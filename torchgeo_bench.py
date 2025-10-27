@@ -1,6 +1,8 @@
 """Benchmark script for torchgeo-bench."""
 
 import os
+import io
+import fcntl
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -211,8 +213,33 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
     dataset_names = _expand_dataset_list(cfg.dataset.names)
     device = torch.device(cfg.device)
 
-    # Prepare output CSV (create header if new)
-    out_exists = os.path.exists(cfg.output)
+    # Output file path
+    output_path = cfg.output
+
+    def _append_rows_atomic(path: str, rows: list[dict]) -> None:
+        """Append rows to CSV atomically with advisory file lock.
+
+        Ensures that if multiple processes start roughly simultaneously, they
+        won't overwrite each other's output. Creates file if absent, writes header
+        only if file was empty prior to append.
+        """
+        if not rows:
+            return
+        df_local = pd.DataFrame(rows)
+        # Open file in append+read mode; create if not exists
+        fd = os.open(path, os.O_RDWR | os.O_CREAT)
+        with os.fdopen(fd, "r+", closefd=True) as f:
+            # Acquire exclusive lock
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            f.seek(0, os.SEEK_END)
+            empty = f.tell() == 0
+            # Prepare CSV in memory
+            buf = io.StringIO()
+            df_local.to_csv(buf, header=empty, index=False)
+            f.write(buf.getvalue())
+            f.flush()
+            os.fsync(f.fileno())
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     all_rows: list[dict] = []
     c_start, c_stop, c_num = cfg.eval.c_range
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
@@ -220,7 +247,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
     
     # Load existing results if resume mode is enabled
     completed_runs: set[tuple[str, str, str, str]] = set()
-    if cfg.resume and out_exists:
+    if cfg.resume and os.path.exists(output_path):
         try:
             existing_df = pd.read_csv(cfg.output)
             # Track (dataset, method, model) tuples that are already computed
@@ -366,17 +393,10 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                 ).to_row()
             )
 
-        df = pd.DataFrame(all_rows)
-        df.to_csv(
-            cfg.output,
-            mode="a" if out_exists else "w",
-            header=not out_exists,
-            index=False,
-        )
-        out_exists = True
+        _append_rows_atomic(output_path, all_rows)
         all_rows.clear()
 
-    print(f"Benchmark complete. Results appended to {cfg.output}")
+    print(f"Benchmark complete. Results appended to {output_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover

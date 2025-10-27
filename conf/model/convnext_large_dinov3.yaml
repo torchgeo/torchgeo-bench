@@ -4,5 +4,3 @@ model_name: convnext_large.dinov3_lvd1689m
 pretrained: true
 global_pool: avg
 name: convnext_large_dinov3
-auto_resize: true
-target_size: 224
