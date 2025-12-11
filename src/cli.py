@@ -11,13 +11,24 @@ logger = logging.getLogger(__name__)
 def download_command(args: argparse.Namespace) -> int:
     """Execute the download command."""
     # Import here to avoid loading heavy dependencies for --help
-    from torchgeo_bench_download import download_benchmark
+    from src.download import (
+        download_geobench_v1,
+        download_geobench_v2,
+        GEOBENCH_V2_DATASETS,
+    )
 
     if args.force:
         print("Force mode enabled: existing files will be re-downloaded")
 
     try:
-        download_benchmark(args.output_dir, args.force)
+        if args.version == "v1":
+            download_geobench_v1(args.output_dir, args.force)
+        elif args.version == "v2":
+            # Parse datasets argument
+            datasets = None
+            if args.datasets and args.datasets != "all":
+                datasets = [d.strip() for d in args.datasets.split(",")]
+            download_geobench_v2(args.output_dir, datasets, args.force)
         return 0
     except Exception as e:
         logger.error(f"Download failed: {e}")
@@ -73,8 +84,21 @@ def main() -> int:
     # Download command
     download_parser = subparsers.add_parser(
         "download",
-        help="Download and extract the GeoBench dataset from Hugging Face",
+        help="Download and extract GeoBench datasets from Hugging Face",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    download_parser.add_argument(
+        "--version",
+        type=str,
+        choices=["v1", "v2"],
+        default="v1",
+        help="GeoBench version to download",
+    )
+    download_parser.add_argument(
+        "--datasets",
+        type=str,
+        default="all",
+        help="For v2: comma-separated dataset names or 'all' (default: all)",
     )
     download_parser.add_argument(
         "--output-dir",

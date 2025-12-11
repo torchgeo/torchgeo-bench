@@ -4,22 +4,38 @@ A lightweight benchmarking framework for evaluating geospatial foundation models
 
 ## Setup: Download GeoBench Dataset
 
-Before running any benchmarks, download the GeoBench dataset:
+Before running any benchmarks, download the GeoBench dataset. The framework supports both GeoBench v1 and v2:
+
+### GeoBench v1 (default)
 
 ```bash
+# Download all GeoBench v1 datasets
 torchgeo-bench download
-```
 
-This will download and extract the dataset to the default directory `data/`. You can specify a custom location with:
-
-```bash
+# Specify custom location
 torchgeo-bench download --output-dir /your/path/to/data
 ```
+
+### GeoBench v2
+
+```bash
+# Download all GeoBench v2 datasets
+torchgeo-bench download --version v2
+
+# Download specific v2 datasets
+torchgeo-bench download --version v2 --datasets forestnet,so2sat,benv2
+
+# Download single dataset
+torchgeo-bench download --version v2 --datasets caffe
+```
+
+Available GeoBench v2 datasets: `benv2`, `biomassters`, `burn_scars`, `caffe`, `cloudsen12`, `dynamic_earthnet`, `everwatch`, `flair2`, `fotw`, `kuro_siwo`, `pastis`, `spacenet2`, `spacenet7`, `substation`, `treesatai`, `wind_turbine`, `so2sat`, `forestnet`
 
 Alternatively, you can still use the standalone script:
 
 ```bash
-python torchgeo_bench_download.py
+python torchgeo_bench_download.py --version v1
+python torchgeo_bench_download.py --version v2 --datasets forestnet
 ```
 
 ## Overview
