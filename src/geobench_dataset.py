@@ -31,8 +31,10 @@ class BandStats:
         median: Median value
         percentile_0_1: 0.1th percentile
         percentile_1: 1st percentile
+        percentile_2: 2nd percentile (interpolated if not available)
         percentile_5: 5th percentile
         percentile_95: 95th percentile
+        percentile_98: 98th percentile (interpolated if not available)
         percentile_99: 99th percentile
         percentile_99_9: 99.9th percentile
     """
@@ -44,10 +46,12 @@ class BandStats:
     median: float
     percentile_0_1: float
     percentile_1: float
-    percentile_5: float
-    percentile_95: float
-    percentile_99: float
-    percentile_99_9: float
+    percentile_2: float | None = None
+    percentile_5: float | None = None
+    percentile_95: float | None = None
+    percentile_98: float | None = None
+    percentile_99: float | None = None
+    percentile_99_9: float | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> BandStats:
@@ -57,8 +61,15 @@ class BandStats:
             d: Dictionary with band statistics
 
         Returns:
-            BandStats instance
+            BandStats instance with interpolated percentiles if missing
         """
+        # Interpolate 2nd and 98th percentiles if not available
+        if "percentile_2" not in d and "percentile_1" in d and "percentile_5" in d:
+            # Linear interpolation: p2 is 1/4 of the way from p1 to p5
+            d["percentile_2"] = d["percentile_1"] + 0.25 * (d["percentile_5"] - d["percentile_1"])
+        if "percentile_98" not in d and "percentile_95" in d and "percentile_99" in d:
+            # Linear interpolation: p98 is 3/4 of the way from p95 to p99
+            d["percentile_98"] = d["percentile_95"] + 0.75 * (d["percentile_99"] - d["percentile_95"])
         return cls(**d)
 
 
@@ -76,6 +87,7 @@ class GeoBenchDataset(Dataset):
         transform: Optional callable to transform the sample dict.
         normalize: If True, normalize using mean/std from band_stats.json.
                    If 'min_max', normalize to [0, 1] using min/max.
+                   If 'percentile_2_98', normalize to [0, 1] using 2nd and 98th percentiles.
                    If False, no normalization (raw int16 values).
 
     Returns:
@@ -265,6 +277,14 @@ class GeoBenchDataset(Dataset):
                     if band_name in self.band_stats:
                         stats = self.band_stats[band_name]
                         image[i] = (image[i] - stats.min) / (stats.max - stats.min + 1e-8)
+            elif self.normalize == "percentile_2_98":
+                # Normalize to [0, 1] using 2nd and 98th percentiles, clipping outliers
+                for i, band_name in enumerate(self.band_names):
+                    if band_name in self.band_stats:
+                        stats = self.band_stats[band_name]
+                        if stats.percentile_2 is not None and stats.percentile_98 is not None:
+                            p2, p98 = stats.percentile_2, stats.percentile_98
+                            image[i] = np.clip((image[i] - p2) / (p98 - p2 + 1e-8), 0.0, 1.0)
             else:
                 # Normalize using mean/std
                 for i, band_name in enumerate(self.band_names):

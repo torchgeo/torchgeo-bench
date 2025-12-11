@@ -64,6 +64,20 @@ def get_datasets(
             stdevs = []
             for band_name in train_dataset.band_names:
                 stdevs.append(train_dataset.band_stats[band_name].percentile_99)
+        elif normalization == "percentile_2_98":
+            means = []
+            stdevs = []
+            for band_name in train_dataset.band_names:
+                stats = train_dataset.band_stats[band_name]
+                # Interpolate 2nd and 98th percentiles if not available
+                p2 = getattr(stats, "percentile_2", None) or (
+                    stats.percentile_1 + 0.25 * (stats.percentile_5 - stats.percentile_1)
+                )
+                p98 = getattr(stats, "percentile_98", None) or (
+                    stats.percentile_95 + 0.75 * (stats.percentile_99 - stats.percentile_95)
+                )
+                means.append(p2)
+                stdevs.append(p98 - p2)
         elif normalization == "min_max":
             means = []
             stdevs = []

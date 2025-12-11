@@ -231,7 +231,7 @@ dataset:
   names: all  # or [m-eurosat, m-forestnet]
   partition: default
   batch_size: 64
-  normalization: mean_stdev  # or min_max, none
+  normalization: mean_stdev  # or min_max, percentile_2_98, none
 
 eval:
   bootstrap: 500        # CI bootstrap samples

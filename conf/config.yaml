@@ -17,7 +17,7 @@ dataset:
   names: all
   partition: default
   batch_size: 64
-  normalization: mean_stdev  # min_max | mean_stdev | none
+  normalization: mean_stdev  # min_max | mean_stdev | percentile_2_98 | none
   image_size: 224           # e.g., 224; if null, no resizing
   interpolation: bilinear     # bilinear | bicubic | nearest; used if image_size set
 

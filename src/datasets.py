@@ -52,7 +52,7 @@ def get_datasets(
         dataset_name: Dataset identifier (e.g., 'm-eurosat', 'm-forestnet')
         partition_name: Partition to use (e.g., 'default', '0.01x_train')
         batch_size: Batch size for dataloaders
-        normalization: Normalization method ('mean_stdev', 'min_max', or 'none')
+        normalization: Normalization method ('mean_stdev', 'min_max', 'percentile_2_98', or 'none')
         return_val: If True, return 4-tuple including validation split
         only_return_datasets: If True, return only datasets without dataloaders
         geobench_root: Path to classification_v1.0 directory (uses DEFAULT if None)
@@ -72,6 +72,8 @@ def get_datasets(
         normalize = True
     elif normalization == "min_max":
         normalize = "min_max"
+    elif normalization == "percentile_2_98":
+        normalize = "percentile_2_98"
     else:
         normalize = False
 

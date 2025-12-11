@@ -74,6 +74,15 @@ class EvaluationResult:
     seed: int
     model: str
     name: str
+    normalization: str
+    image_size: int | None
+    interpolation: str
+    partition: str
+    c_range_start: float
+    c_range_stop: float
+    c_range_num: int
+    merge_val: bool
+    bootstrap: int
 
     def to_row(self) -> dict:
         return self.__dict__.copy()
@@ -248,11 +257,11 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
     c_values_list = [float(v) for v in c_values.tolist()]
 
     # Load existing results if resume mode is enabled
-    completed_runs: set[tuple[str, str, str, str]] = set()
+    completed_runs: set[tuple[str, str, str, str, str, str, str, str]] = set()
     if cfg.resume and os.path.exists(output_path):
         try:
             existing_df = pd.read_csv(cfg.output)
-            # Track (dataset, method, model) tuples that are already computed
+            # Track (dataset, method, model, name, normalization, image_size, interpolation, partition) tuples
             for _, row in existing_df.iterrows():
                 completed_runs.add(
                     (
@@ -260,18 +269,29 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                         str(row.get("method", "")),
                         str(row.get("model", "")),
                         str(row.get("name", "")),
+                        str(row.get("normalization", "")),
+                        str(row.get("image_size", "")),
+                        str(row.get("interpolation", "")),
+                        str(row.get("partition", "")),
                     )
                 )
             print(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
-            print(f"Will skip already-computed (dataset, method, model) combinations.")
+            print(f"Will skip already-computed (dataset, method, model, config) combinations.")
         except Exception as e:
             print(f"Warning: Could not load existing results for resume: {e}")
             completed_runs = set()
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         # Check if we can skip this dataset entirely
-        knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name)
-        linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name)
+        # Include dataset config params to ensure we only skip with matching settings
+        config_tuple = (
+            cfg.dataset.normalization,
+            str(getattr(cfg.dataset, "image_size", None)),
+            getattr(cfg.dataset, "interpolation", "bicubic"),
+            cfg.dataset.partition,
+        )
+        knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name, *config_tuple)
+        linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
         skip_knn = cfg.resume and knn_key in completed_runs
         skip_linear = cfg.resume and linear_key in completed_runs
         skip_linear = skip_linear or getattr(cfg.eval, "skip_linear", False)
@@ -357,6 +377,15 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     seed=cfg.seed,
                     model=cfg.model._target_,
                     name=cfg.model.name,
+                    normalization=cfg.dataset.normalization,
+                    image_size=getattr(cfg.dataset, "image_size", None),
+                    interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+                    partition=cfg.dataset.partition,
+                    c_range_start=c_start,
+                    c_range_stop=c_stop,
+                    c_range_num=c_num,
+                    merge_val=cfg.eval.merge_val,
+                    bootstrap=cfg.eval.bootstrap,
                 ).to_row()
             )
 
@@ -394,6 +423,15 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     seed=cfg.seed,
                     model=cfg.model._target_,
                     name=cfg.model.name,
+                    normalization=cfg.dataset.normalization,
+                    image_size=getattr(cfg.dataset, "image_size", None),
+                    interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+                    partition=cfg.dataset.partition,
+                    c_range_start=c_start,
+                    c_range_stop=c_stop,
+                    c_range_num=c_num,
+                    merge_val=cfg.eval.merge_val,
+                    bootstrap=cfg.eval.bootstrap,
                 ).to_row()
             )
 
