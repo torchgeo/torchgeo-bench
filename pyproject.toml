@@ -42,6 +42,8 @@ dependencies = [
     "tqdm>=4.65.0",
     "timm>=0.9.0",
     "huggingface_hub>=0.20.0",
+    "torchgeo>=0.8.0",
+    "tqdm>=4.67.1"
 ]
 
 [project.optional-dependencies]
