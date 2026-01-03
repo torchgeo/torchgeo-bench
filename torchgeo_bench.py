@@ -24,7 +24,7 @@ from src.linear import LogisticRegression
 from src.models.interface import BenchModel
 from src.utils import extract_features
 from src.segmentation_probe import SegmentationProbe
-from src.segmentation_solver import SegmentationSolver
+from src.segmentation_task import SegmentationSolver
 
 logger = logging.getLogger(__name__)
 
@@ -332,8 +332,9 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
         # Check resume for standard methods
         knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name, *config_tuple)
         linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
-        seg_method = f"seg-{cfg.eval.segmentation.head_type}"
-        seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
+
+        # seg_method = f"seg-{cfg.eval.segmentation.head_type}"
+        # seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
 
         result = get_datasets(
             dataset_name=ds_name,
