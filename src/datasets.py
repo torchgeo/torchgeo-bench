@@ -1,14 +1,26 @@
 """Dataset utilities for torchgeo-bench.
 
 This module provides a unified interface to load GeoBench datasets using
-the lightweight GeoBenchDataset class.
+the V1 GeoBenchDataset class and the V2 geobench_v2 package.
 """
 
+import os
+import warnings
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from typing import Optional, Callable, Tuple, Union
+
 
 from .geobench_dataset import GeoBenchDataset
+
+try:
+    import geobench_v2.datasets as gb_v2
+
+    HAS_V2 = True
+except ImportError:
+    HAS_V2 = False
+
 
 NUM_CLASSES_PER_DATASET = {
     "m-forestnet": 12,
@@ -30,8 +42,203 @@ PARTITION_NAMES = [
     "default",
 ]
 
-# Default GeoBench data root - override via environment variable if needed
 DEFAULT_GEOBENCH_ROOT = "data/classification_v1.0"
+DEFAULT_GEOBENCH_V2_ROOT = "/mnt/SSD2/nils/datasets/GEO-Bench-2/"
+
+# V2 Dataset Registry
+V2_DATASETS = {
+    "benv2",
+    "biomassters",
+    "burn_scars",
+    "caffe",
+    "cloudsen12",
+    "dynamic_earthnet",
+    "everwatch",
+    "flair2",
+    "forestnet",
+    "fotw",
+    "kuro_siwo",
+    "pastis",
+    "spacenet2",
+    "spacenet7",
+    "substation",
+    "treesatai",
+    "wind_turbine",
+    "so2sat",
+}
+
+# V2 Task Types
+V2_TASK_TYPES = {
+    "benv2": "classification",
+    "forestnet": "classification",
+    "so2sat": "classification",
+    "eurosat": "classification",
+    "treesatai": "classification",
+    # Default others to segmentation
+    "biomassters": "segmentation",
+    "burn_scars": "segmentation",
+    "caffe": "segmentation",
+    "cloudsen12": "segmentation",
+    "dynamic_earthnet": "segmentation",
+    "flair2": "segmentation",
+    "fotw": "segmentation",
+    "kuro_siwo": "segmentation",
+    "pastis": "segmentation",
+    "spacenet2": "segmentation",
+    "spacenet7": "segmentation",
+}
+
+
+def _get_v2_class_name(dataset_name: str) -> str:
+    """Helper to convert dataset snake_case name to CamelCase class name."""
+    if dataset_name == "benv2":
+        return "GeoBenchBENV2"
+    if dataset_name == "so2sat":
+        return "GeoBenchSo2Sat"
+    if dataset_name == "flair2":
+        return "GeoBenchFLAIR2"
+
+    camel_name = "".join(x.title() for x in dataset_name.split("_"))
+    return f"GeoBench{camel_name}"
+
+def _get_datasets_v2(
+    dataset_name: str,
+    partition_name: str,
+    batch_size: int,
+    return_val: bool,
+    only_return_datasets: bool,
+    root: str,
+    num_workers: int,
+    bands: tuple,
+    transform: Optional[Callable],
+    normalization: str,
+):
+    """Handles loading logic for V2 datasets."""
+    if not HAS_V2:
+        raise ImportError(
+            f"Cannot load V2 dataset '{dataset_name}': geobench_v2 package not found."
+        )
+
+    if partition_name != "default":
+        warnings.warn(
+            f"Partitions are not supported in GeoBench V2. Ignoring partition '{partition_name}'.",
+            UserWarning,
+        )
+
+    class_name = _get_v2_class_name(dataset_name)
+    dataset_cls = getattr(gb_v2, class_name, None)
+    if dataset_cls is None:
+        raise ValueError(f"Could not find V2 dataset class '{class_name}' in geobench_v2.datasets.")
+
+    # currently only support mean-stdev normalization for V2, which happens by default
+    def load_split(split):
+        import pdb
+        pdb.set_trace()
+        ds = dataset_cls(
+            root=os.path.join(root, dataset_name),
+            split=split,
+            transforms=transform,
+            band_order=bands,
+        )
+        ds.task_type = V2_TASK_TYPES.get(dataset_name, "segmentation")
+        return ds
+
+    train_dataset = load_split("train")
+    valid_dataset = load_split("val")
+    test_dataset = load_split("test")
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True
+    )
+    val_loader = DataLoader(
+        valid_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True
+    )
+
+    if only_return_datasets:
+        return (
+            (train_dataset, valid_dataset, test_dataset)
+            if return_val
+            else (train_dataset, test_dataset)
+        )
+    if return_val:
+        return train_dataset, train_loader, val_loader, test_loader
+    return train_dataset, train_loader, test_loader
+
+
+def _get_datasets_v1(
+    dataset_name: str,
+    partition_name: str,
+    batch_size: int,
+    return_val: bool,
+    only_return_datasets: bool,
+    root: str,
+    num_workers: int,
+    bands: tuple,
+    transform: Optional[Callable],
+    normalize_arg: Union[bool, str],
+):
+    """Handles loading logic for V1 datasets."""
+
+    train_dataset = GeoBenchDataset(
+        root=root,
+        dataset_name=dataset_name,
+        split="train",
+        partition=partition_name,
+        bands=bands,
+        normalize=normalize_arg,
+        transform=transform,
+    )
+
+    valid_dataset = GeoBenchDataset(
+        root=root,
+        dataset_name=dataset_name,
+        split="valid",
+        partition="default",
+        bands=bands,
+        normalize=normalize_arg,
+        transform=transform,
+    )
+
+    test_dataset = GeoBenchDataset(
+        root=root,
+        dataset_name=dataset_name,
+        split="test",
+        partition="default",
+        bands=bands,
+        normalize=normalize_arg,
+        transform=transform,
+    )
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True
+    )
+    val_loader = DataLoader(
+        valid_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True
+    )
+
+    if only_return_datasets:
+        return (
+            (train_dataset, valid_dataset, test_dataset)
+            if return_val
+            else (train_dataset, test_dataset)
+        )
+    if return_val:
+        return train_dataset, train_loader, val_loader, test_loader
+    return train_dataset, train_loader, test_loader
 
 
 def get_datasets(
@@ -42,42 +249,25 @@ def get_datasets(
     return_val: bool = False,
     only_return_datasets: bool = False,
     geobench_root: str | None = None,
+    geobench_v2_root: str | None = None,
     num_workers: int = 8,
     image_size: int | None = None,
     interpolation: str = "bicubic",
 ):
-    """Load GeoBench dataset splits and dataloaders.
+    """Load GeoBench dataset splits and dataloaders (supports V1 and V2)."""
 
-    Args:
-        dataset_name: Dataset identifier (e.g., 'm-eurosat', 'm-forestnet')
-        partition_name: Partition to use (e.g., 'default', '0.01x_train')
-        batch_size: Batch size for dataloaders
-        normalization: Normalization method ('mean_stdev', 'min_max', 'percentile_2_98', or 'none')
-        return_val: If True, return 4-tuple including validation split
-        only_return_datasets: If True, return only datasets without dataloaders
-        geobench_root: Path to classification_v1.0 directory (uses DEFAULT if None)
-        num_workers: Number of dataloader workers
-
-    Returns:
-        If return_val=True: (train_dataset, train_loader, val_loader, test_loader)
-        If return_val=False: (train_dataset, train_loader, test_loader)
-    """
     if geobench_root is None:
-        import os
-
         geobench_root = os.getenv("GEOBENCH_ROOT", DEFAULT_GEOBENCH_ROOT)
 
-    # Map normalization argument
+    if geobench_v2_root is None:
+        geobench_v2_root = os.getenv("GEOBENCH_V2_ROOT", DEFAULT_GEOBENCH_V2_ROOT)
     if normalization == "mean_stdev":
-        normalize = True
-    elif normalization == "min_max":
-        normalize = "min_max"
-    elif normalization == "percentile_2_98":
-        normalize = "percentile_2_98"
+        normalize_v1 = True
+    elif normalization in ["min_max", "percentile_2_98"]:
+        normalize_v1 = normalization
     else:
-        normalize = False
+        normalize_v1 = False
 
-    # Optional resize transform
     resize_transform = None
     if image_size is not None:
         interp_mode = {
@@ -90,7 +280,6 @@ def get_datasets(
             img: torch.Tensor = sample["image"]
             h, w = img.shape[-2], img.shape[-1]
             if h != image_size or w != image_size:
-                # Use float32 already; add batch dim for F.interpolate
                 img = img.unsqueeze(0)
                 img = F.interpolate(
                     img,
@@ -103,70 +292,31 @@ def get_datasets(
 
         resize_transform = _resize
 
-    # Compose transform(s) if needed (currently single resize)
-    transform_callable = resize_transform
-    train_dataset = GeoBenchDataset(
-        root=geobench_root,
-        dataset_name=dataset_name,
-        split="train",
-        partition=partition_name,
-        bands=("red", "green", "blue"),
-        normalize=normalize,
-        transform=transform_callable,
-    )
+    bands = ("red", "green", "blue")
 
-    valid_dataset = GeoBenchDataset(
-        root=geobench_root,
-        dataset_name=dataset_name,
-        split="valid",
-        partition="default",  # validation always uses default partition
-        bands=("red", "green", "blue"),
-        normalize=normalize,
-        transform=transform_callable,
-    )
-
-    test_dataset = GeoBenchDataset(
-        root=geobench_root,
-        dataset_name=dataset_name,
-        split="test",
-        partition="default",  # test always uses default partition
-        bands=("red", "green", "blue"),
-        normalize=normalize,
-        transform=transform_callable,
-    )
-
-    # Create dataloaders
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
-
-    val_dataloader = DataLoader(
-        valid_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
-
-    test_dataloader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
-
-    if only_return_datasets:
-        if return_val:
-            return train_dataset, valid_dataset, test_dataset
-        else:
-            return train_dataset, test_dataset
-
-    if return_val:
-        return train_dataset, train_dataloader, val_dataloader, test_dataloader
+    if dataset_name in V2_DATASETS:
+        return _get_datasets_v2(
+            dataset_name=dataset_name,
+            partition_name=partition_name,
+            batch_size=batch_size,
+            return_val=return_val,
+            only_return_datasets=only_return_datasets,
+            root=geobench_v2_root,
+            num_workers=num_workers,
+            bands=bands,
+            transform=resize_transform,
+            normalization=normalization,
+        )
     else:
-        return train_dataset, train_dataloader, test_dataloader
+        return _get_datasets_v1(
+            dataset_name=dataset_name,
+            partition_name=partition_name,
+            batch_size=batch_size,
+            return_val=return_val,
+            only_return_datasets=only_return_datasets,
+            root=geobench_root,
+            num_workers=num_workers,
+            bands=bands,
+            transform=resize_transform,
+            normalize_arg=normalize_v1,  # V1 uses mapped bool/string
+        )
