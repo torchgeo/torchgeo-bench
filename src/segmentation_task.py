@@ -1,14 +1,16 @@
 """Segmentation Training Task Logic."""
 
-from .segmentation_probe import SegmentationProbe
-import torch
 import logging
+from typing import Optional
+
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from typing import Optional
-from tqdm import tqdm
 from torchmetrics.classification import MulticlassJaccardIndex
+from tqdm import tqdm
+
+from .segmentation_probe import SegmentationProbe
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ class SegmentationSolver:
             total_loss = 0.0
             num_batches = 0
 
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", disable=not verbose)
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", disable=not verbose)
             for batch in pbar:
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
@@ -89,7 +91,7 @@ class SegmentationSolver:
 
             if val_loader and verbose:
                 miou = self.evaluate(val_loader)
-                logger.info(f"Epoch {epoch+1} Val mIoU: {miou:.4f}")
+                logger.info(f"Epoch {epoch + 1} Val mIoU: {miou:.4f}")
 
     @torch.no_grad()
     def evaluate(self, dataloader: DataLoader) -> float:

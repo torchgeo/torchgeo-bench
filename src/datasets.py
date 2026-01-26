@@ -6,11 +6,11 @@ the V1 GeoBenchDataset class and the V2 geobench_v2 package.
 
 import os
 import warnings
+from typing import Callable, Optional, Tuple, Union
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from typing import Optional, Callable, Tuple, Union
-
 
 from .geobench_dataset import GeoBenchDataset
 
@@ -43,7 +43,6 @@ NUM_CLASSES_PER_DATASET = {
     "pastis": 19,
     "spacenet2": 3,
     "spacenet7": 3,
-
 }
 
 PARTITION_NAMES = [
@@ -119,6 +118,7 @@ def _get_v2_class_name(dataset_name: str) -> str:
 
     camel_name = "".join(x.title() for x in dataset_name.split("_"))
     return f"GeoBench{camel_name}"
+
 
 def _get_datasets_v2(
     dataset_name: str,

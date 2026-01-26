@@ -14,10 +14,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from benchmark_utils import get_dataset
 from sklearn.linear_model import LogisticRegression as SkLogReg
 from tqdm import tqdm
 
-from benchmark_utils import get_dataset
 from src.linear import LogisticRegression as TorchLR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

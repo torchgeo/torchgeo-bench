@@ -69,7 +69,9 @@ class BandStats:
             d["percentile_2"] = d["percentile_1"] + 0.25 * (d["percentile_5"] - d["percentile_1"])
         if "percentile_98" not in d and "percentile_95" in d and "percentile_99" in d:
             # Linear interpolation: p98 is 3/4 of the way from p95 to p99
-            d["percentile_98"] = d["percentile_95"] + 0.75 * (d["percentile_99"] - d["percentile_95"])
+            d["percentile_98"] = d["percentile_95"] + 0.75 * (
+                d["percentile_99"] - d["percentile_95"]
+            )
         return cls(**d)
 
 

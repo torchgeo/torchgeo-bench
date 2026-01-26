@@ -9,7 +9,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from src.download import download_geobench_v1, download_geobench_v2, GEOBENCH_V2_DATASETS
+from src.download import GEOBENCH_V2_DATASETS, download_geobench_v1, download_geobench_v2
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 

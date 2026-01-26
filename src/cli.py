@@ -12,9 +12,9 @@ def download_command(args: argparse.Namespace) -> int:
     """Execute the download command."""
     # Import here to avoid loading heavy dependencies for --help
     from src.download import (
+        GEOBENCH_V2_DATASETS,
         download_geobench_v1,
         download_geobench_v2,
-        GEOBENCH_V2_DATASETS,
     )
 
     if args.force:

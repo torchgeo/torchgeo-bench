@@ -1,8 +1,9 @@
 """Tests for the geobenchV2 dataset in datasets.py module and get_datasets function."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 import torch
-from unittest.mock import MagicMock, patch
 from torch.utils.data import DataLoader
 
 from src.datasets import get_datasets

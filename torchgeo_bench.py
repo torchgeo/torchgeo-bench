@@ -6,25 +6,24 @@ import logging
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
-from torch.utils.data import DataLoader
-
 
 import hydra
 import numpy as np
 import pandas as pd
 import torch
+from faissknn import FaissKNNClassifier
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import accuracy_score
-from sklearn.neighbors import KNeighborsClassifier
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.datasets import NUM_CLASSES_PER_DATASET, get_datasets
 from src.linear import LogisticRegression
 from src.models.interface import BenchModel
-from src.utils import extract_features
 from src.segmentation_probe import SegmentationProbe
 from src.segmentation_task import SegmentationSolver
+from src.utils import extract_features
 
 logger = logging.getLogger(__name__)
 
@@ -107,15 +106,16 @@ def evaluate_knn(
     y_test: np.ndarray,
     seed: int,
     n_bootstrap: int,
+    device: str = "cpu",
     verbose: bool = False,
 ) -> tuple[float, float, float]:
     if verbose:
         logger.info(
-            f"[KNN] Fit KNN5 (train={len(x_train)}, test={len(x_test)}, boot={n_bootstrap})"
+            f"[KNN] Fit KNN5 (train={len(x_train)}, test={len(x_test)}, boot={n_bootstrap}, device={device})"
         )
-    clf = KNeighborsClassifier(n_neighbors=5, n_jobs=-1)
-    clf.fit(x_train, y_train)
-    preds = clf.predict(x_test)
+    clf = FaissKNNClassifier(n_neighbors=5, device=device)
+    clf.fit(x_train.astype(np.float32), y_train.astype(np.int64))
+    preds = clf.predict(x_test.astype(np.float32))
     acc_mean, lo, hi = bootstrap_accuracy(y_test, preds, n_boot=n_bootstrap, seed=seed)
     if verbose:
         logger.info(f"[KNN] Test accuracy={acc_mean:.4f} (CI {lo:.4f}-{hi:.4f})")
@@ -233,7 +233,7 @@ def evaluate_segmentation(
 
     if "segmentation" not in cfg.eval:
         raise ValueError("Segmentation evaluation config missing for the model.")
-    
+
     probe = SegmentationProbe(
         backbone=model,
         layer_names=eval_cfg.segmentation.layers,
@@ -457,6 +457,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     y_test,
                     cfg.seed,
                     cfg.eval.bootstrap,
+                    cfg.device,
                     verbose=cfg.verbose,
                 )
                 all_rows.append(

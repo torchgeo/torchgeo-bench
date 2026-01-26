@@ -14,11 +14,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from benchmark_utils import get_dataset
 from faissknn import FaissKNNClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from tqdm import tqdm
-
-from benchmark_utils import get_dataset
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -62,7 +61,6 @@ def run_size_experiment(
     faiss_gpu_std: list[float] = []
     faiss_gpu_acc_mean: list[float] = []
     faiss_gpu_acc_std: list[float] = []
-
 
     for size_multiplier in tqdm(size_multipliers, desc="Dataset sizes"):
         X, y = get_dataset(
@@ -179,7 +177,6 @@ def run_feature_experiment(
     feat_faiss_gpu_std: list[float] = []
     feat_faiss_gpu_acc_mean: list[float] = []
     feat_faiss_gpu_acc_std: list[float] = []
-
 
     for n_features in tqdm(feature_dims, desc="Feature dims"):
         X, y = get_dataset(n_samples=n_samples, n_classes=n_classes, n_features=n_features)

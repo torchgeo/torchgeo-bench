@@ -229,9 +229,7 @@ def _download_files_v1(
         )
 
 
-def _decompress_files(
-    dataset_files: list[str], local_directory: Path, force: bool = False
-) -> None:
+def _decompress_files(dataset_files: list[str], local_directory: Path, force: bool = False) -> None:
     """Decompress all zip files from the dataset.
 
     Args:
@@ -268,9 +266,7 @@ def download_geobench_v2_dataset(
     """
     if dataset_name not in GEOBENCH_V2_DATASETS:
         available = ", ".join(sorted(GEOBENCH_V2_DATASETS.keys()))
-        raise ValueError(
-            f"Unknown dataset '{dataset_name}'. Available: {available}"
-        )
+        raise ValueError(f"Unknown dataset '{dataset_name}'. Available: {available}")
 
     local_directory = Path(local_directory)
     repo_id = GEOBENCH_V2_DATASETS[dataset_name]
@@ -319,9 +315,7 @@ def download_geobench_v2(
         datasets = list(GEOBENCH_V2_DATASETS.keys())
         logger.info(f"Downloading all GeoBench v2 datasets to: {local_directory}")
     else:
-        logger.info(
-            f"Downloading {len(datasets)} GeoBench v2 dataset(s) to: {local_directory}"
-        )
+        logger.info(f"Downloading {len(datasets)} GeoBench v2 dataset(s) to: {local_directory}")
 
     for dataset_name in datasets:
         download_geobench_v2_dataset(dataset_name, local_directory, force)

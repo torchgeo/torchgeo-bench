@@ -24,14 +24,16 @@ FIG_DIR = Path("paper/figures")
 TABLE_DIR = Path("paper/tables")
 
 # Plot styling (no seaborn style)
-plt.rcParams.update({
-    "font.size": 12,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "legend.frameon": True,
-    "axes.grid": True,
-    "grid.alpha": 0.3,
-})
+plt.rcParams.update(
+    {
+        "font.size": 12,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "legend.frameon": True,
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+    }
+)
 
 
 def load_npy(filename: str) -> np.ndarray:
@@ -253,7 +255,9 @@ def plot_lr_time_vs_features() -> None:
     ax.fill_between(feat_dims, sk_times - sk_std, sk_times + sk_std, alpha=0.2, color="C0")
 
     ax.plot(feat_dims, torch_times, label="Torch LR (GPU)", marker="s", color="C3")
-    ax.fill_between(feat_dims, torch_times - torch_std, torch_times + torch_std, alpha=0.2, color="C3")
+    ax.fill_between(
+        feat_dims, torch_times - torch_std, torch_times + torch_std, alpha=0.2, color="C3"
+    )
 
     ax.set_yscale("log")
     ax.set_xscale("log")
@@ -393,7 +397,9 @@ def generate_knn_features_table() -> str:
     if has_gpu:
         lines.append(r"\begin{tabular}{rrrrrr}")
         lines.append(r"\toprule")
-        lines.append(r"Features & sklearn (s) & Faiss CPU (s) & Faiss GPU (s) & Speedup & Acc Match \\")
+        lines.append(
+            r"Features & sklearn (s) & Faiss CPU (s) & Faiss GPU (s) & Speedup & Acc Match \\"
+        )
     else:
         lines.append(r"\begin{tabular}{rrrrr}")
         lines.append(r"\toprule")
@@ -422,7 +428,9 @@ def generate_knn_features_table() -> str:
                 f"{int(n_feat)} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {gpu_t:.2f}$\\pm${gpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\"
             )
         else:
-            lines.append(f"{int(n_feat)} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\")
+            lines.append(
+                f"{int(n_feat)} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\"
+            )
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
@@ -498,7 +506,9 @@ def generate_lr_features_table() -> str:
         speedup = sk_t / t_t if t_t > 0 else np.nan
         acc_delta = torch_acc[i] - sk_acc[i]
 
-        lines.append(f"{int(n_feat)} & {sk_t:.2f}$\\pm${sk_s:.2f} & {t_t:.2f}$\\pm${t_s:.2f} & {speedup:.1f}$\\times$ & {acc_delta:+.2f} \\\\")
+        lines.append(
+            f"{int(n_feat)} & {sk_t:.2f}$\\pm${sk_s:.2f} & {t_t:.2f}$\\pm${t_s:.2f} & {speedup:.1f}$\\times$ & {acc_delta:+.2f} \\\\"
+        )
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
