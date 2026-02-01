@@ -30,7 +30,7 @@ def run_size_experiment(
     n_classes: int = 20,
     n_features: int = 256,
     max_iter: int = 200,
-    repeats: int = 5,
+    repeats: int = 25,
     device: str | None = None,
 ) -> None:
     """Run benchmark varying dataset sizes.
@@ -47,7 +47,7 @@ def run_size_experiment(
     logger.info("Running size experiment (varying dataset sizes)")
 
     if device is None:
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        device = "cuda:1" if torch.cuda.is_available() else "cpu"
     logger.info(f"Using device: {device}")
 
     sizes: list[int] = []
@@ -123,7 +123,7 @@ def run_feature_experiment(
     n_samples: int = 20_000,
     n_classes: int = 20,
     max_iter: int = 200,
-    repeats: int = 5,
+    repeats: int = 25,
     device: str | None = None,
 ) -> None:
     """Run benchmark varying feature dimensionality.
@@ -140,7 +140,7 @@ def run_feature_experiment(
     logger.info(f"Running feature experiment (n_samples={n_samples:,})")
 
     if device is None:
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        device = "cuda:1" if torch.cuda.is_available() else "cpu"
 
     feat_dims: list[int] = []
     feat_sk_times: list[float] = []
@@ -219,7 +219,8 @@ def main() -> None:
         n_classes=20,
         n_features=256,
         max_iter=200,
-        repeats=5,
+        repeats=25,
+        device="cuda:1",
     )
 
     # Experiment 2: Varying feature dimensionality
@@ -229,7 +230,8 @@ def main() -> None:
         n_samples=20_000,
         n_classes=20,
         max_iter=200,
-        repeats=5,
+        repeats=25,
+        device="cuda:1",
     )
 
     logger.info("All LR experiments complete!")

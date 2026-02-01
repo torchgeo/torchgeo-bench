@@ -49,6 +49,7 @@ def run_size_experiment(
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
     use_gpu = device.startswith("cuda")
     logger.info(f"Using device: {device} (GPU enabled: {use_gpu})")
+    sizes: list[int] = []
     sk_times: list[float] = []
     sk_std: list[float] = []
     sk_acc_mean: list[float] = []
@@ -264,7 +265,8 @@ def main() -> None:
         n_classes=20,
         n_features=256,
         n_neighbors=5,
-        repeats=5,
+        repeats=25,
+        device="cuda:0",
     )
 
     # Experiment 2: Varying feature dimensionality
@@ -274,7 +276,8 @@ def main() -> None:
         n_samples=20_000,
         n_classes=20,
         n_neighbors=5,
-        repeats=5,
+        repeats=25,
+        device="cuda:0",
     )
 
     logger.info("All KNN experiments complete!")

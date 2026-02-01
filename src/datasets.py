@@ -128,7 +128,7 @@ def _get_datasets_v2(
     only_return_datasets: bool,
     root: str,
     num_workers: int,
-    bands: tuple,
+    bands: tuple[str, ...] | None,
     transform: Optional[Callable],
     normalization: str,
 ):
@@ -197,7 +197,7 @@ def _get_datasets_v1(
     only_return_datasets: bool,
     root: str,
     num_workers: int,
-    bands: tuple,
+    bands: tuple[str, ...] | None,
     transform: Optional[Callable],
     normalize_arg: Union[bool, str],
 ):
@@ -270,8 +270,16 @@ def get_datasets(
     num_workers: int = 8,
     image_size: int | None = None,
     interpolation: str = "bicubic",
+    bands: str | tuple[str, ...] | None = "rgb",
 ):
-    """Load GeoBench dataset splits and dataloaders (supports V1 and V2)."""
+    """Load GeoBench dataset splits and dataloaders (supports V1 and V2).
+
+    Args:
+        bands: Band selection. Options:
+            - "rgb" (default): Load red, green, blue bands only
+            - "all" or None: Load all available bands (multispectral)
+            - tuple of band names: e.g., ("red", "green", "blue", "nir")
+    """
 
     if geobench_root is None:
         geobench_root = os.getenv("GEOBENCH_ROOT", DEFAULT_GEOBENCH_ROOT)
@@ -322,7 +330,20 @@ def get_datasets(
 
         resize_transform = _resize
 
-    bands = ("red", "green", "blue")
+    # Resolve bands parameter
+    # Convert OmegaConf ListConfig or other iterables to tuple
+    if bands == "rgb":
+        bands_tuple: tuple[str, ...] | None = ("red", "green", "blue")
+    elif bands == "all" or bands is None:
+        bands_tuple = None  # None means load all available bands
+    elif isinstance(bands, str):
+        raise ValueError(f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names.")
+    else:
+        # Handle list, tuple, or OmegaConf ListConfig
+        try:
+            bands_tuple = tuple(bands)  # type: ignore[arg-type]
+        except TypeError:
+            raise ValueError(f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names.")
 
     if dataset_name in V2_DATASETS:
         return _get_datasets_v2(
@@ -333,7 +354,7 @@ def get_datasets(
             only_return_datasets=only_return_datasets,
             root=geobench_v2_root,
             num_workers=num_workers,
-            bands=bands,
+            bands=bands_tuple,
             transform=resize_transform,
             normalization=normalization,
         )
@@ -346,7 +367,7 @@ def get_datasets(
             only_return_datasets=only_return_datasets,
             root=geobench_root,
             num_workers=num_workers,
-            bands=bands,
+            bands=bands_tuple,
             transform=resize_transform,
             normalize_arg=normalize_v1,  # V1 uses mapped bool/string
         )

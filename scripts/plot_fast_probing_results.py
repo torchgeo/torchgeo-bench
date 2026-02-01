@@ -41,14 +41,6 @@ def load_npy(filename: str) -> np.ndarray:
     return np.load(RESULTS_DIR / filename)
 
 
-def load_npy_optional(filename: str) -> np.ndarray | None:
-    """Load a .npy file if it exists, otherwise return None."""
-    path = RESULTS_DIR / filename
-    if path.exists():
-        return np.load(path)
-    return None
-
-
 # =============================================================================
 # KNN Plots
 # =============================================================================
@@ -61,8 +53,8 @@ def plot_knn_time_vs_size() -> None:
     sk_std = load_npy("knn_sk_std.npy")
     faiss_cpu_times = load_npy("knn_faiss_cpu_times.npy")
     faiss_cpu_std = load_npy("knn_faiss_cpu_std.npy")
-    faiss_gpu_times = load_npy_optional("knn_faiss_gpu_times.npy")
-    faiss_gpu_std = load_npy_optional("knn_faiss_gpu_std.npy")
+    faiss_gpu_times = load_npy("knn_faiss_gpu_times.npy")
+    faiss_gpu_std = load_npy("knn_faiss_gpu_std.npy")
 
     fig, ax = plt.subplots(figsize=(6, 4))
 
@@ -74,11 +66,10 @@ def plot_knn_time_vs_size() -> None:
         sizes, faiss_cpu_times - faiss_cpu_std, faiss_cpu_times + faiss_cpu_std, alpha=0.2
     )
 
-    if faiss_gpu_times is not None:
-        ax.plot(sizes, faiss_gpu_times, label="FaissKNN (GPU)", marker="^")
-        ax.fill_between(
-            sizes, faiss_gpu_times - faiss_gpu_std, faiss_gpu_times + faiss_gpu_std, alpha=0.2
-        )
+    ax.plot(sizes, faiss_gpu_times, label="FaissKNN (GPU)", marker="^")
+    ax.fill_between(
+        sizes, faiss_gpu_times - faiss_gpu_std, faiss_gpu_times + faiss_gpu_std, alpha=0.2
+    )
 
     ax.set_yscale("log")
     ax.set_xscale("log")
@@ -98,14 +89,13 @@ def plot_knn_accuracy_vs_size() -> None:
     sizes = load_npy("knn_sizes.npy")
     sk_acc = load_npy("knn_sk_acc_mean.npy")
     faiss_cpu_acc = load_npy("knn_faiss_cpu_acc_mean.npy")
-    faiss_gpu_acc = load_npy_optional("knn_faiss_gpu_acc_mean.npy")
+    faiss_gpu_acc = load_npy("knn_faiss_gpu_acc_mean.npy")
 
     fig, ax = plt.subplots(figsize=(6, 4))
 
     ax.plot(sizes, sk_acc, label="sklearn KNN", marker="o")
     ax.plot(sizes, faiss_cpu_acc, label="FaissKNN (CPU)", marker="s")
-    if faiss_gpu_acc is not None:
-        ax.plot(sizes, faiss_gpu_acc, label="FaissKNN (GPU)", marker="^")
+    ax.plot(sizes, faiss_gpu_acc, label="FaissKNN (GPU)", marker="^")
 
     ax.set_xscale("log")
     ax.set_xlabel("Dataset Size (samples)")
@@ -126,8 +116,8 @@ def plot_knn_time_vs_features() -> None:
     sk_std = load_npy("knn_feat_sk_std.npy")
     faiss_cpu_times = load_npy("knn_feat_faiss_cpu_times.npy")
     faiss_cpu_std = load_npy("knn_feat_faiss_cpu_std.npy")
-    faiss_gpu_times = load_npy_optional("knn_feat_faiss_gpu_times.npy")
-    faiss_gpu_std = load_npy_optional("knn_feat_faiss_gpu_std.npy")
+    faiss_gpu_times = load_npy("knn_feat_faiss_gpu_times.npy")
+    faiss_gpu_std = load_npy("knn_feat_faiss_gpu_std.npy")
 
     fig, ax = plt.subplots(figsize=(6, 4))
 
@@ -139,11 +129,10 @@ def plot_knn_time_vs_features() -> None:
         feat_dims, faiss_cpu_times - faiss_cpu_std, faiss_cpu_times + faiss_cpu_std, alpha=0.2
     )
 
-    if faiss_gpu_times is not None:
-        ax.plot(feat_dims, faiss_gpu_times, label="FaissKNN (GPU)", marker="^")
-        ax.fill_between(
-            feat_dims, faiss_gpu_times - faiss_gpu_std, faiss_gpu_times + faiss_gpu_std, alpha=0.2
-        )
+    ax.plot(feat_dims, faiss_gpu_times, label="FaissKNN (GPU)", marker="^")
+    ax.fill_between(
+        feat_dims, faiss_gpu_times - faiss_gpu_std, faiss_gpu_times + faiss_gpu_std, alpha=0.2
+    )
 
     ax.set_yscale("log")
     ax.set_xscale("log")
@@ -163,14 +152,13 @@ def plot_knn_accuracy_vs_features() -> None:
     feat_dims = load_npy("knn_feat_dims.npy")
     sk_acc = load_npy("knn_feat_sk_acc_mean.npy")
     faiss_cpu_acc = load_npy("knn_feat_faiss_cpu_acc_mean.npy")
-    faiss_gpu_acc = load_npy_optional("knn_feat_faiss_gpu_acc_mean.npy")
+    faiss_gpu_acc = load_npy("knn_feat_faiss_gpu_acc_mean.npy")
 
     fig, ax = plt.subplots(figsize=(6, 4))
 
     ax.plot(feat_dims, sk_acc, label="sklearn KNN", marker="o")
     ax.plot(feat_dims, faiss_cpu_acc, label="FaissKNN (CPU)", marker="s")
-    if faiss_gpu_acc is not None:
-        ax.plot(feat_dims, faiss_gpu_acc, label="FaissKNN (GPU)", marker="^")
+    ax.plot(feat_dims, faiss_gpu_acc, label="FaissKNN (GPU)", marker="^")
 
     ax.set_xscale("log")
     ax.set_xlabel("Feature Dimensionality")
@@ -312,58 +300,40 @@ def generate_knn_size_table() -> str:
     sk_std = load_npy("knn_sk_std.npy")
     faiss_cpu_times = load_npy("knn_faiss_cpu_times.npy")
     faiss_cpu_std = load_npy("knn_faiss_cpu_std.npy")
-    faiss_gpu_times = load_npy_optional("knn_faiss_gpu_times.npy")
-    faiss_gpu_std = load_npy_optional("knn_faiss_gpu_std.npy")
+    faiss_gpu_times = load_npy("knn_faiss_gpu_times.npy")
+    faiss_gpu_std = load_npy("knn_faiss_gpu_std.npy")
     sk_acc = load_npy("knn_sk_acc_mean.npy")
     faiss_cpu_acc = load_npy("knn_faiss_cpu_acc_mean.npy")
-    faiss_gpu_acc = load_npy_optional("knn_faiss_gpu_acc_mean.npy")
-
-    has_gpu = faiss_gpu_times is not None
+    faiss_gpu_acc = load_npy("knn_faiss_gpu_acc_mean.npy")
 
     lines = [
         r"\begin{table}[ht]",
         r"\centering",
         r"\caption{KNN Performance: Varying Dataset Size (256 features)}",
         r"\label{tab:knn_size}",
+        r"\begin{tabular}{rrrrrr}",
+        r"\toprule",
+        r"Samples & sklearn (s) & Faiss CPU (s) & Faiss GPU (s) & Speedup & Acc Match \\",
+        r"\midrule",
     ]
-
-    if has_gpu:
-        lines.append(r"\begin{tabular}{rrrrrr}")
-        lines.append(r"\toprule")
-        lines.append(
-            r"Samples & sklearn (s) & Faiss CPU (s) & Faiss GPU (s) & Speedup & Acc Match \\"
-        )
-    else:
-        lines.append(r"\begin{tabular}{rrrrr}")
-        lines.append(r"\toprule")
-        lines.append(r"Samples & sklearn (s) & Faiss CPU (s) & Speedup & Acc Match \\")
-
-    lines.append(r"\midrule")
 
     for i, n in enumerate(sizes):
         sk_t = sk_times[i]
         sk_s = sk_std[i]
         cpu_t = faiss_cpu_times[i]
         cpu_s = faiss_cpu_std[i]
-        gpu_t = faiss_gpu_times[i] if has_gpu else np.nan
-        gpu_s = faiss_gpu_std[i] if has_gpu else np.nan
+        gpu_t = faiss_gpu_times[i]
+        gpu_s = faiss_gpu_std[i]
 
-        best_faiss = min(cpu_t, gpu_t) if has_gpu else cpu_t
+        best_faiss = min(cpu_t, gpu_t)
         speedup = sk_t / best_faiss
 
-        match = abs(sk_acc[i] - faiss_cpu_acc[i]) < 0.001
-        if has_gpu:
-            match = match and abs(sk_acc[i] - faiss_gpu_acc[i]) < 0.001
+        match = abs(sk_acc[i] - faiss_cpu_acc[i]) < 0.001 and abs(sk_acc[i] - faiss_gpu_acc[i]) < 0.001
         match_str = r"\checkmark" if match else r"\texttimes"
 
-        if has_gpu:
-            lines.append(
-                f"{int(n):,} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {gpu_t:.2f}$\\pm${gpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\"
-            )
-        else:
-            lines.append(
-                f"{int(n):,} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\"
-            )
+        lines.append(
+            f"{int(n):,} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {gpu_t:.2f}$\\pm${gpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\"
+        )
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
@@ -379,58 +349,40 @@ def generate_knn_features_table() -> str:
     sk_std = load_npy("knn_feat_sk_std.npy")
     faiss_cpu_times = load_npy("knn_feat_faiss_cpu_times.npy")
     faiss_cpu_std = load_npy("knn_feat_faiss_cpu_std.npy")
-    faiss_gpu_times = load_npy_optional("knn_feat_faiss_gpu_times.npy")
-    faiss_gpu_std = load_npy_optional("knn_feat_faiss_gpu_std.npy")
+    faiss_gpu_times = load_npy("knn_feat_faiss_gpu_times.npy")
+    faiss_gpu_std = load_npy("knn_feat_faiss_gpu_std.npy")
     sk_acc = load_npy("knn_feat_sk_acc_mean.npy")
     faiss_cpu_acc = load_npy("knn_feat_faiss_cpu_acc_mean.npy")
-    faiss_gpu_acc = load_npy_optional("knn_feat_faiss_gpu_acc_mean.npy")
-
-    has_gpu = faiss_gpu_times is not None
+    faiss_gpu_acc = load_npy("knn_feat_faiss_gpu_acc_mean.npy")
 
     lines = [
         r"\begin{table}[ht]",
         r"\centering",
         r"\caption{KNN Performance: Varying Feature Dimensionality (20,000 samples)}",
         r"\label{tab:knn_features}",
+        r"\begin{tabular}{rrrrrr}",
+        r"\toprule",
+        r"Features & sklearn (s) & Faiss CPU (s) & Faiss GPU (s) & Speedup & Acc Match \\",
+        r"\midrule",
     ]
-
-    if has_gpu:
-        lines.append(r"\begin{tabular}{rrrrrr}")
-        lines.append(r"\toprule")
-        lines.append(
-            r"Features & sklearn (s) & Faiss CPU (s) & Faiss GPU (s) & Speedup & Acc Match \\"
-        )
-    else:
-        lines.append(r"\begin{tabular}{rrrrr}")
-        lines.append(r"\toprule")
-        lines.append(r"Features & sklearn (s) & Faiss CPU (s) & Speedup & Acc Match \\")
-
-    lines.append(r"\midrule")
 
     for i, n_feat in enumerate(feat_dims):
         sk_t = sk_times[i]
         sk_s = sk_std[i]
         cpu_t = faiss_cpu_times[i]
         cpu_s = faiss_cpu_std[i]
-        gpu_t = faiss_gpu_times[i] if has_gpu else np.nan
-        gpu_s = faiss_gpu_std[i] if has_gpu else np.nan
+        gpu_t = faiss_gpu_times[i]
+        gpu_s = faiss_gpu_std[i]
 
-        best_faiss = min(cpu_t, gpu_t) if has_gpu else cpu_t
+        best_faiss = min(cpu_t, gpu_t)
         speedup = sk_t / best_faiss
 
-        match = abs(sk_acc[i] - faiss_cpu_acc[i]) < 0.001
-        if has_gpu:
-            match = match and abs(sk_acc[i] - faiss_gpu_acc[i]) < 0.001
+        match = abs(sk_acc[i] - faiss_cpu_acc[i]) < 0.001 and abs(sk_acc[i] - faiss_gpu_acc[i]) < 0.001
         match_str = r"\checkmark" if match else r"\texttimes"
 
-        if has_gpu:
-            lines.append(
-                f"{int(n_feat)} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {gpu_t:.2f}$\\pm${gpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\"
-            )
-        else:
-            lines.append(
-                f"{int(n_feat)} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\"
-            )
+        lines.append(
+            f"{int(n_feat)} & {sk_t:.2f}$\\pm${sk_s:.2f} & {cpu_t:.2f}$\\pm${cpu_s:.2f} & {gpu_t:.2f}$\\pm${gpu_s:.2f} & {speedup:.1f}$\\times$ & {match_str} \\\\"
+        )
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
@@ -525,11 +477,11 @@ def generate_knn_results_table() -> str:
     sk_std = load_npy("knn_sk_std.npy")
     faiss_cpu_times = load_npy("knn_faiss_cpu_times.npy")
     faiss_cpu_std = load_npy("knn_faiss_cpu_std.npy")
-    faiss_gpu_times = load_npy_optional("knn_faiss_gpu_times.npy")
-    faiss_gpu_std = load_npy_optional("knn_faiss_gpu_std.npy")
+    faiss_gpu_times = load_npy("knn_faiss_gpu_times.npy")
+    faiss_gpu_std = load_npy("knn_faiss_gpu_std.npy")
     sk_acc = load_npy("knn_sk_acc_mean.npy")
     faiss_cpu_acc = load_npy("knn_faiss_cpu_acc_mean.npy")
-    faiss_gpu_acc = load_npy_optional("knn_faiss_gpu_acc_mean.npy")
+    faiss_gpu_acc = load_npy("knn_faiss_gpu_acc_mean.npy")
 
     # Feature experiment data
     feat_dims = load_npy("knn_feat_dims.npy")
@@ -537,13 +489,11 @@ def generate_knn_results_table() -> str:
     feat_sk_std = load_npy("knn_feat_sk_std.npy")
     feat_faiss_cpu_times = load_npy("knn_feat_faiss_cpu_times.npy")
     feat_faiss_cpu_std = load_npy("knn_feat_faiss_cpu_std.npy")
-    feat_faiss_gpu_times = load_npy_optional("knn_feat_faiss_gpu_times.npy")
-    feat_faiss_gpu_std = load_npy_optional("knn_feat_faiss_gpu_std.npy")
+    feat_faiss_gpu_times = load_npy("knn_feat_faiss_gpu_times.npy")
+    feat_faiss_gpu_std = load_npy("knn_feat_faiss_gpu_std.npy")
     feat_sk_acc = load_npy("knn_feat_sk_acc_mean.npy")
     feat_faiss_cpu_acc = load_npy("knn_feat_faiss_cpu_acc_mean.npy")
-    feat_faiss_gpu_acc = load_npy_optional("knn_feat_faiss_gpu_acc_mean.npy")
-
-    has_gpu = faiss_gpu_times is not None
+    feat_faiss_gpu_acc = load_npy("knn_feat_faiss_gpu_acc_mean.npy")
 
     lines = [
         r"\begin{table}[ht]",
@@ -564,15 +514,13 @@ def generate_knn_results_table() -> str:
         sk_s = sk_std[i]
         cpu_t = faiss_cpu_times[i]
         cpu_s = faiss_cpu_std[i]
-        gpu_t = faiss_gpu_times[i] if has_gpu else np.nan
-        gpu_s = faiss_gpu_std[i] if has_gpu else np.nan
+        gpu_t = faiss_gpu_times[i]
+        gpu_s = faiss_gpu_std[i]
 
-        best_faiss = min(cpu_t, gpu_t) if has_gpu else cpu_t
+        best_faiss = min(cpu_t, gpu_t)
         speedup = sk_t / best_faiss
 
-        match = abs(sk_acc[i] - faiss_cpu_acc[i]) < 0.001
-        if has_gpu:
-            match = match and abs(sk_acc[i] - faiss_gpu_acc[i]) < 0.001
+        match = abs(sk_acc[i] - faiss_cpu_acc[i]) < 0.001 and abs(sk_acc[i] - faiss_gpu_acc[i]) < 0.001
         match_str = r"\checkmark" if match else r"\texttimes"
 
         lines.append(
@@ -589,15 +537,13 @@ def generate_knn_results_table() -> str:
         sk_s = feat_sk_std[i]
         cpu_t = feat_faiss_cpu_times[i]
         cpu_s = feat_faiss_cpu_std[i]
-        gpu_t = feat_faiss_gpu_times[i] if has_gpu else np.nan
-        gpu_s = feat_faiss_gpu_std[i] if has_gpu else np.nan
+        gpu_t = feat_faiss_gpu_times[i]
+        gpu_s = feat_faiss_gpu_std[i]
 
-        best_faiss = min(cpu_t, gpu_t) if has_gpu else cpu_t
+        best_faiss = min(cpu_t, gpu_t)
         speedup = sk_t / best_faiss
 
-        match = abs(feat_sk_acc[i] - feat_faiss_cpu_acc[i]) < 0.001
-        if has_gpu:
-            match = match and abs(feat_sk_acc[i] - feat_faiss_gpu_acc[i]) < 0.001
+        match = abs(feat_sk_acc[i] - feat_faiss_cpu_acc[i]) < 0.001 and abs(feat_sk_acc[i] - feat_faiss_gpu_acc[i]) < 0.001
         match_str = r"\checkmark" if match else r"\texttimes"
 
         lines.append(
