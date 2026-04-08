@@ -9,4 +9,5 @@ pretrained: true
 global_pool: avg
 seed: null
 name: vit_large_patch16_dinov3
+auto_resize: true
 use_cls_token: false

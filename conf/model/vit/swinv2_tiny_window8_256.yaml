@@ -9,3 +9,4 @@ pretrained: true
 global_pool: avg
 seed: null
 name: swinv2_tiny_window8_256
+auto_resize: true

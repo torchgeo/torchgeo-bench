@@ -6,16 +6,14 @@ the V1 GeoBenchDataset class and the V2 geobench_v2 package.
 
 import os
 import warnings
-from typing import Callable, Optional, Tuple, Union
+from collections.abc import Callable
 
+import geobench_v2.datasets as gb_v2
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .geobench_dataset import GeoBenchDataset
-
-import geobench_v2.datasets as gb_v2
-
 
 NUM_CLASSES_PER_DATASET = {
     "m-forestnet": 12,
@@ -124,7 +122,7 @@ def _get_datasets_v2(
     root: str,
     num_workers: int,
     bands: tuple[str, ...] | None,
-    transform: Optional[Callable],
+    transform: Callable | None,
     normalization: str,
 ):
     """Handles loading logic for V2 datasets."""
@@ -188,8 +186,8 @@ def _get_datasets_v1(
     root: str,
     num_workers: int,
     bands: tuple[str, ...] | None,
-    transform: Optional[Callable],
-    normalize_arg: Union[bool, str],
+    transform: Callable | None,
+    normalize_arg: bool | str,
 ):
     """Handles loading logic for V1 datasets."""
 
@@ -327,13 +325,17 @@ def get_datasets(
     elif bands == "all" or bands is None:
         bands_tuple = None  # None means load all available bands
     elif isinstance(bands, str):
-        raise ValueError(f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names.")
+        raise ValueError(
+            f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names."
+        )
     else:
         # Handle list, tuple, or OmegaConf ListConfig
         try:
             bands_tuple = tuple(bands)  # type: ignore[arg-type]
         except TypeError:
-            raise ValueError(f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names.")
+            raise ValueError(
+                f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names."
+            )
 
     if dataset_name in V2_DATASETS:
         return _get_datasets_v2(

@@ -14,8 +14,8 @@ def c_values() -> list[float]:
 
 def test_logistic_regression_accuracy_parity_iris(c_values: list[float]):
     iris_any = load_iris()
-    X_np = np.asarray(getattr(iris_any, "data"), dtype=np.float32)
-    y_np = np.asarray(getattr(iris_any, "target"), dtype=np.int64)
+    X_np = np.asarray(iris_any.data, dtype=np.float32)
+    y_np = np.asarray(iris_any.target, dtype=np.int64)
     # enlarge dataset to reduce variance
     X_np = np.tile(X_np, (100, 1))
     y_np = np.tile(y_np, 100)

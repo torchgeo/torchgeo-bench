@@ -66,10 +66,9 @@ def extract_features_transformers(model, dataloader, device, processor=None, ver
 
         images = processor(images)
         # images = {'pixel_values': images}
-        with torch.no_grad():
-            with torch.inference_mode():
-                # features = model(**images)
-                features = model(images)
+        with torch.no_grad(), torch.inference_mode():
+            # features = model(**images)
+            features = model(images)
 
         # last_hidden_states = features.last_hidden_state
         # cls_token = last_hidden_states[:, 0, :]

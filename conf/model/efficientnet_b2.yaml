@@ -9,3 +9,4 @@ pretrained: true
 global_pool: avg
 seed: null
 name: efficientnet_b2
+auto_resize: true

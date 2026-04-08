@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import timm
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from .interface import BenchModel
@@ -48,9 +45,9 @@ class TimmPatchBenchModel(BenchModel):
         *,
         pretrained: bool = True,
         normalize: bool = False,
-        global_pool: Optional[str] = "avg",
+        global_pool: str | None = "avg",
         auto_resize: bool = False,
-        target_size: Optional[int] = None,
+        target_size: int | None = None,
         use_cls_token: bool = False,
         **kwargs,
     ) -> None:
@@ -80,7 +77,7 @@ class TimmPatchBenchModel(BenchModel):
         # timm default_cfg has key 'input_size' like (3, 224, 224)
         default_cfg = getattr(self.backbone, "default_cfg", {}) or {}
         cfg_input_size = default_cfg.get("input_size", None)
-        inferred_size: Optional[int] = None
+        inferred_size: int | None = None
         if isinstance(cfg_input_size, (list, tuple)) and len(cfg_input_size) == 3:
             # (C, H, W)
             inferred_size = int(cfg_input_size[1])

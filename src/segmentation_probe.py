@@ -1,7 +1,7 @@
 """Segmentation Probe Module."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -15,13 +15,13 @@ class SegmentationProbe(nn.Module):
     def __init__(
         self,
         backbone: nn.Module,
-        layer_names: List[str],
+        layer_names: list[str],
         num_classes: int,
         in_channels: int = 3,
-        input_size: Optional[int] = None,
+        input_size: int | None = None,
         freeze_backbone: bool = True,
         head_type: str = "linear",
-        hidden_dim: Optional[int] = None,
+        hidden_dim: int | None = None,
     ) -> None:
         super().__init__()
         self.backbone = backbone
@@ -32,8 +32,8 @@ class SegmentationProbe(nn.Module):
 
         self.effective_classes = num_classes
 
-        self._features: Dict[str, torch.Tensor] = {}
-        self.hooks: List[Any] = []
+        self._features: dict[str, torch.Tensor] = {}
+        self.hooks: list[Any] = []
 
         found_layers = set()
         for name, module in self.backbone.named_modules():
@@ -94,7 +94,7 @@ class SegmentationProbe(nn.Module):
 
         return hook
 
-    def _dry_run_channels(self) -> List[int]:
+    def _dry_run_channels(self) -> list[int]:
         device = next(self.backbone.parameters()).device
         dummy = torch.randn(1, 3, 224, 224, device=device)
         if not self.layer_names:

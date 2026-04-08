@@ -167,9 +167,7 @@ class TestMultiLabelLogisticRegression:
         X_t = torch.from_numpy(d["x_train"])
         Y_t = torch.from_numpy(d["y_train"])
 
-        clf = LogisticRegression(
-            C=1.0, max_iter=50, solver="adam", multi_label=True, device="cpu"
-        )
+        clf = LogisticRegression(C=1.0, max_iter=50, solver="adam", multi_label=True, device="cpu")
         clf.fit(X_t, Y_t)
         assert clf._fitted
 
@@ -221,8 +219,13 @@ class TestUnifiedEvaluateKNN:
 
         d = singlelabel_data
         score, lo, hi = evaluate_knn(
-            d["x_train"], d["y_train"], d["x_test"], d["y_test"],
-            seed=42, n_bootstrap=50, device="cpu",
+            d["x_train"],
+            d["y_train"],
+            d["x_test"],
+            d["y_test"],
+            seed=42,
+            n_bootstrap=50,
+            device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
 
@@ -231,8 +234,13 @@ class TestUnifiedEvaluateKNN:
 
         d = multilabel_data
         score, lo, hi = evaluate_knn(
-            d["x_train"], d["y_train"], d["x_test"], d["y_test"],
-            seed=42, n_bootstrap=50, device="cpu",
+            d["x_train"],
+            d["y_train"],
+            d["x_test"],
+            d["y_test"],
+            seed=42,
+            n_bootstrap=50,
+            device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
 
@@ -243,11 +251,17 @@ class TestUnifiedEvaluateLogistic:
 
         d = singlelabel_data
         score, lo, hi, best_c = evaluate_logistic(
-            d["x_train"], d["y_train"],
-            d["x_test"][:15], d["y_test"][:15],  # use as val
-            d["x_test"][15:], d["y_test"][15:],
-            c_values=[0.1, 1.0], seed=42, n_bootstrap=50,
-            merge_val=True, device="cpu",
+            d["x_train"],
+            d["y_train"],
+            d["x_test"][:15],
+            d["y_test"][:15],  # use as val
+            d["x_test"][15:],
+            d["y_test"][15:],
+            c_values=[0.1, 1.0],
+            seed=42,
+            n_bootstrap=50,
+            merge_val=True,
+            device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert best_c in [0.1, 1.0]
@@ -257,11 +271,17 @@ class TestUnifiedEvaluateLogistic:
 
         d = multilabel_data
         score, lo, hi, best_c = evaluate_logistic(
-            d["x_train"], d["y_train"],
-            d["x_val"], d["y_val"],
-            d["x_test"], d["y_test"],
-            c_values=[0.01, 0.1, 1.0], seed=42, n_bootstrap=50,
-            merge_val=True, device="cpu",
+            d["x_train"],
+            d["y_train"],
+            d["x_val"],
+            d["y_val"],
+            d["x_test"],
+            d["y_test"],
+            c_values=[0.01, 0.1, 1.0],
+            seed=42,
+            n_bootstrap=50,
+            merge_val=True,
+            device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert best_c in [0.01, 0.1, 1.0]

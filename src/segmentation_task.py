@@ -1,11 +1,9 @@
 """Segmentation Training Task Logic."""
 
 import logging
-from typing import Optional
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import MulticlassJaccardIndex
 from tqdm import tqdm
@@ -28,7 +26,7 @@ class SegmentationSolver:
         lr: float = 1e-3,
         weight_decay: float = 0.0,
         device: str = "cuda",
-        criterion: Optional[nn.Module] = None,
+        criterion: nn.Module | None = None,
         ignore_index: int = 255,
     ) -> None:
         """Initialize the SegmentationSolver.
@@ -53,8 +51,10 @@ class SegmentationSolver:
             weight_decay=weight_decay,
         )
 
-        self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss(
-            ignore_index=self.ignore_index
+        self.criterion = (
+            criterion
+            if criterion is not None
+            else nn.CrossEntropyLoss(ignore_index=self.ignore_index)
         )
 
         self.metric = MulticlassJaccardIndex(
@@ -65,7 +65,7 @@ class SegmentationSolver:
     def fit(
         self,
         train_loader: DataLoader,
-        val_loader: Optional[DataLoader] = None,
+        val_loader: DataLoader | None = None,
         epochs: int = 5,
         verbose: bool = True,
     ) -> None:
