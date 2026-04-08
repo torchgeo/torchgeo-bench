@@ -1,4 +1,6 @@
 paper/
+results/
+scripts/*
 
 # Python
 __pycache__/

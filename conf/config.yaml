@@ -6,7 +6,7 @@ defaults:
 
 seed: 0
 device: cuda:5
-output: torchgeo_bench_results.csv
+output: results/all_results.csv
 verbose: false
 resume: false  # if true, skip dataset+method combinations already in output CSV
 
