@@ -7,8 +7,11 @@ multi-label classification using FAISS for efficient nearest-neighbor search.
 import logging
 from typing import Any, Self
 
-import faiss
-import numpy as np
+# Suppress noisy INFO messages from faiss loader (AVX512/AVX2 fallback probing)
+logging.getLogger("faiss.loader").setLevel(logging.WARNING)
+
+import faiss  # noqa: E402
+import numpy as np  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

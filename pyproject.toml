@@ -1,6 +1,6 @@
 [build-system]
-build-backend = "uv_build"
-requires = [ "uv-build>=0.9.3,<1" ]
+build-backend = "hatchling.build"
+requires = [ "hatchling" ]
 
 [project]
 name = "torchgeo-bench"
@@ -49,7 +49,7 @@ dependencies = [
   "tqdm>=4.65",
 ]
 optional-dependencies.all = [
-  "torchgeo-bench[acceleration,dev]",
+  "torchgeo-bench[dev]",
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
@@ -68,9 +68,8 @@ urls.Issues = "https://github.com/calebrob6/torchgeo-bench/issues"
 urls.Repository = "https://github.com/calebrob6/torchgeo-bench"
 scripts.torchgeo-bench = "torchgeo_bench.cli:main"
 
-[tool.uv]
-build-backend.module-name = "torchgeo_bench"
-build-backend.module-root = "src"
+[tool.hatch.build.targets.wheel]
+packages = [ "src/torchgeo_bench" ]
 
 [tool.ruff]
 target-version = "py312"
