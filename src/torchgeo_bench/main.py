@@ -436,18 +436,22 @@ def main(cfg: DictConfig) -> None:
         seg_method = f"seg-{cfg.eval.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
 
-        result = get_datasets(
-            dataset_name=ds_name,
-            partition_name=cfg.dataset.partition,
-            batch_size=cfg.dataset.batch_size,
-            normalization=cfg.dataset.normalization,
-            return_val=True,
-            image_size=getattr(cfg.dataset, "image_size", None),
-            interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-            bands=getattr(cfg.dataset, "bands", "rgb"),
-        )
+        try:
+            result = get_datasets(
+                dataset_name=ds_name,
+                partition_name=cfg.dataset.partition,
+                batch_size=cfg.dataset.batch_size,
+                normalization=cfg.dataset.normalization,
+                return_val=True,
+                image_size=getattr(cfg.dataset, "image_size", None),
+                interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+                geobench_root=getattr(cfg.dataset, "geobench_root", None),
+                geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
+                bands=getattr(cfg.dataset, "bands", "rgb"),
+            )
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            logger.warning(f"Skipping dataset {ds_name} (not available: {exc})")
+            continue
         if result is None or not isinstance(result, tuple) or len(result) != 4:
             logger.warning(f"Skipping dataset {ds_name} (unexpected return)")
             continue
