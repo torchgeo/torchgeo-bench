@@ -1,0 +1,11 @@
+# torchgeo ScaleMAE-Large — fMoW RGB
+# Feature dimension: 1024
+
+_target_: src.models.TorchGeoScaleMAEBench
+num_channels: 3
+factory: scalemae_large_patch16
+weights_class: ScaleMAELarge16_Weights
+weights_member: FMOW_RGB
+auto_resize: true
+target_size: 224
+name: tgeo_scalemae_large_fmow

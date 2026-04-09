@@ -73,8 +73,8 @@ conda activate torchgeo-bench
 # Run benchmark with default RCF model on all datasets (expects GeoBench data in 'data/')
 torchgeo-bench run
 
-# Use pretrained ResNet50
-torchgeo-bench run model=resnet50
+# Use pretrained ResNet50 (timm/ImageNet)
+torchgeo-bench run model=timm/resnet50
 
 # Benchmark on specific datasets with verbose output
 torchgeo-bench run dataset.names=[m-eurosat,m-forestnet] verbose=true
@@ -98,7 +98,7 @@ torchgeo-bench run device=cuda:1
 Alternatively, you can still use the standalone script with Hydra directly:
 
 ```bash
-python torchgeo_bench.py model=resnet50
+python torchgeo_bench.py model=timm/resnet50
 ```
 
 ## Model Interface
@@ -161,18 +161,18 @@ torchgeo-bench run model=rcf model.mode=empirical model.features=1024
 Pretrained ImageNet ResNet50 from `timm`.
 
 ```bash
-torchgeo-bench run model=resnet50
+torchgeo-bench run model=timm/resnet50
 ```
 
 ### Vision Transformers (ViT / DeiT / Swin)
-Configs generated under `conf/model/vit/` (see `create_vit_configs.py`). Vision backbones often expect a fixed spatial resolution (e.g., 224×224). You can now control resizing globally via dataset config:
+Configs generated under `conf/model/timm/vit/` (see `create_vit_configs.py`). Vision backbones often expect a fixed spatial resolution (e.g., 224×224). You can now control resizing globally via dataset config:
 
 ```bash
 # Resize all dataset tiles to 224 (bicubic by default)
-torchgeo-bench run model=vit/vit_base_patch16_224 dataset.image_size=224
+torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224
 
 # Use bilinear interpolation
-torchgeo-bench run model=vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
+torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
 ```
 
 If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `auto_resize` remains available as a fallback but dataset-level resizing is preferred for consistency across models.
@@ -180,19 +180,37 @@ If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `
 Examples:
 
 ```bash
-torchgeo-bench run model=vit/vit_base_patch16_224
-torchgeo-bench run model=vit/deit_small_patch16_224 dataset.names=[m-eurosat]
-torchgeo-bench run model=vit/swin_base_patch4_window7_224 eval.skip_linear=true
+torchgeo-bench run model=timm/vit/vit_base_patch16_224
+torchgeo-bench run model=timm/vit/deit_small_patch16_224 dataset.names=[m-eurosat]
+torchgeo-bench run model=timm/vit/swin_base_patch4_window7_224 eval.skip_linear=true
 ```
 
 To study scale effects without resizing, simply avoid setting `dataset.image_size` and (optionally) disable the model fallback:
 
 ```bash
-torchgeo-bench run model=vit/vit_base_patch16_224 model.auto_resize=false
+torchgeo-bench run model=timm/vit/vit_base_patch16_224 model.auto_resize=false
 ```
 
-### Custom Wrappers
-See `src/bench_models.py` for examples. You can wrap any existing model (timm, torchgeo, transformers) by implementing the interface.
+### torchgeo Foundation Models (RGB)
+Pretrained geospatial foundation models loaded via `torchgeo.models`. Configs under `conf/model/torchgeo/`.
+
+```bash
+# Sentinel-2 RGB self-supervised (MoCo, SeCo, GASSL, Satlas)
+torchgeo-bench run model=torchgeo/resnet50_s2rgb_moco
+torchgeo-bench run model=torchgeo/resnet18_s2rgb_seco
+
+# ScaleMAE (fMoW RGB)
+torchgeo-bench run model=torchgeo/scalemae_large_fmow
+
+# DOFA — band-agnostic (RGB wavelengths)
+torchgeo-bench run model=torchgeo/dofa_base
+
+# Swin-V2-B with Satlas (NAIP / Sentinel-2 RGB)
+torchgeo-bench run model=torchgeo/swinv2b_naip_satlas_mi
+
+# EarthLoc (place-recognition descriptor)
+torchgeo-bench run model=torchgeo/earthloc_s2_resnet50
+```
 
 ## Datasets
 

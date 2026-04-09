@@ -1,0 +1,11 @@
+# torchgeo Swin-V2-B — NAIP RGB SatlasPretrain (single-image)
+# Feature dimension: 1024
+
+_target_: src.models.TorchGeoSwinBench
+num_channels: 3
+factory: swin_v2_b
+weights_class: Swin_V2_B_Weights
+weights_member: NAIP_RGB_SI_SATLAS
+auto_resize: true
+target_size: 256
+name: tgeo_swinv2b_naip_satlas_si

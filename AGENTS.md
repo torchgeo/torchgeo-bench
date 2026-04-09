@@ -60,7 +60,7 @@ ruff format .          # Format code
 
 ```bash
 # Basic usage
-torchgeo-bench run model=resnet50 dataset.names=[m-eurosat]
+torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
 
 # Quick eval (skip linear probing, minimal bootstrap)
 torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
@@ -75,7 +75,7 @@ torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
 torchgeo-bench run device=cuda:1
 
 # Direct Hydra invocation
-python torchgeo_bench.py model=resnet50
+python torchgeo_bench.py model=timm/resnet50
 ```
 
 ## Datasets

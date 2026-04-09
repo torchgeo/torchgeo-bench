@@ -1,0 +1,12 @@
+# torchgeo DOFA-Base — MAE pretraining (band-agnostic, RGB wavelengths)
+# Feature dimension: 768
+
+_target_: src.models.TorchGeoDOFABench
+num_channels: 3
+factory: dofa_base_patch16_224
+weights_class: DOFABase16_Weights
+weights_member: DOFA_MAE
+wavelengths: [0.665, 0.56, 0.49]
+auto_resize: true
+target_size: 224
+name: tgeo_dofa_base
