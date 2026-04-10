@@ -1,0 +1,92 @@
+name: m-so2sat
+task: classification
+num_classes: 17
+sensor: sentinel-2+sar
+version: v1
+rgb_bands:
+- red
+- green
+- blue
+bands:
+- name: 01 - VH.Real
+  short: vh_real
+  mean: 0.0
+  std: 0.21
+- name: 02 - Blue
+  short: blue
+  wavelength_um: 0.49
+  mean: 0.13
+  std: 0.04
+- name: 02 - VH.Imaginary
+  short: vh_imag
+  mean: -0.0
+  std: 0.2
+- name: 03 - Green
+  short: green
+  wavelength_um: 0.56
+  mean: 0.12
+  std: 0.05
+- name: 03 - VV.Real
+  short: vv_real
+  mean: 0.0
+  std: 0.52
+- name: 04 - Red
+  short: red
+  wavelength_um: 0.665
+  mean: 0.11
+  std: 0.07
+- name: 04 - VV.Imaginary
+  short: vv_imag
+  mean: -0.0
+  std: 0.52
+- name: 05 - VH.LEE Filtered
+  short: vh_lee
+  mean: 0.06
+  std: 1.81
+- name: 05 - Vegetation Red Edge
+  short: red_edge_1
+  wavelength_um: 0.705
+  mean: 0.13
+  std: 0.07
+- name: 06 - VV.LEE Filtered
+  short: vv_lee
+  mean: 0.34
+  std: 4.89
+- name: 06 - Vegetation Red Edge
+  short: red_edge_2
+  wavelength_um: 0.74
+  mean: 0.17
+  std: 0.07
+- name: 07 - VH.LEE Filtered.Real
+  short: vh_lee_real
+  mean: -0.0
+  std: 0.89
+- name: 07 - Vegetation Red Edge
+  short: red_edge_3
+  wavelength_um: 0.783
+  mean: 0.19
+  std: 0.08
+- name: 08 - NIR
+  short: nir
+  wavelength_um: 0.842
+  mean: 0.18
+  std: 0.09
+- name: 08 - VV.LEE Filtered.Imaginary
+  short: vv_lee_imag
+  mean: -0.0
+  std: 1.28
+- name: 08A - Vegetation Red Edge
+  short: red_edge_4
+  wavelength_um: 0.865
+  mean: 0.21
+  std: 0.09
+- name: 11 - SWIR
+  short: swir_1
+  wavelength_um: 1.61
+  mean: 0.18
+  std: 0.1
+- name: 12 - SWIR
+  short: swir_2
+  wavelength_um: 2.19
+  mean: 0.13
+  std: 0.09

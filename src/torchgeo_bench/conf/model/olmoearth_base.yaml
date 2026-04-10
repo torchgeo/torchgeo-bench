@@ -1,0 +1,14 @@
+# OlmoEarth-v1-Base (AI2 geospatial foundation model)
+# Feature dimension: 768
+# Default: RGB mode (3 channels). For full S2, set num_channels=12 and dataset.bands=all
+# Run with: dataset.normalization=none
+
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
+num_channels: 3
+model_size: base
+patch_size: 8
+input_res: 10
+time_steps: 3
+std_multiplier: 2.0
+normalize: false
+name: olmoearth_v1_base

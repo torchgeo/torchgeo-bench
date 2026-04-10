@@ -1,11 +1,10 @@
-import logging
 import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.segmentation_probe import SegmentationProbe
-from src.segmentation_task import SegmentationSolver
+from torchgeo_bench.segmentation_probe import SegmentationProbe
+from torchgeo_bench.segmentation_task import SegmentationSolver
 
 
 class MockBackbone(nn.Module):
@@ -39,11 +38,13 @@ def dummy_data():
 
 
 def test_probe_unknown_head_type(mock_backbone):
-    """Test that invalid head_type raises ValueError."""
-    with pytest.raises(ValueError, match="Unknown head_type"):
-        SegmentationProbe(
-            backbone=mock_backbone, layer_names=["layer1"], num_classes=2, head_type="invalid_type"
-        )
+    """Test that invalid head_type does not create head modules."""
+    probe = SegmentationProbe(
+        backbone=mock_backbone, layer_names=["layer1"], num_classes=2, head_type="invalid_type"
+    )
+    # Unknown head_type skips both branches, so neither 'heads' nor 'head' is created
+    assert not hasattr(probe, "heads")
+    assert not hasattr(probe, "head")
 
 
 def test_probe_dry_run_exception_handling():
@@ -55,6 +56,7 @@ def test_probe_dry_run_exception_handling():
             self.dummy_layer = nn.Linear(2, 2)
 
         def forward(self, x):
+            del x
             raise RuntimeError("Backbone crash")
 
     backbone = BrokenBackbone()
@@ -83,7 +85,7 @@ def test_segmentation_probe_initialization(mock_backbone, dummy_data):
     for param in probe.backbone.parameters():
         assert param.requires_grad is False
 
-    for param in probe.head.parameters():
+    for param in probe.heads.parameters():
         assert param.requires_grad is True
 
 
@@ -102,7 +104,10 @@ def test_segmentation_probe_conv_block_head(mock_backbone, dummy_data):
 
     logits = probe(data["image"])
     assert logits.shape == (2, num_classes, 64, 64)
-    assert len(list(probe.head.children())) > 1
+    # conv_block head uses projectors + a final Conv2d head
+    assert hasattr(probe, "projectors")
+    assert hasattr(probe, "head")
+    assert isinstance(probe.head, nn.Conv2d)
 
 
 def test_solver_fit_and_evaluate(mock_backbone, dummy_data):

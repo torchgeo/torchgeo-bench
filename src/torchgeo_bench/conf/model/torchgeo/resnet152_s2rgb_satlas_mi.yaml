@@ -1,0 +1,12 @@
+# torchgeo ResNet-152 — Sentinel-2 RGB SatlasPretrain (multi-image)
+# Feature dimension: 2048
+
+_target_: torchgeo_bench.models.TorchGeoResNetBench
+num_channels: 3
+factory: resnet152
+weights_class: ResNet152_Weights
+weights_member: SENTINEL2_MI_RGB_SATLAS
+auto_resize: false
+target_size: 224
+name: tgeo_resnet152_s2rgb_satlas_mi
+normalization: none

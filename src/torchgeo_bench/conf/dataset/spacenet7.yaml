@@ -1,0 +1,23 @@
+name: spacenet7
+task: segmentation
+num_classes: 3
+sensor: planet
+version: v2
+v2_class: GeoBenchSpaceNet7
+rgb_bands:
+- red
+- green
+- blue
+bands:
+- name: red
+  short: red
+  mean: 116.9447
+  std: 61.6558
+- name: green
+  short: green
+  mean: 103.5589
+  std: 49.649
+- name: blue
+  short: blue
+  mean: 76.7743
+  std: 45.8807

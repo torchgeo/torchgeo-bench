@@ -1,0 +1,31 @@
+name: flair2
+task: segmentation
+num_classes: 13
+sensor: aerial
+version: v2
+v2_class: GeoBenchFLAIR2
+rgb_bands:
+- red
+- green
+- blue
+bands:
+- name: red
+  short: red
+  mean: 110.305
+  std: 50.71
+- name: green
+  short: green
+  mean: 114.7908
+  std: 44.3165
+- name: blue
+  short: blue
+  mean: 105.6127
+  std: 43.2948
+- name: nir
+  short: nir
+  mean: 104.3409
+  std: 39.0496
+- name: elevation
+  short: elevation
+  mean: 17.6965
+  std: 29.9427

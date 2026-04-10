@@ -1,0 +1,99 @@
+name: treesatai
+task: classification
+num_classes: 13
+sensor: aerial+sentinel-2+sar
+version: v2
+v2_class: GeoBenchTreeSatAI
+rgb_bands:
+- red
+- green
+- blue
+bands:
+- name: red
+  short: red
+  mean: 79.3079
+  std: 33.3639
+- name: green
+  short: green
+  mean: 92.1351
+  std: 33.5291
+- name: blue
+  short: blue
+  mean: 85.3632
+  std: 27.9319
+- name: nir
+  short: nir
+  mean: 154.2898
+  std: 49.0291
+- name: B02
+  short: b02
+  wavelength_um: 0.49
+  mean: 245.3107
+  std: 117.7349
+- name: B03
+  short: b03
+  wavelength_um: 0.56
+  mean: 387.6357
+  std: 130.0996
+- name: B04
+  short: b04
+  wavelength_um: 0.665
+  mean: 248.4667
+  std: 129.6638
+- name: B08
+  short: b08
+  wavelength_um: 0.842
+  mean: 2825.936
+  std: 756.8176
+- name: B05
+  short: b05
+  wavelength_um: 0.705
+  mean: 625.9301
+  std: 191.3524
+- name: B06
+  short: b06
+  wavelength_um: 0.74
+  mean: 2118.8374
+  std: 517.2822
+- name: B07
+  short: b07
+  wavelength_um: 0.783
+  mean: 2709.3789
+  std: 691.1488
+- name: B8A
+  short: b8a
+  wavelength_um: 0.865
+  mean: 2982.2087
+  std: 754.942
+- name: B11
+  short: b11
+  wavelength_um: 1.61
+  mean: 1316.7186
+  std: 411.3391
+- name: B12
+  short: b12
+  wavelength_um: 2.19
+  mean: 594.2034
+  std: 234.4886
+- name: B01
+  short: b01
+  wavelength_um: 0.443
+  mean: 265.807
+  std: 125.9928
+- name: B09
+  short: b09
+  wavelength_um: 0.945
+  mean: 2962.1824
+  std: 674.1692
+- name: vv
+  short: vv
+  mean: -6.3649
+  std: 3.5287
+- name: vh
+  short: vh
+  mean: -12.5086
+  std: 3.2121
+- name: vv/vh
+  short: vv_vh
+  mean: 0.4892
+  std: 0.2583

@@ -2,10 +2,19 @@ name: torchgeo-bench
 channels:
   - conda-forge
 dependencies:
-  - python<3.13
+  - python>=3.12,<3.13
   - pip
   - pip:
-      - torchgeo
-      - scikit-learn
-      - hydra-core
-      - git+https://github.com/ServiceNow/geo-bench.git
+      - numpy>=1.24.0
+      - pandas>=2.0.0
+      - scikit-learn>=1.3.0
+      - h5py>=3.8.0
+      - hydra-core>=1.3.0
+      - omegaconf>=2.3.0
+      - tqdm>=4.65.0
+      - timm>=0.9.0
+      - huggingface_hub>=0.20.0
+      - torchgeo>=0.8.0
+      - faiss-gpu>=1.7.0
+      - GeoBenchV2
+      - -e .

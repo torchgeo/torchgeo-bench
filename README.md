@@ -59,10 +59,12 @@ You can add these exports to your shell profile (e.g., `~/.bashrc`) if you want 
 `torchgeo-bench` provides:
 
 1. **Simple Model Interface**: Define your model by implementing `forward_features(images, bboxes)` → embeddings
-2. **Automated Evaluation**: KNN-5 and Linear Probing with bootstrapped confidence intervals
-3. **GeoBench Integration**: Direct access to classification benchmark datasets
-4. **Hydra Configuration**: Flexible experiment configuration without code changes
-5. **Efficient Workflows**: Per-dataset model reinitialization handles varying input channels
+2. **Automated Evaluation**: KNN-5, Linear Probing, and Segmentation (mIoU) with bootstrapped confidence intervals
+3. **GeoBench V1 & V2 Integration**: Direct access to classification and segmentation benchmark datasets
+4. **Resume Mode**: Skip already-computed experiments when interrupted/restarted
+5. **Hydra Configuration**: Flexible experiment configuration without code changes
+6. **Efficient Workflows**: Per-dataset model reinitialization handles varying input channels
+7. **Atomic CSV Writes**: Results appended with file locking for parallel job safety
 
 ## Quick Start
 
@@ -73,37 +75,49 @@ You can add these exports to your shell profile (e.g., `~/.bashrc`) if you want 
 git clone <repository-url>
 cd torchgeo-bench
 
-# Install dependencies (Python 3.12+)
-pip install -e .
-
-# Or using conda
-conda env create -f environment.yml
-conda activate torchgeo-bench
+# Install dependencies and dev tools
+uv sync --extra dev
 ```
+
+## Releasing to PyPI
+
+1. Set up a [PyPI Trusted Publisher](https://docs.pypi.org/trusted-publishers/) for this
+   repository with environment name `pypi`.
+2. Create and push a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The GitHub Actions release workflow will automatically build and publish to PyPI.
 
 ### Basic Usage
 
 ```bash
 # Run benchmark with default RCF model on all datasets (expects GeoBench data in 'data/')
-torchgeo-bench run
+uv run torchgeo-bench run
 
-# Use pretrained ResNet50
-torchgeo-bench run model=resnet50
+# Use pretrained ResNet50 (timm/ImageNet)
+uv run torchgeo-bench run model=timm/resnet50
 
 # Benchmark on specific datasets with verbose output
-torchgeo-bench run dataset.names=[m-eurosat,m-forestnet] verbose=true
+uv run torchgeo-bench run dataset.names=[m-eurosat,m-forestnet] verbose=true
 
 # Quick evaluation (skip linear probing, minimal bootstrap)
-torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
+uv run torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
 
 # Use smaller training partition
-torchgeo-bench run dataset.partition=0.01x_train output=results_1pct.csv
-```
+uv run torchgeo-bench run dataset.partition=0.01x_train output=results_1pct.csv
 
-Alternatively, you can still use the standalone script with Hydra directly:
+# Resume a previously interrupted run (skips completed experiments)
+uv run torchgeo-bench run resume=true
 
-```bash
-python torchgeo_bench.py model=resnet50
+# Evaluate segmentation datasets
+uv run torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
+
+# Select specific GPU device
+uv run torchgeo-bench run device=cuda:1
 ```
 
 ## Model Interface
@@ -111,21 +125,22 @@ python torchgeo_bench.py model=resnet50
 To benchmark your own model, implement the `BenchModel` abstract base class:
 
 ```python
-from src.interface import BenchModel
 import torch
+
+from torchgeo_bench.models.interface import BenchModel
 
 class MyModel(BenchModel):
     def __init__(self, num_channels: int, **kwargs):
         super().__init__(num_channels=num_channels)
         # num_channels varies per dataset (e.g., 3 for RGB)
         self.backbone = create_my_backbone(in_channels=num_channels)
-    
+
     def forward_features(self, images: torch.Tensor, bboxes=None) -> torch.Tensor:
         """
         Args:
             images: (B, C, H, W) tensor in [0, 1] range (after normalization)
             bboxes: Optional (B, 4) geographic bounds (minx, miny, maxx, maxy)
-        
+
         Returns:
             embeddings: (B, K) tensor
         """
@@ -146,7 +161,7 @@ pretrained: true
 Then run:
 
 ```bash
-torchgeo-bench run model=mymodel
+uv run torchgeo-bench run model=mymodel
 ```
 
 ## Available Models
@@ -156,28 +171,28 @@ Gaussian or empirical random features à la MOSAIKS.
 
 ```bash
 # Gaussian RCF
-torchgeo-bench run model=rcf
+uv run torchgeo-bench run model=rcf
 
 # Empirical RCF (samples patches from training data)
-torchgeo-bench run model=rcf model.mode=empirical model.features=1024
+uv run torchgeo-bench run model=rcf model.mode=empirical model.features=1024
 ```
 
 ### Timm ResNet50
 Pretrained ImageNet ResNet50 from `timm`.
 
 ```bash
-torchgeo-bench run model=resnet50
+uv run torchgeo-bench run model=timm/resnet50
 ```
 
 ### Vision Transformers (ViT / DeiT / Swin)
-Configs generated under `conf/model/vit/` (see `create_vit_configs.py`). Vision backbones often expect a fixed spatial resolution (e.g., 224×224). You can now control resizing globally via dataset config:
+Configs generated under `conf/model/timm/vit/` (see `create_vit_configs.py`). Vision backbones often expect a fixed spatial resolution (e.g., 224×224). You can now control resizing globally via dataset config:
 
 ```bash
 # Resize all dataset tiles to 224 (bicubic by default)
-torchgeo-bench run model=vit/vit_base_patch16_224 dataset.image_size=224
+uv run torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224
 
 # Use bilinear interpolation
-torchgeo-bench run model=vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
+uv run torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
 ```
 
 If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `auto_resize` remains available as a fallback but dataset-level resizing is preferred for consistency across models.
@@ -185,31 +200,70 @@ If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `
 Examples:
 
 ```bash
-torchgeo-bench run model=vit/vit_base_patch16_224
-torchgeo-bench run model=vit/deit_small_patch16_224 dataset.names=[m-eurosat]
-torchgeo-bench run model=vit/swin_base_patch4_window7_224 eval.skip_linear=true
+uv run torchgeo-bench run model=timm/vit/vit_base_patch16_224
+uv run torchgeo-bench run model=timm/vit/deit_small_patch16_224 dataset.names=[m-eurosat]
+uv run torchgeo-bench run model=timm/vit/swin_base_patch4_window7_224 eval.skip_linear=true
 ```
 
 To study scale effects without resizing, simply avoid setting `dataset.image_size` and (optionally) disable the model fallback:
 
 ```bash
-torchgeo-bench run model=vit/vit_base_patch16_224 model.auto_resize=false
+uv run torchgeo-bench run model=timm/vit/vit_base_patch16_224 model.auto_resize=false
 ```
 
-### Custom Wrappers
-See `src/bench_models.py` for examples. You can wrap any existing model (timm, torchgeo, transformers) by implementing the interface.
+### torchgeo Foundation Models (RGB)
+Pretrained geospatial foundation models loaded via `torchgeo.models`. Configs under `conf/model/torchgeo/`.
+
+```bash
+# Sentinel-2 RGB self-supervised (MoCo, SeCo, GASSL, Satlas)
+uv run torchgeo-bench run model=torchgeo/resnet50_s2rgb_moco
+uv run torchgeo-bench run model=torchgeo/resnet18_s2rgb_seco
+
+# ScaleMAE (fMoW RGB)
+uv run torchgeo-bench run model=torchgeo/scalemae_large_fmow
+
+# DOFA — band-agnostic (RGB wavelengths)
+uv run torchgeo-bench run model=torchgeo/dofa_base
+
+# Swin-V2-B with Satlas (NAIP / Sentinel-2 RGB)
+uv run torchgeo-bench run model=torchgeo/swinv2b_naip_satlas_mi
+
+# EarthLoc (place-recognition descriptor)
+uv run torchgeo-bench run model=torchgeo/earthloc_s2_resnet50
+```
 
 ## Datasets
 
-### Supported GeoBench Datasets
+### Supported GeoBench V1 Datasets (Classification)
 
-| Dataset         | Classes | Task                          | Samples (default) |
-|-----------------|---------|-------------------------------|-------------------|
-| `m-eurosat`     | 10      | Land cover classification     | ~27,000           |
-| `m-forestnet`   | 12      | Forest type classification    | ~500,000          |
-| `m-so2sat`      | 17      | Local climate zones           | ~400,000          |
-| `m-pv4ger`      | 2       | Photovoltaic detection        | ~100,000          |
-| `m-brick-kiln`  | 2       | Brick kiln detection          | ~100,000          |
+| Dataset         | Classes | Task                          | Prefix |
+|-----------------|---------|-------------------------------|--------|
+| `m-eurosat`     | 10      | Land cover classification     | `m-`   |
+| `m-forestnet`   | 12      | Forest type classification    | `m-`   |
+| `m-so2sat`      | 17      | Local climate zones           | `m-`   |
+| `m-pv4ger`      | 2       | Photovoltaic detection        | `m-`   |
+| `m-brick-kiln`  | 2       | Brick kiln detection          | `m-`   |
+
+### Supported GeoBench V2 Datasets
+
+| Dataset           | Classes | Task            |
+|-------------------|---------|-----------------|
+| `benv2`           | 19      | Classification  |
+| `treesatai`       | 13      | Classification  |
+| `so2sat`          | 17      | Classification  |
+| `forestnet`       | 12      | Classification  |
+| `caffe`           | 4       | Segmentation    |
+| `cloudsen12`      | 4       | Segmentation    |
+| `burn_scars`      | 3       | Segmentation    |
+| `dynamic_earthnet`| 7       | Segmentation    |
+| `flair2`          | 13      | Segmentation    |
+| `fotw`            | 4       | Segmentation    |
+| `kuro_siwo`       | 4       | Segmentation    |
+| `pastis`          | 20      | Segmentation    |
+| `spacenet2`       | 3       | Segmentation    |
+| `spacenet7`       | 3       | Segmentation    |
+
+**Note:** V1 datasets use the `m-` prefix (e.g., `m-eurosat`), while V2 datasets use no prefix (e.g., `forestnet`). The `eurosat` dataset in V2 maps to `benv2`.
 
 ### Data Partitions
 
@@ -242,18 +296,29 @@ seed: 0
 device: cuda:0
 output: torchgeo_bench_results.csv
 verbose: false
+resume: false             # Skip completed experiments on restart
 
 dataset:
-  names: all  # or [m-eurosat, m-forestnet]
+  names: all              # or [m-eurosat, m-forestnet, burn_scars]
   partition: default
   batch_size: 64
   normalization: mean_stdev  # or min_max, percentile_2_98, none
+  image_size: 224            # null to preserve native size
+  interpolation: bilinear    # bilinear, bicubic, or nearest
+  geobench_root: data/classification_v1.0    # V1 dataset location
+  geobench_v2_root: data/geobenchv2          # V2 dataset location
 
 eval:
-  bootstrap: 500        # CI bootstrap samples
-  c_range: [-7, 2, 20]  # LogisticRegression C sweep (log10 scale)
-  merge_val: true       # Merge train+val for final linear model
-  skip_linear: false    # Skip linear probing (KNN only)
+  bootstrap: 500          # CI bootstrap samples
+  c_range: [-7, 2, 20]    # LogisticRegression C sweep (log10 scale)
+  merge_val: true         # Merge train+val for final linear model
+  skip_linear: false      # Skip linear probing (KNN only)
+
+  segmentation:
+    head_type: linear     # Segmentation probe head type
+    layers: []            # Additional MLP layers (empty = linear)
+    lr: 0.001             # Learning rate for segmentation training
+    epochs: 1             # Training epochs for segmentation probe
 ```
 
 ### Override Any Config
@@ -267,14 +332,25 @@ torchgeo-bench run eval.bootstrap=1000
 
 # Custom output file
 torchgeo-bench run output=my_results.csv
+
+# Resume after interruption (skips already-computed results)
+torchgeo-bench run resume=true
+
+# Custom data paths
+torchgeo-bench run dataset.geobench_root=/path/to/v1 dataset.geobench_v2_root=/path/to/v2
+
+# Configure segmentation evaluation
+torchgeo-bench run eval.segmentation.epochs=5 eval.segmentation.lr=0.0001
 ```
 
 ## Evaluation Protocol
 
-For each dataset:
+### Classification Datasets
+
+For each classification dataset:
 
 1. **Model Initialization**: Instantiate model with dataset's `num_channels`
-2. **Feature Extraction**: 
+2. **Feature Extraction**:
    - Embed train, validation, and test sets
    - Returns (B, K) numpy arrays
 3. **KNN-5 Evaluation**:
@@ -289,13 +365,37 @@ For each dataset:
    - Bootstrap predictions 500× for 95% CI
 5. **Results**: Append two rows (knn5, linear) to CSV
 
+### Segmentation Datasets
+
+For each segmentation dataset:
+
+1. **Model Initialization**: Instantiate model with dataset's `num_channels`
+2. **Feature Extraction**: Extract dense feature maps from model
+3. **Segmentation Probe Training**:
+   - Train a linear or MLP head on training features
+   - Uses CrossEntropyLoss with `ignore_index=255` for unlabeled pixels
+4. **mIoU Evaluation**:
+   - Evaluate on test set using MulticlassJaccardIndex (mIoU)
+   - Excludes ignore class from metric computation
+5. **Results**: Append one row (seg-linear) to CSV
+
 ### Output Format
 
 ```csv
-dataset,method,accuracy,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model
-m-eurosat,knn5,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,src.bench_models.RCFBench
-m-eurosat,linear,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,src.bench_models.RCFBench
+dataset,method,metric_name,metric_value,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model,name,normalization,image_size,interpolation,partition
+m-eurosat,knn5,accuracy,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,src.bench_models.RCFBench,rcf,mean_stdev,224,bilinear,default
+m-eurosat,linear,accuracy,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,src.bench_models.RCFBench,rcf,mean_stdev,224,bilinear,default
+burn_scars,seg-linear,mIoU,0.6234,0.0,0.0,768,,1000,200,300,0,src.bench_models.ResNet50Bench,resnet50,mean_stdev,224,bilinear,default
 ```
+
+### Resume Mode
+
+The `resume=true` option enables safe resumption of interrupted runs:
+
+- Reads existing output CSV to find completed experiments
+- Skips (dataset, method, model, config) combinations already present
+- Useful for long benchmark sweeps or recovering from crashes
+- Works with atomic file appending for multi-process safety
 
 ## Development
 
@@ -318,9 +418,17 @@ pytest tests/test_geobench_dataset.py -k "m-eurosat" -v
 torchgeo-bench run dataset.names=[m-eurosat] eval.bootstrap=10 output=test.csv
 ```
 
+<<<<<<< HEAD
 **Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, set one or both environment variables below before running tests:
+=======
+**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, configure the paths in `conf/config.yaml` or use command-line overrides:
+>>>>>>> main
 
 ```bash
+# Command-line override
+torchgeo-bench run dataset.geobench_root=/your/path/to/classification_v1.0
+
+# Or set environment variable (for tests)
 export GEOBENCH_ROOT=/your/path/to/classification_v1.0
 export GEOBENCH_V2_ROOT=/your/path/to/GEO-Bench-2
 pytest
@@ -416,7 +524,7 @@ Adjust number of workers:
 ## Roadmap
 
 - [ ] Embedding disk caching
-- [ ] Segmentation benchmark support
+- [x] Segmentation benchmark support
 - [ ] Multi-label classification metrics
 - [ ] Distributed evaluation (multi-GPU)
 - [ ] Automated hyperparameter sweeps

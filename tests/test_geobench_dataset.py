@@ -8,8 +8,8 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from src.datasets import NUM_CLASSES_PER_DATASET
-from src.geobench_dataset import GeoBenchDataset, get_geobench_dataset
+from torchgeo_bench.dataset_info import load_dataset_info
+from torchgeo_bench.geobench_dataset import GeoBenchDataset, get_geobench_dataset
 
 
 class TestGeoBenchDatasetBasics:
@@ -99,7 +99,7 @@ class TestAllDatasets:
         assert sample["label"].dtype == torch.long, f"{dataset_name}: Expected int64 label"
 
         # Check label is valid
-        expected_classes = NUM_CLASSES_PER_DATASET[dataset_name]
+        expected_classes = load_dataset_info(dataset_name).num_classes
         assert 0 <= sample["label"].item() < expected_classes, (
             f"{dataset_name}: Label out of range [0, {expected_classes})"
         )

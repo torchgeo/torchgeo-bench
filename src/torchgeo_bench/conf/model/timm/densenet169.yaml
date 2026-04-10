@@ -1,0 +1,11 @@
+# DenseNet-169 (12M params)
+# Feature dimension: 1664
+# Model: densenet169
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: densenet169
+pretrained: true
+global_pool: avg
+seed: null
+name: densenet169

@@ -1,0 +1,4 @@
+# ImageStats benchmark model configuration
+_target_: torchgeo_bench.models.ImageStatsBench
+num_channels: 3  # will be overridden per dataset automatically
+name: imagestats

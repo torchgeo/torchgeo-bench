@@ -11,11 +11,11 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from src.datasets import get_datasets as new_get_datasets
+from torchgeo_bench.datasets import get_datasets as new_get_datasets
 
 # Only import reference implementation if available
 try:
-    from src.reference_datasets import get_datasets as ref_get_datasets
+    from torchgeo_bench.reference_datasets import get_datasets as ref_get_datasets
 
     HAS_REFERENCE = True
 except ImportError:

@@ -1,0 +1,69 @@
+name: so2sat
+task: classification
+num_classes: 17
+sensor: sentinel-2+sar
+version: v2
+v2_class: GeoBenchSo2Sat
+rgb_bands:
+- b04
+- b03
+- b02
+bands:
+- name: B02
+  short: b02
+  wavelength_um: 0.49
+  mean: 0.1295
+  std: 0.0414
+- name: B03
+  short: b03
+  wavelength_um: 0.56
+  mean: 0.1172
+  std: 0.052
+- name: B04
+  short: b04
+  wavelength_um: 0.665
+  mean: 0.1138
+  std: 0.0733
+- name: B05
+  short: b05
+  wavelength_um: 0.705
+  mean: 0.1272
+  std: 0.0694
+- name: B06
+  short: b06
+  wavelength_um: 0.74
+  mean: 0.1707
+  std: 0.0751
+- name: B07
+  short: b07
+  wavelength_um: 0.783
+  mean: 0.1928
+  std: 0.0856
+- name: B08
+  short: b08
+  wavelength_um: 0.842
+  mean: 0.1855
+  std: 0.0865
+- name: B8A
+  short: b8a
+  wavelength_um: 0.865
+  mean: 0.2073
+  std: 0.094
+- name: B11
+  short: b11
+  wavelength_um: 1.61
+  mean: 0.1768
+  std: 0.1024
+- name: B12
+  short: b12
+  wavelength_um: 2.19
+  mean: 0.1285
+  std: 0.0923
+- name: VV
+  short: vv
+  mean: -0.0
+  std: 0.5443
+- name: VH
+  short: vh
+  mean: -0.0
+  std: 0.2156

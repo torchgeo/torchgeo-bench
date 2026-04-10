@@ -1,0 +1,12 @@
+# DeiT-Base Patch16 224
+# Feature dimension: 768
+# Model: deit_base_patch16_224
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: deit_base_patch16_224
+pretrained: true
+global_pool: avg
+seed: null
+name: deit_base_patch16_224
+use_cls_token: false

@@ -1,0 +1,17 @@
+# VGG-16 (138M params)
+# Feature dimension: 512
+# Model: vgg16
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: vgg16
+pretrained: true
+global_pool: avg
+seed: null
+name: vgg16
+eval:
+  segmentation:
+    # Layers at MaxPool boundaries, coarse-to-fine (deepest first) for FPN head.
+    # Spatial sizes (224px input): 7, 14, 28, 56.
+    # For ASPP head, only the last entry (features.30) is used.
+    layers: ["features.30", "features.23", "features.16", "features.9"]

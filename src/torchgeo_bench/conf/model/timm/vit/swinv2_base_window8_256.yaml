@@ -1,0 +1,12 @@
+# SwinV2-Base Window8 256 (87M params)
+# Feature dimension: 1024
+# Model: swinv2_base_window8_256
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: swinv2_base_window8_256
+pretrained: true
+global_pool: avg
+seed: null
+name: swinv2_base_window8_256
+auto_resize: true

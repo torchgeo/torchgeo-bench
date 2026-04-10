@@ -1,0 +1,11 @@
+# Wide ResNet-50-2 (67M params)
+# Feature dimension: 2048
+# Model: wide_resnet50_2
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: wide_resnet50_2
+pretrained: true
+global_pool: avg
+seed: null
+name: wide_resnet50_2

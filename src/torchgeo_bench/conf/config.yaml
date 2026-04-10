@@ -1,0 +1,45 @@
+# Primary Hydra configuration for torchgeo-bench
+
+defaults:
+  - model: rcf
+  - _self_
+
+seed: 0
+device: cuda:0
+output: results/all_results.csv
+verbose: false
+resume: false  # if true, skip dataset+method combinations already in output CSV
+
+# Dataset settings
+# Set names: all  OR a list of dataset identifiers
+# Example override: dataset.names=[m-forestnet,m-eurosat]
+dataset:
+  names: all
+  partition: default
+  batch_size: 64
+  normalization: mean_stdev  # min_max | mean_stdev | percentile_2_98 | none
+  bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
+  image_size: 224           # e.g., 224; if null, no resizing
+  interpolation: bilinear     # bilinear | bicubic | nearest; used if image_size set
+  geobench_root: data/classification_v1.0     # Root for GeoBench V1 datasets
+  geobench_v2_root: data/geobenchv2           # Root for GeoBench V2 datasets
+
+# Evaluation settings
+eval:
+  bootstrap: 200          # number of bootstrap resamples
+  c_range: [-7, 2, 20]     # log10 sweep start, stop, num samples
+  merge_val: true          # merge train+val for final logistic training
+  skip_linear: false       # if true, skip LogisticRegression evaluation
+
+  segmentation:
+    head_type: "fpn"
+    layers: []
+    lr: 1e-3
+    epochs: 10
+    loss: "ce"           # "ce" (CrossEntropy) or "bce" (binary CE, often better for frozen probes)
+    lr_scheduler: "cosine"  # "cosine" (CosineAnnealingLR) or "none"
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

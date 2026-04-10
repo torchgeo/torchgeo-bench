@@ -1,0 +1,23 @@
+name: kuro_siwo
+task: segmentation
+num_classes: 4
+sensor: sar
+version: v2
+v2_class: GeoBenchKuroSiwo
+rgb_bands:
+- vv
+- vh
+- dem
+bands:
+- name: vv
+  short: vv
+  mean: 0.0953
+  std: 0.0427
+- name: vh
+  short: vh
+  mean: 0.0264
+  std: 0.0215
+- name: dem
+  short: dem
+  mean: 93.4313
+  std: 1410.8382

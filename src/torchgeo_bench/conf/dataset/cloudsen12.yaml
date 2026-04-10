@@ -1,0 +1,71 @@
+name: cloudsen12
+task: segmentation
+num_classes: 4
+sensor: sentinel-2
+version: v2
+v2_class: GeoBenchCloudSen12
+rgb_bands:
+- b04
+- b03
+- b02
+bands:
+- name: B01
+  short: b01
+  wavelength_um: 0.443
+  mean: 2030.2444
+  std: 2723.436
+- name: B02
+  short: b02
+  wavelength_um: 0.49
+  mean: 2074.8171
+  std: 2691.3027
+- name: B03
+  short: b03
+  wavelength_um: 0.56
+  mean: 2209.8074
+  std: 2539.9136
+- name: B04
+  short: b04
+  wavelength_um: 0.665
+  mean: 2247.9275
+  std: 2538.5208
+- name: B05
+  short: b05
+  wavelength_um: 0.705
+  mean: 2589.5935
+  std: 2504.3284
+- name: B06
+  short: b06
+  wavelength_um: 0.74
+  mean: 3103.5212
+  std: 2241.7446
+- name: B07
+  short: b07
+  wavelength_um: 0.783
+  mean: 3277.9094
+  std: 2145.6677
+- name: B08
+  short: b08
+  wavelength_um: 0.842
+  mean: 3331.6318
+  std: 2176.9978
+- name: B8A
+  short: b8a
+  wavelength_um: 0.865
+  mean: 3377.5447
+  std: 2066.7637
+- name: B09
+  short: b09
+  wavelength_um: 0.945
+  mean: 4038.1931
+  std: 3083.1799
+- name: B11
+  short: b11
+  wavelength_um: 1.61
+  mean: 2448.748
+  std: 1595.0652
+- name: B12
+  short: b12
+  wavelength_um: 2.19
+  mean: 1907.7285
+  std: 1474.1177

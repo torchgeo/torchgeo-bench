@@ -1,0 +1,11 @@
+# ResNet-152 (58M params)
+# Feature dimension: 2048
+# Model: resnet152
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: resnet152
+pretrained: true
+global_pool: avg
+seed: null
+name: resnet152

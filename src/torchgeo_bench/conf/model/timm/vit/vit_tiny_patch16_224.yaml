@@ -1,0 +1,12 @@
+# ViT-Tiny Patch16 224
+# Feature dimension: 192
+# Model: vit_tiny_patch16_224
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: vit_tiny_patch16_224
+pretrained: true
+global_pool: avg
+seed: null
+name: vit_tiny_patch16_224
+use_cls_token: false

@@ -1,0 +1,13 @@
+# ViT-Large Patch16 224
+# Feature dimension: 1024
+# Model: vit_large_patch16_224
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: vit_large_patch16_dinov3.lvd1689m
+pretrained: true
+global_pool: avg
+seed: null
+name: vit_large_patch16_dinov3
+auto_resize: true
+use_cls_token: false

@@ -1,0 +1,9 @@
+# RCF benchmark model configuration
+_target_: torchgeo_bench.models.RCFBench
+num_channels: 3  # will be overridden per dataset automatically
+features: 512
+kernel_size: 3
+mode: gaussian         # or empirical
+stats_mode: mean       # mean | stdev | all
+seed: ${seed}
+name: rcf

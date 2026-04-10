@@ -1,0 +1,12 @@
+# torchgeo ResNet-50 — Sentinel-2 RGB SeCo
+# Feature dimension: 2048
+
+_target_: torchgeo_bench.models.TorchGeoResNetBench
+num_channels: 3
+factory: resnet50
+weights_class: ResNet50_Weights
+weights_member: SENTINEL2_RGB_SECO
+auto_resize: false
+target_size: 224
+name: tgeo_resnet50_s2rgb_seco
+normalization: none

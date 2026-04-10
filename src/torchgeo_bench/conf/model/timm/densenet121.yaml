@@ -1,0 +1,16 @@
+# DenseNet-121 (8M params)
+# Feature dimension: 1024
+# Model: densenet121
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: densenet121
+pretrained: true
+global_pool: avg
+seed: null
+name: densenet121
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    # For ASPP head, only the last entry (features.denseblock4) is used.
+    layers: ["features.denseblock4", "features.denseblock3", "features.denseblock2", "features.denseblock1"]

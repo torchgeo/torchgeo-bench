@@ -1,138 +1,137 @@
 [build-system]
-requires = ["setuptools>=65.0", "wheel"]
-build-backend = "setuptools.build_meta"
+build-backend = "hatchling.build"
+requires = [ "hatchling" ]
 
 [project]
 name = "torchgeo-bench"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight benchmarking framework for geospatial models"
 readme = "README.md"
-requires-python = ">=3.11"
-license = {text = "MIT"}
-authors = [
-    {name = "Caleb Robinson", email = "calebrob6@gmail.com"},
-]
 keywords = [
-    "remote sensing",
-    "earth observation",
-    "foundation models",
-    "benchmark",
-    "geospatial",
-    "machine learning",
+  "benchmark",
+  "earth observation",
+  "foundation models",
+  "geospatial",
+  "machine learning",
+  "remote sensing",
 ]
+license = { text = "MIT" }
+authors = [
+  { name = "Caleb Robinson", email = "calebrob6@gmail.com" },
+  { name = "Isaac Corley", email = "isaac.a.corley@gmail.com" },
+]
+requires-python = ">=3.12"
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Scientific/Engineering :: GIS",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: GIS",
 ]
-
 dependencies = [
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
-    "numpy>=1.24.0",
-    "pandas>=2.0.0",
-    "scikit-learn>=1.3.0",
-    "h5py>=3.8.0",
-    "hydra-core>=1.3.0",
-    "omegaconf>=2.3.0",
-    "tqdm>=4.65.0",
-    "timm>=0.9.0",
-    "huggingface_hub>=0.20.0",
-    "torchgeo>=0.8.0",
-    "tqdm>=4.67.1"
+  "faiss-cpu>=1.7",
+  "geobenchv2>=0.9",
+  "h5py>=3.8",
+  "huggingface-hub>=0.20",
+  "hydra-core>=1.3",
+  "numpy>=1.24",
+  "omegaconf>=2.3",
+  "pandas>=2",
+  "scikit-learn>=1.3",
+  "timm>=0.9",
+  "torch>=2",
+  "torchgeo>=0.8",
+  "torchvision>=0.15",
+  "tqdm>=4.65",
 ]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.3.0",
-    "pytest-cov>=4.1.0",
-    "ruff>=0.0.270",
+optional-dependencies.all = [
+  "torchgeo-bench[dev]",
 ]
-acceleration = [
-    "scikit-learn-intelex>=2023.1.0",  # Intel optimization
+optional-dependencies.dev = [
+  "mdformat>=0.7.22",
+  "pre-commit>=4.3",
+  "pyproject-fmt>=2.21",
+  "pytest>=7.3",
+  "pytest-cov>=4.1",
+  "ruff>=0.0.270",
 ]
-geobench = [
-    "geobench>=0.1.0",  # Original geobench library (optional alternative)
+optional-dependencies.olmoearth = [
+  "olmoearth-pretrain-minimal>=0.0.2",
 ]
-all = [
-    "torchgeo-bench[dev,acceleration,geobench]",
-]
+urls.Documentation = "https://github.com/calebrob6/torchgeo-bench/blob/main/README.md"
+urls.Homepage = "https://github.com/calebrob6/torchgeo-bench"
+urls.Issues = "https://github.com/calebrob6/torchgeo-bench/issues"
+urls.Repository = "https://github.com/calebrob6/torchgeo-bench"
+scripts.torchgeo-bench = "torchgeo_bench.cli:main"
 
-[project.urls]
-Homepage = "https://github.com/calebrob6/torchgeo-bench"
-Documentation = "https://github.com/calebrob6/torchgeo-bench/blob/main/README.md"
-Repository = "https://github.com/calebrob6/torchgeo-bench"
-Issues = "https://github.com/calebrob6/torchgeo-bench/issues"
-
-[project.scripts]
-torchgeo-bench = "src.cli:main"
-
-[tool.setuptools]
-packages = ["src"]
-
-[tool.setuptools.package-data]
-src = ["py.typed"]
+[tool.hatch.build.targets.wheel]
+packages = [ "src/torchgeo_bench" ]
 
 [tool.ruff]
-line-length = 100
 target-version = "py312"
+line-length = 100
+exclude = [
+  ".git",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".venv",
+  "__pycache__",
+  "build",
+  "dist",
+  "outputs",
+]
 lint.select = [
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "F",    # pyflakes
-    "I",    # isort
-    "B",    # flake8-bugbear
-    "C4",   # flake8-comprehensions
-    "UP",   # pyupgrade
-    "ARG",  # flake8-unused-arguments
-    "SIM",  # flake8-simplify
+  "ARG", # flake8-unused-arguments
+  "B",   # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "D",   # pydocstyle
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "I",   # isort
+  "SIM", # flake8-simplify
+  "UP",  # pyupgrade
+  "W",   # pycodestyle warnings
 ]
 lint.ignore = [
-    "E501",  # line too long (handled by ruff format)
-    "B008",  # do not perform function calls in argument defaults
-    "B905",  # zip() without an explicit strict= parameter
+  "B008", # do not perform function calls in argument defaults
+  "B905", # zip() without an explicit strict= parameter
+  "D104", # missing docstring in public package
+  "D105", # missing docstring in magic method
+  "D107", # missing docstring in __init__ (documented in class docstring)
+  "E501", # line too long (handled by ruff format)
 ]
-exclude = [
-    ".git",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".venv",
-    "__pycache__",
-    "build",
-    "dist",
-    "outputs",
+lint.per-file-ignores."scripts/**/*.py" = [ "D" ]
+lint.per-file-ignores."tests/**/*.py" = [ "D" ]
+lint.pydocstyle.convention = "google"
+
+[tool.pytest]
+ini_options.testpaths = [ "tests" ]
+ini_options.python_files = [ "test_*.py" ]
+ini_options.python_classes = [ "Test*" ]
+ini_options.python_functions = [ "test_*" ]
+ini_options.addopts = [
+  "--verbose",
+  "--cov=torchgeo_bench",
+  "--cov-report=term-missing",
+  "--cov-report=html",
 ]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = [
-    "--verbose",
-    "--cov=src",
-    "--cov-report=term-missing",
-    "--cov-report=html",
+[tool.coverage]
+run.omit = [
+  "*/test_*.py",
+  "*/tests/*",
 ]
-
-[tool.coverage.run]
-source = ["src"]
-omit = [
-    "*/tests/*",
-    "*/test_*.py",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-    "@abstractmethod",
+run.source = [ "torchgeo_bench" ]
+report.exclude_lines = [
+  "@abstractmethod",
+  "def __repr__",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "pragma: no cover",
+  "raise AssertionError",
+  "raise NotImplementedError",
 ]

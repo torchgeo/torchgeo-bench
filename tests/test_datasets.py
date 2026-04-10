@@ -4,7 +4,8 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from src.datasets import NUM_CLASSES_PER_DATASET, get_datasets
+from torchgeo_bench.dataset_info import load_dataset_info
+from torchgeo_bench.datasets import get_datasets
 
 
 class TestGetDatasetsFunction:
@@ -81,7 +82,7 @@ class TestGetDatasetsFunction:
         assert test_batch["image"].shape[1] == 3, f"{dataset_name}: Expected 3 channels"
 
         # Verify labels are in valid range
-        expected_classes = NUM_CLASSES_PER_DATASET[dataset_name]
+        expected_classes = load_dataset_info(dataset_name).num_classes
         assert train_batch["label"].min() >= 0
         assert train_batch["label"].max() < expected_classes
 

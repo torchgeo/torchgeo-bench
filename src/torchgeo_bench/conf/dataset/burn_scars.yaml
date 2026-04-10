@@ -1,0 +1,41 @@
+name: burn_scars
+task: segmentation
+num_classes: 3
+sensor: sentinel-2
+version: v2
+v2_class: GeoBenchBurnScars
+rgb_bands:
+- b04
+- b03
+- b02
+bands:
+- name: B02
+  short: b02
+  wavelength_um: 0.49
+  mean: 0.0333
+  std: 0.0227
+- name: B03
+  short: b03
+  wavelength_um: 0.56
+  mean: 0.057
+  std: 0.0268
+- name: B04
+  short: b04
+  wavelength_um: 0.665
+  mean: 0.0589
+  std: 0.04
+- name: B8A
+  short: b8a
+  wavelength_um: 0.865
+  mean: 0.2323
+  std: 0.0779
+- name: B11
+  short: b11
+  wavelength_um: 1.61
+  mean: 0.1973
+  std: 0.0871
+- name: B12
+  short: b12
+  wavelength_um: 2.19
+  mean: 0.1194
+  std: 0.0724

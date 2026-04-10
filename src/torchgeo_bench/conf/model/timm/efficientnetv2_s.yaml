@@ -1,0 +1,12 @@
+# EfficientNetV2-S (20M params)
+# Feature dimension: 1280
+# Model: tf_efficientnetv2_s
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: tf_efficientnetv2_s
+pretrained: true
+global_pool: avg
+seed: null
+name: efficientnetv2_s
+auto_resize: true

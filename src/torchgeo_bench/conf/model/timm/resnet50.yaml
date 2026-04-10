@@ -1,0 +1,16 @@
+# ResNet-50 (25M params)
+# Feature dimension: 2048
+# Model: resnet50
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: resnet50
+pretrained: true
+global_pool: avg
+seed: null
+name: resnet50
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    # For ASPP head, only the last entry (layer4) is used.
+    layers: ["layer4", "layer3", "layer2", "layer1"]

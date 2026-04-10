@@ -1,0 +1,11 @@
+# DenseNet-201 (18M params)
+# Feature dimension: 1920
+# Model: densenet201
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: densenet201
+pretrained: true
+global_pool: avg
+seed: null
+name: densenet201

@@ -1,0 +1,16 @@
+# RegNetX-008 (7.3M params)
+# Feature dimension: 672
+# Model: regnetx_008
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: regnetx_008
+pretrained: true
+global_pool: avg
+seed: null
+name: regnetx_008
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    # For ASPP head, only the last entry (s4) is used.
+    layers: ["s4", "s3", "s2", "s1"]

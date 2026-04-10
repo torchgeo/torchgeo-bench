@@ -1,0 +1,12 @@
+# DeiT-Small Patch16 224
+# Feature dimension: 384
+# Model: deit_small_patch16_224
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: deit_small_patch16_224
+pretrained: true
+global_pool: avg
+seed: null
+name: deit_small_patch16_224
+use_cls_token: false

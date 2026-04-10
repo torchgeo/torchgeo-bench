@@ -1,0 +1,11 @@
+# Swin-Large Patch4 Window7 224 (195M params)
+# Feature dimension: 1536
+# Model: swin_large_patch4_window7_224
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: swin_large_patch4_window7_224
+pretrained: true
+global_pool: avg
+seed: null
+name: swin_large_patch4_window7_224

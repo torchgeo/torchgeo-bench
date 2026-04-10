@@ -1,0 +1,12 @@
+# torchgeo EarthLoc — Sentinel-2 ResNet50 (place-recognition descriptor)
+# Feature dimension: 4096
+
+_target_: torchgeo_bench.models.TorchGeoEarthLocBench
+num_channels: 3
+factory: earthloc
+weights_class: EarthLoc_Weights
+weights_member: SENTINEL2_RESNET50
+auto_resize: true
+target_size: 320
+name: tgeo_earthloc_s2_resnet50
+normalization: none

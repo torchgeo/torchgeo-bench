@@ -1,0 +1,16 @@
+# DenseNet-161 (28M params)
+# Feature dimension: 2208
+# Model: densenet161
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: densenet161
+pretrained: true
+global_pool: avg
+seed: null
+name: densenet161
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    # For ASPP head, only the last entry (features.denseblock4) is used.
+    layers: ["features.denseblock4", "features.denseblock3", "features.denseblock2", "features.denseblock1"]

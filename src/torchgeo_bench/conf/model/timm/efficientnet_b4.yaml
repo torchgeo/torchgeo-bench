@@ -1,0 +1,12 @@
+# EfficientNet-B4 (18M params)
+# Feature dimension: 1792
+# Model: efficientnet_b4
+
+_target_: torchgeo_bench.models.TimmPatchBenchModel
+num_channels: 3
+model_name: efficientnet_b4
+pretrained: true
+global_pool: avg
+seed: null
+name: efficientnet_b4
+auto_resize: true
