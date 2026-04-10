@@ -34,7 +34,11 @@ def extract_features(
 
     for _i, batch in enumerator:
         images = batch["image"].to(device)
-        labels = batch["label"].numpy()
+        if "label" not in batch:
+            # segmentation datasets use "mask" instead of "label"
+            labels = batch["mask"].numpy()
+        else:
+            labels = batch["label"].numpy()
 
         if transforms is not None:
             images = transforms(images)

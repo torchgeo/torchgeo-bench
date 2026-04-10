@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from .dataset_info import load_dataset_info
 from .geobench_dataset import GeoBenchDataset
 
 NUM_CLASSES_PER_DATASET = {
@@ -115,39 +116,6 @@ def _get_v2_class_name(dataset_name: str) -> str:
     return f"GeoBench{camel_name}"
 
 
-def _get_default_bands_v2(dataset_name: str) -> tuple[str, ...]:
-    """Auto-detect sensible default bands for a V2 dataset from the registry.
-
-    Returns ("red", "green", "blue") for RGB datasets, ("gray", "gray", "gray")
-    for grayscale-only datasets, and ("red", "green", "blue") as a best-effort
-    fallback for all other sensor types (the V2 resolver handles aliases).
-    """
-    if not HAS_V2:
-        return ("red", "green", "blue")
-    try:
-        from geobench_v2.datasets.sensor_util import DatasetBandRegistry
-
-        registry_attr = dataset_name.upper()
-        config = getattr(DatasetBandRegistry, registry_attr, None)
-        if config is None:
-            return ("red", "green", "blue")
-
-        if hasattr(config, "modalities"):
-            all_bands: set[str] = set()
-            for mod in config.modalities.values():
-                all_bands.update(mod.bands.keys())
-        else:
-            all_bands = set(config.bands.keys())
-
-        if {"red", "green", "blue"}.issubset(all_bands):
-            return ("red", "green", "blue")
-        if "gray" in all_bands:
-            return ("gray", "gray", "gray")
-        return ("red", "green", "blue")
-    except Exception:
-        return ("red", "green", "blue")
-
-
 def _get_datasets_v2(
     dataset_name: str,
     partition_name: str,
@@ -175,7 +143,7 @@ def _get_datasets_v2(
         raise ValueError(f"Could not find V2 dataset class '{class_name}' in geobench_v2.datasets.")
 
     # currently only support mean-stdev normalization for V2, which happens by default
-    def load_split(split: str) -> gb_v2.GeoBenchBaseDataset:
+    def load_split(split: str):
         ds = dataset_cls(
             root=os.path.join(root, dataset_name),
             split=split,
@@ -304,6 +272,7 @@ def is_dataset_available(
 
     if dataset_name in V2_DATASETS:
         return os.path.isdir(os.path.join(geobench_v2_root, dataset_name))
+
     return os.path.isdir(os.path.join(geobench_root, dataset_name))
 
 
@@ -394,14 +363,11 @@ def get_datasets(
 
         resize_transform = _resize
 
-    if dataset_name in V2_DATASETS:
-        bands = _get_default_bands_v2(dataset_name)
-    else:
-        bands = ("red", "green", "blue")
     # Resolve bands parameter
     # Convert OmegaConf ListConfig or other iterables to tuple
     if bands == "rgb":
-        bands_tuple: tuple[str, ...] | None = ("red", "green", "blue")
+        ds_info = load_dataset_info(dataset_name)
+        bands_tuple: tuple[str, ...] | None = tuple(ds_info.rgb_bands)
     elif bands == "all" or bands is None:
         bands_tuple = None  # None means load all available bands
     elif isinstance(bands, str):

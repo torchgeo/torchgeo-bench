@@ -327,13 +327,14 @@ def evaluate_segmentation(
         head_type=eval_cfg.segmentation.head_type,
         freeze_backbone=True,
     )
+    criterion = instantiate(eval_cfg.segmentation.criterion, num_classes=num_classes) if "criterion" in eval_cfg.segmentation else None
 
     solver = SegmentationSolver(
         model=probe,
         num_classes=num_classes,
         lr=eval_cfg.segmentation.lr,
         device=str(device),
-        loss=eval_cfg.segmentation.get("loss", "ce"),
+        criterion=criterion,
         lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
     )
 
@@ -437,7 +438,7 @@ def main(cfg: DictConfig) -> None:
             geobench_root=getattr(cfg.dataset, "geobench_root", None),
             geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
         ):
-            logger.warning(f"Skipping dataset {ds_name} (data not found on disk)")
+            logger.warning(f"Skipping dataset {ds_name} (data not found on disk), looked in {getattr(cfg.dataset, 'geobench_root', None)} and {getattr(cfg.dataset, 'geobench_v2_root', None)}")
             continue
 
         # Check if we can skip this dataset entirely

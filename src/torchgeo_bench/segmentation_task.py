@@ -1,9 +1,11 @@
 """Segmentation Training Task Logic."""
 
 import logging
+from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import MulticlassJaccardIndex
 from tqdm import tqdm
@@ -43,7 +45,6 @@ class SegmentationSolver:
         weight_decay: float = 0.0,
         device: str = "cuda",
         criterion: Optional[nn.Module] = None,
-        loss: str = "ce",
         lr_scheduler: str = "cosine",
         ignore_index: int = 255,
     ) -> None:
@@ -55,9 +56,7 @@ class SegmentationSolver:
             lr: Learning rate for the optimizer.
             weight_decay: Weight decay for the optimizer.
             device: Device to run training on ('cuda' or 'cpu').
-            criterion: Explicit loss module. If provided, overrides `loss`.
-            loss: Loss type: "ce" (CrossEntropyLoss) or "bce" (binary CE over one-hot targets).
-                  BCE consistently outperforms CE for frozen linear probes (Kerssies et al., 2024).
+            criterion: Loss module. Defaults to CrossEntropyLoss with ignore_index.
             lr_scheduler: LR schedule: "cosine" (CosineAnnealingLR) or "none" (constant LR).
             ignore_index: Label value to ignore in loss and metrics (default: 255).
         """
@@ -74,11 +73,7 @@ class SegmentationSolver:
             weight_decay=weight_decay,
         )
 
-        self.criterion = (
-            criterion
-            if criterion is not None
-            else nn.CrossEntropyLoss(ignore_index=self.ignore_index)
-        )
+        self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss(ignore_index=self.ignore_index)
 
         self.metric = MulticlassJaccardIndex(
             num_classes=self.num_classes,
