@@ -418,11 +418,7 @@ pytest tests/test_geobench_dataset.py -k "m-eurosat" -v
 torchgeo-bench run dataset.names=[m-eurosat] eval.bootstrap=10 output=test.csv
 ```
 
-<<<<<<< HEAD
 **Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, set one or both environment variables below before running tests:
-=======
-**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, configure the paths in `conf/config.yaml` or use command-line overrides:
->>>>>>> main
 
 ```bash
 # Command-line override
