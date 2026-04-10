@@ -60,6 +60,33 @@ def _auto_resize(images: torch.Tensor, target_size: int) -> torch.Tensor:
     return images
 
 
+def _extract_normalize_transforms(weights) -> nn.Sequential | None:
+    """Extract only the ``Normalize`` layers from a torchgeo weights transform.
+
+    The full ``weights.transforms`` typically includes ``Resize``,
+    ``CenterCrop``, and ``Normalize`` steps.  We handle spatial transforms
+    separately (via ``auto_resize``/``target_size``), so this helper pulls
+    out just the normalization layers to apply in the forward pass.
+    """
+    if not hasattr(weights, "transforms") or weights.transforms is None:
+        return None
+    transform = weights.transforms
+    if callable(transform) and not isinstance(transform, nn.Module):
+        transform = transform()
+
+    from torchvision.transforms import Normalize as NormalizeV1
+
+    try:
+        from torchvision.transforms.v2 import Normalize as NormalizeV2
+    except ImportError:
+        NormalizeV2 = NormalizeV1  # type: ignore[misc,assignment]
+
+    norms = [t for t in transform if isinstance(t, (NormalizeV1, NormalizeV2))]
+    if not norms:
+        return None
+    return nn.Sequential(*norms)
+
+
 # ---------------------------------------------------------------------------
 # ResNet (timm backbone loaded via torchgeo)
 # ---------------------------------------------------------------------------
@@ -88,6 +115,7 @@ class TorchGeoResNetBench(BenchModel):
         self.backbone.fc = nn.Identity()
         self.auto_resize = auto_resize
         self.target_size = target_size
+        self.input_norm = _extract_normalize_transforms(weights)
 
     @torch.no_grad()
     def forward_patch_features(
@@ -95,6 +123,8 @@ class TorchGeoResNetBench(BenchModel):
     ) -> torch.Tensor:
         """Return headless ResNet embeddings of shape ``(B, K)``."""
         del bboxes
+        if self.input_norm is not None:
+            images = self.input_norm(images)
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
@@ -128,6 +158,7 @@ class TorchGeoSwinBench(BenchModel):
         self.backbone.head = nn.Identity()
         self.auto_resize = auto_resize
         self.target_size = target_size
+        self.input_norm = _extract_normalize_transforms(weights)
 
     @torch.no_grad()
     def forward_patch_features(
@@ -135,6 +166,8 @@ class TorchGeoSwinBench(BenchModel):
     ) -> torch.Tensor:
         """Return headless Swin-V2 embeddings of shape ``(B, K)``."""
         del bboxes
+        if self.input_norm is not None:
+            images = self.input_norm(images)
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
@@ -167,6 +200,7 @@ class TorchGeoScaleMAEBench(BenchModel):
         self.backbone = _resolve_torchgeo_factory(factory)(weights=weights)
         self.auto_resize = auto_resize
         self.target_size = target_size
+        self.input_norm = _extract_normalize_transforms(weights)
 
     @torch.no_grad()
     def forward_patch_features(
@@ -174,6 +208,8 @@ class TorchGeoScaleMAEBench(BenchModel):
     ) -> torch.Tensor:
         """Return mean-pooled spatial tokens of shape ``(B, D)``."""
         del bboxes
+        if self.input_norm is not None:
+            images = self.input_norm(images)
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         tokens = self.backbone.forward_features(images)  # (B, N+1, D)
@@ -213,6 +249,7 @@ class TorchGeoDOFABench(BenchModel):
         self.wavelengths = wavelengths or self.S2_RGB_WAVELENGTHS
         self.auto_resize = auto_resize
         self.target_size = target_size
+        self.input_norm = _extract_normalize_transforms(weights)
 
     @torch.no_grad()
     def forward_patch_features(
@@ -220,6 +257,8 @@ class TorchGeoDOFABench(BenchModel):
     ) -> torch.Tensor:
         """Return DOFA feature embeddings of shape ``(B, D)``."""
         del bboxes
+        if self.input_norm is not None:
+            images = self.input_norm(images)
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone.forward_features(images, wavelengths=self.wavelengths)
@@ -251,6 +290,7 @@ class TorchGeoEarthLocBench(BenchModel):
         self.backbone = _resolve_torchgeo_factory(factory)(weights=weights)
         self.auto_resize = auto_resize
         self.target_size = target_size
+        self.input_norm = _extract_normalize_transforms(weights)
 
     @torch.no_grad()
     def forward_patch_features(
@@ -258,6 +298,8 @@ class TorchGeoEarthLocBench(BenchModel):
     ) -> torch.Tensor:
         """Return EarthLoc global descriptor of shape ``(B, 4096)``."""
         del bboxes
+        if self.input_norm is not None:
+            images = self.input_norm(images)
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)

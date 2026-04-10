@@ -9,3 +9,4 @@ weights_member: FMOW_RGB_GASSL
 auto_resize: false
 target_size: 224
 name: tgeo_resnet50_fmow_gassl
+normalization: none

@@ -419,11 +419,15 @@ def main(cfg: DictConfig) -> None:
             logger.warning(f"Could not load existing results for resume: {e}")
             completed_runs = set()
 
+    # Model can override dataset normalization (e.g., torchgeo models that
+    # need specific preprocessing).  Fall back to dataset.normalization.
+    normalization = getattr(cfg.model, "normalization", None) or cfg.dataset.normalization
+
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         # Check if we can skip this dataset entirely
         # Include dataset config params to ensure we only skip with matching settings
         config_tuple = (
-            cfg.dataset.normalization,
+            normalization,
             str(getattr(cfg.dataset, "image_size", None)),
             getattr(cfg.dataset, "interpolation", "bicubic"),
             cfg.dataset.partition,
@@ -448,7 +452,7 @@ def main(cfg: DictConfig) -> None:
             dataset_name=ds_name,
             partition_name=cfg.dataset.partition,
             batch_size=cfg.dataset.batch_size,
-            normalization=cfg.dataset.normalization,
+            normalization=normalization,
             return_val=True,
             image_size=getattr(cfg.dataset, "image_size", None),
             interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),

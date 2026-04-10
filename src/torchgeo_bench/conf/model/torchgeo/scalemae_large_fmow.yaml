@@ -9,3 +9,4 @@ weights_member: FMOW_RGB
 auto_resize: true
 target_size: 224
 name: tgeo_scalemae_large_fmow
+normalization: none
