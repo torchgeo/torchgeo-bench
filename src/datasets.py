@@ -108,6 +108,8 @@ def _get_v2_class_name(dataset_name: str) -> str:
     """Helper to convert dataset snake_case name to CamelCase class name."""
     if dataset_name == "benv2":
         return "GeoBenchBENV2"
+    if dataset_name == "caffe":
+        return "GeoBenchCaFFe"
     if dataset_name == "so2sat":
         return "GeoBenchSo2Sat"
     if dataset_name == "flair2":
@@ -119,6 +121,40 @@ def _get_v2_class_name(dataset_name: str) -> str:
 
     camel_name = "".join(x.title() for x in dataset_name.split("_"))
     return f"GeoBench{camel_name}"
+
+
+def _get_default_bands_v2(dataset_name: str) -> tuple[str, ...]:
+    """Auto-detect sensible default bands for a V2 dataset from the registry.
+
+    Returns ("red", "green", "blue") for RGB datasets, ("gray", "gray", "gray")
+    for grayscale-only datasets, and ("red", "green", "blue") as a best-effort
+    fallback for all other sensor types (the V2 resolver handles aliases).
+    """
+    if not HAS_V2:
+        return ("red", "green", "blue")
+    try:
+        from geobench_v2.datasets.sensor_util import DatasetBandRegistry
+
+        registry_attr = dataset_name.upper()
+        config = getattr(DatasetBandRegistry, registry_attr, None)
+        if config is None:
+            return ("red", "green", "blue")
+
+        if hasattr(config, "modalities"):
+            all_bands: set[str] = set()
+            for mod in config.modalities.values():
+                all_bands.update(mod.bands.keys())
+        else:
+            all_bands = set(config.bands.keys())
+
+        if {"red", "green", "blue"}.issubset(all_bands):
+            return ("red", "green", "blue")
+        if "gray" in all_bands:
+            return ("gray", "gray", "gray")
+        return ("red", "green", "blue")
+    except Exception:
+        return ("red", "green", "blue")
+
 
 def _get_datasets_v2(
     dataset_name: str,
@@ -322,7 +358,10 @@ def get_datasets(
 
         resize_transform = _resize
 
-    bands = ("red", "green", "blue")
+    if dataset_name in V2_DATASETS:
+        bands = _get_default_bands_v2(dataset_name)
+    else:
+        bands = ("red", "green", "blue")
 
     if dataset_name in V2_DATASETS:
         return _get_datasets_v2(

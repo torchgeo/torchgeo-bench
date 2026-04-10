@@ -248,6 +248,8 @@ def evaluate_segmentation(
         num_classes=num_classes,
         lr=eval_cfg.segmentation.lr,
         device=str(device),
+        loss=eval_cfg.segmentation.get("loss", "ce"),
+        lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
     )
 
     solver.fit(

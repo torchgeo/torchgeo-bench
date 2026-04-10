@@ -29,10 +29,12 @@ eval:
   skip_linear: false       # if true, skip LogisticRegression evaluation
 
   segmentation:
-    head_type: "linear"
+    head_type: "fpn"
     layers: []
     lr: 1e-3
-    epochs: 1
+    epochs: 10
+    loss: "ce"           # "ce" (CrossEntropy) or "bce" (binary CE, often better for frozen probes)
+    lr_scheduler: "cosine"  # "cosine" (CosineAnnealingLR) or "none"
 
 hydra:
   run:

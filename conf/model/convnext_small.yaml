@@ -9,3 +9,8 @@ pretrained: true
 global_pool: avg
 seed: null
 name: convnext_small
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    # For ASPP head, only the last entry (stages.3) is used.
+    layers: ["stages.3", "stages.2", "stages.1", "stages.0"]
