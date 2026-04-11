@@ -38,22 +38,6 @@ python torchgeo_bench_download.py --version v1
 python torchgeo_bench_download.py --version v2 --datasets forestnet
 ```
 
-### Set Separate Dataset Roots for v1 and v2
-
-`torchgeo-bench` reads separate environment variables for the two dataset versions:
-
-- `GEOBENCH_ROOT`: GeoBench v1 root (should point to `classification_v1.0`)
-- `GEOBENCH_V2_ROOT`: GeoBench v2 root (should point to the directory containing v2 dataset folders)
-
-Example:
-
-```bash
-export GEOBENCH_ROOT=/your/path/to/classification_v1.0
-export GEOBENCH_V2_ROOT=/your/path/to/GEO-Bench-2
-```
-
-You can add these exports to your shell profile (e.g., `~/.bashrc`) if you want them to persist.
-
 ## Overview
 
 `torchgeo-bench` provides:
@@ -451,24 +435,14 @@ pytest tests/test_geobench_dataset.py -k "m-eurosat" -v
 torchgeo-bench run dataset.names=[m-eurosat] eval.bootstrap=10 output=test.csv
 ```
 
-**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, set one or both environment variables below before running tests:
-
-```bash
-# Command-line override
-torchgeo-bench run dataset.geobench_root=/your/path/to/classification_v1.0
-
-# Or set environment variable (for tests)
-export GEOBENCH_ROOT=/your/path/to/classification_v1.0
-export GEOBENCH_V2_ROOT=/your/path/to/GEO-Bench-2
-pytest
-```
+**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, sprecify the root in the config through the keys "dataset.geobench_root" and "dataset.geobench_v2_root".
 
 If the dataset is not found, relevant tests will be skipped.
 
 The test suite includes:
 - **58 tests** covering all datasets, splits, and normalizations
 - **27 comparison tests** validating against reference implementation
-- All tests use small `0.01x_train` partitions for fast execution
+- All tests use small `0.01x_train` partitions for fast execution on GeoBenchV1
 
 ### Adding a New Model
 
