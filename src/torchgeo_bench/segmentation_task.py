@@ -15,22 +15,6 @@ from .segmentation_probe import SegmentationProbe
 logger = logging.getLogger(__name__)
 
 
-class SegmentationBCELoss(nn.Module):
-    """Binary cross-entropy loss with one-hot targets for segmentation.
-
-    Applies per-class binary classification rather than multi-class CE.
-    Often outperforms CrossEntropyLoss for frozen linear probes (Kerssies et al., 2024).
-    """
-
-    def __init__(self, num_classes: int) -> None:
-        super().__init__()
-        self.num_classes = num_classes
-
-    def forward(self, logits: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
-        one_hot = F.one_hot(masks, num_classes=self.num_classes).permute(0, 3, 1, 2).float()
-        return F.binary_cross_entropy_with_logits(logits, one_hot)
-
-
 class SegmentationSolver:
     """A lightweight trainer for the SegmentationProbe."""
 
@@ -86,7 +70,7 @@ class SegmentationSolver:
         val_loader: Optional[DataLoader] = None,
         epochs: int = 10,
         verbose: bool = True,
-    ) -> None:
+    ) -> Optional[float]:
         """Train the segmentation probe.
 
         Args:
@@ -94,6 +78,9 @@ class SegmentationSolver:
             val_loader: Optional validation data loader for per-epoch mIoU logging.
             epochs: Number of training epochs.
             verbose: Whether to show progress bars and epoch logs.
+
+        Returns:
+            Val mIoU from the final epoch if val_loader is given, else None.
         """
         # Set up cosine LR schedule over the full training run
         if self.lr_scheduler_type == "cosine":
@@ -102,7 +89,9 @@ class SegmentationSolver:
             )
         else:
             scheduler = None
-            
+
+        last_val_miou: Optional[float] = None
+
         for epoch in range(epochs):
             self.model.train()
             if self.model.freeze_backbone:
@@ -135,9 +124,12 @@ class SegmentationSolver:
             if scheduler is not None:
                 scheduler.step()
 
-            if val_loader and verbose:
-                miou = self.evaluate(val_loader)
-                logger.info(f"Epoch {epoch + 1} Val mIoU: {miou:.4f}")
+            if val_loader:
+                last_val_miou = self.evaluate(val_loader)
+                if verbose:
+                    logger.info(f"Epoch {epoch + 1} Val mIoU: {last_val_miou:.4f}")
+
+        return last_val_miou
 
     @torch.no_grad()
     def evaluate(self, dataloader: DataLoader) -> float:

@@ -319,6 +319,11 @@ eval:
     layers: []            # Additional MLP layers (empty = linear)
     lr: 0.001             # Learning rate for segmentation training
     epochs: 1             # Training epochs for segmentation probe
+      hparam_search: false  # Enable Optuna TPE search for segmentation
+      n_trials: 10          # Number of Optuna trials
+      lr_min: 1e-5          # Lower bound for LR search (log scale)
+      lr_max: 1e-2          # Upper bound for LR search (log scale)
+      batch_sizes: [16,32,64] # Candidate batch sizes for search
 ```
 
 ### Override Any Config
@@ -378,6 +383,34 @@ For each segmentation dataset:
    - Evaluate on test set using MulticlassJaccardIndex (mIoU)
    - Excludes ignore class from metric computation
 5. **Results**: Append one row (seg-linear) to CSV
+
+### Segmentation Hyperparameter Search (Optuna)
+
+When `eval.segmentation.hparam_search=true`, segmentation uses Optuna (TPE sampler) to tune learning rate and batch size before final test evaluation.
+
+Procedure:
+
+1. **Search Space**:
+   - `lr` sampled log-uniformly from [`eval.segmentation.lr_min`, `eval.segmentation.lr_max`]
+   - `batch_size` sampled from `eval.segmentation.batch_sizes`
+2. **Per-trial Training**:
+   - Rebuild train/val loaders using the trial batch size
+   - Instantiate a fresh `SegmentationProbe` + `SegmentationSolver`
+   - Train for `eval.segmentation.epochs` epochs on train split
+   - Score objective as validation mIoU
+3. **Best Trial Selection**:
+   - Run `eval.segmentation.n_trials` trials
+   - Select best completed trial by validation mIoU
+4. **Final Fit and Test**:
+   - Rebuild merged train+val loader with best batch size
+   - Retrain a fresh probe/solver with best LR
+   - Evaluate once on test split and report final mIoU
+
+Notes:
+
+- Optuna is only required when `hparam_search=true`.
+- Install with: `pip install torchgeo-bench[hpo]`.
+- Result rows include `best_lr` and `best_batch_size` for segmentation HPO runs.
 
 ### Output Format
 

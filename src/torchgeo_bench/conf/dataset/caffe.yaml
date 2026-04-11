@@ -1,5 +1,5 @@
 name: caffe
-task: classification
+task: segmentation
 num_classes: 4
 sensor: aerial
 version: v2

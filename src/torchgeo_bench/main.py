@@ -14,7 +14,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import accuracy_score, average_precision_score
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader
 from tqdm import tqdm
 
 from torchgeo_bench.dataset_info import list_available_datasets, load_dataset_info
@@ -124,6 +124,8 @@ class EvaluationResult:
     ci_upper: float
     feature_dim: int
     best_c: float | None
+    best_lr: float | None
+    best_batch_size: int | None
     n_train: int
     n_val: int
     n_test: int
@@ -303,6 +305,74 @@ def evaluate_logistic(
     return metric, lo, hi, float(best_c)
 
 
+def _make_seg_dataloaders(
+    train_dataset: torch.utils.data.Dataset,
+    val_dataset: torch.utils.data.Dataset,
+    test_loader: DataLoader,
+    batch_size: int,
+) -> tuple[DataLoader, DataLoader, DataLoader]:
+    """Build train, val, and train+val DataLoaders for a given batch size.
+
+    Args:
+        train_dataset: Training split dataset.
+        val_dataset: Validation split dataset.
+        test_loader: Pre-built test loader (reused as-is).
+        batch_size: Batch size for the new loaders.
+
+    Returns:
+        Tuple of (train_loader, val_loader, train_val_loader).
+    """
+    loader_kwargs = {
+        "batch_size": batch_size,
+        "num_workers": test_loader.num_workers,
+        "pin_memory": test_loader.pin_memory,
+    }
+    train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
+    train_val_loader = DataLoader(
+        ConcatDataset([train_dataset, val_dataset]), shuffle=True, **loader_kwargs
+    )
+    return train_loader, val_loader, train_val_loader
+
+
+def _build_seg_probe_and_solver(
+    model: torch.nn.Module,
+    num_classes: int,
+    eval_cfg: DictConfig,
+    device: torch.device,
+    lr: float,
+) -> tuple[SegmentationProbe, SegmentationSolver]:
+    """Instantiate a fresh SegmentationProbe and SegmentationSolver.
+
+    Args:
+        model: Frozen backbone (shared across calls; only the head is re-created).
+        num_classes: Number of segmentation classes.
+        eval_cfg: Merged evaluation config with segmentation sub-config.
+        device: Target device.
+        lr: Learning rate for the solver optimizer.
+
+    Returns:
+        Tuple of (probe, solver).
+    """
+    probe = SegmentationProbe(
+        backbone=model,
+        layer_names=eval_cfg.segmentation.layers,
+        num_classes=num_classes,
+        head_type=eval_cfg.segmentation.head_type,
+        freeze_backbone=True,
+    )
+    criterion = instantiate(eval_cfg.segmentation.criterion)
+    solver = SegmentationSolver(
+        model=probe,
+        num_classes=num_classes,
+        lr=lr,
+        device=str(device),
+        criterion=criterion,
+        lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
+    )
+    return probe, solver
+
+
 def evaluate_segmentation(
     model: torch.nn.Module,
     train_loader: DataLoader,
@@ -311,44 +381,104 @@ def evaluate_segmentation(
     cfg: DictConfig,
     num_classes: int,
     device: torch.device,
-) -> tuple[float, int]:
-    """Evaluate segmentation performance using a segmentation probe and solver."""
-    # merge with model specific eval config if present
+    train_dataset: torch.utils.data.Dataset | None = None,
+    val_dataset: torch.utils.data.Dataset | None = None,
+) -> tuple[float, int, float | None, int | None]:
+    """Evaluate segmentation performance using a segmentation probe and solver.
+
+    When ``eval.segmentation.hparam_search`` is true, runs an Optuna TPE sweep
+    over learning rate and batch size, selects the best combo by val mIoU, retrains
+    on train+val merged, and reports test mIoU.  Otherwise runs a single training
+    with the fixed ``lr`` and the pre-built loaders.
+
+    Args:
+        model: Frozen backbone model.
+        train_loader: Training DataLoader (used when hparam_search is false).
+        val_loader: Validation DataLoader.
+        test_loader: Test DataLoader.
+        cfg: Full Hydra config.
+        num_classes: Number of segmentation classes.
+        device: Torch device.
+        train_dataset: Training dataset (required when hparam_search is true).
+        val_dataset: Validation dataset (required when hparam_search is true).
+
+    Returns:
+        Tuple of (test_miou, feature_dim, best_lr, best_batch_size).
+        ``best_lr`` and ``best_batch_size`` are None when hparam_search is false.
+    """
+    # Merge model-specific eval config if present
     eval_cfg = cfg.eval
     if "eval" in cfg.model and cfg.model.eval is not None:
         eval_cfg = OmegaConf.merge(eval_cfg, cfg.model.eval)
     if "segmentation" not in eval_cfg:
         raise ValueError("Segmentation evaluation config missing for the model.")
 
-    probe = SegmentationProbe(
-        backbone=model,
-        layer_names=eval_cfg.segmentation.layers,
-        num_classes=num_classes,
-        head_type=eval_cfg.segmentation.head_type,
-        freeze_backbone=True,
-    )
-    criterion = instantiate(eval_cfg.segmentation.criterion, num_classes=num_classes) if "criterion" in eval_cfg.segmentation else None
+    seg_cfg = eval_cfg.segmentation
+    epochs = seg_cfg.epochs
 
-    solver = SegmentationSolver(
-        model=probe,
-        num_classes=num_classes,
-        lr=eval_cfg.segmentation.lr,
-        device=str(device),
-        criterion=criterion,
-        lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
+    if not seg_cfg.get("hparam_search", False):
+        # --- Single-run path ---
+        probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr)
+        solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose)
+        miou = solver.evaluate(test_loader)
+        return miou, sum(probe.channels_list), None, None
+
+    # --- Optuna HPO path ---
+    try:
+        import optuna
+    except ImportError as exc:
+        raise ImportError(
+            "Optuna is required for hparam_search=true. "
+            "Install it with: pip install torchgeo-bench[hpo]"
+        ) from exc
+
+    if train_dataset is None or val_dataset is None:
+        raise ValueError("train_dataset and val_dataset must be provided when hparam_search=true")
+
+    lr_min: float = seg_cfg.lr_min
+    lr_max: float = seg_cfg.lr_max
+    batch_size_candidates: list[int] = list(seg_cfg.batch_sizes)
+    n_trials: int = seg_cfg.get("n_trials", 10)
+
+    def objective(trial: "optuna.Trial") -> float:
+        lr = trial.suggest_float("lr", lr_min, lr_max, log=True)
+        bs = trial.suggest_categorical("batch_size", batch_size_candidates)
+        t_loader, v_loader, _ = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, bs)
+        _, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, lr)
+        val_miou = solver.fit(
+            train_loader=t_loader, val_loader=v_loader, epochs=epochs, verbose=False
+        )
+        return val_miou if val_miou is not None else 0.0
+
+    optuna.logging.set_verbosity(
+        optuna.logging.INFO if cfg.verbose else optuna.logging.WARNING
+    )
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=cfg.seed),
+    )
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=cfg.verbose)
+
+    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    if not completed:
+        raise RuntimeError(
+            "All HPO trials failed. Try reducing batch_sizes or n_trials."
+        )
+    best_trial = max(completed, key=lambda t: t.value)  # type: ignore[arg-type]
+    best_lr: float = best_trial.params["lr"]
+    best_bs: int = best_trial.params["batch_size"]
+    logger.info(
+        f"HPO best: lr={best_lr:.4g}, batch_size={best_bs}, val_mIoU={best_trial.value:.4f}"
     )
 
-    solver.fit(
-        train_loader=train_loader,
-        val_loader=val_loader,
-        epochs=eval_cfg.segmentation.epochs,
-        verbose=cfg.verbose,
-    )
-
+    # Final model: retrain on merged train+val with best hparams
+    _, _, train_val_loader = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, best_bs)
+    probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, best_lr)
+    solver.fit(train_loader=train_val_loader, val_loader=None, epochs=epochs, verbose=cfg.verbose)
     miou = solver.evaluate(test_loader)
     feature_dim = sum(probe.channels_list)
 
-    return miou, feature_dim
+    return miou, feature_dim, best_lr, best_bs
 
 
 # ---------------------------------------------------------------------------
@@ -427,11 +557,7 @@ def main(cfg: DictConfig) -> None:
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         # Load dataset metadata from config
-        try:
-            ds_info = load_dataset_info(ds_name)
-        except FileNotFoundError:
-            logger.warning(f"Skipping dataset {ds_name} (no config file found)")
-            continue
+        ds_info = load_dataset_info(ds_name)
 
         if not is_dataset_available(
             ds_name,
@@ -529,8 +655,16 @@ def main(cfg: DictConfig) -> None:
         }
 
         if is_segmentation:
-            miou, feat_dim = evaluate_segmentation(
-                model, train_loader, val_loader, test_loader, cfg, num_classes, device
+            miou, feat_dim, best_lr, best_bs = evaluate_segmentation(
+                model,
+                train_loader,
+                val_loader,
+                test_loader,
+                cfg,
+                num_classes,
+                device,
+                train_dataset=train_dataset,
+                val_dataset=val_loader.dataset,
             )
             all_rows.append(
                 EvaluationResult(
@@ -542,6 +676,8 @@ def main(cfg: DictConfig) -> None:
                     ci_upper=0.0,
                     feature_dim=feat_dim,
                     best_c=None,
+                    best_lr=best_lr,
+                    best_batch_size=best_bs,
                     n_train=len(train_dataset),
                     n_val=len(val_loader.dataset),
                     n_test=len(test_loader.dataset),
@@ -585,6 +721,8 @@ def main(cfg: DictConfig) -> None:
                         ci_upper=knn_hi,
                         feature_dim=feature_dim,
                         best_c=None,
+                        best_lr=None,
+                        best_batch_size=None,
                         n_train=len(x_train),
                         n_val=len(x_val),
                         n_test=len(x_test),
@@ -616,6 +754,8 @@ def main(cfg: DictConfig) -> None:
                         ci_upper=lin_hi,
                         feature_dim=feature_dim,
                         best_c=best_c,
+                        best_lr=None,
+                        best_batch_size=None,
                         n_train=len(x_train),
                         n_val=len(x_val),
                         n_test=len(x_test),

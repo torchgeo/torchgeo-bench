@@ -87,11 +87,8 @@ class SegmentationProbe(nn.Module):
         elif head_type == "fpn":
             self._build_fpn_head(hidden_dim or 256)
 
-        elif head_type == "aspp":
-            self._build_aspp_head(hidden_dim or 256)
-
         else:
-            raise ValueError(f"Unknown head_type: {head_type!r}. Choose from: linear, conv_block, fpn, aspp")
+            raise ValueError(f"Unknown head_type: {head_type!r}. Choose from: linear, conv_block, fpn")
 
         # Metric
         self.miou_metric = MulticlassJaccardIndex(
@@ -131,58 +128,6 @@ class SegmentationProbe(nn.Module):
             ]
         )
         self.fpn_head = nn.Conv2d(hidden_dim * len(self.channels_list), self.effective_classes, kernel_size=1)
-
-    def _build_aspp_head(self, hidden_dim: int) -> None:
-        """Build an ASPP (Atrous Spatial Pyramid Pooling) head.
-
-        Uses the deepest layer only (last entry in layer_names).
-        Parallel branches: 1×1 conv, dilated 3×3 (r=6,12,18), global avg pool.
-        Outputs are concatenated, projected, then classified.
-        """
-        in_ch = self.channels_list[-1]  # deepest layer only
-        self.aspp_hidden_dim = hidden_dim
-
-        self.aspp_branches = nn.ModuleList([
-            # 1×1 conv
-            nn.Sequential(
-                nn.Conv2d(in_ch, hidden_dim, kernel_size=1, bias=False),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU(inplace=True),
-            ),
-            # dilated 3×3, r=6
-            nn.Sequential(
-                nn.Conv2d(in_ch, hidden_dim, kernel_size=3, padding=6, dilation=6, bias=False),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU(inplace=True),
-            ),
-            # dilated 3×3, r=12
-            nn.Sequential(
-                nn.Conv2d(in_ch, hidden_dim, kernel_size=3, padding=12, dilation=12, bias=False),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU(inplace=True),
-            ),
-            # dilated 3×3, r=18
-            nn.Sequential(
-                nn.Conv2d(in_ch, hidden_dim, kernel_size=3, padding=18, dilation=18, bias=False),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU(inplace=True),
-            ),
-        ])
-        # Global average pooling branch
-        self.aspp_gap = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_ch, hidden_dim, kernel_size=1, bias=False),
-            nn.BatchNorm2d(hidden_dim),
-            nn.ReLU(inplace=True),
-        )
-        # Projection after concat (5 branches × hidden_dim)
-        self.aspp_proj = nn.Sequential(
-            nn.Conv2d(hidden_dim * 5, hidden_dim, kernel_size=1, bias=False),
-            nn.BatchNorm2d(hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.1),
-        )
-        self.aspp_head = nn.Conv2d(hidden_dim, self.effective_classes, kernel_size=1)
 
     # ------------------------------------------------------------------
     # Hook / dry-run helpers
@@ -259,10 +204,7 @@ class SegmentationProbe(nn.Module):
             return self._forward_linear(features, input_h, input_w)
         elif self.head_type == "conv_block":
             return self._forward_conv_block(features, input_h, input_w)
-        elif self.head_type == "fpn":
-            return self._forward_fpn(features, input_h, input_w)
-        else:  # aspp
-            return self._forward_aspp(features, input_h, input_w)
+        return self._forward_fpn(features, input_h, input_w)
 
     def _forward_linear(
         self, features: list[torch.Tensor], input_h: int, input_w: int
@@ -348,29 +290,3 @@ class SegmentationProbe(nn.Module):
             )
         return logits
 
-    def _forward_aspp(
-        self, features: list[torch.Tensor], input_h: int, input_w: int
-    ) -> torch.Tensor:
-        """ASPP forward pass using the deepest feature map only."""
-        feat = features[-1]  # deepest layer
-
-        # If feature is spatially degenerate (1×1), fall back to nearest-sized map
-        if feat.shape[-1] == 1:
-            feat = F.interpolate(feat, size=(14, 14), mode="bilinear", align_corners=False)
-
-        branch_outs = [branch(feat) for branch in self.aspp_branches]
-
-        # Global pooling branch: upsample back to feat spatial size
-        gap_out = self.aspp_gap(feat)
-        gap_out = F.interpolate(gap_out, size=feat.shape[-2:], mode="bilinear", align_corners=False)
-        branch_outs.append(gap_out)
-
-        fused = torch.cat(branch_outs, dim=1)
-        fused = self.aspp_proj(fused)
-        logits = self.aspp_head(fused)
-
-        if logits.shape[-2:] != (input_h, input_w):
-            logits = F.interpolate(
-                logits, size=(input_h, input_w), mode="bilinear", align_corners=False
-            )
-        return logits

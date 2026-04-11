@@ -49,7 +49,10 @@ dependencies = [
   "tqdm>=4.65",
 ]
 optional-dependencies.all = [
-  "torchgeo-bench[dev]",
+  "torchgeo-bench[dev,hpo]",
+]
+optional-dependencies.hpo = [
+  "optuna>=3.0",
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
