@@ -11,3 +11,8 @@ auto_resize: true
 target_size: 224
 name: tgeo_dofa_base
 normalization: none
+eval:
+  segmentation:
+    # ViT-Base (12 blocks, 768ch). Coarse-to-fine: deepest block first.
+    # backbone.* prefix is stripped by SegmentationProbe automatically.
+    layers: ["blocks.11", "blocks.8", "blocks.5", "blocks.2"]

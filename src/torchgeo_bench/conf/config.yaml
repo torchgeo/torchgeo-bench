@@ -40,6 +40,9 @@ eval:
       _target_: torch.nn.CrossEntropyLoss
       ignore_index: 255
     lr_scheduler: "cosine"  # "cosine" (CosineAnnealingLR) or "none"
+    # Feature caching: run frozen backbone once, cache features to RAM for head training
+    cache_features: true        # pre-extract backbone features (large speedup for ViT)
+    cache_dtype: "float16"      # storage dtype: "float16" (half RAM) or "float32"
     # Hyperparameter search (Optuna TPE). Requires: pip install torchgeo-bench[hpo]
     hparam_search: false       # set true to enable Bayesian HPO sweep
     n_trials: 10               # number of Optuna trials

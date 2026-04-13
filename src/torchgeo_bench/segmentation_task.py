@@ -1,25 +1,25 @@
 """Segmentation Training Task Logic."""
 
 import logging
-from typing import Optional
+import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import MulticlassJaccardIndex
 from tqdm import tqdm
 
-from .segmentation_probe import SegmentationProbe
+from .segmentation_probe import (
+    CachedFeaturesDataset,
+    GPUTensorCache,
+    SegmentationProbe,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class SegmentationSolver:
     """A lightweight trainer for the SegmentationProbe."""
-
-    # Common ignore index values used in segmentation datasets
-    IGNORE_INDEX = 255
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class SegmentationSolver:
         lr: float = 1e-3,
         weight_decay: float = 0.0,
         device: str = "cuda",
-        criterion: Optional[nn.Module] = None,
+        criterion: nn.Module | None = None,
         lr_scheduler: str = "cosine",
         ignore_index: int = 255,
     ) -> None:
@@ -64,13 +64,27 @@ class SegmentationSolver:
             ignore_index=self.ignore_index,
         )
 
+        self.use_amp = device.startswith("cuda") and torch.cuda.is_available()
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
+        self.device_type = torch.device(device).type
+
+    def _make_scheduler(
+        self, epochs: int
+    ) -> torch.optim.lr_scheduler.LRScheduler | None:
+        """Return a CosineAnnealingLR scheduler, or None for constant LR."""
+        if self.lr_scheduler_type == "cosine":
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=epochs, eta_min=1e-6
+            )
+        return None
+
     def fit(
         self,
         train_loader: DataLoader,
-        val_loader: Optional[DataLoader] = None,
+        val_loader: DataLoader | None = None,
         epochs: int = 10,
         verbose: bool = True,
-    ) -> Optional[float]:
+    ) -> float | None:
         """Train the segmentation probe.
 
         Args:
@@ -82,15 +96,8 @@ class SegmentationSolver:
         Returns:
             Val mIoU from the final epoch if val_loader is given, else None.
         """
-        # Set up cosine LR schedule over the full training run
-        if self.lr_scheduler_type == "cosine":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer, T_max=epochs, eta_min=1e-6
-            )
-        else:
-            scheduler = None
-
-        last_val_miou: Optional[float] = None
+        scheduler = self._make_scheduler(epochs)
+        last_val_miou: float | None = None
 
         for epoch in range(epochs):
             self.model.train()
@@ -111,12 +118,13 @@ class SegmentationSolver:
                     masks = masks.squeeze(1)
 
                 self.optimizer.zero_grad()
-                logits = self.model(images)
+                with torch.autocast(device_type="cuda", enabled=self.use_amp):
+                    logits = self.model(images)
+                    loss = self.criterion(logits, masks)
 
-                loss = self.criterion(logits, masks)
-
-                loss.backward()
-                self.optimizer.step()
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
 
                 total_loss += loss.item()
                 pbar.set_postfix({"loss": f"{loss.item():.4f}"})
@@ -158,10 +166,129 @@ class SegmentationSolver:
                 masks = masks.squeeze(1)
             masks = masks.long()
 
-            logits = self.model(images)
+            with torch.autocast(device_type="cuda", enabled=self.use_amp):
+                logits = self.model(images)
 
             self.metric.update(logits, masks)
 
         # Compute final score
         miou = self.metric.compute().item()
         return miou
+
+    def fit_cached(
+        self,
+        train_cache: CachedFeaturesDataset,
+        val_cache: CachedFeaturesDataset | None = None,
+        batch_size: int = 64,
+        epochs: int = 10,
+        verbose: bool = True,
+        gpu_train: "GPUTensorCache | None" = None,
+        gpu_val: "GPUTensorCache | None" = None,
+    ) -> float | None:
+        """Train the segmentation head on pre-cached backbone features.
+
+        The backbone is **not** called during training — cached features are fed
+        directly to ``self.model.head``, which is the only component that runs
+        a forward/backward pass.
+
+        The entire feature cache is pre-moved to the GPU as contiguous tensors
+        (:class:`GPUTensorCache`), eliminating per-batch CPU→GPU DMA transfers
+        and ``torch.stack`` calls.
+
+        If ``gpu_train`` is provided, that pre-built cache is used directly,
+        allowing callers (e.g. an HPO loop) to transfer the cache once and
+        reuse it across many calls.
+
+        Args:
+            train_cache: Pre-extracted training features from
+                :meth:`SegmentationProbe.extract_all_features`.
+            val_cache: Optional validation cache for per-epoch mIoU logging.
+            batch_size: Batch size for iterating over cached data.
+            epochs: Number of training epochs.
+            verbose: Whether to show progress bars and epoch logs.
+            gpu_train: Optional pre-built GPU cache for training. If provided,
+                the GPU transfer is skipped.
+            gpu_val: Optional pre-built GPU cache for validation. Used only
+                when ``gpu_train`` is also provided.
+
+        Returns:
+            Val mIoU from the final epoch if val_cache is given, else None.
+        """
+        if gpu_train is None:
+            gpu_train = GPUTensorCache.from_cached(train_cache, self.device)
+            if val_cache is not None:
+                gpu_val = GPUTensorCache.from_cached(val_cache, self.device)
+
+        # Fast path: GPU tensor cache — no DataLoader, no host→device transfer per batch
+        scheduler = self._make_scheduler(epochs)
+
+        input_hw: tuple[int, int] = (gpu_train.masks.shape[-2], gpu_train.masks.shape[-1])
+        last_val_miou: float | None = None
+        num_batches = math.ceil(len(gpu_train) / batch_size)
+
+        for epoch in range(epochs):
+            self.model.train()
+            if self.model.freeze_backbone:
+                self.model.backbone.eval()
+
+            total_loss = 0.0
+            pbar = tqdm(
+                gpu_train.shuffled_batches(batch_size),
+                total=num_batches,
+                desc=f"Epoch {epoch + 1}/{epochs}",
+                disable=not verbose,
+            )
+            for features, masks in pbar:
+                self.optimizer.zero_grad()
+                with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+                    logits = self.model.head(features, *input_hw)
+                    loss = self.criterion(logits, masks)
+
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+
+                total_loss += loss.item()
+                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+
+            if scheduler is not None:
+                scheduler.step()
+
+            if gpu_val is not None:
+                last_val_miou = self._evaluate_gpu_cache(gpu_val, batch_size)
+                if verbose:
+                    logger.info(f"Epoch {epoch + 1} Val mIoU: {last_val_miou:.4f}")
+
+        return last_val_miou
+
+    def evaluate_cached(self, cache: CachedFeaturesDataset, batch_size: int = 64) -> float:
+        """Evaluate on a CachedFeaturesDataset.
+
+        The cache is moved to GPU as a :class:`GPUTensorCache` for zero
+        per-batch host→device transfers.
+
+        Args:
+            cache: Pre-extracted features (output of
+                :meth:`SegmentationProbe.extract_all_features`).
+            batch_size: Batch size for iterating over the cache.
+
+        Returns:
+            Mean Intersection-over-Union (mIoU) score.
+        """
+        gpu_cache = GPUTensorCache.from_cached(cache, self.device)
+        return self._evaluate_gpu_cache(gpu_cache, batch_size)
+
+    @torch.no_grad()
+    def _evaluate_gpu_cache(self, gpu_cache: GPUTensorCache, batch_size: int) -> float:
+        """Evaluate on a :class:`GPUTensorCache` and return mean IoU."""
+        self.model.eval()
+        self.metric.reset()
+        self.metric.to(self.device)
+
+        input_hw = (gpu_cache.masks.shape[-2], gpu_cache.masks.shape[-1])
+        for features, masks in gpu_cache.ordered_batches(batch_size):
+            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+                logits = self.model.head(features, *input_hw)
+            self.metric.update(logits, masks)
+
+        return self.metric.compute().item()

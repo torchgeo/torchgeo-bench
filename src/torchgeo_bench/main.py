@@ -22,7 +22,11 @@ from torchgeo_bench.datasets import get_datasets, is_dataset_available
 from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.segmentation_probe import SegmentationProbe
+from torchgeo_bench.segmentation_probe import (
+    CachedFeaturesDataset,
+    GPUTensorCache,
+    SegmentationProbe,
+)
 from torchgeo_bench.segmentation_task import SegmentationSolver
 from torchgeo_bench.utils import extract_features
 
@@ -415,12 +419,29 @@ def evaluate_segmentation(
 
     seg_cfg = eval_cfg.segmentation
     epochs = seg_cfg.epochs
+    use_cache = seg_cfg.get("cache_features", True)
+    cache_dtype_str = seg_cfg.get("cache_dtype", "float16")
+    cache_dtype = torch.float16 if cache_dtype_str == "float16" else torch.float32
 
     if not seg_cfg.get("hparam_search", False):
         # --- Single-run path ---
         probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr)
-        solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose)
-        miou = solver.evaluate(test_loader)
+        if use_cache and probe.freeze_backbone:
+            logger.info("Caching backbone features for train and val splits...")
+            train_cache = probe.extract_all_features(train_loader, cache_dtype=cache_dtype)
+            val_cache = probe.extract_all_features(val_loader, cache_dtype=cache_dtype)
+            test_cache = probe.extract_all_features(test_loader, cache_dtype=cache_dtype)
+            solver.fit_cached(
+                train_cache=train_cache,
+                val_cache=val_cache,
+                batch_size=seg_cfg.get("batch_size", 64),
+                epochs=epochs,
+                verbose=cfg.verbose,
+            )
+            miou = solver.evaluate_cached(test_cache, batch_size=seg_cfg.get("batch_size", 64))
+        else:
+            solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose)
+            miou = solver.evaluate(test_loader)
         return miou, sum(probe.channels_list), None, None
 
     # --- Optuna HPO path ---
@@ -440,14 +461,47 @@ def evaluate_segmentation(
     batch_size_candidates: list[int] = list(seg_cfg.batch_sizes)
     n_trials: int = seg_cfg.get("n_trials", 10)
 
+    # Pre-cache features once for HPO (batch size only affects the head loader, not the backbone)
+    if use_cache:
+        logger.info("Caching backbone features once for HPO...")
+        _probe_for_cache, _ = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr_min)
+        # Use the largest candidate batch size for the initial extraction loader
+        _extract_bs = max(batch_size_candidates)
+        _t_loader_extract, _v_loader_extract, _ = _make_seg_dataloaders(
+            train_dataset, val_dataset, test_loader, _extract_bs
+        )
+        hpo_train_cache = _probe_for_cache.extract_all_features(_t_loader_extract, cache_dtype=cache_dtype)
+        hpo_val_cache = _probe_for_cache.extract_all_features(_v_loader_extract, cache_dtype=cache_dtype)
+        hpo_test_cache = _probe_for_cache.extract_all_features(test_loader, cache_dtype=cache_dtype)
+
+    # Pre-move HPO caches to GPU once so all trials share the same device-resident tensors.
+    hpo_gpu_train: GPUTensorCache | None = None
+    hpo_gpu_val: GPUTensorCache | None = None
+    if use_cache and torch.cuda.is_available():
+        logger.info("Pre-moving HPO caches to GPU once for all trials...")
+        hpo_gpu_train = GPUTensorCache.from_cached(hpo_train_cache, device)
+        hpo_gpu_val = GPUTensorCache.from_cached(hpo_val_cache, device)
+        logger.info("HPO GPU cache transfer complete.")
+
     def objective(trial: "optuna.Trial") -> float:
         lr = trial.suggest_float("lr", lr_min, lr_max, log=True)
         bs = trial.suggest_categorical("batch_size", batch_size_candidates)
-        t_loader, v_loader, _ = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, bs)
         _, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, lr)
-        val_miou = solver.fit(
-            train_loader=t_loader, val_loader=v_loader, epochs=epochs, verbose=False
-        )
+        if use_cache:
+            val_miou = solver.fit_cached(
+                train_cache=hpo_train_cache,
+                val_cache=hpo_val_cache,
+                batch_size=bs,
+                epochs=epochs,
+                verbose=False,
+                gpu_train=hpo_gpu_train,
+                gpu_val=hpo_gpu_val,
+            )
+        else:
+            t_loader, v_loader, _ = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, bs)
+            val_miou = solver.fit(
+                train_loader=t_loader, val_loader=v_loader, epochs=epochs, verbose=False
+            )
         return val_miou if val_miou is not None else 0.0
 
     optuna.logging.set_verbosity(
@@ -472,10 +526,28 @@ def evaluate_segmentation(
     )
 
     # Final model: retrain on merged train+val with best hparams
-    _, _, train_val_loader = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, best_bs)
     probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, best_lr)
-    solver.fit(train_loader=train_val_loader, val_loader=None, epochs=epochs, verbose=cfg.verbose)
-    miou = solver.evaluate(test_loader)
+    if use_cache:
+        # merge train+val caches
+        train_val_cache = CachedFeaturesDataset(
+            layer_tensors=[
+                torch.cat([a, b])
+                for a, b in zip(hpo_train_cache.layer_tensors, hpo_val_cache.layer_tensors)
+            ],
+            masks=torch.cat([hpo_train_cache.masks, hpo_val_cache.masks]),
+        )
+        solver.fit_cached(
+            train_cache=train_val_cache,
+            val_cache=None,
+            batch_size=best_bs,
+            epochs=epochs,
+            verbose=cfg.verbose,
+        )
+        miou = solver.evaluate_cached(hpo_test_cache, batch_size=best_bs)
+    else:
+        _, _, train_val_loader = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, best_bs)
+        solver.fit(train_loader=train_val_loader, val_loader=None, epochs=epochs, verbose=cfg.verbose)
+        miou = solver.evaluate(test_loader)
     feature_dim = sum(probe.channels_list)
 
     return miou, feature_dim, best_lr, best_bs
