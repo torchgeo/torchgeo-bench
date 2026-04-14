@@ -1,6 +1,7 @@
 """Benchmark script for torchgeo-bench."""
 
 import fcntl
+import gc
 import io
 import logging
 import os
@@ -524,6 +525,13 @@ def evaluate_segmentation(
     logger.info(
         f"HPO best: lr={best_lr:.4g}, batch_size={best_bs}, val_mIoU={best_trial.value:.4f}"
     )
+
+    if use_cache and torch.cuda.is_available():
+        # Drop trial-time GPU caches before final retraining to avoid peak-memory OOM.
+        hpo_gpu_train = None
+        hpo_gpu_val = None
+        gc.collect()
+        torch.cuda.empty_cache()
 
     # Final model: retrain on merged train+val with best hparams
     probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, best_lr)
