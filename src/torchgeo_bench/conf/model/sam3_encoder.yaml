@@ -1,0 +1,39 @@
+# SAM3 vision encoder (ViT-H + FPN neck) — frozen backbone probe
+#
+# Architecture:
+#   - ViT-H backbone: 32 layers, hidden size 1024, patch size 14
+#   - FPN neck: 4 scale levels, all with 256 channels
+#   - Input: RGB only (3 channels); arbitrary resolution supported.
+#     RoPE embeddings are reset on the first forward pass to match the
+#     actual dataset image size (cropped to nearest multiple of 14).
+#
+# Hooked FPN layers (coarse-to-fine for FPN/DPT head).
+# Spatial dims scale with input resolution; at 252×252 (18×18 tokens):
+#   neck.fpn_layers.3:  9× 9, 256 ch  (scale 0.5× patch grid)
+#   neck.fpn_layers.2: 18×18, 256 ch  (scale 1×)
+#   neck.fpn_layers.1: 36×36, 256 ch  (scale 2×)
+#   neck.fpn_layers.0: 72×72, 256 ch  (scale 4×)
+#
+# Run with:
+#   torchgeo-bench run model=sam3_encoder dataset.bands=[red,green,blue]
+#
+# Local checkpoint (recommended — avoids gated-repo authentication):
+#   Set checkpoint_path to the directory containing model.safetensors + config.json.
+
+_target_: torchgeo_bench.models.SAM3EncoderBench
+num_channels: 3
+checkpoint_path: checkpoints/sam3
+name: sam3_encoder
+
+eval:
+  segmentation:
+    # Coarse-to-fine order required by FPN/DPT heads
+    layers:
+      - "neck.fpn_layers.3"
+      - "neck.fpn_layers.2"
+      - "neck.fpn_layers.1"
+      - "neck.fpn_layers.0"
+    head_type: fpn
+    # Cache in float16 to save RAM
+    cache_dtype: float16
+    cache_features: true
