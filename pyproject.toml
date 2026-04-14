@@ -118,6 +118,10 @@ ini_options.addopts = [
   "--cov=torchgeo_bench",
   "--cov-report=term-missing",
   "--cov-report=html",
+  "-m not slow",
+]
+ini_options.markers = [
+  "slow: integration tests that load real data and run models (use -m slow to include)",
 ]
 
 [tool.coverage]
