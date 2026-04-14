@@ -230,13 +230,8 @@ class SegmentationProbe(nn.Module):
 
         channels = []
         for name in self.layer_names:
-            feat = self._features[name]
-            if feat.ndim == 2:
-                channels.append(feat.shape[1])
-            elif feat.ndim == 3:
-                channels.append(feat.shape[2])
-            else:
-                channels.append(feat.shape[1])
+            feat = self._process_feature(self._features[name])
+            channels.append(feat.shape[1])
         self.backbone.train(was_training)
         return channels
 
@@ -268,6 +263,14 @@ class SegmentationProbe(nn.Module):
                 "Could not reshape 3D feature map to 2D grid. "
                 f"Got shape={tuple(feat.shape)}. Expected tokens with L=s^2 or L=s^2+1 (CLS)."
             )
+        # 4D tensor: NCHW (standard) or NHWC (Swin-family).
+        # Detect NHWC: spatial dims are square (H==W) and channel dim (last) is
+        # larger than the spatial dims — the opposite of typical NCHW feature maps.
+        if feat.ndim == 4:
+            _, d1, d2, d3 = feat.shape
+            if d1 == d2 and d3 > d1:
+                # NHWC → NCHW
+                return feat.permute(0, 3, 1, 2).contiguous()
         return feat
 
     # ------------------------------------------------------------------
