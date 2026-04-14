@@ -62,7 +62,7 @@ multirun/
 *.tif
 *.tiff
 data/
-datasets/
+/datasets/
 
 # Results
 *.csv

@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from .geobench_dataset import GeoBenchDataset
+from ..geobench_dataset import GeoBenchDataset
 
 NUM_CLASSES_PER_DATASET = {
     "m-forestnet": 12,
