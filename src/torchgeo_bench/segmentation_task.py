@@ -6,7 +6,12 @@ import math
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torchmetrics.classification import MulticlassJaccardIndex
+from torchmetrics.classification import (
+    MulticlassF1Score,
+    MulticlassJaccardIndex,
+    MulticlassPrecision,
+    MulticlassRecall,
+)
 from tqdm import tqdm
 
 from .segmentation_probe import (
@@ -16,6 +21,8 @@ from .segmentation_probe import (
 )
 
 logger = logging.getLogger(__name__)
+
+SegMetrics = dict[str, float]
 
 
 class SegmentationSolver:
@@ -62,7 +69,35 @@ class SegmentationSolver:
         self.metric = MulticlassJaccardIndex(
             num_classes=self.num_classes,
             ignore_index=self.ignore_index,
+            average="macro",
         )
+        self.metric_fw_iou = MulticlassJaccardIndex(
+            num_classes=self.num_classes,
+            ignore_index=self.ignore_index,
+            average="weighted",
+        )
+        self.metric_precision = MulticlassPrecision(
+            num_classes=self.num_classes,
+            ignore_index=self.ignore_index,
+            average="macro",
+        )
+        self.metric_recall = MulticlassRecall(
+            num_classes=self.num_classes,
+            ignore_index=self.ignore_index,
+            average="macro",
+        )
+        self.metric_f1 = MulticlassF1Score(
+            num_classes=self.num_classes,
+            ignore_index=self.ignore_index,
+            average="macro",
+        )
+        self._all_metrics = [
+            self.metric,
+            self.metric_fw_iou,
+            self.metric_precision,
+            self.metric_recall,
+            self.metric_f1,
+        ]
 
         self.use_amp = device.startswith("cuda") and torch.cuda.is_available()
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -133,26 +168,35 @@ class SegmentationSolver:
                 scheduler.step()
 
             if val_loader:
-                last_val_miou = self.evaluate(val_loader)
+                val_metrics = self.evaluate(val_loader)
+                last_val_miou = val_metrics["mIoU"]
                 if verbose:
                     logger.info(f"Epoch {epoch + 1} Val mIoU: {last_val_miou:.4f}")
 
         return last_val_miou
 
     @torch.no_grad()
-    def evaluate(self, dataloader: DataLoader) -> float:
-        """Evaluate the model on a dataloader and return mean IoU.
+    def evaluate(
+        self,
+        dataloader: DataLoader,
+        collect_preds: bool = False,
+    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor]":
+        """Evaluate the model on a dataloader and return segmentation metrics.
 
         Args:
             dataloader: Evaluation data loader.
+            collect_preds: If True, also return predicted class maps (N, H, W) int64.
 
         Returns:
-            Mean Intersection-over-Union (mIoU) score.
+            Dict of metric name → value, or (metrics_dict, preds_tensor) when
+            collect_preds=True.
         """
         self.model.eval()
-        self.metric.reset()
+        for m in self._all_metrics:
+            m.reset()
+            m.to(self.device)
 
-        self.metric.to(self.device)
+        pred_list: list[torch.Tensor] = []
 
         for batch in dataloader:
             if isinstance(batch, dict):
@@ -169,11 +213,16 @@ class SegmentationSolver:
             with torch.autocast(device_type="cuda", enabled=self.use_amp):
                 logits = self.model(images)
 
-            self.metric.update(logits, masks)
+            for m in self._all_metrics:
+                m.update(logits, masks)
 
-        # Compute final score
-        miou = self.metric.compute().item()
-        return miou
+            if collect_preds:
+                pred_list.append(logits.argmax(dim=1).cpu())
+
+        metrics = self._compute_metrics()
+        if collect_preds:
+            return metrics, torch.cat(pred_list, dim=0)
+        return metrics
 
     def fit_cached(
         self,
@@ -255,13 +304,19 @@ class SegmentationSolver:
                 scheduler.step()
 
             if gpu_val is not None:
-                last_val_miou = self._evaluate_gpu_cache(gpu_val, batch_size)
+                val_metrics = self._evaluate_gpu_cache(gpu_val, batch_size)
+                last_val_miou = val_metrics["mIoU"]
                 if verbose:
                     logger.info(f"Epoch {epoch + 1} Val mIoU: {last_val_miou:.4f}")
 
         return last_val_miou
 
-    def evaluate_cached(self, cache: CachedFeaturesDataset, batch_size: int = 64) -> float:
+    def evaluate_cached(
+        self,
+        cache: CachedFeaturesDataset,
+        batch_size: int = 64,
+        collect_preds: bool = False,
+    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor]":
         """Evaluate on a CachedFeaturesDataset.
 
         The cache is moved to GPU as a :class:`GPUTensorCache` for zero
@@ -271,24 +326,50 @@ class SegmentationSolver:
             cache: Pre-extracted features (output of
                 :meth:`SegmentationProbe.extract_all_features`).
             batch_size: Batch size for iterating over the cache.
+            collect_preds: If True, also return predicted class maps (N, H, W) int64.
 
         Returns:
-            Mean Intersection-over-Union (mIoU) score.
+            Dict of metric name → value, or (metrics_dict, preds_tensor) when
+            collect_preds=True.
         """
         gpu_cache = GPUTensorCache.from_cached(cache, self.device)
-        return self._evaluate_gpu_cache(gpu_cache, batch_size)
+        return self._evaluate_gpu_cache(gpu_cache, batch_size, collect_preds=collect_preds)
+
+    def _compute_metrics(self) -> "SegMetrics":
+        """Compute and return all metrics as a dict."""
+        return {
+            "mIoU": self.metric.compute().item(),
+            "fw_IoU": self.metric_fw_iou.compute().item(),
+            "precision": self.metric_precision.compute().item(),
+            "recall": self.metric_recall.compute().item(),
+            "f1": self.metric_f1.compute().item(),
+        }
 
     @torch.no_grad()
-    def _evaluate_gpu_cache(self, gpu_cache: GPUTensorCache, batch_size: int) -> float:
-        """Evaluate on a :class:`GPUTensorCache` and return mean IoU."""
+    def _evaluate_gpu_cache(
+        self,
+        gpu_cache: GPUTensorCache,
+        batch_size: int,
+        collect_preds: bool = False,
+    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor]":
+        """Evaluate on a :class:`GPUTensorCache` and return segmentation metrics."""
         self.model.eval()
-        self.metric.reset()
-        self.metric.to(self.device)
+        for m in self._all_metrics:
+            m.reset()
+            m.to(self.device)
+
+        pred_list: list[torch.Tensor] = []
 
         input_hw = (gpu_cache.masks.shape[-2], gpu_cache.masks.shape[-1])
         for features, masks in gpu_cache.ordered_batches(batch_size):
             with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                 logits = self.model.head(features, *input_hw)
-            self.metric.update(logits, masks)
+            for m in self._all_metrics:
+                m.update(logits, masks)
+            if collect_preds:
+                pred_list.append(logits.argmax(dim=1).cpu())
 
-        return self.metric.compute().item()
+        metrics = self._compute_metrics()
+        if collect_preds:
+            return metrics, torch.cat(pred_list, dim=0)
+        return metrics

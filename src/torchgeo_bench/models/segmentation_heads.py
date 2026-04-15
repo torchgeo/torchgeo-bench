@@ -113,6 +113,9 @@ class FPNHead(nn.Module):
         self, channels_list: list[int], num_classes: int, hidden_dim: int = 256
     ) -> None:
         super().__init__()
+        # Normalise raw CNN features before projection. BN is appropriate here:
+        # CNN channels have per-filter semantics and batch stats are stable.
+        self.input_norms = nn.ModuleList([nn.BatchNorm2d(c) for c in channels_list])
         self.laterals = nn.ModuleList(
             [nn.Conv2d(c, hidden_dim, kernel_size=1, bias=False) for c in channels_list]
         )
@@ -136,7 +139,7 @@ class FPNHead(nn.Module):
             input_h: Target output height (input image height).
             input_w: Target output width (input image width).
         """
-        laterals = [lat(f) for f, lat in zip(features, self.laterals)]
+        laterals = [lat(norm(f)) for f, norm, lat in zip(features, self.input_norms, self.laterals)]
 
         # Top-down merging: from coarsest (0) to finest (-1)
         for i in range(len(laterals) - 1):
@@ -163,6 +166,25 @@ class FPNHead(nn.Module):
 # ---------------------------------------------------------------------------
 # DPT helper modules (adapted from probe3d — mbanani/probe3d)
 # ---------------------------------------------------------------------------
+
+
+class ChannelLayerNorm(nn.Module):
+    """LayerNorm over the channel dimension of a (B, C, H, W) feature map.
+
+    Normalises each spatial position independently across channels — equivalent
+    to the LayerNorm inside a ViT block.  This is the natural choice before
+    projecting ViT intermediate features, where residual-stream outliers can
+    cause large inter-layer scale differences that BatchNorm handles poorly
+    (sample-wise norm is immune to per-batch outlier corruption).
+    """
+
+    def __init__(self, num_channels: int) -> None:
+        super().__init__()
+        self.norm = nn.LayerNorm(num_channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, C, H, W) → permute to (B, H, W, C) → LN → back
+        return self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2).contiguous()
 
 
 class ResidualConvUnit(nn.Module):
@@ -239,6 +261,11 @@ class DPTHead(nn.Module):
                 f"DPTHead requires exactly 4 feature layers, got {len(channels_list)}. "
                 "Specify exactly 4 layer names in coarse-to-fine order in the model config."
             )
+        # Normalise ViT residual-stream features before projection. LayerNorm
+        # over channels (per spatial position) matches the ViT's own internal
+        # normalisation and is sample-wise — robust to the per-layer outlier
+        # activations common in specialist ViTs (e.g. DOFA).
+        self.input_norms = nn.ModuleList([ChannelLayerNorm(c) for c in channels_list])
         # 1×1 projection — index 0 = coarsest
         self.convs = nn.ModuleList(
             [nn.Conv2d(c, hidden_dim, kernel_size=1, padding=0) for c in channels_list]
@@ -266,10 +293,10 @@ class DPTHead(nn.Module):
             input_h: Target output height.
             input_w: Target output width.
         """
-        # Project + 2× upsample
+        # Normalise → project → 2× upsample
         projected = [
-            F.interpolate(conv(f), scale_factor=2, mode="bilinear", align_corners=True)
-            for conv, f in zip(self.convs, features)
+            F.interpolate(conv(norm(f)), scale_factor=2, mode="bilinear", align_corners=True)
+            for norm, conv, f in zip(self.input_norms, self.convs, features)
         ]
 
         # Top-down cascade: coarsest (0) → finest (3)

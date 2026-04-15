@@ -28,7 +28,7 @@ from torchgeo_bench.segmentation_probe import (
     GPUTensorCache,
     SegmentationProbe,
 )
-from torchgeo_bench.segmentation_task import SegmentationSolver
+from torchgeo_bench.segmentation_task import SegMetrics, SegmentationSolver
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
@@ -122,8 +122,8 @@ class EvaluationResult:
     """Container for a single evaluation result row."""
 
     dataset: str
-    method: str  # 'knn5' or 'linear' seg_linear, seg_conv
-    metric_name: str  # 'accuracy' or 'mIoU'
+    method: str  # 'knn5', 'linear', or seg head type
+    metric_name: str  # 'accuracy', 'micro_mAP', or 'mIoU' (primary metric)
     metric_value: float
     ci_lower: float
     ci_upper: float
@@ -146,6 +146,11 @@ class EvaluationResult:
     c_range_num: int
     merge_val: bool
     bootstrap: int
+    # Segmentation-only metrics (None for classification rows)
+    fw_iou: float | None = None
+    precision: float | None = None
+    recall: float | None = None
+    f1: float | None = None
 
     def to_row(self) -> dict:
         """Convert to a flat dictionary suitable for CSV/DataFrame export."""
@@ -388,7 +393,8 @@ def evaluate_segmentation(
     device: torch.device,
     train_dataset: torch.utils.data.Dataset | None = None,
     val_dataset: torch.utils.data.Dataset | None = None,
-) -> tuple[float, int, float | None, int | None]:
+    collect_preds: bool = False,
+) -> "tuple[SegMetrics, int, float | None, int | None, torch.Tensor | None]":
     """Evaluate segmentation performance using a segmentation probe and solver.
 
     When ``eval.segmentation.hparam_search`` is true, runs an Optuna TPE sweep
@@ -406,10 +412,12 @@ def evaluate_segmentation(
         device: Torch device.
         train_dataset: Training dataset (required when hparam_search is true).
         val_dataset: Validation dataset (required when hparam_search is true).
+        collect_preds: If True, collect and return test predictions as (N, H, W) tensor.
 
     Returns:
-        Tuple of (test_miou, feature_dim, best_lr, best_batch_size).
+        Tuple of (metrics_dict, feature_dim, best_lr, best_batch_size, preds_or_None).
         ``best_lr`` and ``best_batch_size`` are None when hparam_search is false.
+        ``preds_or_None`` is None when collect_preds is False.
     """
     # Merge model-specific eval config if present
     eval_cfg = cfg.eval
@@ -439,11 +447,20 @@ def evaluate_segmentation(
                 epochs=epochs,
                 verbose=cfg.verbose,
             )
-            miou = solver.evaluate_cached(test_cache, batch_size=seg_cfg.get("batch_size", 64))
+            eval_result = solver.evaluate_cached(
+                test_cache,
+                batch_size=seg_cfg.get("batch_size", 64),
+                collect_preds=collect_preds,
+            )
         else:
             solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose)
-            miou = solver.evaluate(test_loader)
-        return miou, sum(probe.channels_list), None, None
+            eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
+
+        if collect_preds:
+            metrics, preds = eval_result
+        else:
+            metrics, preds = eval_result, None
+        return metrics, sum(probe.channels_list), None, None, preds
 
     # --- Optuna HPO path ---
     try:
@@ -551,14 +568,21 @@ def evaluate_segmentation(
             epochs=epochs,
             verbose=cfg.verbose,
         )
-        miou = solver.evaluate_cached(hpo_test_cache, batch_size=best_bs)
+        eval_result = solver.evaluate_cached(
+            hpo_test_cache, batch_size=best_bs, collect_preds=collect_preds
+        )
     else:
         _, _, train_val_loader = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, best_bs)
         solver.fit(train_loader=train_val_loader, val_loader=None, epochs=epochs, verbose=cfg.verbose)
-        miou = solver.evaluate(test_loader)
+        eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
+
+    if collect_preds:
+        metrics, preds = eval_result
+    else:
+        metrics, preds = eval_result, None
     feature_dim = sum(probe.channels_list)
 
-    return miou, feature_dim, best_lr, best_bs
+    return metrics, feature_dim, best_lr, best_bs, preds
 
 
 # ---------------------------------------------------------------------------
@@ -735,7 +759,9 @@ def main(cfg: DictConfig) -> None:
         }
 
         if is_segmentation:
-            miou, feat_dim, best_lr, best_bs = evaluate_segmentation(
+            seg_cfg_merged = OmegaConf.merge(cfg.eval, cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {}).segmentation
+            save_viz = seg_cfg_merged.get("save_viz", False)
+            metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
                 model,
                 train_loader,
                 val_loader,
@@ -745,13 +771,14 @@ def main(cfg: DictConfig) -> None:
                 device,
                 train_dataset=train_dataset,
                 val_dataset=val_loader.dataset,
+                collect_preds=save_viz,
             )
             all_rows.append(
                 EvaluationResult(
                     **common_meta,
                     method=cfg.eval.segmentation.head_type,
                     metric_name="mIoU",
-                    metric_value=miou,
+                    metric_value=metrics.get("mIoU", float("nan")),
                     ci_lower=0.0,
                     ci_upper=0.0,
                     feature_dim=feat_dim,
@@ -761,8 +788,48 @@ def main(cfg: DictConfig) -> None:
                     n_train=len(train_dataset),
                     n_val=len(val_loader.dataset),
                     n_test=len(test_loader.dataset),
+                    fw_iou=metrics.get("fw_IoU"),
+                    precision=metrics.get("precision"),
+                    recall=metrics.get("recall"),
+                    f1=metrics.get("f1"),
                 ).to_row()
             )
+            if save_viz and preds is not None:
+                from torchgeo_bench.segmentation_viz import save_segmentation_viz
+                from torchgeo_bench.dataset_info import load_dataset_info as _ldi
+                _ds_info = _ldi(ds_name)
+                rgb_indices = _ds_info.rgb_indices if _ds_info.rgb_indices else [0, 1, 2]
+                # Collect images and GT masks from test_loader (cheap pass, no backbone)
+                test_imgs, test_gts = [], []
+                for _batch in test_loader:
+                    if isinstance(_batch, dict):
+                        test_imgs.append(_batch["image"])
+                        _m = _batch["mask"]
+                    else:
+                        test_imgs.append(_batch[0])
+                        _m = _batch[1]
+                    if _m.ndim == 4:
+                        _m = _m.squeeze(1)
+                    test_gts.append(_m.long())
+                test_imgs_t = torch.cat(test_imgs, dim=0)
+                test_gts_t = torch.cat(test_gts, dim=0)
+                ignore_idx = seg_cfg_merged.get("ignore_index", 255)
+                n_viz = seg_cfg_merged.get("n_viz_samples", 8)
+                viz_dir = seg_cfg_merged.get("viz_dir", "viz")
+                _class_names = list(getattr(train_dataset, "classes", None) or []) or None
+                save_segmentation_viz(
+                    out_dir=viz_dir,
+                    model_name=cfg.model.name,
+                    dataset_name=ds_name,
+                    images=test_imgs_t,
+                    gt_masks=test_gts_t,
+                    pred_masks=preds,
+                    num_classes=num_classes,
+                    rgb_indices=rgb_indices,
+                    ignore_index=ignore_idx,
+                    n_samples=n_viz,
+                    class_names=_class_names,
+                )
         else:
             # Classification (single-label or multi-label)
             metric_name = "micro_mAP" if is_multilabel else "accuracy"

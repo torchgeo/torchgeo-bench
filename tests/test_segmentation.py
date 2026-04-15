@@ -181,10 +181,11 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
 
     solver.fit(loader, epochs=1, verbose=True)
 
-    miou = solver.evaluate(loader)
+    metrics = solver.evaluate(loader)
 
-    assert isinstance(miou, float)
-    assert 0.0 <= miou <= 1.0
+    assert isinstance(metrics, dict)
+    assert set(metrics.keys()) == {"mIoU", "fw_IoU", "precision", "recall", "f1"}
+    assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -318,8 +319,8 @@ def test_solver_dict_batches(mock_backbone, dummy_data):
     probe = make_probe(mock_backbone, ["layer1"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
     solver.fit(loader, epochs=1, verbose=False)
-    miou = solver.evaluate(loader)
-    assert 0.0 <= miou <= 1.0
+    metrics = solver.evaluate(loader)
+    assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -334,8 +335,8 @@ def test_solver_4d_masks(mock_backbone, dummy_data):
     probe = make_probe(mock_backbone, ["layer1"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
     solver.fit(loader, epochs=1, verbose=False)
-    miou = solver.evaluate(loader)
-    assert 0.0 <= miou <= 1.0
+    metrics = solver.evaluate(loader)
+    assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -462,8 +463,9 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0
 
-    miou = solver.evaluate_cached(val_cache, batch_size=2)
-    assert 0.0 <= miou <= 1.0
+    metrics = solver.evaluate_cached(val_cache, batch_size=2)
+    assert isinstance(metrics, dict)
+    assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
 def test_extract_all_features_dict_batches(mock_backbone, dummy_data):

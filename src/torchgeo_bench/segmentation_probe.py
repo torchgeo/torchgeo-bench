@@ -311,7 +311,6 @@ class SegmentationProbe(nn.Module):
             if masks.ndim == 4:
                 masks = masks.squeeze(1)
             masks = masks.long()
-
             self._features.clear()
             _ = self.backbone(images)
 
