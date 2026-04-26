@@ -1,6 +1,6 @@
 [build-system]
-build-backend = "hatchling.build"
-requires = [ "hatchling" ]
+build-backend = "uv_build"
+requires = [ "uv-build>=0.11.6,<0.12" ]
 
 [project]
 name = "torchgeo-bench"
@@ -67,9 +67,6 @@ urls.Homepage = "https://github.com/calebrob6/torchgeo-bench"
 urls.Issues = "https://github.com/calebrob6/torchgeo-bench/issues"
 urls.Repository = "https://github.com/calebrob6/torchgeo-bench"
 scripts.torchgeo-bench = "torchgeo_bench.cli:main"
-
-[tool.hatch.build.targets.wheel]
-packages = [ "src/torchgeo_bench" ]
 
 [tool.ruff]
 target-version = "py312"

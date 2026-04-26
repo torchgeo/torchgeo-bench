@@ -23,9 +23,7 @@ def _setup_config_paths() -> None:
     Only injects flags when the user has **not** already passed
     ``--config-dir`` or ``--config-path``.
     """
-    user_overrode = any(
-        a.startswith(("--config-dir", "--config-path")) for a in sys.argv
-    )
+    user_overrode = any(a.startswith(("--config-dir", "--config-path")) for a in sys.argv)
     if user_overrode:
         return
 
