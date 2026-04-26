@@ -68,8 +68,8 @@ urls.Issues = "https://github.com/calebrob6/torchgeo-bench/issues"
 urls.Repository = "https://github.com/calebrob6/torchgeo-bench"
 scripts.torchgeo-bench = "torchgeo_bench.cli:main"
 
-[tool.hatch.build.targets.wheel]
-packages = [ "src/torchgeo_bench" ]
+[tool.hatch]
+build.targets.wheel.packages = [ "src/torchgeo_bench" ]
 
 [tool.ruff]
 target-version = "py312"

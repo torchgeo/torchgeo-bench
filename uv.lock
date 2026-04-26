@@ -2947,7 +2947,7 @@ wheels = [
 
 [[package]]
 name = "torchgeo-bench"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "faiss-cpu" },
@@ -3008,7 +3008,7 @@ requires-dist = [
     { name = "timm", specifier = ">=0.9" },
     { name = "torch", specifier = ">=2" },
     { name = "torchgeo", specifier = ">=0.8" },
-    { name = "torchgeo-bench", extras = ["acceleration", "dev"], marker = "extra == 'all'" },
+    { name = "torchgeo-bench", extras = ["dev"], marker = "extra == 'all'" },
     { name = "torchvision", specifier = ">=0.15" },
     { name = "tqdm", specifier = ">=4.65" },
 ]
