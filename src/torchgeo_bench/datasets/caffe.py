@@ -16,7 +16,7 @@ class CaFFe(_V2Dataset):
     task = "segmentation"
     num_classes = 4
     multilabel = False
-    rgb_bands = ["gray"]
+    rgb_bands = ["gray", "gray", "gray"]
     split_sizes = {"train": 4000, "val": 1000, "test": 2000}
 
     # fmt: off

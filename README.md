@@ -31,6 +31,13 @@ torchgeo-bench download --version v2 --datasets caffe
 
 Available GeoBench v2 datasets: `benv2`, `biomassters`, `burn_scars`, `caffe`, `cloudsen12`, `dynamic_earthnet`, `everwatch`, `flair2`, `fotw`, `kuro_siwo`, `pastis`, `spacenet2`, `spacenet7`, `substation`, `treesatai`, `wind_turbine`, `so2sat`, `forestnet`
 
+Alternatively, you can still use the standalone script:
+
+```bash
+python torchgeo_bench_download.py --version v1
+python torchgeo_bench_download.py --version v2 --datasets forestnet
+```
+
 ## Overview
 
 `torchgeo-bench` provides:
@@ -429,23 +436,14 @@ pytest tests/test_geobench_dataset.py -k "m-eurosat" -v
 torchgeo-bench run dataset.names=[m-eurosat] eval.bootstrap=10 output=test.csv
 ```
 
-**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, configure the paths in `conf/config.yaml` or use command-line overrides:
-
-```bash
-# Command-line override
-torchgeo-bench run dataset.geobench_root=/your/path/to/classification_v1.0
-
-# Or set environment variable (for tests)
-export GEOBENCH_ROOT=/your/path/to/classification_v1.0
-pytest
-```
+**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, sprecify the root in the config through the keys "dataset.geobench_root" and "dataset.geobench_v2_root".
 
 If the dataset is not found, relevant tests will be skipped.
 
 The test suite includes:
 - **58 tests** covering all datasets, splits, and normalizations
 - **27 comparison tests** validating against reference implementation
-- All tests use small `0.01x_train` partitions for fast execution
+- All tests use small `0.01x_train` partitions for fast execution on GeoBenchV1
 
 ### Adding a New Model
 
@@ -501,7 +499,10 @@ Contributions welcome! Please:
 
 ### "Dataset directory not found"
 
-Ensure `GEOBENCH_ROOT` points to `classification_v1.0` directory containing dataset folders (e.g., `m-eurosat/`, `m-forestnet/`).
+Ensure the correct root is set for the dataset version you are using:
+
+- `GEOBENCH_ROOT` for GeoBench v1 (directory containing folders like `m-eurosat/`, `m-forestnet/`)
+- `GEOBENCH_V2_ROOT` for GeoBench v2 (directory containing v2 dataset folders)
 
 ### "Module 'geobench' not found"
 

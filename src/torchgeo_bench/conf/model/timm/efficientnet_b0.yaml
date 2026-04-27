@@ -8,3 +8,8 @@ pretrained: true
 global_pool: avg
 seed: null
 name: efficientnet_b0
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    # Spatial sizes (224px input): 7, 7, 14, 56. Note blocks.5/6 share 7×7.
+    layers: ["blocks.6", "blocks.5", "blocks.3", "blocks.1"]

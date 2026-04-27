@@ -145,6 +145,64 @@ Identical to the linear segmentation probe:
 
 ---
 
+## Segmentation FPN Probe
+
+**Method name:** `seg-fpn` (config: `eval.segmentation.head_type: "fpn"`)
+
+A Feature Pyramid Network-style decoder that fuses multi-scale feature maps top-down, matching the structure used in dense prediction literature.
+
+### Procedure
+
+1. Same hook-based feature extraction as the other segmentation probes. **Layers must be supplied in coarse-to-fine order** (deepest / lowest-resolution first, e.g. `["layer4", "layer3", "layer2", "layer1"]` for a ResNet).
+2. Each layer's feature map is projected to `hidden_dim` channels via a lateral 1×1 conv.
+3. A **top-down pathway** accumulates context: starting from the coarsest scale, each level is upsampled 2× and added to the next finer lateral output.
+4. Each merged level is refined with a 3×3 conv.
+5. All refined levels are upsampled to the finest spatial resolution, **concatenated**, and passed through a 1×1 conv to produce per-pixel class logits.
+6. Logits are bilinearly upsampled to the original input resolution.
+
+### Training & Evaluation
+
+Identical to the other segmentation probes (AdamW, CrossEntropyLoss, mIoU).
+
+---
+
+## Segmentation Probe Options
+
+All options are set under `eval.segmentation` in `conf/config.yaml` (global defaults) or in a model's config yaml (per-model override via `eval.segmentation`).
+
+### Head type
+
+| `head_type` | Description |
+|---|---|
+| `linear` | Per-layer BN + 1×1 conv → upsample. Multiple layers are fused with learned scalar weights. |
+| `conv_block` | Per-layer 1×1 proj to `hidden_dim` → upsample + concat → 1×1 head. |
+| `fpn` | FPN top-down pathway (see above). Layers must be coarse-to-fine. |
+| `dpt` | DPT-style reassemble + fusion transformer decoder. |
+
+### Training knobs
+
+| Option | Default | Description |
+|---|---|---|
+| `layers` | *(per model)* | List of backbone layer names to hook. For FPN, deepest layer first. |
+| `epochs` | `10` | Training epochs for the probe head. |
+| `lr` | `1e-3` | Initial learning rate (AdamW). |
+| `lr_scheduler` | `cosine` | `cosine` (CosineAnnealingLR to 1e-6) or `none` (constant). |
+| `loss` | `ce` | `ce` (CrossEntropyLoss) or `bce` (binary CE over one-hot targets). |
+| `hidden_dim` | `256` | Projection dimension for `conv_block` and `fpn` heads. |
+| `batch_size` | `64` | Batch size when training the probe head. |
+
+### Feature caching
+
+| Option | Default | Description |
+|---|---|---|
+| `cache_features` | `true` | Pre-extract backbone features once per split into RAM. Features are stored layer-first as contiguous `(N, C, H, W)` float16 tensors (`CachedFeaturesDataset`). GPU transfer is a single memcpy per layer. Eliminates backbone re-runs across epochs — the dominant speedup. |
+| `cache_dtype` | `float16` | Storage dtype for cached features. `float16` halves RAM; autocast upcasts during the head forward pass. |
+
+---
+| `loss_delta` | `initial_loss − final_loss`; near 0 means the optimizer made no progress (bad LR or detached graph) |
+
+---
+
 ## Common Configuration
 
 All tasks share these settings (configurable via Hydra):

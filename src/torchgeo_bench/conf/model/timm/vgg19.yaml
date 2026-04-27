@@ -8,3 +8,8 @@ pretrained: true
 global_pool: avg
 seed: null
 name: vgg19
+eval:
+  segmentation:
+    # Layers at MaxPool boundaries, coarse-to-fine (deepest first) for FPN head.
+    # Spatial sizes (224px input): 7, 14, 28, 56.
+    layers: ["features.36", "features.27", "features.18", "features.9"]

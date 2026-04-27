@@ -8,3 +8,7 @@ pretrained: true
 global_pool: avg
 seed: null
 name: densenet121
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    layers: ["features.denseblock4", "features.denseblock3", "features.denseblock2", "features.denseblock1"]

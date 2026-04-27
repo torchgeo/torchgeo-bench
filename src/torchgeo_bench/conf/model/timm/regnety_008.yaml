@@ -8,3 +8,7 @@ pretrained: true
 global_pool: avg
 seed: null
 name: regnety_008
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    layers: ["s4", "s3", "s2", "s1"]
