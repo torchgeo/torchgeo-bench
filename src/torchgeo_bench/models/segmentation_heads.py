@@ -30,6 +30,7 @@ class LinearHead(nn.Module):
             self.scale_weights = nn.Parameter(torch.ones(len(channels_list)))
 
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
+        """Upsample and sum per-layer logits."""
         total_logits: torch.Tensor | int = 0
         for idx, (feat, head) in enumerate(zip(features, self.heads)):
             logits = head(feat)
@@ -71,6 +72,7 @@ class ConvBlockHead(nn.Module):
         self.head = nn.Conv2d(hidden_dim * len(channels_list), num_classes, kernel_size=1)
 
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
+        """Project, upsample, concat, and classify features."""
         proj_feats = [proj(f) for f, proj in zip(features, self.projectors)]
 
         target_h, target_w = 0, 0
@@ -187,6 +189,7 @@ class ChannelLayerNorm(nn.Module):
         self.norm = nn.LayerNorm(num_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply layer norm over channels."""
         # x: (B, C, H, W) → permute to (B, H, W, C) → LN → back
         return self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2).contiguous()
 
@@ -205,6 +208,7 @@ class ResidualConvUnit(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply residual conv block."""
         return self.conv(x) + x
 
 
@@ -219,6 +223,7 @@ class FeatureFusionBlock(nn.Module):
         self.resConfUnit2 = ResidualConvUnit(features, kernel_size)
 
     def forward(self, x: torch.Tensor, skip_x: torch.Tensor | None = None) -> torch.Tensor:
+        """Fuse skip connection and refine features."""
         if skip_x is not None:
             if skip_x.shape[-2:] != x.shape[-2:]:
                 skip_x = F.interpolate(

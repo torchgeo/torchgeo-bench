@@ -5,7 +5,9 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
+    GPUTensorCache,
     SegmentationProbe,
+    _estimate_cache_bytes,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver
 
@@ -486,8 +488,6 @@ def test_extract_segmentation_features_dict_batches(mock_backbone, dummy_data):
 # ---------------------------------------------------------------------------
 
 
-from torchgeo_bench.segmentation_probe import GPUTensorCache, _estimate_cache_bytes
-
 
 def _make_cpu_cache(mock_backbone, dummy_data):
     """Helper: extract a CachedFeaturesDataset on CPU."""
@@ -545,7 +545,7 @@ def test_gpu_tensor_cache_ordered_batches(mock_backbone, dummy_data):
     gpu_cache = GPUTensorCache.from_cached(cache, device="cpu")
 
     total = 0
-    for feats, masks in gpu_cache.ordered_batches(batch_size=1):
+    for _feats, masks in gpu_cache.ordered_batches(batch_size=1):
         total += masks.shape[0]
     assert total == len(cache)
 
