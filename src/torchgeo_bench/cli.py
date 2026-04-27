@@ -51,6 +51,20 @@ def run_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def overfit_check_command(args: argparse.Namespace) -> int:
+    """Execute the overfit-check command."""
+    import subprocess
+
+    hydra_args = args.hydra_args if args.hydra_args else []
+    try:
+        cmd = [sys.executable, "-m", "torchgeo_bench.overfit_check"] + hydra_args
+        result = subprocess.run(cmd, check=False)
+        return result.returncode
+    except Exception as e:
+        logger.error(f"Overfit check failed: {e}")
+        return 1
+
+
 def main() -> int:
     """Main CLI entry point."""
     # Special handling for "run" command - pass everything after "run" to Hydra
@@ -61,6 +75,12 @@ def main() -> int:
         # Create a minimal args object for run_command
         args = argparse.Namespace(hydra_args=hydra_args)
         return run_command(args)
+
+    # Special handling for "overfit-check" command
+    if len(sys.argv) > 1 and sys.argv[1] == "overfit-check":
+        hydra_args = sys.argv[2:]
+        args = argparse.Namespace(hydra_args=hydra_args)
+        return overfit_check_command(args)
 
     # For other commands, use standard argparse
     parser = argparse.ArgumentParser(
@@ -109,11 +129,21 @@ def main() -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
+    # Overfit-check command
+    subparsers.add_parser(
+        "overfit-check",
+        help=(
+            "Pre-screening sanity check: verify segmentation encoders can overfit "
+            "a tiny training subset before running the full benchmark"
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
     args = parser.parse_args()
 
     if args.command == "download":
         return download_command(args)
-    elif args.command == "run":
+    elif args.command in ("run", "overfit-check"):
         raise AssertionError("This should never be reached due to special handling above.")
     else:
         parser.print_help()

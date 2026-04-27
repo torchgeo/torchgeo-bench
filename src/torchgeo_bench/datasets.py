@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from .dataset_info import load_dataset_info
 from .geobench_dataset import GeoBenchDataset
 
 NUM_CLASSES_PER_DATASET = {
@@ -100,6 +101,8 @@ def _get_v2_class_name(dataset_name: str) -> str:
     """Helper to convert dataset snake_case name to CamelCase class name."""
     if dataset_name == "benv2":
         return "GeoBenchBENV2"
+    if dataset_name == "caffe":
+        return "GeoBenchCaFFe"
     if dataset_name == "so2sat":
         return "GeoBenchSo2Sat"
     if dataset_name == "flair2":
@@ -140,7 +143,7 @@ def _get_datasets_v2(
         raise ValueError(f"Could not find V2 dataset class '{class_name}' in geobench_v2.datasets.")
 
     # currently only support mean-stdev normalization for V2, which happens by default
-    def load_split(split: str) -> gb_v2.GeoBenchBaseDataset:
+    def load_split(split: str):
         ds = dataset_cls(
             root=os.path.join(root, dataset_name),
             split=split,
@@ -269,6 +272,7 @@ def is_dataset_available(
 
     if dataset_name in V2_DATASETS:
         return os.path.isdir(os.path.join(geobench_v2_root, dataset_name))
+
     return os.path.isdir(os.path.join(geobench_root, dataset_name))
 
 
@@ -362,7 +366,8 @@ def get_datasets(
     # Resolve bands parameter
     # Convert OmegaConf ListConfig or other iterables to tuple
     if bands == "rgb":
-        bands_tuple: tuple[str, ...] | None = ("red", "green", "blue")
+        ds_info = load_dataset_info(dataset_name)
+        bands_tuple: tuple[str, ...] | None = tuple(ds_info.rgb_bands)
     elif bands == "all" or bands is None:
         bands_tuple = None  # None means load all available bands
     elif isinstance(bands, str):
