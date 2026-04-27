@@ -2,6 +2,7 @@ import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
     SegmentationProbe,
@@ -162,6 +163,7 @@ def test_segmentation_probe_conv_block_head(mock_backbone, dummy_data):
     assert logits.shape == (2, num_classes, 64, 64)
     # conv_block head is a ConvBlockHead with projectors + a final Conv2d
     from torchgeo_bench.models.segmentation_heads import ConvBlockHead
+
     assert isinstance(probe.head, ConvBlockHead)
     assert hasattr(probe.head, "projectors")
     assert isinstance(probe.head.head, nn.Conv2d)
@@ -196,6 +198,7 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
 def test_probe_fpn_head(mock_backbone, dummy_data):
     """FPN head forward pass produces correct output shape and has expected attributes."""
     from torchgeo_bench.models.segmentation_heads import FPNHead
+
     probe = make_probe(mock_backbone, ["layer2", "layer1"], head_type="fpn", hidden_dim=16)
 
     assert isinstance(probe.head, FPNHead)
@@ -367,9 +370,7 @@ class MockBackbone4Layer(nn.Module):
     def __init__(self):
         super().__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(3, 8, kernel_size=3, padding=1, stride=1), nn.ReLU())
-        self.layer2 = nn.Sequential(
-            nn.Conv2d(8, 16, kernel_size=3, padding=1, stride=2), nn.ReLU()
-        )
+        self.layer2 = nn.Sequential(nn.Conv2d(8, 16, kernel_size=3, padding=1, stride=2), nn.ReLU())
         self.layer3 = nn.Sequential(
             nn.Conv2d(16, 32, kernel_size=3, padding=1, stride=2), nn.ReLU()
         )
@@ -388,6 +389,7 @@ class MockBackbone4Layer(nn.Module):
 def test_probe_dpt_head_forward():
     """DPT head with 4 coarse-to-fine layers produces correct output shape."""
     from torchgeo_bench.models.segmentation_heads import DPTHead
+
     backbone = MockBackbone4Layer()
     # Coarse-to-fine order (same convention as FPN)
     probe = make_probe(
@@ -459,7 +461,9 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
     train_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
     val_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
 
-    val_miou = solver.fit_cached(train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False)
+    val_miou = solver.fit_cached(
+        train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
+    )
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0
 
@@ -557,6 +561,8 @@ def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
     val_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
 
     # On CPU, use_amp=False so GPUTensorCache path is skipped; DataLoader fallback runs.
-    val_miou = solver.fit_cached(train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False)
+    val_miou = solver.fit_cached(
+        train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
+    )
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0

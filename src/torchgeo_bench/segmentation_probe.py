@@ -46,12 +46,14 @@ class CachedFeaturesDataset(Dataset):
         return [t[i] for t in self.layer_tensors], self.masks[i]
 
 
-
 def _estimate_cache_bytes(cache: "CachedFeaturesDataset") -> int:
     """Estimate total bytes occupied by a CachedFeaturesDataset."""
     if not cache.layer_tensors:
         return 0
-    return sum(t.numel() * t.element_size() for t in cache.layer_tensors) + cache.masks.numel() * cache.masks.element_size()
+    return (
+        sum(t.numel() * t.element_size() for t in cache.layer_tensors)
+        + cache.masks.numel() * cache.masks.element_size()
+    )
 
 
 class GPUTensorCache:
@@ -116,9 +118,7 @@ class GPUTensorCache:
             b = idx[start : start + batch_size]
             yield [t[b] for t in self.layer_tensors], self.masks[b]
 
-    def ordered_batches(
-        self, batch_size: int
-    ) -> Iterator[tuple[list[torch.Tensor], torch.Tensor]]:
+    def ordered_batches(self, batch_size: int) -> Iterator[tuple[list[torch.Tensor], torch.Tensor]]:
         """Yield *(features, masks)* mini-batches in sequential order."""
         for start in range(0, len(self), batch_size):
             s = slice(start, start + batch_size)

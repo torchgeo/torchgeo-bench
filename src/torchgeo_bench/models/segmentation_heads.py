@@ -83,12 +83,16 @@ class ConvBlockHead(nn.Module):
         aligned = []
         for f in proj_feats:
             if f.shape[-2:] != (target_h, target_w):
-                f = F.interpolate(f, size=(target_h, target_w), mode="bilinear", align_corners=False)
+                f = F.interpolate(
+                    f, size=(target_h, target_w), mode="bilinear", align_corners=False
+                )
             aligned.append(f)
 
         logits = self.head(torch.cat(aligned, dim=1))
         if logits.shape[-2:] != (input_h, input_w):
-            logits = F.interpolate(logits, size=(input_h, input_w), mode="bilinear", align_corners=False)
+            logits = F.interpolate(
+                logits, size=(input_h, input_w), mode="bilinear", align_corners=False
+            )
         return logits
 
 
@@ -109,9 +113,7 @@ class FPNHead(nn.Module):
         hidden_dim: Feature dimension used throughout the FPN (default 256).
     """
 
-    def __init__(
-        self, channels_list: list[int], num_classes: int, hidden_dim: int = 256
-    ) -> None:
+    def __init__(self, channels_list: list[int], num_classes: int, hidden_dim: int = 256) -> None:
         super().__init__()
         # Normalise raw CNN features before projection. BN is appropriate here:
         # CNN channels have per-filter semantics and batch stats are stable.
@@ -159,7 +161,9 @@ class FPNHead(nn.Module):
 
         logits = self.fpn_head(torch.cat(aligned, dim=1))
         if logits.shape[-2:] != (input_h, input_w):
-            logits = F.interpolate(logits, size=(input_h, input_w), mode="bilinear", align_corners=False)
+            logits = F.interpolate(
+                logits, size=(input_h, input_w), mode="bilinear", align_corners=False
+            )
         return logits
 
 

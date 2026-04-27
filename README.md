@@ -396,6 +396,41 @@ Notes:
 - Install with: `pip install torchgeo-bench[hpo]`.
 - Result rows include `best_lr` and `best_batch_size` for segmentation HPO runs.
 
+### Overfitting Sanity Check (Pre-screening)
+
+Before running a full benchmark across many encoders, use the `overfit-check` command to quickly identify broken or misconfigured segmentation models:
+
+```bash
+# Check a single model on specific datasets
+torchgeo-bench overfit-check model=resnet50 dataset.names=[burn_scars,m-cashew-plantation]
+
+# Adjust the threshold or number of steps
+torchgeo-bench overfit-check model=vit_base_patch16 check.overfit_threshold=0.95 check.overfit_steps=300
+
+# Custom output path
+torchgeo-bench overfit-check model=resnet50 check.output=my_check.csv
+```
+
+The check:
+1. Collects 2 training batches per dataset
+2. Extracts features from the frozen backbone (same hooks as the full benchmark)
+3. Trains a **fresh** probe head for 200 gradient steps on those same batches
+4. Reports whether the head achieves ≥0.9 mIoU on that tiny subset
+
+Any functional encoder should easily memorize a handful of samples. Failure signals a silent bug — wrong layer hook names, degenerate backbone outputs, or a misconfigured head — before you spend compute on the full benchmark.
+
+**Recommended workflow:**
+```bash
+# 1. Pre-screen all models
+torchgeo-bench overfit-check model=mymodel dataset.names=[burn_scars,pastis]
+
+# 2. Review results
+cat overfit_check_results.csv
+
+# 3. Run full benchmark only on passing models
+torchgeo-bench run model=mymodel dataset.names=[burn_scars,pastis]
+```
+
 ### Output Format
 
 ```csv

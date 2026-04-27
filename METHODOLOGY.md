@@ -227,6 +227,55 @@ When `eval.segmentation.hparam_search=true`, an Optuna TPE study is run to selec
 
 ---
 
+## Overfitting Sanity Check
+
+A fast pre-screening step that verifies whether a model's backbone features can be overfit by the probe head on a tiny subset of training data. Invoked via a separate CLI command (`torchgeo-bench overfit-check`) before running the full benchmark.
+
+### Rationale
+
+Any functional encoder should allow the probe head to memorize 1–2 training batches to near-perfect mIoU. Failure to do so is a strong signal of a silent bug — wrong layer hook names, degenerate backbone outputs (e.g. all-zero features), dtype issues, or head misconfiguration — regardless of the specific root cause.
+
+### Procedure
+
+1. Collect `overfit_n_batches` batches from the training split.
+2. Run the frozen backbone (with hooks) to extract features for those batches.
+3. Instantiate a **fresh** probe head (same architecture, freshly initialized weights) to ensure the check is independent of any prior training state.
+4. Train the fresh head for `overfit_steps` gradient steps on the stored features (AdamW, no LR schedule).
+5. Evaluate mIoU on the **same** batches (not held-out data — this is an overfit test, not a generalization test).
+6. Pass if `mIoU ≥ overfit_threshold`; otherwise flag the (model, dataset) pair.
+
+### Knobs (`check:` section in config.yaml)
+
+| Option | Default | Description |
+|---|---|---|
+| `overfit_n_batches` | `2` | Number of training batches to overfit. |
+| `overfit_steps` | `200` | Gradient steps on the tiny subset. |
+| `overfit_threshold` | `0.5` | Minimum mIoU required to pass. |
+| `overfit_lr` | `1e-3` | Learning rate for the overfit check head. |
+| `output` | `overfit_check_results.csv` | Where to write the pass/fail CSV. |
+
+### Output
+
+A CSV with one row per (model, dataset):
+
+| Column | Description |
+|---|---|
+| `model` | Model name from config |
+| `dataset` | Dataset name |
+| `passed` | Whether the check passed |
+| `achieved_miou` | mIoU achieved on the overfit subset |
+| `threshold` | The threshold used |
+| `n_batches` | Number of batches used |
+| `steps` | Number of gradient steps |
+| `batch_size` | Actual batch size of collected batches |
+| `unique_labels` | Number of distinct class labels present in the collected batches (context for low mIoU) |
+| `feature_norm` | Mean L2 norm of backbone features across layers; ≈0 means the hook is dead |
+| `feature_std` | Mean std of backbone features across layers; ≈0 (with nonzero norm) means constant/saturated feature maps |
+| `initial_loss` | Cross-entropy loss at step 0 (before any gradient updates) |
+| `loss_delta` | `initial_loss − final_loss`; near 0 means the optimizer made no progress (bad LR or detached graph) |
+
+---
+
 ## Common Configuration
 
 All tasks share these settings (configurable via Hydra):

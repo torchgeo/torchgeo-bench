@@ -76,8 +76,7 @@ def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int
 
         dim: int = rotary_emb.dim
         freqs = 1.0 / (
-            rotary_emb.rope_theta
-            ** (torch.arange(0, dim, 4)[: (dim // 4)].float() / dim)
+            rotary_emb.rope_theta ** (torch.arange(0, dim, 4)[: (dim // 4)].float() / dim)
         )
         flat = torch.arange(end_x * end_y, dtype=torch.long)
         x_pos = (flat % end_x).float() * scale

@@ -28,7 +28,7 @@ from torchgeo_bench.segmentation_probe import (
     GPUTensorCache,
     SegmentationProbe,
 )
-from torchgeo_bench.segmentation_task import SegMetrics, SegmentationSolver
+from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
@@ -434,7 +434,9 @@ def evaluate_segmentation(
 
     if not seg_cfg.get("hparam_search", False):
         # --- Single-run path ---
-        probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr)
+        probe, solver = _build_seg_probe_and_solver(
+            model, num_classes, eval_cfg, device, seg_cfg.lr
+        )
         if use_cache and probe.freeze_backbone:
             logger.info("Caching backbone features for train and val splits...")
             train_cache = probe.extract_all_features(train_loader, cache_dtype=cache_dtype)
@@ -453,7 +455,9 @@ def evaluate_segmentation(
                 collect_preds=collect_preds,
             )
         else:
-            solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose)
+            solver.fit(
+                train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose
+            )
             eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
 
         if collect_preds:
@@ -482,14 +486,20 @@ def evaluate_segmentation(
     # Pre-cache features once for HPO (batch size only affects the head loader, not the backbone)
     if use_cache:
         logger.info("Caching backbone features once for HPO...")
-        _probe_for_cache, _ = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr_min)
+        _probe_for_cache, _ = _build_seg_probe_and_solver(
+            model, num_classes, eval_cfg, device, seg_cfg.lr_min
+        )
         # Use the largest candidate batch size for the initial extraction loader
         _extract_bs = max(batch_size_candidates)
         _t_loader_extract, _v_loader_extract, _ = _make_seg_dataloaders(
             train_dataset, val_dataset, test_loader, _extract_bs
         )
-        hpo_train_cache = _probe_for_cache.extract_all_features(_t_loader_extract, cache_dtype=cache_dtype)
-        hpo_val_cache = _probe_for_cache.extract_all_features(_v_loader_extract, cache_dtype=cache_dtype)
+        hpo_train_cache = _probe_for_cache.extract_all_features(
+            _t_loader_extract, cache_dtype=cache_dtype
+        )
+        hpo_val_cache = _probe_for_cache.extract_all_features(
+            _v_loader_extract, cache_dtype=cache_dtype
+        )
         hpo_test_cache = _probe_for_cache.extract_all_features(test_loader, cache_dtype=cache_dtype)
 
     # Pre-move HPO caches to GPU once so all trials share the same device-resident tensors.
@@ -516,15 +526,15 @@ def evaluate_segmentation(
                 gpu_val=hpo_gpu_val,
             )
         else:
-            t_loader, v_loader, _ = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, bs)
+            t_loader, v_loader, _ = _make_seg_dataloaders(
+                train_dataset, val_dataset, test_loader, bs
+            )
             val_miou = solver.fit(
                 train_loader=t_loader, val_loader=v_loader, epochs=epochs, verbose=False
             )
         return val_miou if val_miou is not None else 0.0
 
-    optuna.logging.set_verbosity(
-        optuna.logging.INFO if cfg.verbose else optuna.logging.WARNING
-    )
+    optuna.logging.set_verbosity(optuna.logging.INFO if cfg.verbose else optuna.logging.WARNING)
     study = optuna.create_study(
         direction="maximize",
         sampler=optuna.samplers.TPESampler(seed=cfg.seed),
@@ -533,9 +543,7 @@ def evaluate_segmentation(
 
     completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
     if not completed:
-        raise RuntimeError(
-            "All HPO trials failed. Try reducing batch_sizes or n_trials."
-        )
+        raise RuntimeError("All HPO trials failed. Try reducing batch_sizes or n_trials.")
     best_trial = max(completed, key=lambda t: t.value)  # type: ignore[arg-type]
     best_lr: float = best_trial.params["lr"]
     best_bs: int = best_trial.params["batch_size"]
@@ -572,8 +580,12 @@ def evaluate_segmentation(
             hpo_test_cache, batch_size=best_bs, collect_preds=collect_preds
         )
     else:
-        _, _, train_val_loader = _make_seg_dataloaders(train_dataset, val_dataset, test_loader, best_bs)
-        solver.fit(train_loader=train_val_loader, val_loader=None, epochs=epochs, verbose=cfg.verbose)
+        _, _, train_val_loader = _make_seg_dataloaders(
+            train_dataset, val_dataset, test_loader, best_bs
+        )
+        solver.fit(
+            train_loader=train_val_loader, val_loader=None, epochs=epochs, verbose=cfg.verbose
+        )
         eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
 
     if collect_preds:
@@ -668,7 +680,9 @@ def main(cfg: DictConfig) -> None:
             geobench_root=getattr(cfg.dataset, "geobench_root", None),
             geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
         ):
-            logger.warning(f"Skipping dataset {ds_name} (data not found on disk), looked in {getattr(cfg.dataset, 'geobench_root', None)} and {getattr(cfg.dataset, 'geobench_v2_root', None)}")
+            logger.warning(
+                f"Skipping dataset {ds_name} (data not found on disk), looked in {getattr(cfg.dataset, 'geobench_root', None)} and {getattr(cfg.dataset, 'geobench_v2_root', None)}"
+            )
             continue
 
         # Check if we can skip this dataset entirely
@@ -759,7 +773,10 @@ def main(cfg: DictConfig) -> None:
         }
 
         if is_segmentation:
-            seg_cfg_merged = OmegaConf.merge(cfg.eval, cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {}).segmentation
+            seg_cfg_merged = OmegaConf.merge(
+                cfg.eval,
+                cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
+            ).segmentation
             save_viz = seg_cfg_merged.get("save_viz", False)
             metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
                 model,
@@ -795,8 +812,9 @@ def main(cfg: DictConfig) -> None:
                 ).to_row()
             )
             if save_viz and preds is not None:
-                from torchgeo_bench.segmentation_viz import save_segmentation_viz
                 from torchgeo_bench.dataset_info import load_dataset_info as _ldi
+                from torchgeo_bench.segmentation_viz import save_segmentation_viz
+
                 _ds_info = _ldi(ds_name)
                 rgb_indices = _ds_info.rgb_indices if _ds_info.rgb_indices else [0, 1, 2]
                 # Collect images and GT masks from test_loader (cheap pass, no backbone)

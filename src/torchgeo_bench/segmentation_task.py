@@ -64,7 +64,11 @@ class SegmentationSolver:
             weight_decay=weight_decay,
         )
 
-        self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss(ignore_index=self.ignore_index)
+        self.criterion = (
+            criterion
+            if criterion is not None
+            else nn.CrossEntropyLoss(ignore_index=self.ignore_index)
+        )
 
         self.metric = MulticlassJaccardIndex(
             num_classes=self.num_classes,
@@ -103,9 +107,7 @@ class SegmentationSolver:
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         self.device_type = torch.device(device).type
 
-    def _make_scheduler(
-        self, epochs: int
-    ) -> torch.optim.lr_scheduler.LRScheduler | None:
+    def _make_scheduler(self, epochs: int) -> torch.optim.lr_scheduler.LRScheduler | None:
         """Return a CosineAnnealingLR scheduler, or None for constant LR."""
         if self.lr_scheduler_type == "cosine":
             return torch.optim.lr_scheduler.CosineAnnealingLR(

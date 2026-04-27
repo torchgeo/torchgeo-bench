@@ -145,8 +145,7 @@ def load_dataset_info(name: str) -> DatasetInfo:
         return _dict_to_dataset_info(_load_yaml(pkg_path))
 
     raise FileNotFoundError(
-        f"No dataset config found for '{name}'. "
-        f"Looked in {cwd_path} and {pkg_path}."
+        f"No dataset config found for '{name}'. Looked in {cwd_path} and {pkg_path}."
     )
 
 
