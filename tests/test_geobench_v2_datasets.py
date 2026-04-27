@@ -113,13 +113,7 @@ class TestV2Loading:
         assert batch["image"].shape[-1] == target
 
     def test_bad_dataset_name(self, mock_v2_env):
-        mock_v2_env.GeoBenchPhantomDataset = None
+        mock_v2_env.GeoBenchCaFFe = None
 
-        with (
-            patch("torchgeo_bench.datasets.V2_DATASETS", {"phantom_dataset"}),
-            pytest.raises(
-                ValueError,
-                match="Could not find V2 dataset class",
-            ),
-        ):
-            get_datasets(dataset_name="phantom_dataset", geobench_v2_root="/tmp")
+        with pytest.raises(ValueError, match="Could not find V2 dataset class"):
+            get_datasets(dataset_name="caffe", geobench_v2_root="/tmp")
