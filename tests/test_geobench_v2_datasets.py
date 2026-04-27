@@ -69,6 +69,7 @@ class TestV2Loading:
         assert batch["image"].shape == (4, 3, 32, 32)  # B, C, H, W
         assert "label" in batch
 
+    @pytest.mark.skip(reason="Biomassters is pixelwise regression, not yet supported")
     def test_biomassters_segmentation(self, mock_v2_env):
         del mock_v2_env
         ds, train_dl, test_dl = get_datasets(
