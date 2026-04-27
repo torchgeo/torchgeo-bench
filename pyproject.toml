@@ -70,7 +70,7 @@ optional-dependencies.sam3 = [
 ]
 optional-dependencies.viz = [
   "matplotlib>=3.5",
-  "pillow>=9.0",
+  "pillow>=9",
 ]
 urls.Documentation = "https://github.com/calebrob6/torchgeo-bench/blob/main/README.md"
 urls.Homepage = "https://github.com/calebrob6/torchgeo-bench"
