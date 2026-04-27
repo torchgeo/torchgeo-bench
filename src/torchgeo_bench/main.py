@@ -27,8 +27,6 @@ from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.segmentation_probe import (
-    CachedFeaturesDataset,
-    GPUTensorCache,
     SegmentationProbe,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
@@ -455,9 +453,7 @@ def evaluate_segmentation(
     cache_dtype_str = seg_cfg.get("cache_dtype", "float16")
     cache_dtype = torch.float16 if cache_dtype_str == "float16" else torch.float32
 
-    probe, solver = _build_seg_probe_and_solver(
-        model, num_classes, eval_cfg, device, seg_cfg.lr
-    )
+    probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr)
     if use_cache and probe.freeze_backbone:
         logger.info("Caching backbone features for train and val splits...")
         train_cache = probe.extract_segmentation_features(train_loader, cache_dtype=cache_dtype)

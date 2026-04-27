@@ -488,7 +488,6 @@ def test_extract_segmentation_features_dict_batches(mock_backbone, dummy_data):
 # ---------------------------------------------------------------------------
 
 
-
 def _make_cpu_cache(mock_backbone, dummy_data):
     """Helper: extract a CachedFeaturesDataset on CPU."""
     images, masks = dummy_data["image"], dummy_data["mask"]
