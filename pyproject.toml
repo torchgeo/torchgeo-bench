@@ -51,6 +51,7 @@ dependencies = [
 ]
 optional-dependencies.all = [
   "torchgeo-bench[dev]",
+  "torchgeo-bench[sam3]",
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
@@ -62,6 +63,9 @@ optional-dependencies.dev = [
 ]
 optional-dependencies.olmoearth = [
   "olmoearth-pretrain-minimal>=0.0.2",
+]
+optional-dependencies.sam3 = [
+  "transformers>=4.50",
 ]
 urls.Documentation = "https://github.com/calebrob6/torchgeo-bench/blob/main/README.md"
 urls.Homepage = "https://github.com/calebrob6/torchgeo-bench"

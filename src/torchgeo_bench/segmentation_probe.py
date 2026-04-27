@@ -215,8 +215,18 @@ class SegmentationProbe(nn.Module):
 
         return hook
 
+    def _backbone_device(self) -> torch.device:
+        """Return the device of the backbone, falling back to CPU for parameterless backbones."""
+        p = next(self.backbone.parameters(), None)
+        if p is not None:
+            return p.device
+        b = next(self.backbone.buffers(), None)
+        if b is not None:
+            return b.device
+        return torch.device("cpu")
+
     def _dry_run_channels(self) -> list[int]:
-        device = next(self.backbone.parameters()).device
+        device = self._backbone_device()
         dummy = torch.randn(1, 3, 224, 224, device=device)
         if not self.layer_names:
             self.layer_names = ["backbone_output"]
@@ -278,7 +288,7 @@ class SegmentationProbe(nn.Module):
     # ------------------------------------------------------------------
 
     @torch.no_grad()
-    def extract_all_features(
+    def extract_segmentation_features(
         self,
         dataloader: "torch.utils.data.DataLoader",
         cache_dtype: torch.dtype = torch.float16,
@@ -299,7 +309,7 @@ class SegmentationProbe(nn.Module):
         # This avoids N individual per-sample allocations during GPU transfer.
         batches_per_layer: list[list[torch.Tensor]] = [[] for _ in self.layer_names]
         all_masks: list[torch.Tensor] = []
-        device = next(self.backbone.parameters()).device
+        device = self._backbone_device()
 
         for batch in dataloader:
             if isinstance(batch, dict):

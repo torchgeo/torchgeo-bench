@@ -419,17 +419,17 @@ def test_probe_dpt_wrong_num_layers():
 
 
 # ---------------------------------------------------------------------------
-# Feature caching: extract_all_features + CachedFeaturesDataset
+# Feature caching: extract_segmentation_features + CachedFeaturesDataset
 # ---------------------------------------------------------------------------
 
 
-def test_extract_all_features_returns_cached_dataset(mock_backbone, dummy_data):
-    """extract_all_features produces a CachedFeaturesDataset with correct length and dtypes."""
+def test_extract_segmentation_features_returns_cached_dataset(mock_backbone, dummy_data):
+    """extract_segmentation_features produces a CachedFeaturesDataset with correct length and dtypes."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
 
-    cache = probe.extract_all_features(loader, cache_dtype=torch.float16)
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float16)
 
     assert isinstance(cache, CachedFeaturesDataset)
     assert len(cache) == len(images)
@@ -444,7 +444,7 @@ def test_cached_features_dataset_indexing(mock_backbone, dummy_data):
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
-    cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
 
     feats, mask = cache[0]
     assert len(feats) == 2  # two layers
@@ -458,8 +458,8 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
 
-    train_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
-    val_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
 
     val_miou = solver.fit_cached(
         train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
@@ -472,12 +472,12 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
-def test_extract_all_features_dict_batches(mock_backbone, dummy_data):
-    """extract_all_features handles dict-format batches {"image": ..., "mask": ...}."""
+def test_extract_segmentation_features_dict_batches(mock_backbone, dummy_data):
+    """extract_segmentation_features handles dict-format batches {"image": ..., "mask": ...}."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks, as_dict=True)
     probe = make_probe(mock_backbone, ["layer1"])
-    cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
     assert len(cache) == len(images)
 
 
@@ -494,7 +494,7 @@ def _make_cpu_cache(mock_backbone, dummy_data):
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
-    return probe.extract_all_features(loader, cache_dtype=torch.float16)
+    return probe.extract_segmentation_features(loader, cache_dtype=torch.float16)
 
 
 def test_estimate_cache_bytes(mock_backbone, dummy_data):
@@ -557,8 +557,8 @@ def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
 
-    train_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
-    val_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
 
     # On CPU, use_amp=False so GPUTensorCache path is skipped; DataLoader fallback runs.
     val_miou = solver.fit_cached(

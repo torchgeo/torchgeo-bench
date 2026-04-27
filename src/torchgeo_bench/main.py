@@ -407,6 +407,7 @@ def _build_seg_probe_and_solver(
         device=str(device),
         criterion=criterion,
         lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
+        ignore_index=eval_cfg.segmentation.get("ignore_index", 255),
     )
     return probe, solver
 
@@ -459,9 +460,9 @@ def evaluate_segmentation(
     )
     if use_cache and probe.freeze_backbone:
         logger.info("Caching backbone features for train and val splits...")
-        train_cache = probe.extract_all_features(train_loader, cache_dtype=cache_dtype)
-        val_cache = probe.extract_all_features(val_loader, cache_dtype=cache_dtype)
-        test_cache = probe.extract_all_features(test_loader, cache_dtype=cache_dtype)
+        train_cache = probe.extract_segmentation_features(train_loader, cache_dtype=cache_dtype)
+        val_cache = probe.extract_segmentation_features(val_loader, cache_dtype=cache_dtype)
+        test_cache = probe.extract_segmentation_features(test_loader, cache_dtype=cache_dtype)
         solver.fit_cached(
             train_cache=train_cache,
             val_cache=val_cache,
@@ -618,11 +619,18 @@ def main(cfg: DictConfig) -> None:
             bands_value,
         )
 
+        # Merge model-specific eval config early so resume key and result rows
+        # reflect the actual head_type used, not the global default.
+        eval_cfg_merged = OmegaConf.merge(
+            cfg.eval,
+            cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
+        )
+
         # Check resume for standard methods
         knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name, *config_tuple)
         linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
 
-        seg_method = f"seg-{cfg.eval.segmentation.head_type}"
+        seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
 
         try:

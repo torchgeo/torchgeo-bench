@@ -128,7 +128,13 @@ class SAM3Encoder(BenchModel):
                 "Run with dataset.bands=[red,green,blue] or skip this dataset."
             )
 
-        from transformers import Sam3Model
+        try:
+            from transformers import Sam3Model
+        except ImportError as e:
+            raise ImportError(
+                "SAM3Encoder requires the 'transformers' package. "
+                "Install it with: pip install torchgeo-bench[sam3]"
+            ) from e
 
         source = checkpoint_path or model_name_or_path
         logger.info(f"Loading SAM3 from {source!r} …")
