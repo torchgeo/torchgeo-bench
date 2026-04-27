@@ -1,6 +1,6 @@
 [build-system]
-build-backend = "hatchling.build"
-requires = [ "hatchling" ]
+build-backend = "uv_build"
+requires = [ "uv-build>=0.11.6,<0.12" ]
 
 [project]
 name = "torchgeo-bench"
@@ -121,6 +121,10 @@ ini_options.addopts = [
   "--cov=torchgeo_bench",
   "--cov-report=term-missing",
   "--cov-report=html",
+  "-m not slow",
+]
+ini_options.markers = [
+  "slow: integration tests that load real data and run models (use -m slow to include)",
 ]
 
 [tool.coverage]
