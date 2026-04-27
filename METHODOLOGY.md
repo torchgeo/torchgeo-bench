@@ -187,7 +187,7 @@ All options are set under `eval.segmentation` in `conf/config.yaml` (global defa
 | `epochs` | `10` | Training epochs for the probe head. |
 | `lr` | `1e-3` | Initial learning rate (AdamW). |
 | `lr_scheduler` | `cosine` | `cosine` (CosineAnnealingLR to 1e-6) or `none` (constant). |
-| `loss` | `ce` | `ce` (CrossEntropyLoss) or `bce` (binary CE over one-hot targets). |
+| `criterion` | `torch.nn.CrossEntropyLoss` | Instantiable loss criterion for probe-head training. Alternative criteria can be provided via the Hydra `criterion` block. |
 | `hidden_dim` | `256` | Projection dimension for `conv_block` and `fpn` heads. |
 | `batch_size` | `64` | Batch size when training the probe head. |
 

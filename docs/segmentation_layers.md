@@ -4,7 +4,7 @@ This document records how the `eval.segmentation.layers` values were determined 
 
 ## Background
 
-`SegmentationProbe` hooks into named PyTorch modules via `backbone.named_modules()`. The layer names in each model config must exactly match these module names. Layers should be listed **deepest first** (coarsest feature map first) for the FPN head. For ASPP, only the last (deepest) entry is used.
+`SegmentationProbe` hooks into named PyTorch modules via `backbone.named_modules()`. The layer names in each model config must exactly match these module names. Layers should be listed **deepest first** (coarsest feature map first) for the FPN head.
 
 ## How Layer Names Were Discovered
 

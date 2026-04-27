@@ -57,6 +57,12 @@ def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int
     h_tokens = input_h // patch_size
     w_tokens = input_w // patch_size
 
+    if h_tokens == 0 or w_tokens == 0:
+        raise ValueError(
+            f"Input size {input_h}×{input_w} is smaller than patch_size={patch_size}. "
+            "Images must be at least patch_size pixels in each spatial dimension."
+        )
+
     logger.info(
         f"SAM3: resetting RoPE embeddings for {input_h}×{input_w} "
         f"({h_tokens}×{w_tokens} token grid)"
@@ -168,8 +174,18 @@ class SAM3Encoder(BenchModel):
         self._rope_size = (h, w)
 
     def _crop_to_patch_multiple(self, images: torch.Tensor) -> torch.Tensor:
-        """Crop spatial dims to the nearest multiple of ``_PATCH_SIZE``."""
+        """Crop spatial dims to the nearest multiple of ``_PATCH_SIZE``.
+
+        Raises:
+            ValueError: If the input is smaller than one patch (H < _PATCH_SIZE
+                or W < _PATCH_SIZE), which would produce empty tensors.
+        """
         H, W = images.shape[-2:]
+        if H < _PATCH_SIZE or W < _PATCH_SIZE:
+            raise ValueError(
+                f"Input spatial size {H}×{W} is smaller than patch_size={_PATCH_SIZE}. "
+                "Images must be at least patch_size pixels in each spatial dimension."
+            )
         h = (H // _PATCH_SIZE) * _PATCH_SIZE
         w = (W // _PATCH_SIZE) * _PATCH_SIZE
         if h == H and w == W:

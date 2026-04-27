@@ -96,7 +96,13 @@ def render_error_map(gt: np.ndarray, pred: np.ndarray, ignore_index: int = 255) 
 
 def _make_header_row(col_width: int, num_cols: int, labels: list[str], height: int = 24) -> np.ndarray:
     """Return a (height, num_cols*col_width, 3) uint8 header banner with centered column labels."""
-    from PIL import Image, ImageDraw
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as e:
+        raise ImportError(
+            "Pillow is required for segmentation visualization. "
+            "Install it with: pip install torchgeo-bench[viz]"
+        ) from e
 
     header_pil = Image.new("RGB", (num_cols * col_width, height), color=(40, 40, 40))
     draw = ImageDraw.Draw(header_pil)
@@ -185,9 +191,15 @@ def render_confusion_matrix(
     Returns:
         (H_img, W_img, 3) uint8 heatmap rendered with matplotlib Blues colormap.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        raise ImportError(
+            "matplotlib is required for segmentation visualization. "
+            "Install it with: pip install torchgeo-bench[viz]"
+        ) from e
 
     # Flatten and mask out ignored pixels
     p = preds.reshape(-1).numpy()
@@ -274,8 +286,13 @@ def save_segmentation_viz(
         n_samples: Number of sample rows in the grid image.
         class_names: Optional class name strings for confusion matrix axis labels.
     """
-    from PIL import Image
-
+    try:
+        from PIL import Image
+    except ImportError as e:
+        raise ImportError(
+            "Pillow is required for segmentation visualization. "
+            "Install it with: pip install torchgeo-bench[viz]"
+        ) from e
     dest = os.path.join(out_dir, model_name)
     os.makedirs(dest, exist_ok=True)
 
