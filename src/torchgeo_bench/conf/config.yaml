@@ -28,6 +28,16 @@ eval:
   merge_val: true          # merge train+val for final logistic training
   skip_linear: false       # if true, skip LogisticRegression evaluation
 
+  # Optional intrinsic dimension (ID) metrics on extracted embeddings.
+  # Computed alongside KNN/linear probing when enabled. Adds rows with
+  # method="intrinsic_dim" and metric_name="id_<estimator>_<split>".
+  intrinsic_dim:
+    enabled: false
+    estimators: [TwoNN, MLE, lPCA]   # subset of torchid global estimators
+    splits: [train]                  # any of: train, val, test
+    max_samples: 10000               # null disables subsampling
+    device: null                     # null = auto (cuda if available, else cpu)
+
   segmentation:
     head_type: "fpn"
     layers: []

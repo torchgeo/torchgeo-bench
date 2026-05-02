@@ -23,6 +23,7 @@ from torchgeo_bench.datasets import (
     get_datasets,
     list_datasets,
 )
+from torchgeo_bench.intrinsic_dim import compute_intrinsic_dim
 from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
@@ -410,6 +411,62 @@ def _build_seg_probe_and_solver(
     return probe, solver
 
 
+def evaluate_intrinsic_dim(
+    splits: dict[str, np.ndarray],
+    estimators: Sequence[str],
+    selected_splits: Sequence[str],
+    device: str | None,
+    max_samples: int | None,
+    seed: int,
+    common_meta: dict,
+    feature_dim: int,
+    n_counts: dict[str, int],
+    verbose: bool = False,
+) -> list[dict]:
+    """Compute intrinsic-dimension metrics over selected splits and return CSV rows.
+
+    Each (split, estimator) yields one row with ``method="intrinsic_dim"`` and
+    ``metric_name=f"id_{estimator}_{split}"``.
+    """
+    rows: list[dict] = []
+    for split_name in selected_splits:
+        if split_name not in splits:
+            logger.warning(f"[intrinsic-dim] unknown split '{split_name}', skipping")
+            continue
+        X = splits[split_name]
+        if verbose:
+            logger.info(
+                f"[intrinsic-dim] split={split_name} X{X.shape} "
+                f"estimators={list(estimators)} device={device}"
+            )
+        dims = compute_intrinsic_dim(
+            X,
+            estimators=list(estimators),
+            device=device,
+            max_samples=max_samples,
+            seed=seed,
+        )
+        for est_name, dim in dims.items():
+            rows.append(
+                EvaluationResult(
+                    **common_meta,
+                    method="intrinsic_dim",
+                    metric_name=f"id_{est_name}_{split_name}",
+                    metric_value=float(dim),
+                    ci_lower=0.0,
+                    ci_upper=0.0,
+                    feature_dim=feature_dim,
+                    best_c=None,
+                    best_lr=None,
+                    best_batch_size=None,
+                    n_train=n_counts.get("train", 0),
+                    n_val=n_counts.get("val", 0),
+                    n_test=n_counts.get("test", 0),
+                ).to_row()
+            )
+    return rows
+
+
 def evaluate_segmentation(
     model: torch.nn.Module,
     train_loader: DataLoader,
@@ -628,6 +685,7 @@ def main(cfg: DictConfig) -> None:
 
         seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
+        id_key = (ds_name, "intrinsic_dim", cfg.model._target_, cfg.model.name, *config_tuple)
 
         try:
             result = get_datasets(
@@ -786,8 +844,11 @@ def main(cfg: DictConfig) -> None:
             skip_linear = (cfg.resume and linear_key in completed_runs) or getattr(
                 cfg.eval, "skip_linear", False
             )
+            id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
+            id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
+            skip_id = (not id_enabled) or (cfg.resume and id_key in completed_runs)
 
-            if skip_knn and skip_linear:
+            if skip_knn and skip_linear and skip_id:
                 continue
 
             x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
@@ -855,6 +916,25 @@ def main(cfg: DictConfig) -> None:
                         n_test=len(x_test),
                     ).to_row()
                 )
+
+            if not skip_id:
+                id_rows = evaluate_intrinsic_dim(
+                    splits={"train": x_train, "val": x_val, "test": x_test},
+                    estimators=list(id_cfg.estimators),
+                    selected_splits=list(id_cfg.splits),
+                    device=id_cfg.get("device", None) or cfg.device,
+                    max_samples=id_cfg.get("max_samples", None),
+                    seed=cfg.seed,
+                    common_meta=common_meta,
+                    feature_dim=feature_dim,
+                    n_counts={
+                        "train": len(x_train),
+                        "val": len(x_val),
+                        "test": len(x_test),
+                    },
+                    verbose=cfg.verbose,
+                )
+                all_rows.extend(id_rows)
 
         append_rows_atomic(output_path, all_rows)
         all_rows.clear()

@@ -51,6 +51,7 @@ dependencies = [
 ]
 optional-dependencies.all = [
   "torchgeo-bench[dev]",
+  "torchgeo-bench[id]",
   "torchgeo-bench[sam3]",
   "torchgeo-bench[viz]",
 ]
@@ -61,6 +62,9 @@ optional-dependencies.dev = [
   "pytest>=7.3",
   "pytest-cov>=4.1",
   "ruff>=0.0.270",
+]
+optional-dependencies.id = [
+  "torchid>=0.3; python_version>='3.13'",
 ]
 optional-dependencies.olmoearth = [
   "olmoearth-pretrain-minimal>=0.0.2",
