@@ -48,7 +48,8 @@ torchgeo-bench download geobench_v1
 
 V2 (classification + segmentation) and torchgeo's EuroSAT downloader work the
 same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download
-eurosat`). See [DOCS.md](DOCS.md#downloading-datasets) for all options.
+eurosat`). See the [documentation](https://torchgeo-bench.readthedocs.io/en/latest/user/datasets.html)
+for all options.
 
 ## Run a basic experiment
 
@@ -65,12 +66,15 @@ to skip already-completed rows.
 
 ## Learn more
 
-- **[DOCS.md](DOCS.md)** — full configuration reference, all available
-  models, dataset tables, multi-band experiments, output schema, dev /
-  release workflow, and troubleshooting.
-- **[METHODOLOGY.md](METHODOLOGY.md)** — formal description of the KNN,
-  linear-probe, and segmentation-probe protocols.
-- **[AGENTS.md](AGENTS.md)** — contributor guide and house style.
+- **[Documentation](https://torchgeo-bench.readthedocs.io/)** — full
+  configuration reference, available models, dataset tables, multi-band
+  experiments, output schema, dev / release workflow, and
+  troubleshooting.
+- **[METHODOLOGY.md](https://github.com/torchgeo/torchgeo-bench/blob/main/METHODOLOGY.md)**
+  — formal description of the KNN, linear-probe, and segmentation-probe
+  protocols.
+- **[AGENTS.md](https://github.com/torchgeo/torchgeo-bench/blob/main/AGENTS.md)**
+  — contributor guide and house style.
 
 ## Citation
 
