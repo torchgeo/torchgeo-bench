@@ -15,9 +15,9 @@ import pandas as pd
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
+from torchgeo.datasets.errors import DatasetNotFoundError
 
-from torchgeo_bench.dataset_info import load_dataset_info
-from torchgeo_bench.datasets import get_datasets, is_dataset_available
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.main import _build_seg_probe_and_solver, _expand_dataset_list
 from torchgeo_bench.sanity_checks import run_overfit_check
 
@@ -37,7 +37,6 @@ def overfit_check(cfg: DictConfig) -> None:
     check_cfg = cfg.get("check", {})
     output_path: str = check_cfg.get("output", "overfit_check_results.csv")
     device = torch.device(cfg.device)
-    normalization = getattr(cfg.model, "normalization", None) or cfg.dataset.normalization
 
     dataset_names = _expand_dataset_list(cfg.dataset.names)
     results: list[dict] = []
@@ -45,40 +44,32 @@ def overfit_check(cfg: DictConfig) -> None:
     n_total = 0
 
     for ds_name in dataset_names:
-        ds_info = load_dataset_info(ds_name)
+        try:
+            ds_cls = get_bench_dataset_class(ds_name)
+        except KeyError:
+            logger.warning(f"[{ds_name}] Skipping — not in dataset registry.")
+            continue
 
-        if ds_info.task != "segmentation":
+        if ds_cls.task != "segmentation":
             logger.info(f"[{ds_name}] Skipping — not a segmentation dataset.")
             continue
 
-        if not is_dataset_available(
-            ds_name,
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-        ):
-            logger.warning(f"[{ds_name}] Skipping — dataset not found on disk.")
+        try:
+            train_dataset, train_loader, _val_loader, _test_loader = get_datasets(
+                dataset_name=ds_name,
+                partition_name=cfg.dataset.partition,
+                batch_size=cfg.dataset.batch_size,
+                return_val=True,
+                image_size=getattr(cfg.dataset, "image_size", None),
+                interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+                bands=getattr(cfg.dataset, "bands", "rgb"),
+            )
+        except (FileNotFoundError, DatasetNotFoundError) as exc:
+            logger.warning(f"[{ds_name}] Skipping — dataset not found: {exc}")
             continue
-
-        data = get_datasets(
-            dataset_name=ds_name,
-            partition_name=cfg.dataset.partition,
-            batch_size=cfg.dataset.batch_size,
-            normalization=normalization,
-            return_val=True,
-            image_size=getattr(cfg.dataset, "image_size", None),
-            interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-            bands=getattr(cfg.dataset, "bands", "rgb"),
-        )
-        if data is None or not isinstance(data, tuple) or len(data) != 4:
-            logger.warning(f"[{ds_name}] Skipping — unexpected dataset return.")
-            continue
-
-        train_dataset, train_loader, _val_loader, _test_loader = data
         num_channels = train_dataset[0]["image"].shape[0]
-        num_classes = ds_info.num_classes
-        ignore_index = int(getattr(ds_info, "ignore_index", 255))
+        num_classes = ds_cls.num_classes
+        ignore_index = 255
 
         # Instantiate model
         model_cfg = OmegaConf.merge(cfg.model, {"num_channels": num_channels})

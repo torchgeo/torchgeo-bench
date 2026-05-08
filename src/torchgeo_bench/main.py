@@ -28,8 +28,6 @@ from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.segmentation_probe import (
-    CachedFeaturesDataset,
-    GPUTensorCache,
     SegmentationProbe,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
