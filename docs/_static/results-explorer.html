@@ -594,7 +594,7 @@ function renderScatter(data) {
       const ys = rows.map(r => r[y]);
       const text = rows.map(r => `<b>${r.name}</b><br>${r.dataset} · ${r.method} · ${r.normalization}<br>${x}=${r[x]}<br>${y}=${r[y]}`);
       traces.push({
-        type: "scattergl", mode: "markers",
+        type: "scatter", mode: "markers",
         x: xs, y: ys, text, hovertemplate: "%{text}<extra></extra>",
         name: facetBy ? `${cv} · ${f}` : String(cv),
         legendgroup: String(cv),
@@ -618,8 +618,8 @@ function renderScatter(data) {
     })) : [],
   };
   for (let i = 1; i <= facets.length; i++) {
-    layout[`xaxis${i}`] = { ...PLOTLY_LAYOUT_BASE.xaxis, title: { text: x, font: { size: 11 } } };
-    layout[`yaxis${i}`] = { ...PLOTLY_LAYOUT_BASE.yaxis, title: { text: y, font: { size: 11 } } };
+    layout[`xaxis${i}`] = { ...PLOTLY_LAYOUT_BASE.xaxis, type: "linear", title: { text: x, font: { size: 11 } } };
+    layout[`yaxis${i}`] = { ...PLOTLY_LAYOUT_BASE.yaxis, type: "linear", title: { text: y, font: { size: 11 } } };
   }
   Plotly.react("chart-scatter", traces, layout, PLOTLY_CONFIG);
 }
