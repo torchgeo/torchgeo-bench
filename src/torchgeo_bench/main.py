@@ -15,10 +15,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
-<<<<<<< HEAD
-=======
 from torchgeo.datasets.errors import DatasetNotFoundError
->>>>>>> main
 from tqdm import tqdm
 
 from torchgeo_bench.datasets import (
@@ -31,18 +28,12 @@ from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.segmentation_probe import (
-<<<<<<< HEAD
     CachedFeaturesDataset,
     GPUTensorCache,
     SegmentationProbe,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
-=======
-    SegmentationProbe,
-)
-from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
 from torchgeo_bench.segmentation_viz import save_segmentation_viz
->>>>>>> main
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
@@ -418,16 +409,11 @@ def _build_seg_probe_and_solver(
         device=str(device),
         criterion=criterion,
         lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
-<<<<<<< HEAD
-=======
         ignore_index=eval_cfg.segmentation.get("ignore_index", 255),
->>>>>>> main
     )
     return probe, solver
 
 
-<<<<<<< HEAD
-=======
 def evaluate_intrinsic_dim(
     splits: dict[str, np.ndarray],
     estimators: Sequence[str],
@@ -484,7 +470,6 @@ def evaluate_intrinsic_dim(
     return rows
 
 
->>>>>>> main
 def evaluate_segmentation(
     model: torch.nn.Module,
     train_loader: DataLoader,
@@ -527,35 +512,6 @@ def evaluate_segmentation(
     use_cache = seg_cfg.get("cache_features", True)
     cache_dtype_str = seg_cfg.get("cache_dtype", "float16")
     cache_dtype = torch.float16 if cache_dtype_str == "float16" else torch.float32
-<<<<<<< HEAD
-
-    probe, solver = _build_seg_probe_and_solver(
-        model, num_classes, eval_cfg, device, seg_cfg.lr
-    )
-    if use_cache and probe.freeze_backbone:
-        logger.info("Caching backbone features for train and val splits...")
-        train_cache = probe.extract_all_features(train_loader, cache_dtype=cache_dtype)
-        val_cache = probe.extract_all_features(val_loader, cache_dtype=cache_dtype)
-        test_cache = probe.extract_all_features(test_loader, cache_dtype=cache_dtype)
-        solver.fit_cached(
-            train_cache=train_cache,
-            val_cache=val_cache,
-            batch_size=seg_cfg.get("batch_size", 64),
-            epochs=epochs,
-            verbose=cfg.verbose,
-        )
-        eval_result = solver.evaluate_cached(
-            test_cache,
-            batch_size=seg_cfg.get("batch_size", 64),
-            collect_preds=collect_preds,
-        )
-    else:
-        solver.fit(
-            train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose
-        )
-        eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
-
-=======
 
     probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr)
     if use_cache and probe.freeze_backbone:
@@ -581,7 +537,6 @@ def evaluate_segmentation(
         )
         eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
 
->>>>>>> main
     if collect_preds:
         metrics, preds = eval_result
     else:
@@ -703,25 +658,11 @@ def main(cfg: DictConfig) -> None:
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
-<<<<<<< HEAD
-        # Load dataset metadata from config
-        ds_info = load_dataset_info(ds_name)
-
-        if not is_dataset_available(
-            ds_name,
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-        ):
-            logger.warning(
-                f"Skipping dataset {ds_name} (data not found on disk), looked in {getattr(cfg.dataset, 'geobench_root', None)} and {getattr(cfg.dataset, 'geobench_v2_root', None)}"
-            )
-=======
         # Resolve metadata via the BenchDataset registry (no I/O).
         try:
             ds_cls = get_bench_dataset_class(ds_name)
         except KeyError:
             logger.warning(f"Skipping dataset {ds_name} (not in registry)")
->>>>>>> main
             continue
 
         # Check if we can skip this dataset entirely
@@ -864,15 +805,7 @@ def main(cfg: DictConfig) -> None:
                 ).to_row()
             )
             if save_viz and preds is not None:
-<<<<<<< HEAD
-                from torchgeo_bench.dataset_info import load_dataset_info as _ldi
-                from torchgeo_bench.segmentation_viz import save_segmentation_viz
-
-                _ds_info = _ldi(ds_name)
-                rgb_indices = _ds_info.rgb_indices if _ds_info.rgb_indices else [0, 1, 2]
-=======
                 rgb_indices = ds_cls().rgb_indices or [0, 1, 2]
->>>>>>> main
                 # Collect images and GT masks from test_loader (cheap pass, no backbone)
                 test_imgs, test_gts = [], []
                 for _batch in test_loader:

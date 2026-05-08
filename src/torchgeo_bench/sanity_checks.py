@@ -96,7 +96,7 @@ def run_overfit_check(
     batch_size = images_list[0].shape[0]
 
     # --- Extract features using frozen backbone ---
-    probe.backbone.eval()
+    probe.backbone.to(device).eval()
     input_h, input_w = images_list[0].shape[-2:]
     use_amp = device.type == "cuda"
 

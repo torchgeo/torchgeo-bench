@@ -33,19 +33,12 @@ def extract_features(
     for batch in iterator:
         images = batch["image"].to(device)
         if "label" not in batch:
-<<<<<<< HEAD
-            # segmentation datasets use "mask" instead of "label"
-            labels = batch["mask"].numpy()
-        else:
-            labels = batch["label"].numpy()
-=======
             raise KeyError(
                 "Batch is missing 'label' key. extract_features() is a classification "
                 "utility; for segmentation use "
                 "SegmentationProbe.extract_segmentation_features() instead."
             )
         labels = batch["label"].numpy()
->>>>>>> main
 
         if transforms is not None:
             images = transforms(images)

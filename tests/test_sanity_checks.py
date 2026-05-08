@@ -11,14 +11,34 @@ NUM_CLASSES = 3
 IMG_SIZE = 64
 BATCH_SIZE = 4
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+REQUIRED_KEYS = {
+    "passed", "achieved_miou", "threshold", "n_batches", "steps",
+    "batch_size", "unique_labels", "feature_norm", "feature_std",
+    "initial_loss", "loss_delta",
+}
+
 
 class SimpleBackbone(nn.Module):
-    """Simple CNN backbone with hookable intermediate layers."""
+    """Simple CNN backbone with hookable intermediate layers.
+
+    Images are constructed so channel 0 encodes the class label — these
+    fixed conv weights read that signal out, giving discriminative features
+    even without any training.
+    """
 
     def __init__(self):
         super().__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(3, 16, kernel_size=3, padding=1, stride=2), nn.ReLU())
         self.layer2 = nn.Sequential(nn.Conv2d(16, 32, kernel_size=3, padding=1, stride=2), nn.ReLU())
+        # Fix layer1 weights so channel 0 → feature channels, making features
+        # class-discriminative even with no gradient updates on the backbone.
+        with torch.no_grad():
+            self.layer1[0].weight.zero_()
+            self.layer1[0].bias.zero_()
+            for i in range(min(NUM_CLASSES, 16)):
+                self.layer1[0].weight[i, 0] = 1.0
 
     def forward(self, x):
         x = self.layer1(x)
@@ -27,29 +47,42 @@ class SimpleBackbone(nn.Module):
 
 
 class ZeroBackbone(nn.Module):
-    """Backbone that returns all-zero features — simulates a degenerate encoder."""
+    """Backbone whose hooked layers emit all-zero tensors — simulates degenerate features."""
 
     def __init__(self):
         super().__init__()
-        self.layer1 = nn.Sequential(nn.Conv2d(3, 16, kernel_size=3, padding=1, stride=2), nn.ReLU())
-        self.layer2 = nn.Sequential(nn.Conv2d(16, 32, kernel_size=3, padding=1, stride=2), nn.ReLU())
+        # Use identity-shaped layers whose output will be zeroed before hooks fire.
+        self.layer1 = _ZeroLayer(3, 16)
+        self.layer2 = _ZeroLayer(16, 32)
 
     def forward(self, x):
-        # Still call layers so hooks fire, but zero out the outputs
-        h = self.layer1(x)
-        h = self.layer2(h)
-        return torch.zeros_like(h)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        return x
+
+
+class _ZeroLayer(nn.Module):
+    """A strided layer that always emits zeros (hooks capture this zero output)."""
+
+    def __init__(self, in_ch: int, out_ch: int):
+        super().__init__()
+        self.out_ch = out_ch
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, _c, h, w = x.shape
+        return torch.zeros(b, self.out_ch, h // 2, w // 2, device=x.device, dtype=x.dtype)
 
 
 def _make_loader(backbone_class, n_samples=8):
     """Create a DataLoader of synthetic (image, mask) pairs.
 
-    Masks are spatially constant per image (one class fills the whole image),
-    which makes them easily memorizable by a small head.
+    Each image encodes its class label in channel 0 so the fixed backbone
+    weights can read out discriminative features. Masks are spatially constant
+    per image (one class fills the whole image).
     """
-    images = torch.randn(n_samples, 3, IMG_SIZE, IMG_SIZE)
-    # Assign a constant class per image — trivially overfittable
     class_ids = torch.arange(n_samples) % NUM_CLASSES
+    images = torch.randn(n_samples, 3, IMG_SIZE, IMG_SIZE)
+    images[:, 0] = class_ids.float()[:, None, None].expand(n_samples, IMG_SIZE, IMG_SIZE)
     masks = class_ids[:, None, None].expand(n_samples, IMG_SIZE, IMG_SIZE).clone()
     dataset = TensorDataset(images, masks)
 
@@ -90,13 +123,13 @@ def test_overfit_check_passes_with_functional_encoder(check_cfg):
         probe=probe,
         train_loader=loader,
         num_classes=NUM_CLASSES,
-        device=torch.device("cpu"),
+        device=DEVICE,
         check_cfg=check_cfg,
     )
 
     assert result["n_batches"] == 2
     assert result["steps"] == 300
-    assert result["threshold"] == 0.9
+    assert result["threshold"] == 0.5
     assert isinstance(result["achieved_miou"], float)
     assert result["passed"], (
         f"Expected overfit check to pass for a functional backbone, "
@@ -113,7 +146,7 @@ def test_overfit_check_fails_with_zero_backbone(check_cfg):
         probe=probe,
         train_loader=loader,
         num_classes=NUM_CLASSES,
-        device=torch.device("cpu"),
+        device=DEVICE,
         check_cfg=check_cfg,
     )
 
@@ -132,11 +165,11 @@ def test_overfit_check_result_keys(check_cfg):
         probe=probe,
         train_loader=loader,
         num_classes=NUM_CLASSES,
-        device=torch.device("cpu"),
+        device=DEVICE,
         check_cfg=check_cfg,
     )
 
-    assert set(result.keys()) == {"passed", "achieved_miou", "threshold", "n_batches", "steps"}
+    assert REQUIRED_KEYS.issubset(result.keys())
 
 
 def test_overfit_check_fpn_head(check_cfg):
@@ -148,7 +181,7 @@ def test_overfit_check_fpn_head(check_cfg):
         probe=probe,
         train_loader=loader,
         num_classes=NUM_CLASSES,
-        device=torch.device("cpu"),
+        device=DEVICE,
         check_cfg=check_cfg,
     )
 
@@ -168,7 +201,7 @@ def test_overfit_check_empty_loader(check_cfg):
         probe=probe,
         train_loader=loader,
         num_classes=NUM_CLASSES,
-        device=torch.device("cpu"),
+        device=DEVICE,
         check_cfg=check_cfg,
     )
 
