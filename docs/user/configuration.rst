@@ -79,6 +79,12 @@ selection semantics.
        viz_dir: viz
        n_viz_samples: 8
 
+.. seealso::
+
+   :doc:`segmentation-layers` lists the verified ``layers`` values for
+   every supported timm backbone family, with spatial sizes and notes on
+   stages that share resolution (common in EfficientNet / MobileNet).
+
 Refer to :doc:`/api/eval` for the runtime functions that consume each
 sub-block.
 

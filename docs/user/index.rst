@@ -13,7 +13,7 @@ and models, and interpreting the results.
    datasets
    configuration
    results-format
-   ../segmentation_layers
+   segmentation-layers
    contributing
    glossary
    changelog

@@ -54,7 +54,9 @@ Segmentation heads
 
 These heads attach to a frozen :class:`BenchModel` backbone to produce
 dense per-pixel predictions.  See :class:`~torchgeo_bench.segmentation_probe.SegmentationProbe`
-for the wiring layer.
+for the wiring layer, and :doc:`/user/segmentation-layers` for the
+verified ``eval.segmentation.layers`` values for each supported timm
+backbone family.
 
 .. autoclass:: LinearHead
 .. autoclass:: ConvBlockHead
