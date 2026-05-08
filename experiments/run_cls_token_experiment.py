@@ -19,7 +19,7 @@ from _runner import Job, add_devices_argument, run_jobs
 
 OUTPUT = "results/cls_token_experiment.csv"
 
-DATASETS = ["m-eurosat", "m-so2sat"]
+DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
 
 MODELS = [
     "timm/vit/vit_tiny_patch16_224",

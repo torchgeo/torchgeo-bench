@@ -1,7 +1,10 @@
 #!/usr/bin/env python
-"""Sweep resnet18 on m-eurosat varying normalization, image size, and interpolation.
+"""Sweep resnet18 on m-eurosat varying image size, interpolation, and the model's input normalization mode.
 
-Results land in ``results/eurosat_effect_of_experimental_setting.csv``.
+Sweeps the model-side ``input_normalization`` knob (``bands_zscore``,
+``none``, ``imagenet``, ``timm_default``) — the dataset always emits raw
+values, so normalization is configured on the model. Results land in
+``results/eurosat_effect_of_experimental_setting.csv``.
 
 Usage:
     python experiments/run_resize_and_normalization_experiment.py
@@ -16,7 +19,7 @@ from _runner import Job, add_devices_argument, run_jobs
 
 OUTPUT = "results/eurosat_effect_of_experimental_setting.csv"
 
-NORMALIZATIONS = ["mean_stdev", "min_max", "percentile_2_98", "none"]
+NORMALIZATIONS = ["bands_zscore", "none", "imagenet", "timm_default"]
 IMAGE_SIZES: list[str] = ["null", "224", "256", "448", "512"]
 INTERPOLATIONS = ["bilinear", "bicubic", "nearest"]
 
@@ -32,8 +35,8 @@ def build_jobs() -> list[Job]:
 
                 overrides = [
                     "model=timm/resnet18",
+                    f"model.input_normalization={norm}",
                     "dataset.names=[m-eurosat]",
-                    f"dataset.normalization={norm}",
                     f"dataset.image_size={size}",
                     "eval.merge_val=false",
                     "verbose=false",

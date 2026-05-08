@@ -19,7 +19,6 @@ Configs swept (per (model, dataset)):
 
 Usage:
     python experiments/run_effect_of_lbfgs_vs_adam.py
-    python experiments/run_effect_of_lbfgs_vs_adam.py --dataset m-eurosat m-forestnet
     python experiments/run_effect_of_lbfgs_vs_adam.py --device cuda:3
 """
 
@@ -41,6 +40,9 @@ from torchgeo_bench.utils import extract_features
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
+IMAGE_SIZE = 224
+
 MODEL_CONFIGS = {
     "resnet18": {
         "_target_": "torchgeo_bench.models.timm.TimmPatchBenchModel",
@@ -60,11 +62,9 @@ MODEL_CONFIGS = {
     },
 }
 
-# Mirrors the main pipeline's c_range default (small, focused grid). Adjust
-# via --c-values if you want a wider sweep.
-DEFAULT_C_VALUES = [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0]
-DEFAULT_ADAM_LRS = [1e-3, 1e-2, 1e-1, 1.0]
-DEFAULT_DATASETS = ["m-eurosat", "m-forestnet"]
+# Mirrors the main pipeline's c_range default (small, focused grid).
+C_VALUES = [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0]
+ADAM_LRS = [1e-3, 1e-2, 1e-1, 1.0]
 
 # Match main.py's linear-probe call (LogisticRegression(C=c, max_iter=2000, tol=1e-6)).
 MAX_ITER = 2000
@@ -83,34 +83,13 @@ def instantiate_model(model_cfg: dict, num_channels: int) -> torch.nn.Module:
     return cls(**kwargs)
 
 
-def parse_dataset_names(raw_names: list[str]) -> list[str]:
-    """Parse comma- and space-separated dataset name lists."""
-    out: list[str] = []
-    for raw in raw_names:
-        for name in raw.split(","):
-            clean = name.strip()
-            if clean and clean not in out:
-                out.append(clean)
-    return out
-
-
-def parse_float_list(raw: str | None, default: list[float]) -> list[float]:
-    """Parse a comma-separated float list (e.g. ``"1e-3,1e-2,1"``)."""
-    if raw is None:
-        return list(default)
-    values = [float(x) for x in raw.split(",") if x.strip()]
-    if not values:
-        raise ValueError(f"Empty float list: {raw!r}")
-    return values
-
-
-def build_configs(c_values: list[float], adam_lrs: list[float]) -> list[dict]:
+def build_configs() -> list[dict]:
     """Build a flat list of ``(solver, C, lr)`` fit configurations."""
     configs: list[dict] = []
-    for c in c_values:
+    for c in C_VALUES:
         configs.append({"solver": "lbfgs", "C": float(c), "lr": 1.0})
-    for c in c_values:
-        for lr in adam_lrs:
+    for c in C_VALUES:
+        for lr in ADAM_LRS:
             configs.append({"solver": "adam", "C": float(c), "lr": float(lr)})
     return configs
 
@@ -168,7 +147,7 @@ def run_dataset(dataset_name: str, configs: list[dict], args: argparse.Namespace
         partition_name="default",
         batch_size=64,
         return_val=True,
-        image_size=args.image_size,
+        image_size=IMAGE_SIZE,
         interpolation="bilinear",
     )
     num_channels = train_dataset[0]["image"].shape[0]
@@ -264,16 +243,6 @@ def run_dataset(dataset_name: str, configs: list[dict], args: argparse.Namespace
 def main() -> None:
     """Entry point."""
     parser = argparse.ArgumentParser(description="LBFGS vs Adam linear-probing speed test")
-    parser.add_argument(
-        "--dataset",
-        "--datasets",
-        dest="datasets",
-        nargs="+",
-        default=DEFAULT_DATASETS,
-        help=(
-            f"Dataset name(s), space- or comma-separated (default: {', '.join(DEFAULT_DATASETS)})."
-        ),
-    )
     parser.add_argument("--device", default="cuda:0", help="PyTorch device.")
     parser.add_argument(
         "--output-dir",
@@ -281,45 +250,23 @@ def main() -> None:
         help="Output directory (one CSV per dataset).",
     )
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--image-size", type=int, default=224)
-    parser.add_argument(
-        "--c-values",
-        default=None,
-        help=(
-            "Comma-separated C values for both solvers "
-            f"(default: {','.join(repr(c) for c in DEFAULT_C_VALUES)})."
-        ),
-    )
-    parser.add_argument(
-        "--adam-lrs",
-        default=None,
-        help=(
-            "Comma-separated learning rates for the Adam branch "
-            f"(default: {','.join(repr(lr) for lr in DEFAULT_ADAM_LRS)})."
-        ),
-    )
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-    dataset_names = parse_dataset_names(args.datasets)
-    if not dataset_names:
-        raise ValueError("Provide at least one dataset name via --dataset.")
 
-    c_values = parse_float_list(args.c_values, DEFAULT_C_VALUES)
-    adam_lrs = parse_float_list(args.adam_lrs, DEFAULT_ADAM_LRS)
-    configs = build_configs(c_values, adam_lrs)
+    configs = build_configs()
     logger.info(
         "Configs per (model, dataset): %d LBFGS + %d Adam = %d total",
-        len(c_values),
-        len(c_values) * len(adam_lrs),
+        len(C_VALUES),
+        len(C_VALUES) * len(ADAM_LRS),
         len(configs),
     )
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-    logger.info("Running LBFGS-vs-Adam sweep on datasets: %s", ", ".join(dataset_names))
+    logger.info("Running LBFGS-vs-Adam sweep on datasets: %s", ", ".join(DATASETS))
 
-    output_paths = [run_dataset(name, configs, args) for name in dataset_names]
+    output_paths = [run_dataset(name, configs, args) for name in DATASETS]
     logger.info("Finished sweeps: %s", ", ".join(output_paths))
 
 

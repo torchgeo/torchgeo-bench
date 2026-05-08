@@ -6,9 +6,8 @@ regularization strength ``C`` of :class:`torchgeo_bench.linear.LogisticRegressio
 and records train/val/test accuracy for each ``C`` value.
 
 Usage:
-    python experiments/run_c_sweep_experiment.py --dataset m-eurosat
-    python experiments/run_c_sweep_experiment.py --dataset m-so2sat --device cuda:3
-    python experiments/run_c_sweep_experiment.py --dataset m-eurosat,m-forestnet
+    python experiments/run_c_sweep_experiment.py
+    python experiments/run_c_sweep_experiment.py --device cuda:3
 """
 
 import argparse
@@ -27,6 +26,9 @@ from torchgeo_bench.utils import extract_features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
+IMAGE_SIZE = 224
 
 MODEL_CONFIGS = {
     "resnet18": {
@@ -81,17 +83,6 @@ def instantiate_model(model_cfg: dict, num_channels: int) -> torch.nn.Module:
     kwargs = {k: v for k, v in model_cfg.items() if k not in ("_target_", "name")}
     kwargs["num_channels"] = num_channels
     return cls(**kwargs)
-
-
-def parse_dataset_names(raw_names: list[str]) -> list[str]:
-    """Parse comma- and space-separated dataset name lists."""
-    out: list[str] = []
-    for raw in raw_names:
-        for name in raw.split(","):
-            clean = name.strip()
-            if clean and clean not in out:
-                out.append(clean)
-    return out
 
 
 def run_c_sweep(
@@ -171,7 +162,7 @@ def run_dataset_sweep(dataset_name: str, args: argparse.Namespace) -> str:
         partition_name="default",
         batch_size=64,
         return_val=True,
-        image_size=args.image_size,
+        image_size=IMAGE_SIZE,
         interpolation="bilinear",
     )
     num_channels = train_dataset[0]["image"].shape[0]
@@ -226,14 +217,6 @@ def run_dataset_sweep(dataset_name: str, args: argparse.Namespace) -> str:
 def main() -> None:
     """Entry point."""
     parser = argparse.ArgumentParser(description="C-sweep for linear probing")
-    parser.add_argument(
-        "--dataset",
-        "--datasets",
-        dest="datasets",
-        nargs="+",
-        default=["m-eurosat"],
-        help="Dataset name(s), space- or comma-separated (default: m-eurosat).",
-    )
     parser.add_argument("--device", default="cuda:0", help="PyTorch device.")
     parser.add_argument(
         "--output-dir",
@@ -241,19 +224,15 @@ def main() -> None:
         help="Output directory.",
     )
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--image-size", type=int, default=224)
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-    dataset_names = parse_dataset_names(args.datasets)
-    if not dataset_names:
-        raise ValueError("Provide at least one dataset name via --dataset.")
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-    logger.info("Running C sweep for datasets: %s", ", ".join(dataset_names))
+    logger.info("Running C sweep for datasets: %s", ", ".join(DATASETS))
 
-    output_paths = [run_dataset_sweep(name, args) for name in dataset_names]
+    output_paths = [run_dataset_sweep(name, args) for name in DATASETS]
     logger.info("Finished C sweeps: %s", ", ".join(output_paths))
 
 
