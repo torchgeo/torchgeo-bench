@@ -93,14 +93,17 @@ class _TerraTorchBench(BenchModel):
 PRITHVI_BANDS: list[str] = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
 
 
-_PRITHVI_V1_MEAN = [775.0, 1081.0, 1229.0, 2497.0, 2204.0, 1611.0]
-_PRITHVI_V1_STD = [1282.0, 1270.0, 1399.0, 1368.0, 1292.0, 1155.0]
-_PRITHVI_V2_MEAN = [1087.0, 1342.0, 1433.0, 2734.0, 1958.0, 1363.0]
-_PRITHVI_V2_STD = [2248.0, 2179.0, 2178.0, 1850.0, 1242.0, 1049.0]
-
-
 class TerraTorchPrithviBench(_TerraTorchBench):
-    """IBM/NASA Prithvi-EO v1/v2 — auto-maps dataset bands onto 6 HLS slots @ 224."""
+    """IBM/NASA Prithvi-EO v1/v2 — auto-maps dataset bands onto 6 HLS slots @ 224.
+
+    ``expected_input_unit = S2_DN``: under ``model_native`` the wrapper
+    rescales the input to S2 DN scale before band-mapping.  Per-version
+    pretraining mean/std are deliberately *not* applied here — they
+    correspond to the post-mapped 6-band layout, while strategy
+    normalisation runs on the dataset's raw channel count.  The BandSpec
+    z-score (default) and minmax strategies compose cleanly with the
+    band-mapping zero-fill that follows.
+    """
 
     expected_input_unit = InputUnit.S2_DN
 
@@ -114,9 +117,6 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         **kwargs: Any,
     ) -> None:
         self.backbone_name = backbone_name
-        # `model_native` normalisation needs the right mean/std for this version.
-        self.pretrain_mean = _PRITHVI_V1_MEAN if "v1" in backbone_name else _PRITHVI_V2_MEAN
-        self.pretrain_std = _PRITHVI_V1_STD if "v1" in backbone_name else _PRITHVI_V2_STD
         super().__init__(
             bands=bands,
             target_size=target_size,
