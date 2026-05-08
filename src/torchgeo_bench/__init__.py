@@ -7,7 +7,7 @@ from .main import bootstrap_map, evaluate_knn, evaluate_logistic
 try:
     __version__ = version("torchgeo-bench")
 except PackageNotFoundError:  # editable / pre-install fallback
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
 __author__ = "torchgeo-bench contributors"
 

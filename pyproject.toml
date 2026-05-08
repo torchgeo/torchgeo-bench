@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.11.6,<0.12" ]
 
 [project]
 name = "torchgeo-bench"
-version = "0.2.0"
+version = "0.2.1"
 description = "Lightweight benchmarking framework for geospatial models"
 readme = "README.md"
 keywords = [
