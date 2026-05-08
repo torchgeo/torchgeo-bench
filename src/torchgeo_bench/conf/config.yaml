@@ -57,10 +57,10 @@ eval:
 
 check:
   output: "overfit_check_results.csv"
-  overfit_n_batches: 4
-  overfit_steps: 200
+  overfit_n_batches: 2
+  overfit_steps: 600
   overfit_threshold: 0.95
-  overfit_lr: 1e-3
+  overfit_lr: 3e-4
 
 hydra:
   run:
