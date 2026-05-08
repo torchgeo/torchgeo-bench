@@ -84,10 +84,10 @@ optional-dependencies.viz = [
   "matplotlib>=3.5",
   "pillow>=9",
 ]
-urls.Documentation = "https://github.com/calebrob6/torchgeo-bench/blob/main/README.md"
-urls.Homepage = "https://github.com/calebrob6/torchgeo-bench"
-urls.Issues = "https://github.com/calebrob6/torchgeo-bench/issues"
-urls.Repository = "https://github.com/calebrob6/torchgeo-bench"
+urls.Documentation = "https://torchgeo-bench.readthedocs.io/"
+urls.Homepage = "https://github.com/torchgeo/torchgeo-bench"
+urls.Issues = "https://github.com/torchgeo/torchgeo-bench/issues"
+urls.Repository = "https://github.com/torchgeo/torchgeo-bench"
 scripts.torchgeo-bench = "torchgeo_bench.cli:main"
 
 [tool.hatch]
