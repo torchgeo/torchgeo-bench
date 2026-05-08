@@ -33,7 +33,7 @@ def build_jobs() -> list[Job]:
 
                 overrides = [
                     "model=timm/resnet18",
-                    f"model.input_normalization={norm}",
+                    f"++model.input_normalization={norm}",
                     "dataset.names=[m-eurosat]",
                     f"dataset.image_size={size}",
                     "eval.merge_val=false",
