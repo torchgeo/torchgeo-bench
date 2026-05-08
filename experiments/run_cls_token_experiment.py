@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 """CLS-token vs spatial-average sweep for ViT/DeiT models.
 
-Ported from ``scripts/run_cls_token_experiment.sh``. Each ViT/DeiT model is
-evaluated twice per dataset — once with ``model.use_cls_token=false``
-(spatial average) and once with ``model.use_cls_token=true`` (CLS token).
-Swin models are excluded (no CLS token). Results land in
-``results/cls_token_experiment.csv``.
+Each ViT/DeiT model is evaluated twice per dataset — once with
+``model.use_cls_token=false`` (spatial average) and once with
+``model.use_cls_token=true`` (CLS token). Swin models are excluded (no CLS
+token). Results land in ``results/cls_token_experiment.csv``.
 
 Usage:
     python experiments/run_cls_token_experiment.py

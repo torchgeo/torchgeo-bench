@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 """Sweep resnet18 on m-eurosat varying normalization, image size, and interpolation.
 
-Ported from ``scripts/run_eurosat_effect_of_input_choices.sh``. Results land in
-``results/eurosat_effect_of_experimental_setting.csv``.
+Results land in ``results/eurosat_effect_of_experimental_setting.csv``.
 
 Usage:
     python experiments/run_resize_and_normalization_experiment.py

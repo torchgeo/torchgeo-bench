@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Run every benchmark model across every dataset (or chosen subsets).
 
-Ported from ``scripts/run_full_benchmark.py``. Each model is one job; the
-job evaluates that model across all datasets specified by ``--datasets``
-(default ``all``). Results land in ``results/all_results.csv``.
+Each model is one job; the job evaluates that model across all datasets
+specified by ``--datasets`` (default ``all``). Results land in
+``results/all_results.csv``.
 
 Usage:
     python experiments/run_main_experiments.py
