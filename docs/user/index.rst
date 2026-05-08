@@ -11,9 +11,12 @@ and models, and interpreting the results.
    installation
    quickstart
    datasets
+   models
    configuration
    results-format
+   methodology
    segmentation-layers
    contributing
+   troubleshooting
    glossary
    changelog
