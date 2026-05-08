@@ -8,4 +8,3 @@ weights_member: SENTINEL2_MI_RGB_SATLAS
 auto_resize: false
 target_size: 224
 name: tgeo_resnet152_s2rgb_satlas_mi
-normalization: none

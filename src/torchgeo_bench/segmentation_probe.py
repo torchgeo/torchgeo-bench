@@ -352,7 +352,7 @@ class SegmentationProbe(nn.Module):
         if self.freeze_backbone:
             self.backbone.eval()
             use_amp = x.device.type == "cuda"
-            with torch.no_grad(), torch.autocast(device_type="cuda", enabled=use_amp):
+            with torch.no_grad(), torch.autocast(device_type=x.device.type, enabled=use_amp):
                 _ = self.backbone(x)
         else:
             _ = self.backbone(x)

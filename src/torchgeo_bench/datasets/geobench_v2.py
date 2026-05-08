@@ -132,7 +132,7 @@ class _V2Dataset(BenchDataset):
 
     def build_band_order(self, bands: tuple[str, ...] | None) -> object:
         """Translate canonical band names into the upstream loader's shape."""
-        specs = self._select_band_specs(bands)
+        specs = self.select_band_specs(bands)
         if self.band_order_strategy == "by_sensor":
             grouped: dict[str, list[str]] = {}
             for spec in specs:

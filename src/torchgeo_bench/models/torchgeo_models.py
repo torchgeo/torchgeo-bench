@@ -26,6 +26,9 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchgeo.models as tgm
+from torchvision.transforms import Normalize as NormalizeV1
+from torchvision.transforms.v2 import Normalize as NormalizeV2
 
 from torchgeo_bench.datasets.base import BandSpec
 
@@ -36,8 +39,6 @@ logger = logging.getLogger(__name__)
 
 def _resolve_torchgeo_factory(factory_name: str):
     """Return the model-factory function from ``torchgeo.models``."""
-    import torchgeo.models as tgm
-
     fn = getattr(tgm, factory_name, None)
     if fn is None:
         raise ValueError(f"torchgeo.models has no factory function '{factory_name}'")
@@ -46,8 +47,6 @@ def _resolve_torchgeo_factory(factory_name: str):
 
 def _resolve_torchgeo_weights(weights_class_name: str, weights_member: str):
     """Return the concrete weights enum member."""
-    import torchgeo.models as tgm
-
     cls = getattr(tgm, weights_class_name, None)
     if cls is None:
         raise ValueError(f"torchgeo.models has no weights class '{weights_class_name}'")
@@ -76,13 +75,6 @@ def _extract_normalize_transforms(weights) -> nn.Sequential | None:
     transform = weights.transforms
     if callable(transform) and not isinstance(transform, nn.Module):
         transform = transform()
-
-    from torchvision.transforms import Normalize as NormalizeV1
-
-    try:
-        from torchvision.transforms.v2 import Normalize as NormalizeV2
-    except ImportError:
-        NormalizeV2 = NormalizeV1  # type: ignore[misc,assignment]
 
     norms = [t for t in transform if isinstance(t, (NormalizeV1, NormalizeV2))]
     if not norms:

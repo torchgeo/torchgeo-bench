@@ -24,11 +24,6 @@ Models whose backbones do their own normalization (e.g. OlmoEarth) override
 normalization strategy (ImageNet-style for pretrained RGB CNNs, weights-bound
 ``Normalize`` transforms for torchgeo wrappers, etc.) override
 :meth:`normalize_inputs` with their own policy.
-
-Why the template-method pattern?  An earlier version of this contract had
-each subclass call ``self.normalize_inputs(x)`` from inside its forward
-method, which was easy to forget.  Sealing the public method makes
-forgetting structurally impossible.
 """
 
 from abc import ABC, abstractmethod

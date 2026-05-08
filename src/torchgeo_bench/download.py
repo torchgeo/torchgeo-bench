@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
+from torchgeo.datasets import EuroSAT
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -106,8 +107,6 @@ def download_geobench_v2(output_dir: Path, datasets: list[str] | None = None) ->
 
 def download_eurosat(output_dir: Path) -> None:
     """Download torchgeo's EuroSAT into ``output_dir/eurosat`` for all splits."""
-    from torchgeo.datasets import EuroSAT
-
     target = Path(output_dir) / "eurosat"
     target.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading torchgeo EuroSAT -> %s", target)

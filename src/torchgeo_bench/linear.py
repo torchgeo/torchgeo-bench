@@ -143,10 +143,9 @@ class LogisticRegression:
             self.classes_ = np.arange(n_classes)
         else:
             y_tensor = y.to(self.device, dtype=torch.long, non_blocking=True).contiguous()
-            # Encode classes to 0..K-1 and keep mapping
             unique_classes, y_inv = torch.unique(y_tensor, sorted=True, return_inverse=True)
             self.classes_ = unique_classes.detach().cpu().numpy()
-            y_tensor = y_inv  # already long on device
+            y_tensor = y_inv
             n_classes = unique_classes.numel()
 
         if n_samples != y_tensor.shape[0]:

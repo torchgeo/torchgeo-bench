@@ -57,7 +57,6 @@ class SegmentationSolver:
         self.lr_scheduler_type = lr_scheduler
 
         self.ignore_index = ignore_index
-        # parameters can either be heads for linear probe or projectors + head for conv_block probe
         self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=lr,

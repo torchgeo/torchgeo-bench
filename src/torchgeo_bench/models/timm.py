@@ -27,23 +27,17 @@ class TimmPatchBenchModel(BenchModel):
         global_pool: Global pooling strategy for timm headless models.
         use_cls_token: For ViT-family models, use the CLS token instead of
             averaging spatial tokens.
-        auto_resize / target_size: If ``auto_resize=True``, bilinearly
-            resize each batch to a square ``target_size`` (auto-inferred
-            from ``backbone.default_cfg["input_size"]`` when not given).
-        input_normalization: How to normalize raw inputs before the
-            backbone:
-
-            - ``"bands_zscore"`` (default): per-channel z-score using
-              ``BandSpec.{mean, std}``.  Correct for raw remote-sensing
-              data of any channel count.
-            - ``"imagenet"``: ``(images / scale - mean) / std`` with
-              ImageNet RGB stats.  Only safe for true 0-255 RGB inputs;
-              pair with ``scale=255``.
-            - ``"timm_default"``: same shape as ``"imagenet"`` but reads
-              ``backbone.default_cfg["mean"]/["std"]`` (which may differ
-              for non-ImageNet pretrained timm models).  Refuses to
-              instantiate when ``len(bands) != 3``.
-            - ``"none"``: identity.
+        auto_resize: If ``True``, bilinearly resize each batch to ``target_size``.
+        target_size: Square target size; auto-inferred from
+            ``backbone.default_cfg["input_size"]`` when not given.
+        input_normalization: One of ``"bands_zscore"`` (default; per-channel
+            z-score using :class:`BandSpec` statistics — correct for raw
+            remote-sensing data of any channel count), ``"imagenet"``
+            (``(images / scale - mean) / std`` with ImageNet RGB stats; only
+            safe for true 0-255 RGB inputs — pair with ``scale=255``),
+            ``"timm_default"`` (same shape as ``"imagenet"`` but reads
+            ``backbone.default_cfg["mean"]/["std"]``; refuses to instantiate
+            when ``len(bands) != 3``), or ``"none"`` (identity).
         scale: Divisor applied before subtracting ``mean`` for
             ``"imagenet"``/``"timm_default"`` modes.  Defaults to ``1.0``
             but most pretrained models want ``255.0``.

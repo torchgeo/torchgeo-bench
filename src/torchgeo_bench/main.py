@@ -31,6 +31,7 @@ from torchgeo_bench.segmentation_probe import (
     SegmentationProbe,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
+from torchgeo_bench.segmentation_viz import save_segmentation_viz
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
@@ -720,7 +721,7 @@ def main(cfg: DictConfig) -> None:
             if cfg.dataset.bands in ("all", None)
             else tuple(cfg.dataset.bands)
         )
-        bands_list = bench_for_bands._select_band_specs(bands_resolved)
+        bands_list = bench_for_bands.select_band_specs(bands_resolved)
         assert len(bands_list) == num_channels, (
             f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
             f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
@@ -802,8 +803,6 @@ def main(cfg: DictConfig) -> None:
                 ).to_row()
             )
             if save_viz and preds is not None:
-                from torchgeo_bench.segmentation_viz import save_segmentation_viz
-
                 rgb_indices = ds_cls().rgb_indices or [0, 1, 2]
                 # Collect images and GT masks from test_loader (cheap pass, no backbone)
                 test_imgs, test_gts = [], []

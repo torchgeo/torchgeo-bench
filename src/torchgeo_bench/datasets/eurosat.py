@@ -67,7 +67,7 @@ class EuroSAT(BenchDataset):
     ) -> Dataset:
         """Return a :class:`torchgeo.datasets.EuroSAT` for the given split."""
         del partition, normalize
-        band_codes = tuple(spec.source_name for spec in self._select_band_specs(bands))
+        band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
         return TGEuroSAT(
             root=str(self.data_root()),
             split=split,

@@ -9,4 +9,3 @@ wavelengths: [0.665, 0.56, 0.49]
 auto_resize: true
 target_size: 224
 name: tgeo_dofa_large
-normalization: none

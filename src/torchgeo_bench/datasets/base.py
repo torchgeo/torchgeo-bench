@@ -101,7 +101,7 @@ class BenchDataset(ABC):
         wrappers it is the dataset's own root (e.g. ``data/eurosat``).
         """
 
-    def _select_band_specs(self, bands: Iterable[str] | None) -> list[BandSpec]:
+    def select_band_specs(self, bands: Iterable[str] | None) -> list[BandSpec]:
         """Return the :class:`BandSpec` entries matching *bands*.
 
         Preserves the order given by *bands*. Raises ``ValueError`` if any

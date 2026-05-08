@@ -8,4 +8,3 @@ weights_member: SENTINEL2_RGB_SECO
 auto_resize: false
 target_size: 224
 name: tgeo_resnet18_s2rgb_seco
-normalization: none

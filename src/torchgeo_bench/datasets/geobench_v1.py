@@ -233,7 +233,7 @@ class _V1Dataset(BenchDataset):
     ) -> Dataset:
         """Return a :class:`GeoBenchv1` for the given split (raw values)."""
         v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split  # type: ignore[assignment]
-        source_bands = tuple(spec.source_name for spec in self._select_band_specs(bands))
+        source_bands = tuple(spec.source_name for spec in self.select_band_specs(bands))
         return GeoBenchv1(
             root=self.data_root(),
             dataset_name=self.name,

@@ -8,4 +8,3 @@ weights_member: NAIP_RGB_SI_SATLAS
 auto_resize: true
 target_size: 256
 name: tgeo_swinv2b_naip_satlas_si
-normalization: none

@@ -8,7 +8,6 @@ weights_member: SENTINEL2_MI_RGB_SATLAS
 auto_resize: true
 target_size: 256
 name: tgeo_swinv2b_s2rgb_satlas_mi
-normalization: none
 eval:
   segmentation:
     # SwinV2-B: 4 stages via backbone.features[1,3,5,7] (patch merging at 0,2,4,6).
