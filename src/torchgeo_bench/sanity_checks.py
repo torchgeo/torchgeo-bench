@@ -14,7 +14,9 @@ from torchgeo_bench.segmentation_probe import GPUTensorCache, SegmentationProbe
 logger = logging.getLogger(__name__)
 
 
-def _build_fresh_head(probe: SegmentationProbe, num_classes: int, hidden_dim: int = 256) -> nn.Module:
+def _build_fresh_head(
+    probe: SegmentationProbe, num_classes: int, hidden_dim: int = 256
+) -> nn.Module:
     """Instantiate a new head of the same type as probe.head with fresh weights."""
     channels_list = probe.channels_list
     head_type = probe.head_type
@@ -109,7 +111,9 @@ def run_overfit_check(
     n_samples = stored_masks.shape[0]
 
     unique_labels = int(stored_masks[stored_masks != ignore_index].unique().numel())
-    feature_norm = float(torch.stack([f.norm(dim=1).mean() for f in gpu_cache.layer_tensors]).mean().item())
+    feature_norm = float(
+        torch.stack([f.norm(dim=1).mean() for f in gpu_cache.layer_tensors]).mean().item()
+    )
     feature_std = float(torch.stack([f.std() for f in gpu_cache.layer_tensors]).mean().item())
 
     # --- Build fresh head ---

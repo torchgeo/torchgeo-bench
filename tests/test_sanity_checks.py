@@ -14,9 +14,17 @@ BATCH_SIZE = 4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 REQUIRED_KEYS = {
-    "passed", "achieved_miou", "threshold", "n_batches", "steps",
-    "batch_size", "unique_labels", "feature_norm", "feature_std",
-    "initial_loss", "loss_delta",
+    "passed",
+    "achieved_miou",
+    "threshold",
+    "n_batches",
+    "steps",
+    "batch_size",
+    "unique_labels",
+    "feature_norm",
+    "feature_std",
+    "initial_loss",
+    "loss_delta",
 }
 
 
@@ -31,7 +39,9 @@ class SimpleBackbone(nn.Module):
     def __init__(self):
         super().__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(3, 16, kernel_size=3, padding=1, stride=2), nn.ReLU())
-        self.layer2 = nn.Sequential(nn.Conv2d(16, 32, kernel_size=3, padding=1, stride=2), nn.ReLU())
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=3, padding=1, stride=2), nn.ReLU()
+        )
         # Fix layer1 weights so channel 0 → feature channels, making features
         # class-discriminative even with no gradient updates on the backbone.
         with torch.no_grad():
@@ -106,12 +116,14 @@ def _make_probe(backbone, head_type="linear"):
 
 @pytest.fixture
 def check_cfg():
-    return OmegaConf.create({
-        "overfit_n_batches": 2,
-        "overfit_steps": 300,
-        "overfit_threshold": 0.5,
-        "overfit_lr": 1e-2,
-    })
+    return OmegaConf.create(
+        {
+            "overfit_n_batches": 2,
+            "overfit_steps": 300,
+            "overfit_threshold": 0.5,
+            "overfit_lr": 1e-2,
+        }
+    )
 
 
 def test_overfit_check_passes_with_functional_encoder(check_cfg):
@@ -194,7 +206,9 @@ def test_overfit_check_empty_loader(check_cfg):
     probe = _make_probe(backbone)
 
     # Empty DataLoader
-    dataset = TensorDataset(torch.empty(0, 3, IMG_SIZE, IMG_SIZE), torch.empty(0, IMG_SIZE, IMG_SIZE, dtype=torch.long))
+    dataset = TensorDataset(
+        torch.empty(0, 3, IMG_SIZE, IMG_SIZE), torch.empty(0, IMG_SIZE, IMG_SIZE, dtype=torch.long)
+    )
     loader = DataLoader(dataset, batch_size=4)
 
     result = run_overfit_check(

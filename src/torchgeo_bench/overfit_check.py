@@ -134,7 +134,9 @@ def overfit_check(cfg: DictConfig) -> None:
     df = pd.DataFrame(results)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     df.to_csv(output_path, index=False)
-    logger.info(f"Overfit check complete: {n_pass}/{n_total} passed. Results written to {output_path}")
+    logger.info(
+        f"Overfit check complete: {n_pass}/{n_total} passed. Results written to {output_path}"
+    )
 
 
 if __name__ == "__main__":
