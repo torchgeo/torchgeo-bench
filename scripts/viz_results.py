@@ -665,7 +665,7 @@ function renderCompare(data) {
       }
     });
     return {
-      type: "scattergl", mode: "markers",
+      type: "scatter", mode: "markers",
       x: xs, y: ys, text, hovertemplate: "%{text}<extra></extra>",
       name: ds, marker: { color: colorMap[ds], size: 7, opacity: 0.85, line: { width: 0.5, color: "#262a33" } },
     };
@@ -679,8 +679,18 @@ function renderCompare(data) {
 
   Plotly.react("chart-compare", traces, {
     ...PLOTLY_LAYOUT_BASE, height: 580,
-    xaxis: { ...PLOTLY_LAYOUT_BASE.xaxis, title: { text: "KNN-5 accuracy", font: { size: 11 } }, range: [0, 1.02] },
-    yaxis: { ...PLOTLY_LAYOUT_BASE.yaxis, title: { text: "Linear probe accuracy", font: { size: 11 } }, range: [0, 1.02], scaleanchor: "x", scaleratio: 1 },
+    xaxis: {
+      ...PLOTLY_LAYOUT_BASE.xaxis,
+      type: "linear",
+      title: { text: "KNN-5 accuracy", font: { size: 11 } },
+      range: [0, 1.02], dtick: 0.1, tickformat: ".2f",
+    },
+    yaxis: {
+      ...PLOTLY_LAYOUT_BASE.yaxis,
+      type: "linear",
+      title: { text: "Linear probe accuracy", font: { size: 11 } },
+      range: [0, 1.02], dtick: 0.1, tickformat: ".2f",
+    },
     legend: { bgcolor: "#fff1e5", bordercolor: "#b3a9a0", borderwidth: 1, font: { family: "Inter, sans-serif" } },
   }, PLOTLY_CONFIG);
 }
