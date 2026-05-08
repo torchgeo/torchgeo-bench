@@ -64,6 +64,7 @@ torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
 Results are appended to `results/all_results.csv`. Re-run with `resume=true`
 to skip already-completed rows.
 
+<!-- skip-on-docs-landing-start -->
 ## Learn more
 
 - **[Documentation](https://torchgeo.org/torchgeo-bench/)** — full
@@ -72,6 +73,7 @@ to skip already-completed rows.
   workflow, and troubleshooting.
 - **[AGENTS.md](https://github.com/torchgeo/torchgeo-bench/blob/main/AGENTS.md)**
   — contributor guide and house style.
+<!-- skip-on-docs-landing-end -->
 
 ## Citation
 
