@@ -69,6 +69,7 @@ nitpick_ignore = [
     ("py:class", "RCF"),
     ("py:class", "EvaluationResult"),
     ("py:class", "BandSpec"),
+    ("py:class", "GeoBenchv2"),
     ("py:class", "Single-label"),
     ("py:class", "auto_resize /"),
     ("py:class", "FeatureFusionBlock"),
