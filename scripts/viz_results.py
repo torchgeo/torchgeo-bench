@@ -576,8 +576,12 @@ function renderLeaderboard(data) {
   });
   const cols = Math.min(datasets.length, 2);
   const rows = Math.ceil(datasets.length / cols);
+  // Drop the base `xaxis`/`yaxis` from the spread so they don't alias `xaxis1`
+  // / `yaxis1` (Plotly treats `xaxisN` and `xaxis` as the same axis when N=1,
+  // and the unstyled base would otherwise win for the first subplot).
+  const { xaxis: _bx, yaxis: _by, ...layoutBase } = PLOTLY_LAYOUT_BASE;
   const layout = {
-    ...PLOTLY_LAYOUT_BASE,
+    ...layoutBase,
     height: rows * 380 + 80,
     showlegend: false,
     grid: { rows, columns: cols, pattern: "independent" },
@@ -626,8 +630,12 @@ function renderScatter(data) {
   });
   const cols = facetBy ? Math.min(facets.length, 3) : 1;
   const rows = facetBy ? Math.ceil(facets.length / cols) : 1;
+  // See renderLeaderboard — strip the base xaxis/yaxis to avoid aliasing the
+  // first subplot's xaxis1 / yaxis1 (the first scatter facet was inheriting
+  // unstyled base axes and rendering with categorical-looking ticks).
+  const { xaxis: _bx, yaxis: _by, ...layoutBase } = PLOTLY_LAYOUT_BASE;
   const layout = {
-    ...PLOTLY_LAYOUT_BASE,
+    ...layoutBase,
     height: rows * 360 + 80,
     grid: { rows, columns: cols, pattern: "independent" },
     legend: { bgcolor: "#fff1e5", bordercolor: "#b3a9a0", borderwidth: 1, font: { family: "Inter, sans-serif" } },
