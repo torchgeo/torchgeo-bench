@@ -53,9 +53,11 @@ eval:
     # Hyperparameter search (Optuna TPE). Requires: pip install torchgeo-bench[hpo]
     hparam_search: false       # set true to enable Bayesian HPO sweep
     n_trials: 10               # number of Optuna trials
+    hpo_epochs: 5              # training epochs per trial
     lr_min: 1e-5               # lower bound for LR (log-uniform)
     lr_max: 1e-2               # upper bound for LR
-    batch_sizes: [16, 32, 64]  # candidate batch sizes
+    wd_min: 1e-6               # lower bound for weight decay (log-uniform)
+    wd_max: 1e-1               # upper bound for weight decay
     # Visualization (opt-in)
     save_viz: false            # set true to save prediction grids and confusion matrices
     viz_dir: "viz"             # root output directory for visualizations

@@ -16,10 +16,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
-<<<<<<< HEAD
-=======
 from torchgeo.datasets.errors import DatasetNotFoundError
->>>>>>> main
 from tqdm import tqdm
 
 from torchgeo_bench.datasets import (
@@ -32,18 +29,11 @@ from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.segmentation_probe import (
-<<<<<<< HEAD
     CachedFeaturesDataset,
-    GPUTensorCache,
-    SegmentationProbe,
-)
-from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
-=======
     SegmentationProbe,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
 from torchgeo_bench.segmentation_viz import save_segmentation_viz
->>>>>>> main
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
@@ -170,7 +160,7 @@ class EvaluationResult:
     feature_dim: int
     best_c: float | None
     best_lr: float | None
-    best_batch_size: int | None
+    best_weight_decay: float | None
     n_train: int
     n_val: int
     n_test: int
@@ -391,6 +381,7 @@ def _build_seg_probe_and_solver(
     eval_cfg: DictConfig,
     device: torch.device,
     lr: float,
+    weight_decay: float = 0.0,
 ) -> tuple[SegmentationProbe, SegmentationSolver]:
     """Instantiate a fresh SegmentationProbe and SegmentationSolver.
 
@@ -416,6 +407,7 @@ def _build_seg_probe_and_solver(
         model=probe,
         num_classes=num_classes,
         lr=lr,
+        weight_decay=weight_decay,
         device=str(device),
         criterion=criterion,
         lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
@@ -471,7 +463,7 @@ def evaluate_intrinsic_dim(
                     feature_dim=feature_dim,
                     best_c=None,
                     best_lr=None,
-                    best_batch_size=None,
+                    best_weight_decay=None,
                     n_train=n_counts.get("train", 0),
                     n_val=n_counts.get("val", 0),
                     n_test=n_counts.get("test", 0),
@@ -489,7 +481,7 @@ def evaluate_segmentation(
     num_classes: int,
     device: torch.device,
     collect_preds: bool = False,
-) -> "tuple[SegMetrics, int, float | None, int | None, torch.Tensor | None]":
+) -> "tuple[SegMetrics, int, float | None, float | None, torch.Tensor | None]":
     """Evaluate segmentation performance using a frozen-backbone segmentation probe.
 
     Trains a lightweight segmentation head on top of the frozen backbone and
@@ -507,7 +499,8 @@ def evaluate_segmentation(
         collect_preds: If True, collect and return test predictions as (N, H, W) tensor.
 
     Returns:
-        Tuple of (metrics_dict, feature_dim, None, None, preds_or_None).
+        Tuple of (metrics_dict, feature_dim, best_lr, best_weight_decay, preds_or_None).
+        ``best_lr`` and ``best_weight_decay`` are None when HPO is disabled.
         ``preds_or_None`` is None when collect_preds is False.
     """
     # Merge model-specific eval config if present
@@ -523,25 +516,52 @@ def evaluate_segmentation(
     cache_dtype_str = seg_cfg.get("cache_dtype", "float16")
     cache_dtype = torch.float16 if cache_dtype_str == "float16" else torch.float32
 
-    probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr)
+    probe, solver = _build_seg_probe_and_solver(
+        model, num_classes, eval_cfg, device, seg_cfg.lr,
+        weight_decay=seg_cfg.get("weight_decay", 0.0),
+    )
     if use_cache and probe.freeze_backbone:
-        logger.info("Caching backbone features for train and val splits...")
+        logger.info("Caching backbone features for train, val, and test splits...")
         train_cache = probe.extract_segmentation_features(train_loader, cache_dtype=cache_dtype)
         val_cache = probe.extract_segmentation_features(val_loader, cache_dtype=cache_dtype)
         test_cache = probe.extract_segmentation_features(test_loader, cache_dtype=cache_dtype)
-        solver.fit_cached(
-            train_cache=train_cache,
-            val_cache=val_cache,
-            batch_size=seg_cfg.get("batch_size", 64),
-            epochs=epochs,
-            verbose=cfg.verbose,
-        )
+
+        if seg_cfg.get("hparam_search", False):
+            from torchgeo_bench.hpo import find_best_hparams
+
+            logger.info("Running HPO to find best LR and weight decay...")
+            best_hparams = find_best_hparams(
+                model, train_cache, val_cache, num_classes, eval_cfg, device
+            )
+            best_lr = best_hparams["lr"]
+            best_wd = best_hparams["weight_decay"]
+            probe, solver = _build_seg_probe_and_solver(
+                model, num_classes, eval_cfg, device, lr=best_lr, weight_decay=best_wd
+            )
+            train_val_cache = CachedFeaturesDataset.merge(train_cache, val_cache)
+            solver.fit_cached(
+                train_val_cache,
+                batch_size=seg_cfg.get("batch_size", 64),
+                epochs=epochs,
+                verbose=cfg.verbose,
+            )
+        else:
+            best_lr, best_wd = None, None
+            solver.fit_cached(
+                train_cache=train_cache,
+                val_cache=val_cache,
+                batch_size=seg_cfg.get("batch_size", 64),
+                epochs=epochs,
+                verbose=cfg.verbose,
+            )
+
         eval_result = solver.evaluate_cached(
             test_cache,
             batch_size=seg_cfg.get("batch_size", 64),
             collect_preds=collect_preds,
         )
     else:
+        best_lr, best_wd = None, None
         solver.fit(
             train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose
         )
@@ -551,7 +571,7 @@ def evaluate_segmentation(
         metrics, preds = eval_result
     else:
         metrics, preds = eval_result, None
-    return metrics, sum(probe.channels_list), None, None, preds
+    return metrics, sum(probe.channels_list), best_lr, best_wd, preds
 
 
 # ---------------------------------------------------------------------------
@@ -783,7 +803,7 @@ def main(cfg: DictConfig) -> None:
                 cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
             ).segmentation
             save_viz = seg_cfg_merged.get("save_viz", False)
-            metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
+            metrics, feat_dim, best_lr, best_wd, preds = evaluate_segmentation(
                 model,
                 train_loader,
                 val_loader,
@@ -804,7 +824,7 @@ def main(cfg: DictConfig) -> None:
                     feature_dim=feat_dim,
                     best_c=None,
                     best_lr=best_lr,
-                    best_batch_size=best_bs,
+                    best_weight_decay=best_wd,
                     n_train=len(train_dataset),
                     n_val=len(val_loader.dataset),
                     n_test=len(test_loader.dataset),
@@ -888,7 +908,7 @@ def main(cfg: DictConfig) -> None:
                         feature_dim=feature_dim,
                         best_c=None,
                         best_lr=None,
-                        best_batch_size=None,
+                        best_weight_decay=None,
                         n_train=len(x_train),
                         n_val=len(x_val),
                         n_test=len(x_test),
@@ -921,7 +941,7 @@ def main(cfg: DictConfig) -> None:
                         feature_dim=feature_dim,
                         best_c=best_c,
                         best_lr=None,
-                        best_batch_size=None,
+                        best_weight_decay=None,
                         n_train=len(x_train),
                         n_val=len(x_val),
                         n_test=len(x_test),

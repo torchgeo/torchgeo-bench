@@ -1,10 +1,5 @@
 """Visualization utilities for segmentation probe evaluation."""
 
-<<<<<<< HEAD
-from __future__ import annotations
-
-=======
->>>>>>> main
 import logging
 import os
 
