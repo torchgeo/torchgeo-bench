@@ -65,9 +65,12 @@ MODEL_CONFIGS = {
     },
 }
 
-# Mirrors the main pipeline's c_range default (small, focused grid).
-C_VALUES = [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0]
-ADAM_LRS = [1e-3, 1e-2, 1e-1, 1.0]
+# Wider grid than the original (1e-3..100) to make sure we bracket each
+# (model, dataset)'s optimum on both ends.
+C_VALUES = [1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1000.0]
+# Wider Adam LR grid (1e-5..3.0) — the original (1e-3..1.0) saturated at the
+# boundary in 5 of 10 (model, dataset) cells, so we need to extend both ends.
+ADAM_LRS = [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1.0, 3.0]
 
 # Match main.py's linear-probe call (LogisticRegression(C=c, max_iter=2000, tol=1e-6)).
 MAX_ITER = 2000
