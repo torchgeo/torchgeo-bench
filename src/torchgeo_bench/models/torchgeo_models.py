@@ -57,6 +57,54 @@ def _resolve_torchgeo_weights(weights_class_name: str, weights_member: str):
     return member
 
 
+def _adapt_first_conv(model: nn.Module, attr_path: str, in_chans: int) -> None:
+    """Adapt ``model.<attr_path>`` (a ``Conv2d``) to ``in_chans`` input channels.
+
+    Reuses :func:`timm.models._manipulate.adapt_input_conv` when possible
+    (RGB-pretrained -> arbitrary in_chans).  For other shapes (e.g. 13ch
+    MoCo-MSI -> 3ch RGB) timm raises NotImplementedError; fall back to
+    averaging the pretrained weight to one channel and replicating with a
+    ``3 / in_chans`` scale to preserve activation magnitude.
+    """
+    from timm.models._manipulate import adapt_input_conv
+
+    parts = attr_path.split(".")
+    parent = model
+    for p in parts[:-1]:
+        parent = getattr(parent, p)
+    conv = getattr(parent, parts[-1])
+    if conv.in_channels == in_chans:
+        return
+
+    try:
+        new_weight = adapt_input_conv(in_chans, conv.weight.data)
+    except NotImplementedError:
+        new_weight = None
+    if new_weight is None or new_weight.shape[1] != in_chans:
+        # Fallback: average pretrained weight to a single channel then
+        # replicate, scaling by the original-to-target channel ratio so
+        # the post-conv activation magnitude is preserved.
+        avg = conv.weight.data.float().mean(dim=1, keepdim=True)
+        new_weight = avg.expand(-1, in_chans, -1, -1).contiguous()
+        new_weight = new_weight * (conv.in_channels / float(in_chans))
+        new_weight = new_weight.to(conv.weight.dtype)
+
+    new_conv = nn.Conv2d(
+        in_channels=in_chans,
+        out_channels=conv.out_channels,
+        kernel_size=conv.kernel_size,
+        stride=conv.stride,
+        padding=conv.padding,
+        dilation=conv.dilation,
+        groups=conv.groups,
+        bias=conv.bias is not None,
+    )
+    new_conv.weight.data.copy_(new_weight)
+    if conv.bias is not None:
+        new_conv.bias.data.copy_(conv.bias.data)
+    setattr(parent, parts[-1], new_conv)
+
+
 def _auto_resize(images: torch.Tensor, target_size: int) -> torch.Tensor:
     h, w = images.shape[-2], images.shape[-1]
     if h != target_size or w != target_size:
@@ -217,8 +265,13 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         self.backbone.fc = nn.Identity()
+        # Adapt input conv to dataset channel count via timm's averaging /
+        # replication of pretrained weights.  Lets a 13-band MoCo-MSI run
+        # on 3-band RGB or 18-band S1+S2 stacks without crashing.
+        _adapt_first_conv(self.backbone, "conv1", len(bands))
 
     @torch.no_grad()
     def _forward_patch_features(

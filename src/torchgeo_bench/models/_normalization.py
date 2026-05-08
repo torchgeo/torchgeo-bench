@@ -44,9 +44,7 @@ class NormalizationStrategy(StrEnum):
 def _bandspec_mean_std(bands: list[BandSpec]) -> tuple[torch.Tensor, torch.Tensor]:
     n = len(bands)
     mean = torch.tensor([b.mean for b in bands], dtype=torch.float32).view(1, n, 1, 1)
-    std = (
-        torch.tensor([b.std for b in bands], dtype=torch.float32).view(1, n, 1, 1).clamp_min(1e-8)
-    )
+    std = torch.tensor([b.std for b in bands], dtype=torch.float32).view(1, n, 1, 1).clamp_min(1e-8)
     return mean, std
 
 
@@ -119,8 +117,10 @@ def build_normalizer(
 
     n = len(pretrain_mean)
     pm = torch.tensor(pretrain_mean, dtype=torch.float32).view(1, n, 1, 1)
-    ps = torch.tensor(pretrain_std or [1.0] * n, dtype=torch.float32).view(1, n, 1, 1).clamp_min(
-        1e-8
+    ps = (
+        torch.tensor(pretrain_std or [1.0] * n, dtype=torch.float32)
+        .view(1, n, 1, 1)
+        .clamp_min(1e-8)
     )
 
     def _f(x: torch.Tensor) -> torch.Tensor:
