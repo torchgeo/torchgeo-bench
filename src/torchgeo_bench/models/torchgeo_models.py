@@ -244,6 +244,7 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
     """
 
     weights_input_unit = "s2_dn_div10000"
+    expected_input_unit = InputUnit.S2_DN
 
     def __init__(
         self,
