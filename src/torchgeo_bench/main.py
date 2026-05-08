@@ -517,7 +517,11 @@ def evaluate_segmentation(
     cache_dtype = torch.float16 if cache_dtype_str == "float16" else torch.float32
 
     probe, solver = _build_seg_probe_and_solver(
-        model, num_classes, eval_cfg, device, seg_cfg.lr,
+        model,
+        num_classes,
+        eval_cfg,
+        device,
+        seg_cfg.lr,
         weight_decay=seg_cfg.get("weight_decay", 0.0),
     )
     if use_cache and probe.freeze_backbone:

@@ -65,15 +65,15 @@ optional-dependencies.dev = [
   "pytest-cov>=4.1",
   "ruff>=0.0.270",
 ]
-optional-dependencies.hpo = [
-  "optuna>=3",
-]
 optional-dependencies.docs = [
   "linkify-it-py>=2",
   "myst-parser>=2",
   "pydata-sphinx-theme>=0.15",
   "sphinx>=7",
   "sphinx-copybutton>=0.5",
+]
+optional-dependencies.hpo = [
+  "optuna>=3",
 ]
 optional-dependencies.id = [
   "torchid>=0.3; python_version>='3.13'",
