@@ -234,12 +234,12 @@ class FeatureFusionBlock(nn.Module):
 
 
 class DPTHead(nn.Module):
-    """DPT-style decoder head (adapted from probe3d — mbanani/probe3d, single-view).
+    """DPT-style decoder head (adapted from probe3d at mbanani/probe3d, single-view).
 
     Requires exactly **4** feature layers in **coarse-to-fine order** (same
     convention as FPN, e.g. ``["layer4", "layer3", "layer2", "layer1"]`` for
     ResNet). The forward pass processes features from coarsest to finest
-    through a cascade of :class:`FeatureFusionBlock`s.
+    through a cascade of :class:`FeatureFusionBlock` modules.
 
     Upsampling chain (mirroring probe3d):
       1. 1×1 project each map to ``hidden_dim``
