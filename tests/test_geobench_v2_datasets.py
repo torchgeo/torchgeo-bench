@@ -177,3 +177,148 @@ class TestV2Loading:
                 bo = call.kwargs["band_order"]
                 assert isinstance(bo, list), bo
                 assert bo == ["B04", "B03", "B02"], bo
+
+
+class MockKuroSiwo:
+    """Stand-in for ``geobench_v2.datasets.GeoBenchKuroSiwo``.
+
+    Mirrors the real upstream loader's *unstacked* output shape: a per-modality
+    dict containing ``image_pre_1`` / ``image_pre_2`` / ``image_post`` for SAR
+    (gated by ``time_step``) and ``image_dem`` for DEM, plus ``mask`` and
+    ``invalid_data``. Each tensor is 3-D ``(C, H, W)``.
+
+    Channel counts come from ``band_order`` (a ``dict[modality, list[str]]``),
+    which is what the wrapper's ``band_order_strategy = "by_sensor"`` produces.
+    """
+
+    def __init__(
+        self,
+        root,
+        split,
+        *,
+        band_order=None,
+        time_step=("pre_1", "pre_2", "post"),
+        transforms=None,
+        return_stacked_image=False,
+        **kwargs,
+    ):
+        del kwargs
+        self.root = root
+        self.split = split
+        self.band_order = band_order or {}
+        self.time_step = list(time_step)
+        self.transforms = transforms
+        self.return_stacked_image = return_stacked_image
+        self.h, self.w = 16, 16
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, idx):
+        del idx
+        sample: dict[str, torch.Tensor] = {
+            "invalid_data": torch.ones(1, self.h, self.w, dtype=torch.long),
+            "mask": torch.zeros(self.h, self.w, dtype=torch.long),
+        }
+        if "sar" in self.band_order:
+            sar_c = len(self.band_order["sar"])
+            for ts in self.time_step:
+                sample[f"image_{ts}"] = torch.ones(sar_c, self.h, self.w) * float(
+                    {"pre_1": 1.0, "pre_2": 2.0, "post": 3.0}[ts]
+                )
+        if "dem" in self.band_order:
+            sample["image_dem"] = torch.full((len(self.band_order["dem"]), self.h, self.w), 99.0)
+        if self.transforms is not None:
+            sample = self.transforms(sample)
+        return sample
+
+
+class TestKuroSiwoCanonicalization:
+    """Verify the kuro_siwo wrapper folds per-modality keys into a 3-D image."""
+
+    @pytest.fixture
+    def mocked_kuro_siwo(self):
+        with patch(
+            "geobench_v2.datasets.GeoBenchKuroSiwo",
+            MagicMock(side_effect=MockKuroSiwo),
+        ) as mocked:
+            yield mocked
+
+    @pytest.mark.parametrize(
+        "bands,expected_channels",
+        [
+            (("vv", "vh"), 2),
+            (("vv",), 1),
+            (("dem",), 1),
+            (("vv", "dem"), 2),
+            (("vv", "vh", "dem"), 3),
+            (None, 3),  # all bands
+        ],
+    )
+    def test_image_is_3d_with_correct_channel_count(
+        self, mocked_kuro_siwo, bands, expected_channels
+    ):
+        """For every band selection the canonical image must be ``(C, H, W)``."""
+        bench = get_bench_dataset_class("kuro_siwo")()
+        ds = bench.get_dataset("train", bands=bands)
+        sample = ds[0]
+        assert "image" in sample
+        img = sample["image"]
+        assert img.dim() == 3, f"expected 3-D image, got shape {tuple(img.shape)} for bands={bands}"
+        assert img.shape[0] == expected_channels, (
+            f"expected {expected_channels} channels, got {img.shape[0]} for bands={bands}"
+        )
+
+        for stale in ("image_pre_1", "image_pre_2", "image_post", "image_dem"):
+            assert stale not in sample, f"per-modality key {stale!r} should be folded into 'image'"
+
+        assert mocked_kuro_siwo.called
+
+    def test_uses_post_event_sar_only(self, mocked_kuro_siwo):
+        """The wrapper must request ``time_step=['post']`` from upstream."""
+        bench = get_bench_dataset_class("kuro_siwo")()
+        bench.get_dataset("train", bands=("vv", "vh"))
+        for call in mocked_kuro_siwo.call_args_list:
+            assert call.kwargs["time_step"] == ["post"], call.kwargs
+
+    def test_does_not_request_stacked_image(self, mocked_kuro_siwo):
+        """The wrapper must NOT request upstream's broken stacking path."""
+        bench = get_bench_dataset_class("kuro_siwo")()
+        bench.get_dataset("train", bands=None)
+        for call in mocked_kuro_siwo.call_args_list:
+            assert call.kwargs.get("return_stacked_image", False) is False, call.kwargs
+
+    def test_dem_concatenated_after_sar(self, mocked_kuro_siwo):
+        """When both SAR and DEM are requested, DEM lives in the trailing channels."""
+        del mocked_kuro_siwo  # only used to install the mock
+        bench = get_bench_dataset_class("kuro_siwo")()
+        ds = bench.get_dataset("train", bands=("vv", "vh", "dem"))
+        img = ds[0]["image"]
+        # MockKuroSiwo paints SAR-post with 3.0 and DEM with 99.0
+        assert torch.allclose(img[:2], torch.full_like(img[:2], 3.0))
+        assert torch.allclose(img[2:], torch.full_like(img[2:], 99.0))
+
+
+@pytest.mark.slow
+class TestKuroSiwoLive:
+    """Smoke tests against real Kuro Siwo data (skipped if the dataset is missing)."""
+
+    @pytest.mark.parametrize(
+        "bands,expected_channels",
+        [
+            (("vv", "vh"), 2),
+            (None, 3),  # all bands: vv, vh, dem
+            (("vv", "dem"), 2),
+        ],
+    )
+    def test_real_sample_is_3d(self, geobench_v2_root, bands, expected_channels):
+        """Loading real kuro_siwo data must yield a 3-D image with the expected channels."""
+        del geobench_v2_root
+        bench = get_bench_dataset_class("kuro_siwo")()
+        ds = bench.get_dataset("train", bands=bands)
+        sample = ds[0]
+        img = sample["image"]
+        assert img.dim() == 3, f"expected 3-D, got shape {tuple(img.shape)}"
+        assert img.shape[0] == expected_channels, (
+            f"expected {expected_channels} channels, got {img.shape[0]}"
+        )
