@@ -874,9 +874,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv", type=Path, help="Path to the results CSV.")
     parser.add_argument("html", type=Path, help="Output HTML file path.")
-    parser.add_argument(
-        "--title", default=None, help="Page title (defaults to the CSV filename)."
-    )
+    parser.add_argument("--title", default=None, help="Page title (defaults to the CSV filename).")
     parser.add_argument(
         "--headline",
         default=None,
@@ -910,16 +908,13 @@ def main() -> int:
     if "metric_value" in df and len(df):
         best_idx = df["metric_value"].idxmax()
         best = df.loc[best_idx]
-        best_name = str(best.get("name", "—"))
         best_dataset = str(best.get("dataset", "—"))
         best_acc = float(best["metric_value"])
     else:
-        best_name = best_dataset = "—"
+        best_dataset = "—"
         best_acc = float("nan")
 
-    headline = args.headline or (
-        f"How {n_models} frozen backbones perform on GeoBench"
-    )
+    headline = args.headline or (f"How {n_models} frozen backbones perform on GeoBench")
     if args.standfirst:
         standfirst = args.standfirst
     else:
