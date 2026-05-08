@@ -622,7 +622,11 @@ def main(cfg: DictConfig) -> None:
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     all_rows: list[dict] = []
-    c_start, c_stop, c_num = cfg.eval.c_range
+    model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
+    if model_eval is not None and model_eval.get("c_range", None) is not None:
+        c_start, c_stop, c_num = model_eval.c_range
+    else:
+        c_start, c_stop, c_num = cfg.eval.c_range
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
 
@@ -693,6 +697,7 @@ def main(cfg: DictConfig) -> None:
                 dataset_name=ds_name,
                 partition_name=cfg.dataset.partition,
                 batch_size=cfg.dataset.batch_size,
+                num_workers=int(cfg.dataset.get("num_workers", 8)),
                 return_val=True,
                 image_size=getattr(cfg.dataset, "image_size", None),
                 interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),

@@ -75,8 +75,13 @@ def _extract_normalize_transforms(weights) -> nn.Sequential | None:
     transform = weights.transforms
     if callable(transform) and not isinstance(transform, nn.Module):
         transform = transform()
-
-    norms = [t for t in transform if isinstance(t, (NormalizeV1, NormalizeV2))]
+    if isinstance(transform, nn.Identity):
+        return None
+    try:
+        iterator = iter(transform)
+    except TypeError:
+        return None
+    norms = [t for t in iterator if isinstance(t, (NormalizeV1, NormalizeV2))]
     if not norms:
         return None
     return nn.Sequential(*norms)
@@ -422,3 +427,112 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
+
+
+_CROMA_S2_12 = [
+    "coastal",
+    "blue",
+    "green",
+    "red",
+    "rededge1",
+    "rededge2",
+    "rededge3",
+    "nir",
+    "nir_narrow",
+    "watervapor",
+    "swir1",
+    "swir2",
+]
+
+
+class TorchGeoCromaBench(_TorchGeoBackboneBench):
+    """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``."""
+
+    weights_input_unit = "s2_dn_div10000"
+
+    def __init__(
+        self,
+        bands: list[BandSpec],
+        *,
+        factory: str = "croma_base",
+        weights_class: str = "CROMABase_Weights",
+        weights_member: str = "CROMA_VIT",
+        auto_resize: bool = True,
+        target_size: int | None = 120,
+        input_unit_check: str = "warn",
+        **_kwargs: Any,
+    ) -> None:
+        super().__init__(
+            bands=bands,
+            factory=factory,
+            weights_class=weights_class,
+            weights_member=weights_member,
+            auto_resize=auto_resize,
+            target_size=target_size,
+            input_unit_check=input_unit_check,
+        )
+
+    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
+        """Divide raw S2 DN by 10000 to match pretraining reflectance scale."""
+        return images / 10000.0
+
+    @torch.no_grad()
+    def _forward_patch_features(
+        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        # Bypass CROMA.forward — its joint branch references `sar_encodings`
+        # even when only the optical modality is provided.
+        from ._band_mapping import map_to_model_bands
+
+        del bboxes
+        if self.auto_resize and self.target_size:
+            images = _auto_resize(images, self.target_size)
+        x_opt, _ = map_to_model_bands(images, self.bands, _CROMA_S2_12)
+        encodings = self.backbone.s2_encoder(imgs=x_opt, attn_bias=self.backbone.attn_bias)
+        return self.backbone.s2_GAP_FFN(encodings.mean(dim=1))
+
+
+class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
+    """Panopticon ViT-B/14 — per-channel wavelength tokens (nm) from BandSpec."""
+
+    weights_input_unit = "s2_dn_div10000"
+
+    def __init__(
+        self,
+        bands: list[BandSpec],
+        *,
+        factory: str = "panopticon_vitb14",
+        weights_class: str = "Panopticon_Weights",
+        weights_member: str = "VIT_BASE14",
+        auto_resize: bool = True,
+        target_size: int | None = 224,
+        input_unit_check: str = "warn",
+        **_kwargs: Any,
+    ) -> None:
+        super().__init__(
+            bands=bands,
+            factory=factory,
+            weights_class=weights_class,
+            weights_member=weights_member,
+            auto_resize=auto_resize,
+            target_size=target_size,
+            input_unit_check=input_unit_check,
+        )
+        from ._band_mapping import wavelengths_um
+
+        wls_nm = [w * 1000.0 for w in wavelengths_um(bands, default_um=0.6)]
+        self.register_buffer("_chn_ids", torch.tensor(wls_nm, dtype=torch.float32))
+
+    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
+        """Divide raw S2 DN by 10000 to match pretraining reflectance scale."""
+        return images / 10000.0
+
+    @torch.no_grad()
+    def _forward_patch_features(
+        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        del bboxes
+        if self.auto_resize and self.target_size:
+            images = _auto_resize(images, self.target_size)
+        chn_ids = self._chn_ids.unsqueeze(0).expand(images.shape[0], -1)
+        return self.backbone({"imgs": images, "chn_ids": chn_ids})

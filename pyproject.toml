@@ -45,7 +45,7 @@ dependencies = [
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
-  "torchgeo>=0.8",
+  "torchgeo @ git+https://github.com/microsoft/torchgeo.git@e585e2c07f7a",
   "torchvision>=0.15",
   "tqdm>=4.65",
 ]
@@ -54,6 +54,7 @@ optional-dependencies.all = [
   "torchgeo-bench[docs]",
   "torchgeo-bench[id]",
   "torchgeo-bench[sam3]",
+  "torchgeo-bench[terratorch]",
   "torchgeo-bench[viz]",
 ]
 optional-dependencies.dev = [
@@ -79,6 +80,9 @@ optional-dependencies.olmoearth = [
 ]
 optional-dependencies.sam3 = [
   "transformers>=4.50",
+]
+optional-dependencies.terratorch = [
+  "terratorch>=1",
 ]
 optional-dependencies.viz = [
   "matplotlib>=3.5",
