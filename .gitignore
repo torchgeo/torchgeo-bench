@@ -2,6 +2,7 @@ paper/
 results/
 scripts/*
 !scripts/viz_results.py
+figures/
 
 # Python
 __pycache__/
