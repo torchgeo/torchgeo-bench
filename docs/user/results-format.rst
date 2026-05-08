@@ -6,6 +6,36 @@ All evaluation runs append rows to a single CSV file (default
 :class:`~torchgeo_bench.main.EvaluationResult` describing a single
 ``(dataset, method, model, config)`` measurement.
 
+Sample rows
+-----------
+
+.. code-block:: text
+
+   dataset,method,metric_name,metric_value,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model,name,normalization,image_size,interpolation,partition,bands
+   m-eurosat,knn5,accuracy,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,raw,224,bilinear,default,rgb
+   m-eurosat,linear,accuracy,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,raw,224,bilinear,default,rgb
+   burn_scars,seg-fpn,mIoU,0.6234,0.0,0.0,768,,1000,200,300,0,torchgeo_bench.models.TimmPatchBenchModel,resnet50,raw,224,bilinear,default,rgb
+
+The ``normalization`` column is currently always ``raw`` — datasets emit
+unnormalized tensors and each model wrapper applies its own
+normalization inside :meth:`~torchgeo_bench.models.BenchModel.normalize_inputs`.
+The column is preserved in the schema so older results from before that
+refactor remain distinguishable on resume.
+
+Method values
+-------------
+
+================== ==================================================================================
+``method``         Meaning
+================== ==================================================================================
+``knn5``           KNN-5 classification (multilabel KNN for ``m-bigearthnet``).
+``linear``         L-BFGS logistic regression with C-sweep on the validation set.
+``intrinsic_dim``  Optional intrinsic-dimension metrics on extracted embeddings (requires
+                   the ``[id]`` extra and ``eval.intrinsic_dim.enabled=true``).
+``seg-<head>``     Segmentation probe with the configured head (``linear`` / ``conv_block`` /
+                   ``fpn`` / ``dpt``).
+================== ==================================================================================
+
 CSV schema
 ----------
 

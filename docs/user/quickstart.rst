@@ -14,22 +14,19 @@ Prerequisites
 Download data
 -------------
 
-GeoBench V1 (default) lives under ``data/geobench-1.0/``:
+Datasets always live under ``./data/`` relative to the current working
+directory (paths are fixed — there are no ``GEOBENCH_ROOT`` environment
+variables).  The bundled downloader fetches each family by name:
 
 .. code-block:: console
 
-   $ torchgeo-bench download
-   $ # or just one V1 family by editing the script — V1 currently downloads as a bundle.
-
-GeoBench V2 datasets can be selected individually:
-
-.. code-block:: console
-
-   $ torchgeo-bench download --version v2 --datasets m_eurosat
+   $ torchgeo-bench download geobench_v1                       # all V1 classification datasets
+   $ torchgeo-bench download geobench_v2                       # default V2 set (cls + seg)
+   $ torchgeo-bench download geobench_v2 --datasets m_eurosat,burn_scars
+   $ torchgeo-bench download eurosat                           # torchgeo's EuroSAT mirror
 
 See :doc:`datasets` for the full list of supported names and the
-``GEOBENCH_ROOT`` / ``GEOBENCH_V2_ROOT`` environment variables that
-override the default location.
+canonical destination subdirectories.
 
 Run a benchmark
 ---------------

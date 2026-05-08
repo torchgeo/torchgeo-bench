@@ -63,4 +63,4 @@ Extra             Pulls in
 ================  ==============================================================
 
 Datasets are not installed by these extras — see :doc:`datasets` for how to
-download GeoBench V1 / V2.
+download GeoBench V1 / V2 with the bundled ``torchgeo-bench download`` command.
