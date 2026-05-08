@@ -56,7 +56,7 @@ def run_overfit_check(
         ignore_index: Label value to ignore in loss and metrics.
 
     Returns:
-        Dict with keys: passed, achieved_miou, threshold, n_batches, steps.
+        dict with keys ``passed``, ``achieved_miou``, ``threshold``, ``n_batches``, ``steps``.
     """
     n_batches: int = int(check_cfg.get("overfit_n_batches", 2))
     steps: int = int(check_cfg.get("overfit_steps", 200))
