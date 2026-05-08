@@ -101,10 +101,10 @@ current working directory (no env vars, no overrides — keep it simple).
 `m-eurosat`, `m-forestnet`, `m-so2sat`, `m-pv4ger`, `m-brick-kiln`, `m-bigearthnet`
 
 ### GeoBench V2 (Classification)
-`benv2`, `treesatai`, `so2sat`, `forestnet`, `caffe`
+`benv2`, `treesatai`, `so2sat`, `forestnet`
 
 ### GeoBench V2 (Segmentation)
-`burn_scars`, `cloudsen12`, `dynamic_earthnet`, `flair2`, `fotw`, `kuro_siwo`, `pastis`, `spacenet2`, `spacenet7`
+`burn_scars`, `caffe`, `cloudsen12`, `dynamic_earthnet`, `flair2`, `fotw`, `kuro_siwo`, `pastis`, `spacenet2`, `spacenet7`
 
 ### torchgeo template
 `eurosat` (loads via `torchgeo.datasets.EuroSAT`)

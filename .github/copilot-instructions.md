@@ -118,11 +118,11 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
      `m-so2sat` (17, sentinel-2 + SAR, 18 bands), `m-pv4ger` (2, aerial RGB),
      `m-brick-kiln` (2), and `m-bigearthnet` (43, `multilabel=True`).
    - V2 classification: `benv2` (19, S2+SAR), `treesatai` (13, aerial+S2+SAR,
-     19 bands), `so2sat` (17, S2+SAR), `forestnet` (12, S2 6-band), and
-     `caffe` (4, aerial grayscale).
-   - V2 segmentation: `burn_scars`, `cloudsen12`, `dynamic_earthnet`, `flair2`,
-     `fotw`, `kuro_siwo` (SAR vv/vh + DEM, no RGB), `pastis` (S2+SAR, 16
-     bands), `spacenet2` (WorldView 8-band + pan), `spacenet7`.
+     19 bands), `so2sat` (17, S2+SAR), and `forestnet` (12, S2 6-band).
+   - V2 segmentation: `burn_scars`, `caffe` (4, aerial grayscale),
+     `cloudsen12`, `dynamic_earthnet`, `flair2`, `fotw`, `kuro_siwo`
+     (SAR vv/vh + DEM, no RGB), `pastis` (S2+SAR, 16 bands), `spacenet2`
+     (WorldView 8-band + pan), `spacenet7`.
    - torchgeo template: `eurosat` (uses `torchgeo.datasets.EuroSAT`).
    - V1 vs V2 is decided by which family base class the wrapper inherits from
      (`_V1Dataset` vs `_V2Dataset`). `forestnet` exists in both

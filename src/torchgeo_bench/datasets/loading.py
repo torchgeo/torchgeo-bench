@@ -56,8 +56,8 @@ _REGISTRY: dict[str, type[BenchDataset]] = {
         TreeSatAI,
         So2Sat,
         Forestnet,
-        CaFFe,
         # V2 segmentation
+        CaFFe,
         BurnScars,
         CloudSEN12,
         DynamicEarthNet,
