@@ -58,7 +58,7 @@ class TimmPatchBenchModel(BenchModel):
         scale: float = 1.0,
         **_kwargs,
     ) -> None:
-        super().__init__(bands=bands)
+        super().__init__(bands=bands, **_kwargs)
 
         if input_normalization not in _VALID_INPUT_NORMALIZATIONS:
             raise ValueError(

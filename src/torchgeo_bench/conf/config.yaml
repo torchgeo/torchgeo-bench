@@ -18,6 +18,7 @@ dataset:
   partition: default
   batch_size: 64
   num_workers: 4              # set 0 to disable dataloader multiprocessing
+  normalization: bandspec_zscore   # bandspec_zscore | model_native | minmax | minmax_zscore | identity
   bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
   image_size: 224           # e.g., 224; if null, no resizing
   interpolation: bilinear     # bilinear | bicubic | nearest; used if image_size set

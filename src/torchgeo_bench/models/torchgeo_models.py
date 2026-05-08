@@ -32,6 +32,7 @@ from torchvision.transforms.v2 import Normalize as NormalizeV2
 
 from torchgeo_bench.datasets.base import BandSpec
 
+from ._input_units import InputUnit
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -153,9 +154,9 @@ class _TorchGeoBackboneBench(BenchModel):
         auto_resize: bool,
         target_size: int | None,
         input_unit_check: str = "warn",
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> None:
-        super().__init__(bands=bands)
+        super().__init__(bands=bands, **kwargs)
         weights = _resolve_torchgeo_weights(weights_class, weights_member)
         self.weights = weights
         self.backbone = self._load_backbone(weights, factory)
@@ -172,10 +173,10 @@ class _TorchGeoBackboneBench(BenchModel):
         return _resolve_torchgeo_factory(factory)(weights=weights)
 
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Apply the pretrained weights' ``Normalize`` layer (no extra z-score)."""
-        if self._weights_normalize is None:
-            return images
-        return self._weights_normalize(images)
+        """Use the weights-bound ``Normalize`` transform if present; else the parent strategy."""
+        if self._weights_normalize is not None:
+            return self._weights_normalize(images)
+        return super().normalize_inputs(images)
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +450,7 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
     """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``."""
 
     weights_input_unit = "s2_dn_div10000"
+    expected_input_unit = InputUnit.REFLECTANCE_0_1
 
     def __init__(
         self,
@@ -492,6 +494,7 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
     """Panopticon ViT-B/14 — per-channel wavelength tokens (nm) from BandSpec."""
 
     weights_input_unit = "s2_dn_div10000"
+    expected_input_unit = InputUnit.REFLECTANCE_0_1
 
     def __init__(
         self,

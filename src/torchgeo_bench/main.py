@@ -653,10 +653,9 @@ def main(cfg: DictConfig) -> None:
         logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
-    # Datasets always emit raw values; the model owns normalization.  The
-    # CSV column is kept for back-compat but pinned to a literal so old/new
-    # rows are clearly not comparable across the model-normalization refactor.
-    normalization = "raw"
+    # Selectable input-normalisation strategy; recorded in the CSV so
+    # ablations across strategies are distinguishable.
+    normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
@@ -746,7 +745,11 @@ def main(cfg: DictConfig) -> None:
             and str(cfg.model._target_).endswith("RCFBench")
             and str(cfg.model.mode) == "empirical"
         )
-        instantiate_kwargs: dict = {"bands": bands_list, "_convert_": "object"}
+        instantiate_kwargs: dict = {
+            "bands": bands_list,
+            "normalization": normalization,
+            "_convert_": "object",
+        }
         if is_rcf_empirical:
             instantiate_kwargs["dataset"] = train_dataset
         model: BenchModel = instantiate(cfg.model, **instantiate_kwargs)

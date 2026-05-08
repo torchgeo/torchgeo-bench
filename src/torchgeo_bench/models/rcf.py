@@ -268,7 +268,7 @@ class RCFBench(BenchModel):
         dataset: NonGeoDataset | None = None,
         **_kwargs,
     ) -> None:
-        super().__init__(bands=bands)
+        super().__init__(bands=bands, **_kwargs)
         if mode == "empirical" and dataset is not None:
             dataset = _NormalizingDatasetView(dataset, self.input_mean, self.input_std)
         self.rcf = RCF(

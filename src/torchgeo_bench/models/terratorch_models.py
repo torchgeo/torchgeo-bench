@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torchgeo_bench.datasets.base import BandSpec
 
 from ._band_mapping import map_to_model_bands
+from ._input_units import InputUnit
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,9 @@ class _TerraTorchBench(BenchModel):
         *,
         target_size: int | None = 224,
         backbone_kwargs: dict[str, Any] | None = None,
-        **_: Any,
+        **kwargs: Any,
     ) -> None:
-        super().__init__(bands=bands)
+        super().__init__(bands=bands, **kwargs)
         self.target_size = target_size
         self.backbone = _build_backbone(self.backbone_name, **(backbone_kwargs or {}))
         self.backbone.eval()
@@ -92,8 +93,16 @@ class _TerraTorchBench(BenchModel):
 PRITHVI_BANDS: list[str] = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
 
 
+_PRITHVI_V1_MEAN = [775.0, 1081.0, 1229.0, 2497.0, 2204.0, 1611.0]
+_PRITHVI_V1_STD = [1282.0, 1270.0, 1399.0, 1368.0, 1292.0, 1155.0]
+_PRITHVI_V2_MEAN = [1087.0, 1342.0, 1433.0, 2734.0, 1958.0, 1363.0]
+_PRITHVI_V2_STD = [2248.0, 2179.0, 2178.0, 1850.0, 1242.0, 1049.0]
+
+
 class TerraTorchPrithviBench(_TerraTorchBench):
     """IBM/NASA Prithvi-EO v1/v2 — auto-maps dataset bands onto 6 HLS slots @ 224."""
+
+    expected_input_unit = InputUnit.S2_DN
 
     def __init__(
         self,
@@ -102,13 +111,17 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         backbone_name: str = "prithvi_eo_v2_300",
         pretrained: bool = True,
         target_size: int | None = 224,
-        **_: Any,
+        **kwargs: Any,
     ) -> None:
         self.backbone_name = backbone_name
+        # `model_native` normalisation needs the right mean/std for this version.
+        self.pretrain_mean = _PRITHVI_V1_MEAN if "v1" in backbone_name else _PRITHVI_V2_MEAN
+        self.pretrain_std = _PRITHVI_V1_STD if "v1" in backbone_name else _PRITHVI_V2_STD
         super().__init__(
             bands=bands,
             target_size=target_size,
             backbone_kwargs={"pretrained": pretrained, "num_frames": 1},
+            **kwargs,
         )
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
@@ -123,6 +136,8 @@ _CLAY_WAVELENGTHS_UM: list[float] = [0.493, 0.560, 0.665, 0.842, 1.610, 2.190]
 class TerraTorchClayBench(_TerraTorchBench):
     """Clay v1.5 — 6 S2 bands @ 256, conditioned on per-band ``waves`` (µm) and ``gsd``."""
 
+    expected_input_unit = InputUnit.REFLECTANCE_0_1
+
     def __init__(
         self,
         bands: list[BandSpec],
@@ -132,13 +147,14 @@ class TerraTorchClayBench(_TerraTorchBench):
         target_size: int | None = 256,
         modality: str = "sentinel-2-l2a",  # noqa: ARG002 — kept for config back-compat
         gsd: float = 10.0,
-        **_: Any,
+        **kwargs: Any,
     ) -> None:
         self.backbone_name = backbone_name
         super().__init__(
             bands=bands,
             target_size=target_size,
             backbone_kwargs={"pretrained": pretrained},
+            **kwargs,
         )
         self.gsd = gsd
         self.register_buffer("_clay_waves", torch.tensor(_CLAY_WAVELENGTHS_UM, dtype=torch.float32))
@@ -175,6 +191,8 @@ TERRAMIND_S2L2A_BANDS: list[str] = [
 class TerraTorchTerraMindBench(_TerraTorchBench):
     """TerraMind v1 — takes ``{modality: (B, 12, H, W)}`` for fixed-channel S2L2A tokenizer."""
 
+    expected_input_unit = InputUnit.REFLECTANCE_0_1
+
     def __init__(
         self,
         bands: list[BandSpec],
@@ -183,13 +201,14 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         pretrained: bool = True,
         target_size: int | None = 224,
         modality: str = "S2L2A",
-        **_: Any,
+        **kwargs: Any,
     ) -> None:
         self.backbone_name = backbone_name
         super().__init__(
             bands=bands,
             target_size=target_size,
             backbone_kwargs={"pretrained": pretrained, "modalities": [modality]},
+            **kwargs,
         )
         self.modality = modality
 
