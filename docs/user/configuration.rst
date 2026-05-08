@@ -17,6 +17,27 @@ Hydra's dotted-path syntax:
        eval.skip_linear=true \
        device=cuda:1
 
+Config tree
+-----------
+
+The packaged config tree is shipped inside the wheel:
+
+.. code-block:: text
+
+   src/torchgeo_bench/conf/
+   ├── config.yaml          # primary config (defaults below)
+   └── model/
+       ├── rcf.yaml
+       ├── imagestats.yaml
+       ├── sam3_encoder.yaml
+       ├── olmoearth_{base,large}.yaml
+       ├── timm/
+       │   └── ...          # ResNet, ConvNeXt, EfficientNet, ViT/Swin/DeiT, ...
+       └── torchgeo/
+           └── ...          # SSL backbones, ScaleMAE, DOFA, Satlas, EarthLoc, ...
+
+See :doc:`models` for an operator-facing tour of the available presets.
+
 Top-level options
 -----------------
 

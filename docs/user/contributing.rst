@@ -9,14 +9,36 @@ same conventions).
 Environment
 -----------
 
+The repo's canonical workflow uses both `conda <https://docs.conda.io>`_
+and `uv <https://docs.astral.sh/uv/>`_:
+
 .. code-block:: console
 
    $ git clone https://github.com/torchgeo/torchgeo-bench.git
    $ cd torchgeo-bench
+   $ conda env update -n torchgeo-bench -f environment.yml
+   $ conda activate torchgeo-bench
    $ uv sync --extra dev
 
-The conda environment ``torchgeo-bench`` is also supported; activate it
-before running any tooling.
+If you'd rather skip conda, ``uv sync --extra dev`` alone is enough on
+any Python 3.12+ install.
+
+Makefile shortcuts
+------------------
+
+The top-level :file:`Makefile` provides convenient wrappers around the
+above:
+
+================ ===================================================
+Target           What it does
+================ ===================================================
+``make install`` Create / update the conda env and install ``[dev]``.
+``make sync``    Alias for ``install``.
+``make tests``   ``pytest`` (skips ``slow`` integration tests).
+``make lint``    ``pre-commit run --all-files``.
+``make format``  ``ruff format`` then ``ruff check --fix --select I``.
+``make clean``   Removes ``htmlcov``, ``.coverage``, ``.pytest_cache``.
+================ ===================================================
 
 Linting and formatting
 ----------------------
@@ -41,11 +63,11 @@ Tests
    $ uv run pytest                                  # all tests (skipping slow)
    $ uv run pytest -m slow                          # only slow integration tests
    $ uv run pytest tests/test_intrinsic_dim.py -v   # one file
+   $ uv run pytest -k "m-eurosat" -v                # by keyword
    $ uv run pytest --no-cov                         # disable coverage for speed
 
-Tests that depend on real GeoBench data look up ``GEOBENCH_ROOT`` and
-``GEOBENCH_V2_ROOT`` environment variables and skip cleanly if the data
-isn't present.
+Tests skip gracefully when ``data/`` is missing — they look up the
+canonical subdirs documented in :doc:`datasets`.
 
 Code style
 ----------
@@ -57,6 +79,8 @@ Code style
   annotations, or explicit imports for forward references.
 * Google-style docstrings (configured via ``ruff.lint.pydocstyle.convention``).
 * Use the ``logging`` module — no bare ``print`` calls.
+* No defensive ``try/except ImportError`` for hard dependencies — every
+  package in ``[project.dependencies]`` is guaranteed to be installed.
 
 Documentation
 -------------
@@ -68,3 +92,19 @@ This very site is built with Sphinx.  To build it locally:
    $ uv sync --extra docs
    $ cd docs && uv run make html
    $ open _build/html/index.html
+
+Releasing to PyPI
+-----------------
+
+1. Configure a `PyPI Trusted Publisher
+   <https://docs.pypi.org/trusted-publishers/>`_ for this repository
+   with environment name ``pypi``.
+2. Tag and push:
+
+   .. code-block:: console
+
+      $ git tag v0.2.0
+      $ git push origin v0.2.0
+
+The ``Publish to PyPI`` workflow (:file:`.github/workflows/release.yml`)
+builds and uploads the release automatically.
