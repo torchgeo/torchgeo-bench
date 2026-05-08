@@ -1,7 +1,6 @@
 """Benchmark script for torchgeo-bench."""
 
 import fcntl
-import gc
 import io
 import logging
 import os
@@ -391,6 +390,7 @@ def _build_seg_probe_and_solver(
         eval_cfg: Merged evaluation config with segmentation sub-config.
         device: Target device.
         lr: Learning rate for the solver optimizer.
+        weight_decay: L2 regularization for the solver optimizer.
 
     Returns:
         Tuple of (probe, solver).
