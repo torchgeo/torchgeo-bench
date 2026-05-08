@@ -62,7 +62,7 @@ def singlelabel_data():
 class TestKNNClassifierSingleLabel:
     def test_fit_predict_shapes(self, singlelabel_data):
         d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=5, device="cpu")
+        clf = KNNClassifier(n_neighbors=5)
         clf.fit(d["x_train"], d["y_train"])
 
         preds = clf.predict(d["x_test"])
@@ -71,7 +71,7 @@ class TestKNNClassifierSingleLabel:
 
     def test_predict_proba_shapes(self, singlelabel_data):
         d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=5, device="cpu")
+        clf = KNNClassifier(n_neighbors=5)
         clf.fit(d["x_train"], d["y_train"])
 
         probs = clf.predict_proba(d["x_test"])
@@ -80,7 +80,7 @@ class TestKNNClassifierSingleLabel:
 
     def test_multi_label_property_false(self, singlelabel_data):
         d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=5, device="cpu")
+        clf = KNNClassifier(n_neighbors=5)
         clf.fit(d["x_train"], d["y_train"])
         assert clf.multi_label is False
 
@@ -89,7 +89,7 @@ class TestKNNClassifierSingleLabel:
         rng = np.random.default_rng(0)
         X = rng.standard_normal((3, 8)).astype(np.float32)
         y = np.array([0, 1, 2], dtype=np.int64)
-        clf = KNNClassifier(n_neighbors=10, device="cpu")
+        clf = KNNClassifier(n_neighbors=10)
         clf.fit(X, y)
         preds = clf.predict(X)
         assert preds.shape == (3,)
@@ -98,7 +98,7 @@ class TestKNNClassifierSingleLabel:
 class TestKNNClassifierMultiLabel:
     def test_fit_predict_shapes(self, multilabel_data):
         d = multilabel_data
-        clf = KNNClassifier(n_neighbors=5, device="cpu")
+        clf = KNNClassifier(n_neighbors=5)
         clf.fit(d["x_train"], d["y_train"])
 
         preds = clf.predict(d["x_test"])
@@ -107,7 +107,7 @@ class TestKNNClassifierMultiLabel:
 
     def test_predict_proba_shapes(self, multilabel_data):
         d = multilabel_data
-        clf = KNNClassifier(n_neighbors=5, device="cpu")
+        clf = KNNClassifier(n_neighbors=5)
         clf.fit(d["x_train"], d["y_train"])
 
         probs = clf.predict_proba(d["x_test"])
@@ -116,7 +116,7 @@ class TestKNNClassifierMultiLabel:
 
     def test_multi_label_property_true(self, multilabel_data):
         d = multilabel_data
-        clf = KNNClassifier(n_neighbors=5, device="cpu")
+        clf = KNNClassifier(n_neighbors=5)
         clf.fit(d["x_train"], d["y_train"])
         assert clf.multi_label is True
 
@@ -225,7 +225,6 @@ class TestUnifiedEvaluateKNN:
             d["y_test"],
             seed=42,
             n_bootstrap=50,
-            device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
 
@@ -240,7 +239,6 @@ class TestUnifiedEvaluateKNN:
             d["y_test"],
             seed=42,
             n_bootstrap=50,
-            device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
 

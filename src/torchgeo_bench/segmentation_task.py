@@ -57,7 +57,6 @@ class SegmentationSolver:
         self.lr_scheduler_type = lr_scheduler
 
         self.ignore_index = ignore_index
-        # parameters can either be heads for linear probe or projectors + head for conv_block probe
         self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=lr,
@@ -155,7 +154,7 @@ class SegmentationSolver:
                     masks = masks.squeeze(1)
 
                 self.optimizer.zero_grad()
-                with torch.autocast(device_type="cuda", enabled=self.use_amp):
+                with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                     logits = self.model(images)
                     loss = self.criterion(logits, masks)
 
@@ -212,7 +211,7 @@ class SegmentationSolver:
                 masks = masks.squeeze(1)
             masks = masks.long()
 
-            with torch.autocast(device_type="cuda", enabled=self.use_amp):
+            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                 logits = self.model(images)
 
             for m in self._all_metrics:
@@ -252,7 +251,7 @@ class SegmentationSolver:
 
         Args:
             train_cache: Pre-extracted training features from
-                :meth:`SegmentationProbe.extract_all_features`.
+                :meth:`SegmentationProbe.extract_segmentation_features`.
             val_cache: Optional validation cache for per-epoch mIoU logging.
             batch_size: Batch size for iterating over cached data.
             epochs: Number of training epochs.
@@ -326,7 +325,7 @@ class SegmentationSolver:
 
         Args:
             cache: Pre-extracted features (output of
-                :meth:`SegmentationProbe.extract_all_features`).
+                :meth:`SegmentationProbe.extract_segmentation_features`).
             batch_size: Batch size for iterating over the cache.
             collect_preds: If True, also return predicted class maps (N, H, W) int64.
 

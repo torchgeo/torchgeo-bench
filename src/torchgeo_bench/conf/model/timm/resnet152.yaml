@@ -3,7 +3,6 @@
 # Model: resnet152
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: resnet152
 pretrained: true
 global_pool: avg

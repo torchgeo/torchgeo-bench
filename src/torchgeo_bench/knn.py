@@ -1,11 +1,12 @@
 """KNN classifier for torchgeo-bench.
 
 Unified k-nearest neighbors classifier supporting both single-label and
-multi-label classification using FAISS for efficient nearest-neighbor search.
+multi-label classification using FAISS (CPU) for efficient nearest-neighbor
+search.
 """
 
 import logging
-from typing import Any, Self
+from typing import Self
 
 # Suppress noisy INFO messages from faiss loader (AVX512/AVX2 fallback probing)
 logging.getLogger("faiss.loader").setLevel(logging.WARNING)
@@ -29,34 +30,15 @@ class KNNClassifier:
     Args:
         n_neighbors: Number of nearest neighbors (k). Clamped to ``min(k, n_train)``
             at predict time.
-        device: ``"cpu"`` or ``"cuda:<id>"`` for GPU-accelerated search.
     """
 
-    def __init__(self, n_neighbors: int = 5, device: str = "cpu") -> None:
+    def __init__(self, n_neighbors: int = 5) -> None:
         self.n_neighbors = n_neighbors
-        self.device = device
 
         self._index: faiss.Index | None = None
         self._y: np.ndarray | None = None
         self._multi_label: bool = False
         self._n_classes: int | None = None
-        self._gpu_res: Any | None = None
-
-    def _build_index(self, d: int) -> faiss.Index:
-        if self.device != "cpu" and self.device.startswith("cuda"):
-            if not all(
-                hasattr(faiss, attr) for attr in ("StandardGpuResources", "GpuIndexFlatConfig")
-            ):
-                logger.warning(
-                    "CUDA device requested but faiss GPU support is unavailable; using CPU."
-                )
-                return faiss.IndexFlatL2(d)
-            gpu_id = int(self.device.split(":")[-1]) if ":" in self.device else 0
-            self._gpu_res = faiss.StandardGpuResources()
-            config = faiss.GpuIndexFlatConfig()
-            config.device = gpu_id
-            return faiss.GpuIndexFlatL2(self._gpu_res, d, config)
-        return faiss.IndexFlatL2(d)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> Self:
         """Index training features and store labels.
@@ -66,10 +48,9 @@ class KNNClassifier:
             y: Labels — ``(n_samples,)`` for single-label or
                ``(n_samples, n_classes)`` for multi-label.
         """
-        X = np.atleast_2d(X).astype(np.float32)
-        X = np.ascontiguousarray(X)
+        X = np.ascontiguousarray(np.atleast_2d(X).astype(np.float32))
 
-        self._index = self._build_index(X.shape[1])
+        self._index = faiss.IndexFlatL2(X.shape[1])
         self._index.add(X)
 
         if y.ndim == 2:
@@ -91,8 +72,7 @@ class KNNClassifier:
     def _search(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Return (distances, indices) for k-nearest neighbors."""
         assert self._index is not None and self._y is not None, "Call fit() first."
-        X = np.atleast_2d(X).astype(np.float32)
-        X = np.ascontiguousarray(X)
+        X = np.ascontiguousarray(np.atleast_2d(X).astype(np.float32))
         k_eff = min(self.n_neighbors, self._index.ntotal)
         return self._index.search(X, k_eff)
 
@@ -110,14 +90,13 @@ class KNNClassifier:
             neighbor_labels = self._y[indices]  # (n_test, k, n_classes)
             scores = neighbor_labels.mean(axis=1)
             return (scores > 0.5).astype(np.int32)
-        else:
-            neighbor_labels = self._y[indices]  # (n_test, k)
-            counts = np.apply_along_axis(
-                lambda x: np.bincount(x, minlength=self._n_classes),
-                axis=1,
-                arr=neighbor_labels.astype(np.int16),
-            )
-            return np.argmax(counts, axis=1)
+        neighbor_labels = self._y[indices]  # (n_test, k)
+        counts = np.apply_along_axis(
+            lambda x: np.bincount(x, minlength=self._n_classes),
+            axis=1,
+            arr=neighbor_labels.astype(np.int16),
+        )
+        return np.argmax(counts, axis=1)
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Predict per-class probabilities for X.
@@ -133,19 +112,10 @@ class KNNClassifier:
         if self._multi_label:
             neighbor_labels = self._y[indices]
             return neighbor_labels.mean(axis=1)
-        else:
-            neighbor_labels = self._y[indices]
-            counts = np.apply_along_axis(
-                lambda x: np.bincount(x, minlength=self._n_classes),
-                axis=1,
-                arr=neighbor_labels.astype(np.int16),
-            )
-            return counts.astype(np.float32) / k_eff
-
-    def __del__(self) -> None:
-        if hasattr(self, "_index") and self._index is not None:
-            self._index.reset()
-            del self._index
-        if hasattr(self, "_gpu_res") and self._gpu_res is not None:
-            self._gpu_res.noTempMemory()
-            del self._gpu_res
+        neighbor_labels = self._y[indices]
+        counts = np.apply_along_axis(
+            lambda x: np.bincount(x, minlength=self._n_classes),
+            axis=1,
+            arr=neighbor_labels.astype(np.int16),
+        )
+        return counts.astype(np.float32) / k_eff

@@ -3,9 +3,12 @@
 # Model: regnetx_002
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: regnetx_002
 pretrained: true
 global_pool: avg
 seed: null
 name: regnetx_002
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    layers: ["s4", "s3", "s2", "s1"]
