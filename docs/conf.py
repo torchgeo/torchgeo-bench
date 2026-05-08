@@ -11,8 +11,9 @@ import os
 import sys
 
 # Make the src/ layout importable so autodoc can resolve the package without
-# requiring it to be installed (Read the Docs installs it via uv sync, but a
-# bare ``make html`` from a fresh checkout should still work).
+# requiring it to be installed (the GitHub Pages workflow installs the package
+# via 'uv sync --extra docs', but a bare 'make html' from a fresh checkout
+# should still work).
 sys.path.insert(0, os.path.abspath(os.path.join("..", "src")))
 
 import torchgeo_bench
@@ -95,9 +96,9 @@ nitpick_ignore = [
 ]
 
 # Modules whose entries are looked up via intersphinx — when intersphinx is
-# unreachable (e.g. an offline build), don't fail the build over them.  On
-# Read the Docs the inventory fetches succeed and these references resolve
-# correctly.
+# unreachable (e.g. an offline build), don't fail the build over them.  When
+# the network is available (CI, GitHub Pages) the inventory fetches succeed
+# and these references resolve correctly.
 nitpick_ignore_regex = [
     (r"py:.*", r"^(numpy|torch|sklearn|pandas|matplotlib|PIL|pillow|torchgeo|torchvision)(\..*)?$"),
     (r"py:.*", r"^(pathlib|abc|collections|typing|argparse)(\..*)?$"),

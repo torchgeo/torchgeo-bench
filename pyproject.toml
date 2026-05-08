@@ -84,7 +84,7 @@ optional-dependencies.viz = [
   "matplotlib>=3.5",
   "pillow>=9",
 ]
-urls.Documentation = "https://torchgeo-bench.readthedocs.io/"
+urls.Documentation = "https://torchgeo.org/torchgeo-bench/"
 urls.Homepage = "https://github.com/torchgeo/torchgeo-bench"
 urls.Issues = "https://github.com/torchgeo/torchgeo-bench/issues"
 urls.Repository = "https://github.com/torchgeo/torchgeo-bench"

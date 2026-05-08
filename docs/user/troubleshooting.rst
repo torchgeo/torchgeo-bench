@@ -58,5 +58,5 @@ Build / docs warnings
 If you build the docs locally without internet access, expect ~9
 ``WARNING: failed to reach any of the inventories`` messages from
 ``sphinx.ext.intersphinx``.  These are network reachability errors, not
-real issues — Read the Docs builds with network access and resolves
-these inventories cleanly.
+real issues — the GitHub Pages build runner has network access and
+resolves these inventories cleanly.
