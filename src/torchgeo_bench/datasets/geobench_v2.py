@@ -169,9 +169,10 @@ class _V2Dataset(BenchDataset):
         canonicalize = self.canonicalize_sample
 
         def chained(sample: dict) -> dict:
+            sample = canonicalize(sample)    # rename image_b → "image" first
             if transform is not None:
-                sample = transform(sample)
-            return canonicalize(sample)
+                sample = transform(sample)   # _resize now finds "image" safely
+            return sample
 
         kwargs: dict[str, object] = {"data_normalizer": nn.Identity}
         if self.band_order_strategy == "by_sensor":
