@@ -48,7 +48,7 @@ torchgeo-bench download geobench_v1
 
 V2 (classification + segmentation) and torchgeo's EuroSAT downloader work the
 same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download
-eurosat`). See the [documentation](https://torchgeo-bench.readthedocs.io/en/latest/user/datasets.html)
+eurosat`). See the [documentation](https://torchgeo.org/torchgeo-bench/user/datasets.html)
 for all options.
 
 ## Run a basic experiment
@@ -66,7 +66,7 @@ to skip already-completed rows.
 
 ## Learn more
 
-- **[Documentation](https://torchgeo-bench.readthedocs.io/)** — full
+- **[Documentation](https://torchgeo.org/torchgeo-bench/)** — full
   configuration reference, available models, dataset tables, multi-band
   experiments, evaluation methodology, output schema, dev / release
   workflow, and troubleshooting.
