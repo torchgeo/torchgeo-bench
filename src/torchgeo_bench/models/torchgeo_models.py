@@ -472,10 +472,6 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
             input_unit_check=input_unit_check,
         )
 
-    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Divide raw S2 DN by 10000 to match pretraining reflectance scale."""
-        return images / 10000.0
-
     @torch.no_grad()
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
@@ -522,10 +518,6 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
 
         wls_nm = [w * 1000.0 for w in wavelengths_um(bands, default_um=0.6)]
         self.register_buffer("_chn_ids", torch.tensor(wls_nm, dtype=torch.float32))
-
-    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Divide raw S2 DN by 10000 to match pretraining reflectance scale."""
-        return images / 10000.0
 
     @torch.no_grad()
     def _forward_patch_features(

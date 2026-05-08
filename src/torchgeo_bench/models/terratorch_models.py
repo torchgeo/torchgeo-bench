@@ -77,10 +77,6 @@ class _TerraTorchBench(BenchModel):
         for p in self.backbone.parameters():
             p.requires_grad_(False)
 
-    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Identity by default; subclasses override per family."""
-        return images
-
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
         return images
 
@@ -94,14 +90,10 @@ class _TerraTorchBench(BenchModel):
 
 
 PRITHVI_BANDS: list[str] = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
-_PRITHVI_V1_MEAN = [775.0, 1081.0, 1229.0, 2497.0, 2204.0, 1611.0]
-_PRITHVI_V1_STD = [1282.0, 1270.0, 1399.0, 1368.0, 1292.0, 1155.0]
-_PRITHVI_V2_MEAN = [1087.0, 1342.0, 1433.0, 2734.0, 1958.0, 1363.0]
-_PRITHVI_V2_STD = [2248.0, 2179.0, 2178.0, 1850.0, 1242.0, 1049.0]
 
 
 class TerraTorchPrithviBench(_TerraTorchBench):
-    """IBM/NASA Prithvi-EO v1/v2 — 6 HLS bands @ 224, per-version mean/std applied here."""
+    """IBM/NASA Prithvi-EO v1/v2 — auto-maps dataset bands onto 6 HLS slots @ 224."""
 
     def __init__(
         self,
@@ -118,25 +110,10 @@ class TerraTorchPrithviBench(_TerraTorchBench):
             target_size=target_size,
             backbone_kwargs={"pretrained": pretrained, "num_frames": 1},
         )
-        mean = _PRITHVI_V1_MEAN if "v1" in backbone_name else _PRITHVI_V2_MEAN
-        std = _PRITHVI_V1_STD if "v1" in backbone_name else _PRITHVI_V2_STD
-        self.register_buffer("_p_mean", torch.tensor(mean, dtype=torch.float32).view(1, 6, 1, 1))
-        self.register_buffer(
-            "_p_std", torch.tensor(std, dtype=torch.float32).view(1, 6, 1, 1).clamp_min(1e-8)
-        )
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
         mapped, _ = map_to_model_bands(images, self.bands, PRITHVI_BANDS)
         return mapped
-
-    @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
-        x = self._prepare_input(images)
-        x = (x - self._p_mean.to(x.dtype)) / self._p_std.to(x.dtype)
-        return _reduce_to_vec(self.backbone(_maybe_resize(x, self.target_size)))
 
 
 CLAY_BANDS: list[str] = ["blue", "green", "red", "nir", "swir1", "swir2"]
@@ -169,10 +146,6 @@ class TerraTorchClayBench(_TerraTorchBench):
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
         mapped, _ = map_to_model_bands(images, self.bands, CLAY_BANDS)
         return mapped
-
-    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Divide raw S2 DN by 10000 to match pretraining reflectance scale."""
-        return images / 10000.0
 
     @torch.no_grad()
     def _forward_patch_features(
@@ -219,10 +192,6 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
             backbone_kwargs={"pretrained": pretrained, "modalities": [modality]},
         )
         self.modality = modality
-
-    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Divide raw S2 DN by 10000 to match pretraining reflectance scale."""
-        return images / 10000.0
 
     @torch.no_grad()
     def _forward_patch_features(

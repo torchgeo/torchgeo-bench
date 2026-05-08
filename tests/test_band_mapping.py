@@ -35,6 +35,20 @@ class TestCanonicalBandName:
         assert canonical_band_name("B8A") == "nir_narrow"
         assert canonical_band_name("VV") == "vv"
 
+    def test_geobench_v1_aliases(self) -> None:
+        # GeoBench V1 datasets use these long-form names; ensure they resolve
+        # to canonical short names so band-mapping doesn't silently zero-fill.
+        assert canonical_band_name("coastal_aerosol") == "coastal"
+        assert canonical_band_name("red_edge_1") == "rededge1"
+        assert canonical_band_name("red_edge_2") == "rededge2"
+        assert canonical_band_name("red_edge_3") == "rededge3"
+        assert canonical_band_name("red_edge_4") == "nir_narrow"
+        assert canonical_band_name("water_vapour") == "watervapor"
+        assert canonical_band_name("water_vapor") == "watervapor"
+        assert canonical_band_name("swir_cirrus") == "cirrus"
+        assert canonical_band_name("swir_1") == "swir1"
+        assert canonical_band_name("swir_2") == "swir2"
+
     def test_unknown_falls_through(self) -> None:
         assert canonical_band_name("custom_xyz") == "custom_xyz"
 
