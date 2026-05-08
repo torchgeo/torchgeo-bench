@@ -33,7 +33,7 @@ from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
-from torchgeo_bench.datasets import get_datasets
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import extract_features
 
@@ -74,7 +74,7 @@ MAX_ITER = 2000
 TOL = 1e-6
 
 
-def instantiate_model(model_cfg: dict, num_channels: int) -> torch.nn.Module:
+def instantiate_model(model_cfg: dict, bands: list) -> torch.nn.Module:
     """Instantiate a model from its ``MODEL_CONFIGS`` entry."""
     target = model_cfg["_target_"]
     module_name, class_name = target.rsplit(".", 1)
@@ -82,7 +82,7 @@ def instantiate_model(model_cfg: dict, num_channels: int) -> torch.nn.Module:
     cls = getattr(module, class_name)
 
     kwargs = {k: v for k, v in model_cfg.items() if k not in ("_target_", "name")}
-    kwargs["num_channels"] = num_channels
+    kwargs["bands"] = bands
     return cls(**kwargs)
 
 
@@ -146,6 +146,13 @@ def run_dataset(
         logger.info("Resume: %d existing rows for %s", len(completed), dataset_name)
 
     logger.info("Loading %s dataset...", dataset_name)
+    bench = get_bench_dataset_class(dataset_name)()
+    if bench.multilabel:
+        logger.info(
+            "=== %s === skipping (multi-label not supported by this comparison)", dataset_name
+        )
+        return all_rows
+    bands_list = bench.select_band_specs(tuple(bench.rgb_bands))
     train_dataset, train_loader, val_loader, test_loader = get_datasets(
         dataset_name=dataset_name,
         partition_name="default",
@@ -155,6 +162,9 @@ def run_dataset(
         interpolation="bilinear",
     )
     num_channels = train_dataset[0]["image"].shape[0]
+    assert len(bands_list) == num_channels, (
+        f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} for {dataset_name}"
+    )
 
     for model_name, model_cfg in MODEL_CONFIGS.items():
         remaining = [
@@ -180,7 +190,7 @@ def run_dataset(
         )
 
         logger.info("  Loading model %s...", model_name)
-        model = instantiate_model(model_cfg, num_channels)
+        model = instantiate_model(model_cfg, bands_list)
         model.to(device).eval()
 
         logger.info("  Extracting features...")

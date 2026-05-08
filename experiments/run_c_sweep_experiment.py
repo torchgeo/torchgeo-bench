@@ -22,7 +22,8 @@ from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
-from torchgeo_bench.datasets import get_datasets
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import extract_features
 
@@ -78,7 +79,7 @@ MODEL_CONFIGS = {
 C_VALUES = np.sort(np.unique(np.append(np.logspace(-7, 2, 40), 1.0)))
 
 
-def instantiate_model(model_cfg: dict, num_channels: int) -> torch.nn.Module:
+def instantiate_model(model_cfg: dict, bands: list[BandSpec]) -> torch.nn.Module:
     """Instantiate a model from its ``MODEL_CONFIGS`` entry."""
     target = model_cfg["_target_"]
     module_name, class_name = target.rsplit(".", 1)
@@ -86,7 +87,7 @@ def instantiate_model(model_cfg: dict, num_channels: int) -> torch.nn.Module:
     cls = getattr(module, class_name)
 
     kwargs = {k: v for k, v in model_cfg.items() if k not in ("_target_", "name")}
-    kwargs["num_channels"] = num_channels
+    kwargs["bands"] = bands
     return cls(**kwargs)
 
 
@@ -143,6 +144,15 @@ def run_c_sweep(
 
 def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[dict]) -> list[dict]:
     """Run the C sweep for one dataset, appending rows in-place to ``all_rows``."""
+    bench_cls = get_bench_dataset_class(dataset_name)
+    if bench_cls.multilabel:
+        logger.warning(
+            "Skipping %s: this script is single-label only (uses accuracy_score + "
+            "single-label LogisticRegression).",
+            dataset_name,
+        )
+        return all_rows
+
     completed_models = {r["model"] for r in all_rows if r.get("dataset") == dataset_name}
     if completed_models:
         logger.info(
@@ -153,7 +163,7 @@ def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[di
         )
 
     logger.info("Loading %s dataset...", dataset_name)
-    train_dataset, train_loader, val_loader, test_loader = get_datasets(
+    _train_dataset, train_loader, val_loader, test_loader = get_datasets(
         dataset_name=dataset_name,
         partition_name="default",
         batch_size=64,
@@ -161,7 +171,7 @@ def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[di
         image_size=IMAGE_SIZE,
         interpolation="bilinear",
     )
-    num_channels = train_dataset[0]["image"].shape[0]
+    bands = bench_cls().select_band_specs(tuple(bench_cls.rgb_bands))
 
     for model_name, model_cfg in MODEL_CONFIGS.items():
         if model_name in completed_models:
@@ -170,7 +180,7 @@ def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[di
 
         logger.info("=== %s/%s ===", dataset_name, model_name)
         logger.info("  Loading model %s...", model_name)
-        model = instantiate_model(model_cfg, num_channels)
+        model = instantiate_model(model_cfg, bands)
         model.to(device).eval()
 
         logger.info("  Extracting features...")
