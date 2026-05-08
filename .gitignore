@@ -1,6 +1,7 @@
 paper/
 results/
 scripts/*
+!scripts/viz_results.py
 
 # Python
 __pycache__/
