@@ -2,11 +2,15 @@
 # Feature dimension: 1024
 
 _target_: torchgeo_bench.models.TorchGeoSwinBench
-num_channels: 3
 factory: swin_v2_b
 weights_class: Swin_V2_B_Weights
 weights_member: SENTINEL2_MI_RGB_SATLAS
 auto_resize: true
 target_size: 256
 name: tgeo_swinv2b_s2rgb_satlas_mi
-normalization: none
+eval:
+  segmentation:
+    # SwinV2-B: 4 stages via backbone.features[1,3,5,7] (patch merging at 0,2,4,6).
+    # Coarse-to-fine: features.7 (8×8, 1024ch) → features.1 (64×64, 128ch).
+    # backbone.* prefix is stripped by SegmentationProbe automatically.
+    layers: ["features.7", "features.5", "features.3", "features.1"]

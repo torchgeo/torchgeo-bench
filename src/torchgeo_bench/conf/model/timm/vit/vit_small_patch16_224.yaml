@@ -3,7 +3,6 @@
 # Model: vit_small_patch16_224
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: vit_small_patch16_224
 pretrained: true
 global_pool: avg

@@ -3,9 +3,12 @@
 # Model: convnext_small
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: convnext_small
 pretrained: true
 global_pool: avg
 seed: null
 name: convnext_small
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    layers: ["stages.3", "stages.2", "stages.1", "stages.0"]

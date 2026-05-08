@@ -28,17 +28,17 @@ def extract_features(
     x_all = []
     y_all = []
 
-    enumerator = enumerate(dataloader)
-    if verbose:
-        enumerator = enumerate(tqdm(dataloader, total=len(dataloader)))
+    iterator = tqdm(dataloader, total=len(dataloader)) if verbose else dataloader
 
-    for _i, batch in enumerator:
+    for batch in iterator:
         images = batch["image"].to(device)
         if "label" not in batch:
-            # segmentation datasets use "mask" instead of "label"
-            labels = batch["mask"].numpy()
-        else:
-            labels = batch["label"].numpy()
+            raise KeyError(
+                "Batch is missing 'label' key. extract_features() is a classification "
+                "utility; for segmentation use "
+                "SegmentationProbe.extract_segmentation_features() instead."
+            )
+        labels = batch["label"].numpy()
 
         if transforms is not None:
             images = transforms(images)
@@ -57,12 +57,10 @@ def extract_features(
                 else:
                     raise ValueError(f"Unexpected features format: {features.keys()}")
 
-            # handles the case where features are 1D (e.g., the ResNet model has batch x features)
-            if len(features.shape) == 1:
+            if features.ndim == 1:
                 features = features[np.newaxis, :]
 
-            # handles the case where features are 3D (e.g., the DinoV2 model has batch x tokens x features)
-            if len(features.shape) == 3:
+            if features.ndim == 3:
                 features = np.mean(features, axis=1, keepdims=False)
 
         x_all.append(features)

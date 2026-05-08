@@ -3,9 +3,13 @@
 # Model: mobilenetv3_small_100
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: mobilenetv3_small_100
 pretrained: true
 global_pool: avg
 seed: null
 name: mobilenetv3_small_100
+eval:
+  segmentation:
+    # Layers in coarse-to-fine order (deepest first) for FPN head.
+    # Spatial sizes (224px input): 7, 7, 14, 28. Note blocks.4/5 share 7×7.
+    layers: ["blocks.5", "blocks.4", "blocks.2", "blocks.1"]

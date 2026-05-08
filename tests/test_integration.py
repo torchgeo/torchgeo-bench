@@ -157,14 +157,14 @@ class TestEurosatResNet18Pipeline:
 @pytest.mark.slow
 @_skip_no_v1
 class TestTorchGeoModelNormalization:
-    """Verify torchgeo models use their own normalization (none) override."""
+    """torchgeo wrappers' normalization is owned by the model (not the dataset)."""
 
     @pytest.fixture(autouse=True)
     def _output_csv(self, tmp_path):
         self.output = str(tmp_path / "tgeo_norm_results.csv")
 
-    def test_torchgeo_resnet_uses_none_normalization(self):
-        """torchgeo ResNet18 MoCo should record normalization=none."""
+    def test_torchgeo_resnet_records_raw_normalization(self):
+        """The CSV `normalization` column is pinned to ``"raw"`` framework-wide."""
         result = _run_bench(
             "model=torchgeo/resnet18_s2rgb_moco",
             "dataset.names=[m-eurosat]",
@@ -178,8 +178,8 @@ class TestTorchGeoModelNormalization:
 
         df = pd.read_csv(self.output)
         assert len(df) == 1
-        assert df.iloc[0]["normalization"] == "none", (
-            f"Expected normalization=none, got {df.iloc[0]['normalization']}"
+        assert df.iloc[0]["normalization"] == "raw", (
+            f"Expected normalization=raw, got {df.iloc[0]['normalization']}"
         )
 
 

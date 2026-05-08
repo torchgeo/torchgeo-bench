@@ -1,7 +1,10 @@
 """Visualization utilities for segmentation probe evaluation."""
 
+<<<<<<< HEAD
 from __future__ import annotations
 
+=======
+>>>>>>> main
 import logging
 import os
 
@@ -13,18 +16,48 @@ logger = logging.getLogger(__name__)
 # Fixed palette: tab20 (20 colours) concatenated with tab20b (20 more) for up to 40 classes.
 # Index 0 is black (background / class 0). 255 (ignore) is rendered as white.
 _TAB20_COLORS: list[tuple[int, int, int]] = [
-    (31, 119, 180), (174, 199, 232), (255, 127, 14), (255, 187, 120),
-    (44, 160, 44), (152, 223, 138), (214, 39, 40), (255, 152, 150),
-    (148, 103, 189), (197, 176, 213), (140, 86, 75), (196, 156, 148),
-    (227, 119, 194), (247, 182, 210), (127, 127, 127), (199, 199, 199),
-    (188, 189, 34), (219, 219, 141), (23, 190, 207), (158, 218, 229),
+    (31, 119, 180),
+    (174, 199, 232),
+    (255, 127, 14),
+    (255, 187, 120),
+    (44, 160, 44),
+    (152, 223, 138),
+    (214, 39, 40),
+    (255, 152, 150),
+    (148, 103, 189),
+    (197, 176, 213),
+    (140, 86, 75),
+    (196, 156, 148),
+    (227, 119, 194),
+    (247, 182, 210),
+    (127, 127, 127),
+    (199, 199, 199),
+    (188, 189, 34),
+    (219, 219, 141),
+    (23, 190, 207),
+    (158, 218, 229),
 ]
 _TAB20B_COLORS: list[tuple[int, int, int]] = [
-    (57, 59, 121), (82, 84, 163), (107, 110, 207), (156, 158, 222),
-    (99, 121, 57), (140, 162, 82), (181, 207, 107), (206, 219, 156),
-    (140, 109, 49), (189, 158, 57), (231, 186, 82), (231, 203, 148),
-    (132, 60, 57), (173, 73, 74), (214, 97, 107), (231, 150, 156),
-    (123, 65, 115), (165, 81, 148), (206, 109, 189), (222, 158, 214),
+    (57, 59, 121),
+    (82, 84, 163),
+    (107, 110, 207),
+    (156, 158, 222),
+    (99, 121, 57),
+    (140, 162, 82),
+    (181, 207, 107),
+    (206, 219, 156),
+    (140, 109, 49),
+    (189, 158, 57),
+    (231, 186, 82),
+    (231, 203, 148),
+    (132, 60, 57),
+    (173, 73, 74),
+    (214, 97, 107),
+    (231, 150, 156),
+    (123, 65, 115),
+    (165, 81, 148),
+    (206, 109, 189),
+    (222, 158, 214),
 ]
 _PALETTE: list[tuple[int, int, int]] = _TAB20_COLORS + _TAB20B_COLORS  # 40 entries
 
@@ -82,21 +115,29 @@ def render_error_map(gt: np.ndarray, pred: np.ndarray, ignore_index: int = 255) 
     out = np.zeros((h, w, 3), dtype=np.uint8)
     valid = gt != ignore_index
     correct = valid & (gt == pred)
-    fn = valid & (gt != pred) & (pred == 0)    # model missed the class (predicted background)
-    fp = valid & (gt != pred) & (gt == 0)       # model hallucinated (GT is background)
-    other = valid & (gt != pred) & ~fn & ~fp    # class-to-class confusion
+    fn = valid & (gt != pred) & (pred == 0)  # model missed the class (predicted background)
+    fp = valid & (gt != pred) & (gt == 0)  # model hallucinated (GT is background)
+    other = valid & (gt != pred) & ~fn & ~fp  # class-to-class confusion
 
-    out[correct] = (80, 200, 80)    # green
-    out[fn] = (220, 50, 50)         # red
-    out[fp] = (50, 100, 220)        # blue
-    out[other] = (220, 160, 50)     # orange — class confusion
-    out[~valid] = (255, 255, 255)   # white for ignore
+    out[correct] = (80, 200, 80)  # green
+    out[fn] = (220, 50, 50)  # red
+    out[fp] = (50, 100, 220)  # blue
+    out[other] = (220, 160, 50)  # orange — class confusion
+    out[~valid] = (255, 255, 255)  # white for ignore
     return out
 
 
-def _make_header_row(col_width: int, num_cols: int, labels: list[str], height: int = 24) -> np.ndarray:
+def _make_header_row(
+    col_width: int, num_cols: int, labels: list[str], height: int = 24
+) -> np.ndarray:
     """Return a (height, num_cols*col_width, 3) uint8 header banner with centered column labels."""
-    from PIL import Image, ImageDraw
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as e:
+        raise ImportError(
+            "Pillow is required for segmentation visualization. "
+            "Install it with: pip install torchgeo-bench[viz]"
+        ) from e
 
     header_pil = Image.new("RGB", (num_cols * col_width, height), color=(40, 40, 40))
     draw = ImageDraw.Draw(header_pil)
@@ -142,8 +183,8 @@ def render_sample_grid(
     panels: list[np.ndarray] = []
 
     for idx in indices:
-        img = images[idx].cpu().numpy()    # (C, H, W)
-        gt = gt_masks[idx].cpu().numpy()   # (H, W)
+        img = images[idx].cpu().numpy()  # (C, H, W)
+        gt = gt_masks[idx].cpu().numpy()  # (H, W)
         pred = pred_masks[idx].cpu().numpy()  # (H, W)
 
         # RGB image: pick channels, transpose to (H, W, 3)
@@ -185,9 +226,16 @@ def render_confusion_matrix(
     Returns:
         (H_img, W_img, 3) uint8 heatmap rendered with matplotlib Blues colormap.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        raise ImportError(
+            "matplotlib is required for segmentation visualization. "
+            "Install it with: pip install torchgeo-bench[viz]"
+        ) from e
 
     # Flatten and mask out ignored pixels
     p = preds.reshape(-1).numpy()
@@ -225,8 +273,9 @@ def render_confusion_matrix(
         for col in range(num_classes):
             val = cm_norm[row, col]
             color = "white" if val > 0.5 else "black"
-            ax.text(col, row, f"{val:.0%}", ha="center", va="center",
-                    fontsize=font_size, color=color)
+            ax.text(
+                col, row, f"{val:.0%}", ha="center", va="center", fontsize=font_size, color=color
+            )
 
     ax.set_xlabel("Predicted class")
     ax.set_ylabel("True class")
@@ -274,8 +323,13 @@ def save_segmentation_viz(
         n_samples: Number of sample rows in the grid image.
         class_names: Optional class name strings for confusion matrix axis labels.
     """
-    from PIL import Image
-
+    try:
+        from PIL import Image
+    except ImportError as e:
+        raise ImportError(
+            "Pillow is required for segmentation visualization. "
+            "Install it with: pip install torchgeo-bench[viz]"
+        ) from e
     dest = os.path.join(out_dir, model_name)
     os.makedirs(dest, exist_ok=True)
 

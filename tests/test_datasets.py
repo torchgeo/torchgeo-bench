@@ -4,8 +4,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from torchgeo_bench.dataset_info import load_dataset_info
-from torchgeo_bench.datasets import get_datasets
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 
 
 class TestGetDatasetsFunction:
@@ -18,7 +17,6 @@ class TestGetDatasetsFunction:
             partition_name="0.01x_train",
             batch_size=8,
             return_val=False,
-            geobench_root=geobench_root,
         )
 
         assert len(result) == 3  # train_dataset, train_loader, test_loader
@@ -35,7 +33,6 @@ class TestGetDatasetsFunction:
             partition_name="0.01x_train",
             batch_size=8,
             return_val=True,
-            geobench_root=geobench_root,
         )
 
         assert len(result) == 4  # train_dataset, train_loader, val_loader, test_loader
@@ -63,7 +60,6 @@ class TestGetDatasetsFunction:
             partition_name="0.01x_train",
             batch_size=4,
             return_val=True,
-            geobench_root=geobench_root,
         )
 
         train_dataset, train_loader, val_loader, test_loader = result  # type: ignore[misc]
@@ -82,31 +78,25 @@ class TestGetDatasetsFunction:
         assert test_batch["image"].shape[1] == 3, f"{dataset_name}: Expected 3 channels"
 
         # Verify labels are in valid range
-        expected_classes = load_dataset_info(dataset_name).num_classes
+        expected_classes = get_bench_dataset_class(dataset_name).num_classes
         assert train_batch["label"].min() >= 0
         assert train_batch["label"].max() < expected_classes
 
-    @pytest.mark.parametrize(
-        "normalization",
-        ["mean_stdev", "min_max", "none"],
-    )
-    def test_different_normalizations(self, geobench_root, normalization):
-        """Test different normalization methods."""
+    def test_raw_emission(self, geobench_root):
+        """Datasets always emit raw float32 (normalization moved to BenchModel)."""
         result = get_datasets(
             dataset_name="m-eurosat",
             partition_name="0.01x_train",
             batch_size=4,
-            normalization=normalization,
             return_val=False,
-            geobench_root=geobench_root,
         )
 
         train_dataset, train_loader, test_loader = result  # type: ignore[misc]
         batch = next(iter(train_loader))
 
-        # Just verify we can get data without errors
-        assert batch["image"].shape[0] > 0
         assert batch["image"].dtype == torch.float32
+        # Raw S2 reflectance DN values are large (well above the [-5, 5] z-score range).
+        assert batch["image"].max().item() > 100.0
 
 
 class TestIntegrationWithBenchmark:
@@ -120,7 +110,6 @@ class TestIntegrationWithBenchmark:
             partition_name="0.01x_train",
             batch_size=4,
             return_val=True,
-            geobench_root=geobench_root,
         )
 
         # Get channel count from first sample

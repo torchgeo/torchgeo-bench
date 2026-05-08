@@ -16,19 +16,34 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
+<<<<<<< HEAD
+=======
+from torchgeo.datasets.errors import DatasetNotFoundError
+>>>>>>> main
 from tqdm import tqdm
 
-from torchgeo_bench.dataset_info import list_available_datasets, load_dataset_info
-from torchgeo_bench.datasets import get_datasets, is_dataset_available
+from torchgeo_bench.datasets import (
+    get_bench_dataset_class,
+    get_datasets,
+    list_datasets,
+)
+from torchgeo_bench.intrinsic_dim import compute_intrinsic_dim
 from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.segmentation_probe import (
+<<<<<<< HEAD
     CachedFeaturesDataset,
     GPUTensorCache,
     SegmentationProbe,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
+=======
+    SegmentationProbe,
+)
+from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
+from torchgeo_bench.segmentation_viz import save_segmentation_viz
+>>>>>>> main
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
@@ -50,9 +65,34 @@ def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
     """
     if isinstance(names, str):
         if names == "all":
-            return list_available_datasets()
+            return list_datasets()
         return [n.strip() for n in names.split(",") if n.strip()]
     return list(names)
+
+
+def _normalize_bands_value(bands: object) -> str:
+    """Canonicalize the ``cfg.dataset.bands`` value for logging/CSV/resume.
+
+    Hydra hands us either ``"rgb"``/``"all"``, an explicit list (``ListConfig``
+    or ``list[str]``), or ``None``.  Reduce all of those to a stable string so
+    that the resume key and the CSV column are comparable across runs.
+
+    Args:
+        bands: The raw ``cfg.dataset.bands`` value.
+
+    Returns:
+        A stable string representation: ``"rgb"``, ``"all"``, or a
+        comma-joined explicit band list (e.g. ``"red,green,blue,nir"``).
+    """
+    if bands is None:
+        return "all"
+    if isinstance(bands, str):
+        return bands
+    try:
+        items = [str(b) for b in bands]
+    except TypeError:
+        return str(bands)
+    return ",".join(items)
 
 
 def bootstrap_accuracy(
@@ -141,6 +181,7 @@ class EvaluationResult:
     image_size: int | None
     interpolation: str
     partition: str
+    bands: str
     c_range_start: float
     c_range_stop: float
     c_range_num: int
@@ -181,12 +222,11 @@ def evaluate_knn(
     y_test: np.ndarray,
     seed: int,
     n_bootstrap: int,
-    device: str = "cpu",
     verbose: bool = False,
 ) -> tuple[float, float, float]:
     """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
     multi_label = y_train.ndim == 2
-    clf = KNNClassifier(n_neighbors=5, device=device)
+    clf = KNNClassifier(n_neighbors=5)
     clf.fit(x_train, y_train)
 
     if multi_label:
@@ -379,8 +419,65 @@ def _build_seg_probe_and_solver(
         device=str(device),
         criterion=criterion,
         lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
+        ignore_index=eval_cfg.segmentation.get("ignore_index", 255),
     )
     return probe, solver
+
+
+def evaluate_intrinsic_dim(
+    splits: dict[str, np.ndarray],
+    estimators: Sequence[str],
+    selected_splits: Sequence[str],
+    device: str | None,
+    max_samples: int | None,
+    seed: int,
+    common_meta: dict,
+    feature_dim: int,
+    n_counts: dict[str, int],
+    verbose: bool = False,
+) -> list[dict]:
+    """Compute intrinsic-dimension metrics over selected splits and return CSV rows.
+
+    Each (split, estimator) yields one row with ``method="intrinsic_dim"`` and
+    ``metric_name=f"id_{estimator}_{split}"``.
+    """
+    rows: list[dict] = []
+    for split_name in selected_splits:
+        if split_name not in splits:
+            logger.warning(f"[intrinsic-dim] unknown split '{split_name}', skipping")
+            continue
+        X = splits[split_name]
+        if verbose:
+            logger.info(
+                f"[intrinsic-dim] split={split_name} X{X.shape} "
+                f"estimators={list(estimators)} device={device}"
+            )
+        dims = compute_intrinsic_dim(
+            X,
+            estimators=list(estimators),
+            device=device,
+            max_samples=max_samples,
+            seed=seed,
+        )
+        for est_name, dim in dims.items():
+            rows.append(
+                EvaluationResult(
+                    **common_meta,
+                    method="intrinsic_dim",
+                    metric_name=f"id_{est_name}_{split_name}",
+                    metric_value=float(dim),
+                    ci_lower=0.0,
+                    ci_upper=0.0,
+                    feature_dim=feature_dim,
+                    best_c=None,
+                    best_lr=None,
+                    best_batch_size=None,
+                    n_train=n_counts.get("train", 0),
+                    n_val=n_counts.get("val", 0),
+                    n_test=n_counts.get("test", 0),
+                ).to_row()
+            )
+    return rows
 
 
 def evaluate_segmentation(
@@ -391,32 +488,26 @@ def evaluate_segmentation(
     cfg: DictConfig,
     num_classes: int,
     device: torch.device,
-    train_dataset: torch.utils.data.Dataset | None = None,
-    val_dataset: torch.utils.data.Dataset | None = None,
     collect_preds: bool = False,
 ) -> "tuple[SegMetrics, int, float | None, int | None, torch.Tensor | None]":
-    """Evaluate segmentation performance using a segmentation probe and solver.
+    """Evaluate segmentation performance using a frozen-backbone segmentation probe.
 
-    When ``eval.segmentation.hparam_search`` is true, runs an Optuna TPE sweep
-    over learning rate and batch size, selects the best combo by val mIoU, retrains
-    on train+val merged, and reports test mIoU.  Otherwise runs a single training
-    with the fixed ``lr`` and the pre-built loaders.
+    Trains a lightweight segmentation head on top of the frozen backbone and
+    evaluates mIoU on the test split. Optionally pre-caches backbone features for
+    faster training across epochs.
 
     Args:
         model: Frozen backbone model.
-        train_loader: Training DataLoader (used when hparam_search is false).
+        train_loader: Training DataLoader.
         val_loader: Validation DataLoader.
         test_loader: Test DataLoader.
         cfg: Full Hydra config.
         num_classes: Number of segmentation classes.
         device: Torch device.
-        train_dataset: Training dataset (required when hparam_search is true).
-        val_dataset: Validation dataset (required when hparam_search is true).
         collect_preds: If True, collect and return test predictions as (N, H, W) tensor.
 
     Returns:
-        Tuple of (metrics_dict, feature_dim, best_lr, best_batch_size, preds_or_None).
-        ``best_lr`` and ``best_batch_size`` are None when hparam_search is false.
+        Tuple of (metrics_dict, feature_dim, None, None, preds_or_None).
         ``preds_or_None`` is None when collect_preds is False.
     """
     # Merge model-specific eval config if present
@@ -432,159 +523,27 @@ def evaluate_segmentation(
     cache_dtype_str = seg_cfg.get("cache_dtype", "float16")
     cache_dtype = torch.float16 if cache_dtype_str == "float16" else torch.float32
 
-    if not seg_cfg.get("hparam_search", False):
-        # --- Single-run path ---
-        probe, solver = _build_seg_probe_and_solver(
-            model, num_classes, eval_cfg, device, seg_cfg.lr
-        )
-        if use_cache and probe.freeze_backbone:
-            logger.info("Caching backbone features for train and val splits...")
-            train_cache = probe.extract_all_features(train_loader, cache_dtype=cache_dtype)
-            val_cache = probe.extract_all_features(val_loader, cache_dtype=cache_dtype)
-            test_cache = probe.extract_all_features(test_loader, cache_dtype=cache_dtype)
-            solver.fit_cached(
-                train_cache=train_cache,
-                val_cache=val_cache,
-                batch_size=seg_cfg.get("batch_size", 64),
-                epochs=epochs,
-                verbose=cfg.verbose,
-            )
-            eval_result = solver.evaluate_cached(
-                test_cache,
-                batch_size=seg_cfg.get("batch_size", 64),
-                collect_preds=collect_preds,
-            )
-        else:
-            solver.fit(
-                train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose
-            )
-            eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
-
-        if collect_preds:
-            metrics, preds = eval_result
-        else:
-            metrics, preds = eval_result, None
-        return metrics, sum(probe.channels_list), None, None, preds
-
-    # --- Optuna HPO path ---
-    try:
-        import optuna
-    except ImportError as exc:
-        raise ImportError(
-            "Optuna is required for hparam_search=true. "
-            "Install it with: pip install torchgeo-bench[hpo]"
-        ) from exc
-
-    if train_dataset is None or val_dataset is None:
-        raise ValueError("train_dataset and val_dataset must be provided when hparam_search=true")
-
-    lr_min: float = seg_cfg.lr_min
-    lr_max: float = seg_cfg.lr_max
-    batch_size_candidates: list[int] = list(seg_cfg.batch_sizes)
-    n_trials: int = seg_cfg.get("n_trials", 10)
-
-    # Pre-cache features once for HPO (batch size only affects the head loader, not the backbone)
-    if use_cache:
-        logger.info("Caching backbone features once for HPO...")
-        _probe_for_cache, _ = _build_seg_probe_and_solver(
-            model, num_classes, eval_cfg, device, seg_cfg.lr_min
-        )
-        # Use the largest candidate batch size for the initial extraction loader
-        _extract_bs = max(batch_size_candidates)
-        _t_loader_extract, _v_loader_extract, _ = _make_seg_dataloaders(
-            train_dataset, val_dataset, test_loader, _extract_bs
-        )
-        hpo_train_cache = _probe_for_cache.extract_all_features(
-            _t_loader_extract, cache_dtype=cache_dtype
-        )
-        hpo_val_cache = _probe_for_cache.extract_all_features(
-            _v_loader_extract, cache_dtype=cache_dtype
-        )
-        hpo_test_cache = _probe_for_cache.extract_all_features(test_loader, cache_dtype=cache_dtype)
-
-    # Pre-move HPO caches to GPU once so all trials share the same device-resident tensors.
-    hpo_gpu_train: GPUTensorCache | None = None
-    hpo_gpu_val: GPUTensorCache | None = None
-    if use_cache and torch.cuda.is_available():
-        logger.info("Pre-moving HPO caches to GPU once for all trials...")
-        hpo_gpu_train = GPUTensorCache.from_cached(hpo_train_cache, device)
-        hpo_gpu_val = GPUTensorCache.from_cached(hpo_val_cache, device)
-        logger.info("HPO GPU cache transfer complete.")
-
-    def objective(trial: "optuna.Trial") -> float:
-        lr = trial.suggest_float("lr", lr_min, lr_max, log=True)
-        bs = trial.suggest_categorical("batch_size", batch_size_candidates)
-        _, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, lr)
-        if use_cache:
-            val_miou = solver.fit_cached(
-                train_cache=hpo_train_cache,
-                val_cache=hpo_val_cache,
-                batch_size=bs,
-                epochs=epochs,
-                verbose=False,
-                gpu_train=hpo_gpu_train,
-                gpu_val=hpo_gpu_val,
-            )
-        else:
-            t_loader, v_loader, _ = _make_seg_dataloaders(
-                train_dataset, val_dataset, test_loader, bs
-            )
-            val_miou = solver.fit(
-                train_loader=t_loader, val_loader=v_loader, epochs=epochs, verbose=False
-            )
-        return val_miou if val_miou is not None else 0.0
-
-    optuna.logging.set_verbosity(optuna.logging.INFO if cfg.verbose else optuna.logging.WARNING)
-    study = optuna.create_study(
-        direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=cfg.seed),
-    )
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=cfg.verbose)
-
-    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
-    if not completed:
-        raise RuntimeError("All HPO trials failed. Try reducing batch_sizes or n_trials.")
-    best_trial = max(completed, key=lambda t: t.value)  # type: ignore[arg-type]
-    best_lr: float = best_trial.params["lr"]
-    best_bs: int = best_trial.params["batch_size"]
-    logger.info(
-        f"HPO best: lr={best_lr:.4g}, batch_size={best_bs}, val_mIoU={best_trial.value:.4f}"
-    )
-
-    if use_cache and torch.cuda.is_available():
-        # Drop trial-time GPU caches before final retraining to avoid peak-memory OOM.
-        hpo_gpu_train = None
-        hpo_gpu_val = None
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    # Final model: retrain on merged train+val with best hparams
-    probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, best_lr)
-    if use_cache:
-        # merge train+val caches
-        train_val_cache = CachedFeaturesDataset(
-            layer_tensors=[
-                torch.cat([a, b])
-                for a, b in zip(hpo_train_cache.layer_tensors, hpo_val_cache.layer_tensors)
-            ],
-            masks=torch.cat([hpo_train_cache.masks, hpo_val_cache.masks]),
-        )
+    probe, solver = _build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr)
+    if use_cache and probe.freeze_backbone:
+        logger.info("Caching backbone features for train and val splits...")
+        train_cache = probe.extract_segmentation_features(train_loader, cache_dtype=cache_dtype)
+        val_cache = probe.extract_segmentation_features(val_loader, cache_dtype=cache_dtype)
+        test_cache = probe.extract_segmentation_features(test_loader, cache_dtype=cache_dtype)
         solver.fit_cached(
-            train_cache=train_val_cache,
-            val_cache=None,
-            batch_size=best_bs,
+            train_cache=train_cache,
+            val_cache=val_cache,
+            batch_size=seg_cfg.get("batch_size", 64),
             epochs=epochs,
             verbose=cfg.verbose,
         )
         eval_result = solver.evaluate_cached(
-            hpo_test_cache, batch_size=best_bs, collect_preds=collect_preds
+            test_cache,
+            batch_size=seg_cfg.get("batch_size", 64),
+            collect_preds=collect_preds,
         )
     else:
-        _, _, train_val_loader = _make_seg_dataloaders(
-            train_dataset, val_dataset, test_loader, best_bs
-        )
         solver.fit(
-            train_loader=train_val_loader, val_loader=None, epochs=epochs, verbose=cfg.verbose
+            train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose
         )
         eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
 
@@ -592,14 +551,73 @@ def evaluate_segmentation(
         metrics, preds = eval_result
     else:
         metrics, preds = eval_result, None
-    feature_dim = sum(probe.channels_list)
-
-    return metrics, feature_dim, best_lr, best_bs, preds
+    return metrics, sum(probe.channels_list), None, None, preds
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
+def append_rows_atomic(path: str, rows: list[dict]) -> None:
+    """Append rows to a CSV atomically, with advisory file lock and schema healing.
+
+    Behavior:
+
+    - Empty/missing file: writes the header derived from ``rows`` and the rows.
+    - Existing file whose header matches ``rows[0]`` keys exactly: appends
+      rows without rewriting the header (fast path).
+    - Existing file with a different schema (e.g. ``EvaluationResult`` gained
+      a field since the file was first written): the file is rewritten with
+      the unioned schema so every value lives under a named column instead
+      of being silently stuffed into an unnamed position.
+
+    Args:
+        path: Output CSV path; created if missing.
+        rows: List of dicts to append.  All dicts should share the same keys.
+    """
+    if not rows:
+        return
+    df_local = pd.DataFrame(rows)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    with os.fdopen(fd, "r+", closefd=True) as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.seek(0, os.SEEK_END)
+            empty = f.tell() == 0
+            buf = io.StringIO()
+            if empty:
+                df_local.to_csv(buf, header=True, index=False)
+                f.write(buf.getvalue())
+            else:
+                f.seek(0)
+                existing_df = pd.read_csv(f)
+                if list(existing_df.columns) == list(df_local.columns):
+                    df_local.to_csv(buf, header=False, index=False)
+                    f.seek(0, os.SEEK_END)
+                    f.write(buf.getvalue())
+                else:
+                    extra = [c for c in existing_df.columns if c not in df_local.columns]
+                    ordered = list(df_local.columns) + extra
+                    combined = pd.concat(
+                        [existing_df, df_local], ignore_index=True, sort=False
+                    ).reindex(columns=ordered)
+                    logger.warning(
+                        "CSV schema drift detected at %s: existing columns %s, "
+                        "new columns %s. Rewriting with unioned schema %s.",
+                        path,
+                        list(existing_df.columns),
+                        list(df_local.columns),
+                        ordered,
+                    )
+                    f.seek(0)
+                    f.truncate()
+                    combined.to_csv(buf, header=True, index=False)
+                    f.write(buf.getvalue())
+            f.flush()
+            os.fsync(f.fileno())
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -615,74 +633,46 @@ def main(cfg: DictConfig) -> None:
     output_path = cfg.output
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    def _append_rows_atomic(path: str, rows: list[dict]) -> None:
-        """Append rows to CSV atomically with advisory file lock."""
-        if not rows:
-            return
-        df_local = pd.DataFrame(rows)
-        # Open file in read-write mode; create if not exists
-        fd = os.open(path, os.O_RDWR | os.O_CREAT)
-        with os.fdopen(fd, "r+", closefd=True) as f:
-            # Acquire exclusive lock
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            f.seek(0, os.SEEK_END)
-            empty = f.tell() == 0
-            # Prepare CSV in memory
-            buf = io.StringIO()
-            df_local.to_csv(buf, header=empty, index=False)
-            f.write(buf.getvalue())
-            f.flush()
-            os.fsync(f.fileno())
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
     all_rows: list[dict] = []
     c_start, c_stop, c_num = cfg.eval.c_range
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
 
     # Load existing results if resume mode is enabled
-    completed_runs: set[tuple[str, str, str, str, str, str, str, str]] = set()
+    completed_runs: set[tuple[str, ...]] = set()
     if cfg.resume and os.path.exists(output_path):
-        try:
-            existing_df = pd.read_csv(cfg.output)
-            # Track (dataset, method, model, name, normalization, image_size, interpolation, partition) tuples
-            for _, row in existing_df.iterrows():
-                completed_runs.add(
-                    (
-                        str(row.get("dataset", "")),
-                        str(row.get("method", "")),
-                        str(row.get("model", "")),
-                        str(row.get("name", "")),
-                        str(row.get("normalization", "")),
-                        str(row.get("image_size", "")),
-                        str(row.get("interpolation", "")),
-                        str(row.get("partition", "")),
-                    )
+        existing_df = pd.read_csv(cfg.output)
+        # Track (dataset, method, model, name, normalization, image_size,
+        # interpolation, partition, bands) tuples
+        for _, row in existing_df.iterrows():
+            completed_runs.add(
+                (
+                    str(row.get("dataset", "")),
+                    str(row.get("method", "")),
+                    str(row.get("model", "")),
+                    str(row.get("name", "")),
+                    str(row.get("normalization", "")),
+                    str(row.get("image_size", "")),
+                    str(row.get("interpolation", "")),
+                    str(row.get("partition", "")),
+                    str(row.get("bands", "")),
                 )
-            logger.info(
-                f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}"
             )
-            logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
-        except Exception as e:
-            logger.warning(f"Could not load existing results for resume: {e}")
-            completed_runs = set()
+        logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
+        logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
-    # Model can override dataset normalization (e.g., torchgeo models that
-    # need specific preprocessing).  Fall back to dataset.normalization.
-    normalization = getattr(cfg.model, "normalization", None) or cfg.dataset.normalization
+    # Datasets always emit raw values; the model owns normalization.  The
+    # CSV column is kept for back-compat but pinned to a literal so old/new
+    # rows are clearly not comparable across the model-normalization refactor.
+    normalization = "raw"
+    bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
-        # Load dataset metadata from config
-        ds_info = load_dataset_info(ds_name)
-
-        if not is_dataset_available(
-            ds_name,
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-        ):
-            logger.warning(
-                f"Skipping dataset {ds_name} (data not found on disk), looked in {getattr(cfg.dataset, 'geobench_root', None)} and {getattr(cfg.dataset, 'geobench_v2_root', None)}"
-            )
+        # Resolve metadata via the BenchDataset registry (no I/O).
+        try:
+            ds_cls = get_bench_dataset_class(ds_name)
+        except KeyError:
+            logger.warning(f"Skipping dataset {ds_name} (not in registry)")
             continue
 
         # Check if we can skip this dataset entirely
@@ -692,37 +682,62 @@ def main(cfg: DictConfig) -> None:
             str(getattr(cfg.dataset, "image_size", None)),
             getattr(cfg.dataset, "interpolation", "bicubic"),
             cfg.dataset.partition,
+            bands_value,
+        )
+
+        # Merge model-specific eval config early so resume key and result rows
+        # reflect the actual head_type used, not the global default.
+        eval_cfg_merged = OmegaConf.merge(
+            cfg.eval,
+            cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
         )
 
         # Check resume for standard methods
         knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name, *config_tuple)
         linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
 
-        seg_method = f"seg-{cfg.eval.segmentation.head_type}"
+        seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
+        id_key = (ds_name, "intrinsic_dim", cfg.model._target_, cfg.model.name, *config_tuple)
 
-        result = get_datasets(
-            dataset_name=ds_name,
-            partition_name=cfg.dataset.partition,
-            batch_size=cfg.dataset.batch_size,
-            normalization=normalization,
-            return_val=True,
-            image_size=getattr(cfg.dataset, "image_size", None),
-            interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-            bands=getattr(cfg.dataset, "bands", "rgb"),
-        )
+        try:
+            result = get_datasets(
+                dataset_name=ds_name,
+                partition_name=cfg.dataset.partition,
+                batch_size=cfg.dataset.batch_size,
+                return_val=True,
+                image_size=getattr(cfg.dataset, "image_size", None),
+                interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+                bands=getattr(cfg.dataset, "bands", "rgb"),
+            )
+        except (FileNotFoundError, DatasetNotFoundError) as exc:
+            logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
+            continue
         if result is None or not isinstance(result, tuple) or len(result) != 4:
             logger.warning(f"Skipping dataset {ds_name} (unexpected return)")
             continue
         train_dataset, train_loader, val_loader, test_loader = result
 
-        # Use metadata from dataset config
+        # Use metadata from the BenchDataset class
         num_channels = train_dataset[0]["image"].shape[0]
-        is_segmentation = ds_info.task == "segmentation"
-        is_multilabel = ds_info.multilabel
-        num_classes = ds_info.num_classes
+        is_segmentation = ds_cls.task == "segmentation"
+        is_multilabel = ds_cls.multilabel
+        num_classes = ds_cls.num_classes
+
+        # Build the BandSpec list that matches the actual loaded channels.
+        bench_for_bands = ds_cls()
+        bands_resolved = (
+            tuple(bench_for_bands.rgb_bands)
+            if cfg.dataset.bands == "rgb"
+            else None
+            if cfg.dataset.bands in ("all", None)
+            else tuple(cfg.dataset.bands)
+        )
+        bands_list = bench_for_bands.select_band_specs(bands_resolved)
+        assert len(bands_list) == num_channels, (
+            f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
+            f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
+        )
 
         # Resume check for segmentation
         if is_segmentation and cfg.resume and seg_key in completed_runs:
@@ -730,29 +745,18 @@ def main(cfg: DictConfig) -> None:
                 logger.info(f"[{ds_name}] Skipping segmentation (already computed)")
             continue
 
-        # Instantiate Backbone
-        model_cfg = OmegaConf.merge(cfg.model, {"num_channels": num_channels})
-
-        needs_dataset = (
+        # Instantiate Backbone — pass `bands` post-hoc so Hydra never tries
+        # to OmegaConf-ify the BandSpec list.  `_convert_="object"` keeps
+        # the rest of the model config as plain Python primitives.
+        is_rcf_empirical = (
             hasattr(cfg.model, "mode")
             and str(cfg.model._target_).endswith("RCFBench")
             and str(cfg.model.mode) == "empirical"
         )
-        if needs_dataset:
-            target_path: str = cfg.model._target_
-            module_name, class_name = target_path.rsplit(".", 1)
-            module = __import__(module_name, fromlist=[class_name])
-            model = getattr(module, class_name)(
-                num_channels=num_channels,
-                features=cfg.model.features,
-                kernel_size=cfg.model.kernel_size,
-                mode=cfg.model.mode,
-                stats_mode=cfg.model.stats_mode,
-                seed=getattr(cfg.model, "seed", None),
-                dataset=train_dataset,
-            )
-        else:
-            model: BenchModel = instantiate(model_cfg)
+        instantiate_kwargs: dict = {"bands": bands_list, "_convert_": "object"}
+        if is_rcf_empirical:
+            instantiate_kwargs["dataset"] = train_dataset
+        model: BenchModel = instantiate(cfg.model, **instantiate_kwargs)
         model.to(device).eval()
 
         # Shared Result metadata
@@ -765,6 +769,7 @@ def main(cfg: DictConfig) -> None:
             "image_size": getattr(cfg.dataset, "image_size", None),
             "interpolation": getattr(cfg.dataset, "interpolation", "bicubic"),
             "partition": cfg.dataset.partition,
+            "bands": bands_value,
             "c_range_start": c_start,
             "c_range_stop": c_stop,
             "c_range_num": c_num,
@@ -786,14 +791,12 @@ def main(cfg: DictConfig) -> None:
                 cfg,
                 num_classes,
                 device,
-                train_dataset=train_dataset,
-                val_dataset=val_loader.dataset,
                 collect_preds=save_viz,
             )
             all_rows.append(
                 EvaluationResult(
                     **common_meta,
-                    method=cfg.eval.segmentation.head_type,
+                    method=seg_method,
                     metric_name="mIoU",
                     metric_value=metrics.get("mIoU", float("nan")),
                     ci_lower=0.0,
@@ -812,11 +815,7 @@ def main(cfg: DictConfig) -> None:
                 ).to_row()
             )
             if save_viz and preds is not None:
-                from torchgeo_bench.dataset_info import load_dataset_info as _ldi
-                from torchgeo_bench.segmentation_viz import save_segmentation_viz
-
-                _ds_info = _ldi(ds_name)
-                rgb_indices = _ds_info.rgb_indices if _ds_info.rgb_indices else [0, 1, 2]
+                rgb_indices = ds_cls().rgb_indices or [0, 1, 2]
                 # Collect images and GT masks from test_loader (cheap pass, no backbone)
                 test_imgs, test_gts = [], []
                 for _batch in test_loader:
@@ -856,8 +855,11 @@ def main(cfg: DictConfig) -> None:
             skip_linear = (cfg.resume and linear_key in completed_runs) or getattr(
                 cfg.eval, "skip_linear", False
             )
+            id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
+            id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
+            skip_id = (not id_enabled) or (cfg.resume and id_key in completed_runs)
 
-            if skip_knn and skip_linear:
+            if skip_knn and skip_linear and skip_id:
                 continue
 
             x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
@@ -873,7 +875,6 @@ def main(cfg: DictConfig) -> None:
                     y_test,
                     cfg.seed,
                     cfg.eval.bootstrap,
-                    cfg.device,
                     verbose=cfg.verbose,
                 )
                 all_rows.append(
@@ -927,7 +928,26 @@ def main(cfg: DictConfig) -> None:
                     ).to_row()
                 )
 
-        _append_rows_atomic(output_path, all_rows)
+            if not skip_id:
+                id_rows = evaluate_intrinsic_dim(
+                    splits={"train": x_train, "val": x_val, "test": x_test},
+                    estimators=list(id_cfg.estimators),
+                    selected_splits=list(id_cfg.splits),
+                    device=id_cfg.get("device", None) or cfg.device,
+                    max_samples=id_cfg.get("max_samples", None),
+                    seed=cfg.seed,
+                    common_meta=common_meta,
+                    feature_dim=feature_dim,
+                    n_counts={
+                        "train": len(x_train),
+                        "val": len(x_val),
+                        "test": len(x_test),
+                    },
+                    verbose=cfg.verbose,
+                )
+                all_rows.extend(id_rows)
+
+        append_rows_atomic(output_path, all_rows)
         all_rows.clear()
 
     logger.info(f"Benchmark complete. Results appended to {output_path}")

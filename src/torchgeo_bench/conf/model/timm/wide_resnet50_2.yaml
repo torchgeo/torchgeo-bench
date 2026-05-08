@@ -3,7 +3,6 @@
 # Model: wide_resnet50_2
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: wide_resnet50_2
 pretrained: true
 global_pool: avg

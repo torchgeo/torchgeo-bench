@@ -1,32 +1,33 @@
 # Makefile for torchgeo-bench
 
-UV := uv run
+CONDA_RUN := conda run --no-capture-output -n torchgeo-bench
 
 .PHONY: install sync tests lint format clean help
 
 install:
-	uv sync --all-extras
+	conda env update -n torchgeo-bench -f environment.yml
+	$(CONDA_RUN) pip install -e ".[dev]"
 
 sync:
 	$(MAKE) install
 
 tests:
-	$(UV) pytest
+	$(CONDA_RUN) pytest
 
 lint:
-	$(UV) pre-commit run --all-files
+	$(CONDA_RUN) pre-commit run --all-files
 
 format:
-	$(UV) ruff format src/ tests/
-	$(UV) ruff check --fix --select I src/ tests/
+	$(CONDA_RUN) ruff format src/ tests/
+	$(CONDA_RUN) ruff check --fix --select I src/ tests/
 
 clean:
 	rm -rf htmlcov .pytest_cache .coverage
 
 help:
 	@echo "Available targets:"
-	@echo "  install - Install dependencies and dev tools with uv"
-	@echo "  sync    - Install dependencies and dev tools with uv"
+	@echo "  install - Install dependencies into torchgeo-bench conda env"
+	@echo "  sync    - Alias for install"
 	@echo "  tests   - Run test suite with coverage"
 	@echo "  lint    - Run pre-commit checks on all files"
 	@echo "  format  - Format code and auto-fix imports with ruff"

@@ -17,12 +17,9 @@ dataset:
   names: all
   partition: default
   batch_size: 64
-  normalization: mean_stdev  # min_max | mean_stdev | percentile_2_98 | none
   bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
   image_size: 224           # e.g., 224; if null, no resizing
   interpolation: bilinear     # bilinear | bicubic | nearest; used if image_size set
-  geobench_root: data/classification_v1.0     # Root for GeoBench V1 datasets
-  geobench_v2_root: data/geobenchv2           # Root for GeoBench V2 datasets
 
 # Evaluation settings
 eval:
@@ -30,6 +27,16 @@ eval:
   c_range: [-7, 2, 20]     # log10 sweep start, stop, num samples
   merge_val: true          # merge train+val for final logistic training
   skip_linear: false       # if true, skip LogisticRegression evaluation
+
+  # Optional intrinsic dimension (ID) metrics on extracted embeddings.
+  # Computed alongside KNN/linear probing when enabled. Adds rows with
+  # method="intrinsic_dim" and metric_name="id_<estimator>_<split>".
+  intrinsic_dim:
+    enabled: false
+    estimators: [TwoNN, MLE, lPCA]   # subset of torchid global estimators
+    splits: [train]                  # any of: train, val, test
+    max_samples: 10000               # null disables subsampling
+    device: null                     # null = auto (cuda if available, else cpu)
 
   segmentation:
     head_type: "fpn"

@@ -4,7 +4,6 @@
 # Run with: dataset.normalization=none
 
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
-num_channels: 3
 model_size: base
 patch_size: 8
 input_res: 10

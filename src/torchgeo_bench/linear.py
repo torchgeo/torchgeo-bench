@@ -143,10 +143,9 @@ class LogisticRegression:
             self.classes_ = np.arange(n_classes)
         else:
             y_tensor = y.to(self.device, dtype=torch.long, non_blocking=True).contiguous()
-            # Encode classes to 0..K-1 and keep mapping
             unique_classes, y_inv = torch.unique(y_tensor, sorted=True, return_inverse=True)
             self.classes_ = unique_classes.detach().cpu().numpy()
-            y_tensor = y_inv  # already long on device
+            y_tensor = y_inv
             n_classes = unique_classes.numel()
 
         if n_samples != y_tensor.shape[0]:
@@ -195,14 +194,10 @@ class LogisticRegression:
             final_loss = float(loss_tensor.detach())
             losses.append(final_loss)
 
-            # Extract LBFGS n_iter from optimizer state if available
-            try:
-                # state is shared; pick any param
-                first_param = next(iter(model.parameters()))
-                state = optimizer.state[first_param]
-                self.n_iter_ = int(state.get("n_iter", self.max_iter))
-            except Exception:
-                self.n_iter_ = self.max_iter
+            # Extract LBFGS n_iter from optimizer state.
+            first_param = next(iter(model.parameters()))
+            state = optimizer.state[first_param]
+            self.n_iter_ = int(state.get("n_iter", self.max_iter))
 
         else:  # Adam (mini-batch) -- keep everything on device, no DataLoader
             optimizer = torch.optim.AdamW(model.parameters(), lr=self.lr, weight_decay=0.0)
