@@ -71,9 +71,23 @@ def overfit_check(cfg: DictConfig) -> None:
         num_classes = ds_cls.num_classes
         ignore_index = 255
 
-        # Instantiate model
-        model_cfg = OmegaConf.merge(cfg.model, {"num_channels": num_channels})
-        model = instantiate(model_cfg)
+        # Instantiate model (match main.py behavior with resolved bands)
+        bench_for_bands = ds_cls()
+        bands_resolved = (
+            tuple(bench_for_bands.rgb_bands)
+            if cfg.dataset.bands == "rgb"
+            else None
+            if cfg.dataset.bands in ("all", None)
+            else tuple(cfg.dataset.bands)
+        )
+        bands_list = bench_for_bands.select_band_specs(bands_resolved)
+        assert len(bands_list) == num_channels, (
+            f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
+            f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
+        )
+
+        instantiate_kwargs: dict = {"bands": bands_list, "_convert_": "object"}
+        model = instantiate(cfg.model, **instantiate_kwargs)
         model.to(device).eval()
 
         # Build segmentation probe (same path as main benchmark)

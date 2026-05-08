@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torchmetrics.classification import MulticlassJaccardIndex
 
 from torchgeo_bench.models.segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead
-from torchgeo_bench.segmentation_probe import SegmentationProbe
+from torchgeo_bench.segmentation_probe import GPUTensorCache, SegmentationProbe
 
 logger = logging.getLogger(__name__)
 
@@ -96,28 +96,21 @@ def run_overfit_check(
     batch_size = images_list[0].shape[0]
 
     # --- Extract features using frozen backbone ---
-    probe.backbone.to(device).eval()
     input_h, input_w = images_list[0].shape[-2:]
     use_amp = device.type == "cuda"
 
-    layer_feature_batches: list[list[torch.Tensor]] = [[] for _ in probe.layer_names]
-    with torch.no_grad():
-        for imgs in images_list:
-            probe._features.clear()
-            with torch.autocast(device_type=device.type, enabled=use_amp):
-                probe.backbone(imgs)
-            for li, name in enumerate(probe.layer_names):
-                feat = probe._process_feature(probe._features[name])
-                layer_feature_batches[li].append(feat.detach())
-
-    # Concatenate into (N, C, H, W) per layer
-    stored_features: list[torch.Tensor] = [torch.cat(layer_feature_batches[li]) for li in range(len(probe.layer_names))]
-    stored_masks: torch.Tensor = torch.cat(masks_list)
+    overfit_loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(torch.cat(images_list).cpu(), torch.cat(masks_list).cpu()),
+        batch_size=sum(t.shape[0] for t in images_list),
+    )
+    cpu_cache = probe.extract_segmentation_features(overfit_loader)
+    gpu_cache = GPUTensorCache.from_cached(cpu_cache, device)
+    stored_masks = gpu_cache.masks
     n_samples = stored_masks.shape[0]
 
     unique_labels = int(stored_masks[stored_masks != ignore_index].unique().numel())
-    feature_norm = float(torch.stack([f.norm(dim=1).mean() for f in stored_features]).mean().item())
-    feature_std = float(torch.stack([f.std() for f in stored_features]).mean().item())
+    feature_norm = float(torch.stack([f.norm(dim=1).mean() for f in gpu_cache.layer_tensors]).mean().item())
+    feature_std = float(torch.stack([f.std() for f in gpu_cache.layer_tensors]).mean().item())
 
     # --- Build fresh head ---
     head = _build_fresh_head(probe, num_classes, hidden_dim=hidden_dim).to(device)
@@ -132,7 +125,7 @@ def run_overfit_check(
     for _step in range(steps):
         optimizer.zero_grad()
         with torch.autocast(device_type=device.type, enabled=use_amp):
-            logits = head(stored_features, input_h, input_w)
+            logits = head(gpu_cache.layer_tensors, input_h, input_w)
             loss = criterion(logits, stored_masks)
         if _step == 0:
             initial_loss = loss.item()
@@ -151,11 +144,7 @@ def run_overfit_check(
     ).to(device)
 
     with torch.no_grad():
-        batch_size = min(n_samples, 32)
-        for start in range(0, n_samples, batch_size):
-            s = slice(start, start + batch_size)
-            feat_batch = [t[s] for t in stored_features]
-            mask_batch = stored_masks[s]
+        for feat_batch, mask_batch in gpu_cache.ordered_batches(32):
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 logits = head(feat_batch, input_h, input_w)
             metric.update(logits, mask_batch)
@@ -185,21 +174,3 @@ def run_overfit_check(
         "initial_loss": initial_loss if initial_loss is not None else 0.0,
         "loss_delta": loss_delta,
     }
-
-
-
-# for MODEL in \
-#   sam3_encoder \
-#   timm/convnext_base timm/convnext_large timm/convnext_large_dinov3 timm/convnext_small timm/convnext_tiny \
-#   timm/densenet121 timm/densenet161 \
-#   timm/efficientnet_b0 timm/efficientnet_b1 timm/efficientnet_b2 timm/efficientnet_b3 \
-#   timm/maxvit_tiny_tf_224 \
-#   timm/mobilenetv3_large_100 timm/mobilenetv3_small_100 \
-#   timm/regnetx_002 timm/regnetx_008 timm/regnety_002 timm/regnety_008 \
-#   timm/resnet18 timm/resnet34 timm/resnet50 timm/resnet101 \
-#   timm/vgg16 timm/vgg19 \
-#   torchgeo/dofa_base torchgeo/scalemae_large_fmow torchgeo/swinv2b_s2rgb_satlas_mi \
-# ; do
-#   echo "=== $MODEL ==="
-#   torchgeo-bench overfit-check model=$MODEL dataset.names=[caffe,flair2] dataset.geobench_v2_root=/mnt/SSD2/nils/datasets/geobench2
-# done
