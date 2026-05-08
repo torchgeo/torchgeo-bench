@@ -1,0 +1,8 @@
+# Documentation requirements for Read the Docs (fallback when uv is unavailable).
+# Keep in sync with optional-dependencies.docs in pyproject.toml.
+
+linkify-it-py>=2
+myst-parser>=2
+pydata-sphinx-theme>=0.15
+sphinx>=7
+sphinx-copybutton>=0.5

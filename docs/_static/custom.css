@@ -1,0 +1,13 @@
+/* torchgeo-bench documentation custom styles */
+
+/* Slightly wider primary content column to fit code samples and CSV-like tables. */
+.bd-main .bd-content .bd-article-container {
+    max-width: 80em;
+}
+
+/* Tighten autodoc signatures so long type annotations wrap cleanly. */
+dl.py.class > dt,
+dl.py.function > dt,
+dl.py.method > dt {
+    word-break: break-word;
+}
