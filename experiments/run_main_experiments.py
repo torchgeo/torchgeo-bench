@@ -1,24 +1,20 @@
 #!/usr/bin/env python
-"""Run every benchmark model across every dataset (or chosen subsets).
+"""Run every benchmark model across every dataset.
 
-Each model is one job; the job evaluates that model across all datasets
-specified by ``--datasets`` (default ``all``). Results land in
-``results/all_results.csv``.
+Each model is one job that evaluates that model across all datasets
+(``dataset.names=all``).
 
 Usage:
     python experiments/run_main_experiments.py
     python experiments/run_main_experiments.py --devices 0 1 2 3
-    python experiments/run_main_experiments.py --models timm/resnet18 timm/resnet50
-    python experiments/run_main_experiments.py --datasets [m-eurosat,m-forestnet]
-    python experiments/run_main_experiments.py --dry-run
 """
 
 import argparse
 import sys
 
-from _runner import Job, add_devices_argument, run_jobs
+from _runner import Job, add_devices_argument, default_output, run_jobs
 
-OUTPUT = "results/all_results.csv"
+OUTPUT = default_output(__file__)
 
 MODELS = [
     "timm/convnext_base",
@@ -95,48 +91,20 @@ MODELS = [
 ]
 
 
-def build_jobs(models: list[str], datasets: str) -> list[Job]:
-    """Build one job per model.
-
-    Args:
-        models: Model identifiers (Hydra ``model=`` overrides) to evaluate.
-        datasets: Hydra value forwarded as ``dataset.names=<datasets>``
-            (e.g. ``"all"`` or ``"[m-eurosat,m-forestnet]"``).
-    """
-    jobs: list[Job] = []
-    for model in models:
-        short = model.split("/")[-1]
-        overrides = [f"model={model}", f"dataset.names={datasets}"]
-        jobs.append(Job(label=short, overrides=overrides))
-    return jobs
+def build_jobs() -> list[Job]:
+    """Build one job per model (each runs over all datasets)."""
+    return [
+        Job(label=model.split("/")[-1], overrides=[f"model={model}", "dataset.names=all"])
+        for model in MODELS
+    ]
 
 
 def main() -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--models",
-        nargs="+",
-        default=None,
-        help=f"Subset of models to run (default: all {len(MODELS)}).",
-    )
-    parser.add_argument(
-        "--datasets",
-        default="all",
-        help="Hydra value for dataset.names — 'all' or a bracketed list "
-        "such as '[m-eurosat,m-forestnet]'. Default: all.",
-    )
-    parser.add_argument(
-        "--output",
-        default=OUTPUT,
-        help=f"Output CSV path (default: {OUTPUT}).",
-    )
     add_devices_argument(parser)
     args = parser.parse_args()
-
-    models = args.models if args.models is not None else MODELS
-    jobs = build_jobs(models, args.datasets)
-    return run_jobs(jobs, args.devices, output=args.output, dry_run=args.dry_run)
+    return run_jobs(build_jobs(), args.devices, output=OUTPUT)
 
 
 if __name__ == "__main__":

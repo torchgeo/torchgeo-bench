@@ -67,11 +67,16 @@ def add_devices_argument(parser: argparse.ArgumentParser) -> None:
         "jobs are dispatched via a queue with one worker per device. "
         "Default: 0.",
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the job list without executing anything.",
-    )
+
+
+def default_output(script_file: str | Path) -> str:
+    """Derive the standard ``results/<basename>.csv`` path from a script's ``__file__``.
+
+    Drops the ``run_`` prefix and ``.py`` suffix. For example,
+    ``run_cls_token_experiment.py`` becomes ``results/cls_token_experiment.csv``.
+    """
+    stem = Path(script_file).stem.removeprefix("run_")
+    return f"results/{stem}.csv"
 
 
 def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResult:
@@ -231,33 +236,12 @@ def run_jobs(
     return 0 if failed == 0 else 1
 
 
-def main_with_runner(
-    parser: argparse.ArgumentParser,
-    build_jobs,  # callable[[argparse.Namespace], tuple[list[Job], str]]
-) -> int:
-    """Convenience wrapper used by the non-custom scripts.
-
-    Args:
-        parser: Argparse parser with all script-specific args already added
-            (including the standard ``--devices`` / ``--dry-run`` registered
-            via :func:`add_devices_argument`).
-        build_jobs: Callable taking the parsed args and returning
-            ``(jobs, output_path)``.
-
-    Returns:
-        Process exit code (forward to ``sys.exit``).
-    """
-    args = parser.parse_args()
-    jobs, output = build_jobs(args)
-    return run_jobs(jobs, args.devices, output=output, dry_run=args.dry_run)
-
-
 __all__ = [
+    "REPO_ROOT",
     "Job",
     "add_devices_argument",
-    "main_with_runner",
+    "default_output",
     "run_jobs",
-    "REPO_ROOT",
 ]
 
 

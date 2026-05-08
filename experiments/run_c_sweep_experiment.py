@@ -7,16 +7,18 @@ and records train/val/test accuracy for each ``C`` value.
 
 Usage:
     python experiments/run_c_sweep_experiment.py
-    python experiments/run_c_sweep_experiment.py --device cuda:3
+    python experiments/run_c_sweep_experiment.py --devices 3
 """
 
 import argparse
 import logging
 import os
+import sys
 
 import numpy as np
 import pandas as pd
 import torch
+from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
@@ -27,8 +29,11 @@ from torchgeo_bench.utils import extract_features
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
+OUTPUT = default_output(__file__)
+SEED = 0
 IMAGE_SIZE = 224
+
+DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
 
 MODEL_CONFIGS = {
     "resnet18": {
@@ -94,9 +99,7 @@ def run_c_sweep(
     y_val: np.ndarray,
     x_test: np.ndarray,
     y_test: np.ndarray,
-    c_values: np.ndarray,
-    device: str,
-    seed: int = 0,
+    device: torch.device,
 ) -> list[dict]:
     """Train ``LogisticRegression`` for each ``C`` and return per-C metrics."""
     rows = []
@@ -105,12 +108,12 @@ def run_c_sweep(
     x_val_t = torch.from_numpy(x_val)
     x_test_t = torch.from_numpy(x_test)
 
-    for c in tqdm(c_values, desc=f"  C-sweep ({model_name})", leave=False):
+    for c in tqdm(C_VALUES, desc=f"  C-sweep ({model_name})", leave=False):
         clf = LogisticRegression(
             C=float(c),
             max_iter=2000,
             tol=1e-6,
-            random_state=seed,
+            random_state=SEED,
             device=device,
         )
         clf.fit(x_train_t, y_train_t)
@@ -138,22 +141,15 @@ def run_c_sweep(
     return rows
 
 
-def run_dataset_sweep(dataset_name: str, args: argparse.Namespace) -> str:
-    """Run the C sweep for one dataset and write its CSV."""
-    output_path = os.path.join(args.output_dir, f"c_sweep_{dataset_name}.csv")
-    device = torch.device(args.device)
-
-    completed_models: set[str] = set()
-    all_rows: list[dict] = []
-    if os.path.exists(output_path):
-        existing_df = pd.read_csv(output_path)
-        all_rows = existing_df.to_dict("records")
-        completed_models = set(existing_df["model"].unique())
+def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[dict]) -> list[dict]:
+    """Run the C sweep for one dataset, appending rows in-place to ``all_rows``."""
+    completed_models = {r["model"] for r in all_rows if r.get("dataset") == dataset_name}
+    if completed_models:
         logger.info(
-            "Resume: found %d completed models in %s: %s",
+            "Resume: %d models already computed for %s: %s",
             len(completed_models),
-            output_path,
-            completed_models,
+            dataset_name,
+            sorted(completed_models),
         )
 
     logger.info("Loading %s dataset...", dataset_name)
@@ -200,41 +196,45 @@ def run_dataset_sweep(dataset_name: str, args: argparse.Namespace) -> str:
             y_val,
             x_test,
             y_test,
-            C_VALUES,
-            args.device,
-            args.seed,
+            device,
         )
         all_rows.extend(rows)
+        pd.DataFrame(all_rows).to_csv(OUTPUT, index=False)
+        logger.info("  Saved %d rows to %s", len(all_rows), OUTPUT)
 
-        df = pd.DataFrame(all_rows)
-        df.to_csv(output_path, index=False)
-        logger.info("  Saved %d rows to %s", len(all_rows), output_path)
-
-    logger.info("Done. Final results for %s: %s", dataset_name, output_path)
-    return output_path
+    return all_rows
 
 
-def main() -> None:
+def main() -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description="C-sweep for linear probing")
-    parser.add_argument("--device", default="cuda:0", help="PyTorch device.")
-    parser.add_argument(
-        "--output-dir",
-        default="results/c_sweep_results",
-        help="Output directory.",
-    )
-    parser.add_argument("--seed", type=int, default=0)
+    add_devices_argument(parser)
     args = parser.parse_args()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    if len(args.devices) > 1:
+        logger.warning(
+            "This script runs in-process; using only the first of --devices=%s.",
+            args.devices,
+        )
+    device = torch.device(f"cuda:{args.devices[0]}")
 
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    logger.info("Running C sweep for datasets: %s", ", ".join(DATASETS))
+    os.makedirs(os.path.dirname(OUTPUT) or ".", exist_ok=True)
 
-    output_paths = [run_dataset_sweep(name, args) for name in DATASETS]
-    logger.info("Finished C sweeps: %s", ", ".join(output_paths))
+    all_rows: list[dict] = []
+    if os.path.exists(OUTPUT):
+        all_rows = pd.read_csv(OUTPUT).to_dict("records")
+        logger.info("Resume: loaded %d existing rows from %s", len(all_rows), OUTPUT)
+
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
+    logger.info("Running C sweep on %d datasets -> %s", len(DATASETS), OUTPUT)
+
+    for dataset_name in DATASETS:
+        all_rows = run_dataset_sweep(dataset_name, device, all_rows)
+
+    logger.info("Done. Final results: %s", OUTPUT)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

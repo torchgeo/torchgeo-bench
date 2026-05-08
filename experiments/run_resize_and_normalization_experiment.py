@@ -3,21 +3,19 @@
 
 Sweeps the model-side ``input_normalization`` knob (``bands_zscore``,
 ``none``, ``imagenet``, ``timm_default``) — the dataset always emits raw
-values, so normalization is configured on the model. Results land in
-``results/eurosat_effect_of_experimental_setting.csv``.
+values, so normalization is configured on the model.
 
 Usage:
     python experiments/run_resize_and_normalization_experiment.py
     python experiments/run_resize_and_normalization_experiment.py --devices 0 1 2
-    python experiments/run_resize_and_normalization_experiment.py --dry-run
 """
 
 import argparse
 import sys
 
-from _runner import Job, add_devices_argument, run_jobs
+from _runner import Job, add_devices_argument, default_output, run_jobs
 
-OUTPUT = "results/eurosat_effect_of_experimental_setting.csv"
+OUTPUT = default_output(__file__)
 
 NORMALIZATIONS = ["bands_zscore", "none", "imagenet", "timm_default"]
 IMAGE_SIZES: list[str] = ["null", "224", "256", "448", "512"]
@@ -54,9 +52,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     add_devices_argument(parser)
     args = parser.parse_args()
-
-    jobs = build_jobs()
-    return run_jobs(jobs, args.devices, output=OUTPUT, dry_run=args.dry_run)
+    return run_jobs(build_jobs(), args.devices, output=OUTPUT)
 
 
 if __name__ == "__main__":

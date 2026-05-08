@@ -8,9 +8,7 @@ is apples-to-apples on regularization and the training objective::
     loss = (1/n) * CrossEntropy + (1/n) * 0.5/C * ||W||^2
 
 For each (model, dataset, fit_config) we record wall-clock fit time,
-number of optimizer iterations, and train/val/test accuracy. With these
-columns you can plot e.g. accuracy-vs-time Pareto curves to see which
-solver hits a target accuracy fastest.
+number of optimizer iterations, and train/val/test accuracy.
 
 Configs swept (per (model, dataset)):
     - LBFGS: one fit per ``C``, ``lr=1.0`` (LBFGS uses strong-Wolfe line
@@ -19,17 +17,19 @@ Configs swept (per (model, dataset)):
 
 Usage:
     python experiments/run_effect_of_lbfgs_vs_adam.py
-    python experiments/run_effect_of_lbfgs_vs_adam.py --device cuda:3
+    python experiments/run_effect_of_lbfgs_vs_adam.py --devices 3
 """
 
 import argparse
 import logging
 import os
+import sys
 import time
 
 import numpy as np
 import pandas as pd
 import torch
+from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
@@ -40,8 +40,11 @@ from torchgeo_bench.utils import extract_features
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
+OUTPUT = default_output(__file__)
+SEED = 0
 IMAGE_SIZE = 224
+
+DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
 
 MODEL_CONFIGS = {
     "resnet18": {
@@ -101,7 +104,6 @@ def fit_one(
     x_val: torch.Tensor,
     x_test: torch.Tensor,
     device: torch.device,
-    seed: int,
 ) -> tuple[LogisticRegression, float, np.ndarray, np.ndarray, np.ndarray]:
     """Fit one config and return ``(clf, fit_seconds, train_pred, val_pred, test_pred)``."""
     clf = LogisticRegression(
@@ -110,7 +112,7 @@ def fit_one(
         solver=cfg["solver"],
         max_iter=MAX_ITER,
         tol=TOL,
-        random_state=seed,
+        random_state=SEED,
         device=device,
     )
 
@@ -128,18 +130,20 @@ def fit_one(
     return clf, fit_seconds, train_pred, val_pred, test_pred
 
 
-def run_dataset(dataset_name: str, configs: list[dict], args: argparse.Namespace) -> str:
-    """Run all (model, config) fits for one dataset and write its CSV."""
-    output_path = os.path.join(args.output_dir, f"effect_of_lbfgs_vs_adam_{dataset_name}.csv")
-    device = torch.device(args.device)
-
-    completed: set[tuple] = set()
-    all_rows: list[dict] = []
-    if os.path.exists(output_path):
-        existing = pd.read_csv(output_path)
-        all_rows = existing.to_dict("records")
-        completed = {(r["model"], r["solver"], float(r["C"]), float(r["lr"])) for r in all_rows}
-        logger.info("Resume: found %d existing rows in %s", len(existing), output_path)
+def run_dataset(
+    dataset_name: str,
+    configs: list[dict],
+    device: torch.device,
+    all_rows: list[dict],
+) -> list[dict]:
+    """Run all (model, config) fits for one dataset, appending rows to ``all_rows``."""
+    completed = {
+        (r["model"], r["solver"], float(r["C"]), float(r["lr"]))
+        for r in all_rows
+        if r.get("dataset") == dataset_name
+    }
+    if completed:
+        logger.info("Resume: %d existing rows for %s", len(completed), dataset_name)
 
     logger.info("Loading %s dataset...", dataset_name)
     train_dataset, train_loader, val_loader, test_loader = get_datasets(
@@ -207,7 +211,6 @@ def run_dataset(dataset_name: str, configs: list[dict], args: argparse.Namespace
                 x_val_t,
                 x_test_t,
                 device,
-                args.seed,
             )
             all_rows.append(
                 {
@@ -232,27 +235,31 @@ def run_dataset(dataset_name: str, configs: list[dict], args: argparse.Namespace
                 }
             )
 
-        df = pd.DataFrame(all_rows)
-        df.to_csv(output_path, index=False)
-        logger.info("  Saved %d rows to %s", len(all_rows), output_path)
+        pd.DataFrame(all_rows).to_csv(OUTPUT, index=False)
+        logger.info("  Saved %d rows to %s", len(all_rows), OUTPUT)
 
-    logger.info("Done. Final results for %s: %s", dataset_name, output_path)
-    return output_path
+    return all_rows
 
 
-def main() -> None:
+def main() -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description="LBFGS vs Adam linear-probing speed test")
-    parser.add_argument("--device", default="cuda:0", help="PyTorch device.")
-    parser.add_argument(
-        "--output-dir",
-        default="results/effect_of_lbfgs_vs_adam",
-        help="Output directory (one CSV per dataset).",
-    )
-    parser.add_argument("--seed", type=int, default=0)
+    add_devices_argument(parser)
     args = parser.parse_args()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    if len(args.devices) > 1:
+        logger.warning(
+            "This script runs in-process; using only the first of --devices=%s.",
+            args.devices,
+        )
+    device = torch.device(f"cuda:{args.devices[0]}")
+
+    os.makedirs(os.path.dirname(OUTPUT) or ".", exist_ok=True)
+
+    all_rows: list[dict] = []
+    if os.path.exists(OUTPUT):
+        all_rows = pd.read_csv(OUTPUT).to_dict("records")
+        logger.info("Resume: loaded %d existing rows from %s", len(all_rows), OUTPUT)
 
     configs = build_configs()
     logger.info(
@@ -262,13 +269,16 @@ def main() -> None:
         len(configs),
     )
 
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    logger.info("Running LBFGS-vs-Adam sweep on datasets: %s", ", ".join(DATASETS))
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
+    logger.info("Running LBFGS-vs-Adam sweep on %d datasets -> %s", len(DATASETS), OUTPUT)
 
-    output_paths = [run_dataset(name, configs, args) for name in DATASETS]
-    logger.info("Finished sweeps: %s", ", ".join(output_paths))
+    for dataset_name in DATASETS:
+        all_rows = run_dataset(dataset_name, configs, device, all_rows)
+
+    logger.info("Done. Final results: %s", OUTPUT)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

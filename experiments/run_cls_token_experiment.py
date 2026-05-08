@@ -4,20 +4,19 @@
 Each ViT/DeiT model is evaluated twice per dataset — once with
 ``model.use_cls_token=false`` (spatial average) and once with
 ``model.use_cls_token=true`` (CLS token). Swin models are excluded (no CLS
-token). Results land in ``results/cls_token_experiment.csv``.
+token).
 
 Usage:
     python experiments/run_cls_token_experiment.py
     python experiments/run_cls_token_experiment.py --devices 0 1 2
-    python experiments/run_cls_token_experiment.py --dry-run
 """
 
 import argparse
 import sys
 
-from _runner import Job, add_devices_argument, run_jobs
+from _runner import Job, add_devices_argument, default_output, run_jobs
 
-OUTPUT = "results/cls_token_experiment.csv"
+OUTPUT = default_output(__file__)
 
 DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
 
@@ -58,9 +57,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     add_devices_argument(parser)
     args = parser.parse_args()
-
-    jobs = build_jobs()
-    return run_jobs(jobs, args.devices, output=OUTPUT, dry_run=args.dry_run)
+    return run_jobs(build_jobs(), args.devices, output=OUTPUT)
 
 
 if __name__ == "__main__":
