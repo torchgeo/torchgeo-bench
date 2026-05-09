@@ -5,9 +5,10 @@ from .geobench_v2 import _V2Dataset
 
 
 class TreeSatAI(_V2Dataset):
-    """Aerial + Sentinel-2 + SAR tree species classification (15 classes).
+    """Aerial + Sentinel-2 + SAR tree species classification (15 classes, multilabel).
 
     Multi-sensor dataset with aerial RGB+NIR, 12 Sentinel-2 bands, and 3 SAR bands.
+    Labels are multi-hot (a single image can contain multiple tree species).
     Class indices follow the upstream ``GeoBenchTreeSatAI.classes`` ordering:
     Abies, Acer, Alnus, Betula, Cleared, Fagus, Fraxinus, Larix, Picea, Pinus,
     Populus, Prunus, Pseudotsuga, Quercus, Tilia.

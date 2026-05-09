@@ -814,9 +814,9 @@ def main(cfg: DictConfig) -> None:
                     device,
                     collect_preds=save_viz,
                 )
-            except RuntimeError as exc:
+            except (RuntimeError, ValueError) as exc:
                 logger.warning(
-                    f"Skipping {ds_name}/{cfg.model.name} (incompatible channels or runtime error: {exc})"
+                    f"Skipping {ds_name}/{cfg.model.name} (incompatible inputs or runtime error: {exc})"
                 )
                 continue
             all_rows.append(
@@ -892,74 +892,91 @@ def main(cfg: DictConfig) -> None:
                 x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
                 x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
                 x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
-            except RuntimeError as exc:
+            except (RuntimeError, ValueError) as exc:
                 logger.warning(
-                    f"Skipping {ds_name}/{cfg.model.name} (incompatible channels or runtime error: {exc})"
+                    f"Skipping {ds_name}/{cfg.model.name} (incompatible inputs or runtime error: {exc})"
                 )
                 continue
             feature_dim = x_train.shape[1]
+            if not (np.isfinite(x_train).all() and np.isfinite(x_val).all() and np.isfinite(x_test).all()):
+                logger.warning(
+                    f"Skipping {ds_name}/{cfg.model.name} (model produced non-finite embeddings)"
+                )
+                continue
 
             if not skip_knn:
-                knn_score, knn_lo, knn_hi = evaluate_knn(
-                    x_train,
-                    y_train,
-                    x_test,
-                    y_test,
-                    cfg.seed,
-                    cfg.eval.bootstrap,
-                    verbose=cfg.verbose,
-                    device=cfg.device,
-                )
-                all_rows.append(
-                    EvaluationResult(
-                        **common_meta,
-                        method="knn5",
-                        metric_name=metric_name,
-                        metric_value=knn_score,
-                        ci_lower=knn_lo,
-                        ci_upper=knn_hi,
-                        feature_dim=feature_dim,
-                        best_c=None,
-                        best_lr=None,
-                        best_batch_size=None,
-                        n_train=len(x_train),
-                        n_val=len(x_val),
-                        n_test=len(x_test),
-                    ).to_row()
-                )
+                try:
+                    knn_score, knn_lo, knn_hi = evaluate_knn(
+                        x_train,
+                        y_train,
+                        x_test,
+                        y_test,
+                        cfg.seed,
+                        cfg.eval.bootstrap,
+                        verbose=cfg.verbose,
+                        device=cfg.device,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    logger.warning(
+                        f"Skipping {ds_name}/{cfg.model.name} knn5 (eval error: {exc})"
+                    )
+                else:
+                    all_rows.append(
+                        EvaluationResult(
+                            **common_meta,
+                            method="knn5",
+                            metric_name=metric_name,
+                            metric_value=knn_score,
+                            ci_lower=knn_lo,
+                            ci_upper=knn_hi,
+                            feature_dim=feature_dim,
+                            best_c=None,
+                            best_lr=None,
+                            best_batch_size=None,
+                            n_train=len(x_train),
+                            n_val=len(x_val),
+                            n_test=len(x_test),
+                        ).to_row()
+                    )
 
             if not skip_linear:
-                lin_score, lin_lo, lin_hi, best_c = evaluate_logistic(
-                    x_train,
-                    y_train,
-                    x_val,
-                    y_val,
-                    x_test,
-                    y_test,
-                    c_values_list,
-                    cfg.seed,
-                    cfg.eval.bootstrap,
-                    cfg.eval.merge_val,
-                    cfg.device,
-                    cfg.verbose,
-                )
-                all_rows.append(
-                    EvaluationResult(
-                        **common_meta,
-                        method="linear",
-                        metric_name=metric_name,
-                        metric_value=lin_score,
-                        ci_lower=lin_lo,
-                        ci_upper=lin_hi,
-                        feature_dim=feature_dim,
-                        best_c=best_c,
-                        best_lr=None,
-                        best_batch_size=None,
-                        n_train=len(x_train),
-                        n_val=len(x_val),
-                        n_test=len(x_test),
-                    ).to_row()
-                )
+                try:
+                    lin_score, lin_lo, lin_hi, best_c = evaluate_logistic(
+                        x_train,
+                        y_train,
+                        x_val,
+                        y_val,
+                        x_test,
+                        y_test,
+                        c_values_list,
+                        cfg.seed,
+                        cfg.eval.bootstrap,
+                        cfg.eval.merge_val,
+                        cfg.device,
+                        cfg.verbose,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    logger.warning(
+                        f"Skipping {ds_name}/{cfg.model.name} linear (eval error: {exc})"
+                    )
+                else:
+                    all_rows.append(
+                        EvaluationResult(
+                            **common_meta,
+                            method="linear",
+                            metric_name=metric_name,
+                            metric_value=lin_score,
+                            ci_lower=lin_lo,
+                            ci_upper=lin_hi,
+                            feature_dim=feature_dim,
+                            best_c=best_c,
+                            best_lr=None,
+                            best_batch_size=None,
+                            n_train=len(x_train),
+                            n_val=len(x_val),
+                            n_test=len(x_test),
+                        ).to_row()
+                    )
 
             if not skip_id:
                 id_rows = evaluate_intrinsic_dim(
