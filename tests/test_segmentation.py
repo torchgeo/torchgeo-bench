@@ -59,6 +59,19 @@ class ViTBackbone(nn.Module):
         return x
 
 
+class TwoChannelBackbone(nn.Module):
+    """Backbone with a BenchModel-like num_channels attribute."""
+
+    num_channels = 2
+
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 8, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        return self.conv(x).mean(dim=(-2, -1))
+
+
 @pytest.fixture
 def mock_backbone():
     return MockBackbone()
@@ -315,6 +328,15 @@ def test_probe_vit_token_features():
     # 'blocks' is an Identity that passes through (B, L, C); hook it directly
     probe = make_probe(backbone, ["blocks"], head_type="linear")
     images = torch.randn(2, 3, 64, 64)
+    logits = probe(images)
+    assert logits.shape == (2, NUM_CLASSES, 64, 64)
+
+
+def test_probe_dry_run_uses_backbone_num_channels():
+    """Dry-run channel inference supports non-RGB benchmark models."""
+    backbone = TwoChannelBackbone()
+    probe = make_probe(backbone, [], head_type="linear")
+    images = torch.randn(2, 2, 64, 64)
     logits = probe(images)
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
