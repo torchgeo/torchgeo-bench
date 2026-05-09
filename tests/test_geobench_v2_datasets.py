@@ -298,6 +298,20 @@ class TestKuroSiwoCanonicalization:
         assert torch.allclose(img[:2], torch.full_like(img[:2], 3.0))
         assert torch.allclose(img[2:], torch.full_like(img[2:], 99.0))
 
+    def test_resize_runs_after_canonicalization(self, mocked_kuro_siwo):
+        """Framework transforms must see the folded ``image`` key."""
+        del mocked_kuro_siwo
+        _, train_dl, _ = get_datasets(
+            dataset_name="kuro_siwo",
+            bands=("vv", "vh"),
+            image_size=32,
+            batch_size=2,
+            num_workers=0,
+        )
+        batch = next(iter(train_dl))
+        assert batch["image"].shape[-2:] == (32, 32)
+        assert batch["mask"].shape[-2:] == (32, 32)
+
 
 @pytest.mark.slow
 class TestKuroSiwoLive:
