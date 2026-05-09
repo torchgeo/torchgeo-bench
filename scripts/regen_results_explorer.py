@@ -1,26 +1,13 @@
 """Regenerate ``docs/_static/results-explorer.html`` from result snapshots.
 
-The explorer ships as a self-contained HTML file with the dataset inlined
-as a ``const DATA = [...]`` JS array.  To show *progression over time* the
-explorer holds N labelled snapshots; the UI surfaces a dropdown that
-defaults to the newest one.
-
-Snapshots live under ``docs/_static/_results_snapshots/<label>.json`` and
-are versioned in git.  Each row in a snapshot file carries a ``snapshot``
-field equal to the file label.  This script:
-
-1. Loads every existing snapshot JSON.
-2. Reads ``results/all_results.csv`` and writes today's snapshot
-   (``<YYYY-MM-DD>.json``) — overwriting any prior write for today.
-3. Inlines all snapshots (newest first) into the explorer HTML and bumps
-   the masthead to reflect the newest snapshot.
+Reads ``results/all_results.csv``, writes today's snapshot to
+``docs/_static/_results_snapshots/<label>.json``, then re-inlines every
+committed snapshot (newest first) into the explorer HTML and bumps the
+masthead.  Only ``knn5`` / ``linear`` rows are kept.
 
 Usage::
 
     python scripts/regen_results_explorer.py [--label 2026-05-08]
-
-Only ``method in {knn5, linear}`` rows are inlined (intrinsic-dimension
-rows have no ``metric_value`` and clutter the appendix table).
 """
 
 import argparse
@@ -36,17 +23,55 @@ HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
 SNAPSHOT_DIR = ROOT / "docs" / "_static" / "_results_snapshots"
 
 COLUMNS = [
-    "dataset", "method", "metric_name", "metric_value", "ci_lower", "ci_upper",
-    "feature_dim", "best_c", "best_lr", "best_batch_size", "n_train", "n_val",
-    "n_test", "seed", "model", "name", "normalization", "image_size",
-    "interpolation", "partition", "bands", "c_range_start", "c_range_stop",
-    "c_range_num", "merge_val", "bootstrap", "snapshot",
+    "dataset",
+    "method",
+    "metric_name",
+    "metric_value",
+    "ci_lower",
+    "ci_upper",
+    "feature_dim",
+    "best_c",
+    "best_lr",
+    "best_batch_size",
+    "n_train",
+    "n_val",
+    "n_test",
+    "seed",
+    "model",
+    "name",
+    "normalization",
+    "image_size",
+    "interpolation",
+    "partition",
+    "bands",
+    "c_range_start",
+    "c_range_stop",
+    "c_range_num",
+    "merge_val",
+    "bootstrap",
+    "snapshot",
 ]
 NUMERIC = {
-    "metric_value", "ci_lower", "ci_upper", "feature_dim", "best_c", "best_lr",
-    "best_batch_size", "n_train", "n_val", "n_test", "seed", "image_size",
-    "c_range_start", "c_range_stop", "c_range_num", "bootstrap", "fw_iou",
-    "precision", "recall", "f1",
+    "metric_value",
+    "ci_lower",
+    "ci_upper",
+    "feature_dim",
+    "best_c",
+    "best_lr",
+    "best_batch_size",
+    "n_train",
+    "n_val",
+    "n_test",
+    "seed",
+    "image_size",
+    "c_range_start",
+    "c_range_stop",
+    "c_range_num",
+    "bootstrap",
+    "fw_iou",
+    "precision",
+    "recall",
+    "f1",
 }
 BOOL = {"merge_val"}
 
@@ -112,9 +137,7 @@ def main() -> None:
     latest_label = ordered_labels[0]
     latest_rows = snapshots[latest_label]
     flat_rows = [r for label in ordered_labels for r in snapshots[label]]
-    snapshot_meta = [
-        {"label": label, "rows": len(snapshots[label])} for label in ordered_labels
-    ]
+    snapshot_meta = [{"label": label, "rows": len(snapshots[label])} for label in ordered_labels]
 
     n_models = len({r["name"] for r in latest_rows if r["name"]})
     n_datasets = len({r["dataset"] for r in latest_rows})

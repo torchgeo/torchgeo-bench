@@ -270,7 +270,9 @@ class RCFBench(BenchModel):
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
         if mode == "empirical" and dataset is not None:
-            dataset = _NormalizingDatasetView(dataset, self.input_mean, self.input_std)
+            mean = torch.tensor([b.mean for b in self.bands], dtype=torch.float32)
+            std = torch.tensor([b.std for b in self.bands], dtype=torch.float32)
+            dataset = _NormalizingDatasetView(dataset, mean, std)
         self.rcf = RCF(
             in_channels=self.num_channels,
             features=features,

@@ -278,7 +278,6 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return headless ResNet embeddings of shape ``(B, K)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
@@ -322,7 +321,6 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return headless Swin-V2 embeddings of shape ``(B, K)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
@@ -369,7 +367,6 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return mean-pooled spatial tokens of shape ``(B, D)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
@@ -400,7 +397,6 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
     # torchgeo releases, and dataset units vary widely.
     weights_input_unit = None
 
-    # Approximate centre wavelengths in µm for Sentinel-2 RGB (B4, B3, B2).
     S2_RGB_WAVELENGTHS: list[float] = [0.665, 0.56, 0.49]
 
     def __init__(
@@ -431,7 +427,6 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return DOFA feature embeddings of shape ``(B, D)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
@@ -477,7 +472,6 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return EarthLoc global descriptor of shape ``(B, 4096)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)

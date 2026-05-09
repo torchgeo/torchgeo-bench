@@ -30,7 +30,7 @@ import torch
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._input_units import InputUnit, to_reflectance, to_s2_dn
+from ._input_units import InputUnit, detect_input_unit, to_reflectance, to_s2_dn
 
 
 class NormalizationStrategy(StrEnum):
@@ -101,7 +101,7 @@ def build_normalizer(
     # MODEL_NATIVE
     if expected_input_unit is None:
         raise ValueError("model_native normalisation requires expected_input_unit")
-    src = _detect(bands)
+    src = detect_input_unit(bands)
     if expected_input_unit == InputUnit.S2_DN:
         convert = lambda x: to_s2_dn(x, src)  # noqa: E731
     elif expected_input_unit == InputUnit.REFLECTANCE_0_1:
@@ -128,9 +128,3 @@ def build_normalizer(
         return (x - pm.to(x.device, x.dtype)) / ps.to(x.device, x.dtype)
 
     return _f
-
-
-def _detect(bands: list[BandSpec]) -> InputUnit:
-    from ._input_units import detect_input_unit
-
-    return detect_input_unit(bands)

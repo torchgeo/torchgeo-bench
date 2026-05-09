@@ -12,15 +12,25 @@ Sample rows
 .. code-block:: text
 
    dataset,method,metric_name,metric_value,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model,name,normalization,image_size,interpolation,partition,bands
-   m-eurosat,knn5,accuracy,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,raw,224,bilinear,default,rgb
-   m-eurosat,linear,accuracy,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,raw,224,bilinear,default,rgb
-   burn_scars,seg-fpn,mIoU,0.6234,0.0,0.0,768,,1000,200,300,0,torchgeo_bench.models.TimmPatchBenchModel,resnet50,raw,224,bilinear,default,rgb
+   m-eurosat,knn5,accuracy,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,bandspec_zscore,224,bilinear,default,rgb
+   m-eurosat,linear,accuracy,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,bandspec_zscore,224,bilinear,default,rgb
+   burn_scars,seg-fpn,mIoU,0.6234,0.0,0.0,768,,1000,200,300,0,torchgeo_bench.models.TimmPatchBenchModel,resnet50,bandspec_zscore,224,bilinear,default,rgb
 
-The ``normalization`` column is currently always ``raw`` — datasets emit
-unnormalized tensors and each model wrapper applies its own
-normalization inside :meth:`~torchgeo_bench.models.BenchModel.normalize_inputs`.
-The column is preserved in the schema so older results from before that
-refactor remain distinguishable on resume.
+Datasets emit unnormalized tensors; each model wrapper normalises inside
+:meth:`~torchgeo_bench.models.BenchModel.normalize_inputs` according to
+the strategy selected by ``cfg.dataset.normalization``.  Allowed values:
+
+================== ==================================================================
+``bandspec_zscore`` Per-channel z-score using :class:`BandSpec` mean/std (default).
+``model_native``    Convert to the wrapper's ``expected_input_unit``, then apply any
+                    ``pretrain_mean`` / ``pretrain_std`` declared on the class.
+``minmax``          Scale each channel to ``[0, 1]`` from BandSpec min/max.
+``minmax_zscore``   ``minmax`` then z-score against assumed ``mean=0.5, std=0.25``.
+``identity``        No rescaling (for models whose forward owns normalisation).
+================== ==================================================================
+
+Older snapshots may carry legacy values such as ``raw`` / ``mean_stdev`` /
+``percentile_2_98`` — they are kept verbatim for resume safety.
 
 Method values
 -------------
@@ -60,8 +70,7 @@ Column               Description
 ``seed``             RNG seed used for the run.
 ``model``            Fully-qualified model class (``cfg.model._target_``).
 ``name``             Human-readable model name (``cfg.model.name``).
-``normalization``    Always ``raw`` after the model-normalization refactor;
-                     kept for back-compat with older CSVs.
+``normalization``    Strategy applied by the model wrapper (see table above).
 ``image_size``       Input resize size (``None`` if no resizing).
 ``interpolation``    Resize interpolation mode.
 ``partition``        GeoBench V1 partition name (``default`` for V2).
