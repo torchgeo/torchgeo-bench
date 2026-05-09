@@ -15,7 +15,7 @@ class TreeSatAI(_V2Dataset):
     name = "treesatai"
     task = "classification"
     num_classes = 13
-    multilabel = False
+    multilabel = True
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 4000, "val": 1000, "test": 2000}
 
