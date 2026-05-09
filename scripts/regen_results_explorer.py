@@ -1,50 +1,47 @@
-"""Regenerate ``docs/_static/results-explorer.html`` from ``results/all_results.csv``.
+"""Regenerate ``docs/_static/results-explorer.html`` from result snapshots.
 
-The explorer ships as a self-contained HTML file with the dataset inlined as a
-``const DATA = [...]`` JS array.  Whenever ``all_results.csv`` changes the
-inlined snapshot drifts and the deployed leaderboard becomes stale.  Run this
-script to splice the current CSV into the page and refresh the masthead
-counters.
+The explorer ships as a self-contained HTML file with the dataset inlined
+as a ``const DATA = [...]`` JS array.  To show *progression over time* the
+explorer holds N labelled snapshots; the UI surfaces a dropdown that
+defaults to the newest one.
+
+Snapshots live under ``docs/_static/_results_snapshots/<label>.json`` and
+are versioned in git.  Each row in a snapshot file carries a ``snapshot``
+field equal to the file label.  This script:
+
+1. Loads every existing snapshot JSON.
+2. Reads ``results/all_results.csv`` and writes today's snapshot
+   (``<YYYY-MM-DD>.json``) — overwriting any prior write for today.
+3. Inlines all snapshots (newest first) into the explorer HTML and bumps
+   the masthead to reflect the newest snapshot.
 
 Usage::
 
-    python scripts/regen_results_explorer.py
+    python scripts/regen_results_explorer.py [--label 2026-05-08]
 
-Only ``method in {knn5, linear}`` rows are inlined (intrinsic-dimension rows
-have no ``metric_value`` and clutter the appendix table).
+Only ``method in {knn5, linear}`` rows are inlined (intrinsic-dimension
+rows have no ``metric_value`` and clutter the appendix table).
 """
 
+import argparse
 import csv
 import json
 import re
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH = ROOT / "results" / "all_results.csv"
 HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
+SNAPSHOT_DIR = ROOT / "docs" / "_static" / "_results_snapshots"
 
 COLUMNS = [
     "dataset", "method", "metric_name", "metric_value", "ci_lower", "ci_upper",
     "feature_dim", "best_c", "best_lr", "best_batch_size", "n_train", "n_val",
     "n_test", "seed", "model", "name", "normalization", "image_size",
     "interpolation", "partition", "bands", "c_range_start", "c_range_stop",
-    "c_range_num", "merge_val", "bootstrap", "scope",
+    "c_range_num", "merge_val", "bootstrap", "snapshot",
 ]
-
-# Wrapper classes added in PR #32 (Prithvi / TerraMind / Clay / CROMA /
-# Panopticon).  Everything else (TIMM, RCF, ImageStats, DOFA, EarthLoc,
-# ScaleMAE, Swin, ResNet, OlmoEarth, SAM3) was on main before the PR.
-PR32_CLASSES = {
-    "torchgeo_bench.models.TerraTorchClayBench",
-    "torchgeo_bench.models.TerraTorchPrithviBench",
-    "torchgeo_bench.models.TerraTorchTerraMindBench",
-    "torchgeo_bench.models.TorchGeoCromaBench",
-    "torchgeo_bench.models.TorchGeoPanopticonBench",
-}
-# Pre-existing wrapper class but new checkpoint config introduced by PR #32.
-PR32_NAMES = {
-    "tgeo_resnet50_s2all_moco",
-}
 NUMERIC = {
     "metric_value", "ci_lower", "ci_upper", "feature_dim", "best_c", "best_lr",
     "best_batch_size", "n_train", "n_val", "n_test", "seed", "image_size",
@@ -54,7 +51,7 @@ NUMERIC = {
 BOOL = {"merge_val"}
 
 
-def _load_rows() -> list[dict]:
+def _load_csv_rows(label: str) -> list[dict]:
     rows = []
     with CSV_PATH.open() as fh:
         for r in csv.DictReader(fh):
@@ -64,7 +61,7 @@ def _load_rows() -> list[dict]:
                 continue
             row = {}
             for k in COLUMNS:
-                if k == "scope":
+                if k == "snapshot":
                     continue
                 v = r.get(k, "")
                 if v is None or v == "":
@@ -78,31 +75,65 @@ def _load_rows() -> list[dict]:
                     row[k] = v.lower() in ("true", "1")
                 else:
                     row[k] = v
-            row["scope"] = (
-                "pr_32"
-                if row["model"] in PR32_CLASSES or row["name"] in PR32_NAMES
-                else "pre_pr"
-            )
+            row["snapshot"] = label
             rows.append(row)
     return rows
 
 
+def _snapshot_label_sort_key(label: str) -> tuple:
+    """Sort labels with leading ``YYYY-MM-DD`` chronologically; the rest lex."""
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", label)
+    return (m.group(1) if m else "", label)
+
+
 def main() -> None:
-    rows = _load_rows()
-    n_models = len({r["name"] for r in rows if r["name"]})
-    n_datasets = len({r["dataset"] for r in rows})
-    best = max(rows, key=lambda r: r["metric_value"])
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--label",
+        default=date.today().isoformat(),
+        help="Label for the snapshot generated from the current CSV (default: today).",
+    )
+    args = parser.parse_args()
+
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    today_rows = _load_csv_rows(args.label)
+    snapshot_path = SNAPSHOT_DIR / f"{args.label}.json"
+    snapshot_path.write_text(json.dumps(today_rows, separators=(",", ":")))
+
+    snapshots: dict[str, list[dict]] = {}
+    for path in sorted(SNAPSHOT_DIR.glob("*.json")):
+        label = path.stem
+        rows = json.loads(path.read_text())
+        for r in rows:
+            r["snapshot"] = label  # normalise even if file omits it
+        snapshots[label] = rows
+
+    ordered_labels = sorted(snapshots, key=_snapshot_label_sort_key, reverse=True)
+    latest_label = ordered_labels[0]
+    latest_rows = snapshots[latest_label]
+    flat_rows = [r for label in ordered_labels for r in snapshots[label]]
+    snapshot_meta = [
+        {"label": label, "rows": len(snapshots[label])} for label in ordered_labels
+    ]
+
+    n_models = len({r["name"] for r in latest_rows if r["name"]})
+    n_datasets = len({r["dataset"] for r in latest_rows})
+    best = max(latest_rows, key=lambda r: r["metric_value"])
 
     js_columns = "const COLUMNS = " + json.dumps(COLUMNS) + ";"
     js_numeric = "const NUMERIC_COLS = " + json.dumps(sorted(NUMERIC)) + ";"
-    js_data = "const DATA = " + json.dumps(rows, separators=(",", ":")) + ";"
+    js_snaps = "const SNAPSHOTS = " + json.dumps(snapshot_meta) + ";"
+    js_default = "const DEFAULT_SNAPSHOT = " + json.dumps(latest_label) + ";"
+    js_data = "const DATA = " + json.dumps(flat_rows, separators=(",", ":")) + ";"
 
     text = HTML_PATH.read_text()
     pattern = re.compile(
-        r"const COLUMNS = \[.*?\];\s*const NUMERIC_COLS = \[.*?\];\s*const DATA = \[.*?\];",
+        r"const COLUMNS = \[.*?\];\s*const NUMERIC_COLS = \[.*?\];"
+        r"(?:\s*const SNAPSHOTS = \[.*?\];)?(?:\s*const DEFAULT_SNAPSHOT = \"[^\"]*\";)?"
+        r"\s*const DATA = \[.*?\];",
         re.DOTALL,
     )
-    new_block = "\n".join([js_columns, js_numeric, js_data])
+    new_block = "\n".join([js_columns, js_numeric, js_snaps, js_default, js_data])
     if not pattern.search(text):
         raise SystemExit("Could not locate COLUMNS/NUMERIC_COLS/DATA block in HTML.")
     text = pattern.sub(new_block, text, count=1)
@@ -115,17 +146,18 @@ def main() -> None:
     text = re.sub(
         r'<p class="standfirst" id="standfirst-text">[^<]*<em>[^<]*</em>[^<]*</p>',
         (
-            f'<p class="standfirst" id="standfirst-text">A snapshot of {len(rows):,} '
-            f"measurements across {n_datasets} classification datasets (RGB and full "
-            f"multispectral) and {n_models} model variants. The best configuration in "
-            f"this run reaches {best['metric_value'] * 100:.1f}% on "
-            f"<em>{best['dataset']}</em> — explore the data below.</p>"
+            f'<p class="standfirst" id="standfirst-text">A snapshot of '
+            f"{len(latest_rows):,} measurements across {n_datasets} classification "
+            f"datasets (RGB and full multispectral) and {n_models} model variants. "
+            f"The best configuration in this run reaches "
+            f"{best['metric_value'] * 100:.1f}% on <em>{best['dataset']}</em> — "
+            f"explore the data below.</p>"
         ),
         text,
     )
     text = re.sub(
         r'<b id="row-shown">\d+</b> of <b id="row-total">\d+</b>',
-        f'<b id="row-shown">{len(rows)}</b> of <b id="row-total">{len(rows)}</b>',
+        f'<b id="row-shown">{len(latest_rows)}</b> of <b id="row-total">{len(latest_rows)}</b>',
         text,
     )
     text = re.sub(
@@ -137,7 +169,8 @@ def main() -> None:
     HTML_PATH.write_text(text)
     print(
         f"Wrote {HTML_PATH.relative_to(ROOT)}: "
-        f"{len(rows)} rows, {n_models} models, {n_datasets} datasets — "
+        f"{len(snapshot_meta)} snapshots, latest={latest_label} "
+        f"({len(latest_rows)} rows, {n_models} models, {n_datasets} datasets) — "
         f"best {best['metric_value']:.4f} ({best['name']} on {best['dataset']})"
     )
 
