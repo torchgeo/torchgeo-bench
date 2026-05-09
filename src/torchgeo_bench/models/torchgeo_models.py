@@ -32,7 +32,7 @@ from torchvision.transforms.v2 import Normalize as NormalizeV2
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._input_units import InputUnit
+from ._input_units import InputUnit, detect_input_unit
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -144,6 +144,12 @@ _UNIT_EXPECTED_MEAN: dict[str, tuple[float, float]] = {
     "s2_dn_div10000": (0.0, 10000.0),
 }
 
+_UNIT_EXPECTED_SOURCE: dict[str, InputUnit] = {
+    "uint8_div255": InputUnit.UINT8,
+    "reflectance_0_1": InputUnit.REFLECTANCE_0_1,
+    "s2_dn_div10000": InputUnit.S2_DN,
+}
+
 
 def _warn_unit_mismatch(
     cls_name: str,
@@ -162,6 +168,19 @@ def _warn_unit_mismatch(
             ``"ignore"`` is silent.
     """
     if check == "ignore" or weights_input_unit is None:
+        return
+    expected_unit = _UNIT_EXPECTED_SOURCE.get(weights_input_unit)
+    detected_unit = detect_input_unit(bands)
+    if expected_unit is not None and detected_unit != expected_unit:
+        msg = (
+            f"{cls_name}: pretrained weights expect {weights_input_unit!r} inputs "
+            f"({expected_unit.value}), but selected bands look like {detected_unit.value}: "
+            f"{[(b.name, b.mean, b.max) for b in bands[:5]]}"
+            f"{'...' if len(bands) > 5 else ''}. Embeddings may be poorly scaled."
+        )
+        if check == "error":
+            raise RuntimeError(msg)
+        warnings.warn(msg, UserWarning, stacklevel=3)
         return
     expected = _UNIT_EXPECTED_MEAN.get(weights_input_unit)
     if expected is None:
