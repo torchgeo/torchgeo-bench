@@ -1,8 +1,10 @@
 import pytest
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
+from torchgeo_bench.main import _build_seg_probe_and_solver
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
     GPUTensorCache,
@@ -103,6 +105,28 @@ def test_probe_unknown_head_type(mock_backbone):
     with pytest.raises(ValueError, match="Unknown head_type"):
         SegmentationProbe(
             backbone=mock_backbone, layer_names=["layer1"], num_classes=2, head_type="invalid_type"
+        )
+
+
+def test_build_seg_probe_requires_spatial_layers(mock_backbone):
+    """Segmentation evaluation refuses the global-output fallback."""
+    eval_cfg = OmegaConf.create(
+        {
+            "segmentation": {
+                "layers": [],
+                "head_type": "fpn",
+                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 255},
+                "lr_scheduler": "none",
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="requires eval.segmentation.layers"):
+        _build_seg_probe_and_solver(
+            mock_backbone,
+            num_classes=NUM_CLASSES,
+            eval_cfg=eval_cfg,
+            device=torch.device("cpu"),
+            lr=1e-3,
         )
 
 

@@ -42,7 +42,7 @@ eval:
 
   segmentation:
     head_type: "fpn"
-    layers: []
+    layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10
     criterion:

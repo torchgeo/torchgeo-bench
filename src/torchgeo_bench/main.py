@@ -392,9 +392,15 @@ def _build_seg_probe_and_solver(
     Returns:
         Tuple of (probe, solver).
     """
+    layer_names = list(eval_cfg.segmentation.layers)
+    if not layer_names:
+        raise ValueError(
+            "Segmentation evaluation requires eval.segmentation.layers to name "
+            "spatial backbone layers. Refusing to probe the global backbone output."
+        )
     probe = SegmentationProbe(
         backbone=model,
-        layer_names=eval_cfg.segmentation.layers,
+        layer_names=layer_names,
         num_classes=num_classes,
         head_type=eval_cfg.segmentation.head_type,
         freeze_backbone=True,
