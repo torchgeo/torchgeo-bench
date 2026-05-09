@@ -28,8 +28,23 @@ COLUMNS = [
     "feature_dim", "best_c", "best_lr", "best_batch_size", "n_train", "n_val",
     "n_test", "seed", "model", "name", "normalization", "image_size",
     "interpolation", "partition", "bands", "c_range_start", "c_range_stop",
-    "c_range_num", "merge_val", "bootstrap",
+    "c_range_num", "merge_val", "bootstrap", "scope",
 ]
+
+# Wrapper classes added in PR #32 (Prithvi / TerraMind / Clay / CROMA /
+# Panopticon).  Everything else (TIMM, RCF, ImageStats, DOFA, EarthLoc,
+# ScaleMAE, Swin, ResNet, OlmoEarth, SAM3) was on main before the PR.
+PR32_CLASSES = {
+    "torchgeo_bench.models.TerraTorchClayBench",
+    "torchgeo_bench.models.TerraTorchPrithviBench",
+    "torchgeo_bench.models.TerraTorchTerraMindBench",
+    "torchgeo_bench.models.TorchGeoCromaBench",
+    "torchgeo_bench.models.TorchGeoPanopticonBench",
+}
+# Pre-existing wrapper class but new checkpoint config introduced by PR #32.
+PR32_NAMES = {
+    "tgeo_resnet50_s2all_moco",
+}
 NUMERIC = {
     "metric_value", "ci_lower", "ci_upper", "feature_dim", "best_c", "best_lr",
     "best_batch_size", "n_train", "n_val", "n_test", "seed", "image_size",
@@ -49,6 +64,8 @@ def _load_rows() -> list[dict]:
                 continue
             row = {}
             for k in COLUMNS:
+                if k == "scope":
+                    continue
                 v = r.get(k, "")
                 if v is None or v == "":
                     row[k] = None
@@ -61,6 +78,11 @@ def _load_rows() -> list[dict]:
                     row[k] = v.lower() in ("true", "1")
                 else:
                     row[k] = v
+            row["scope"] = (
+                "pr_32"
+                if row["model"] in PR32_CLASSES or row["name"] in PR32_NAMES
+                else "pre_pr"
+            )
             rows.append(row)
     return rows
 
