@@ -15,7 +15,7 @@ class BENV2(_V2Dataset):
     name = "benv2"
     task = "classification"
     num_classes = 19
-    multilabel = False
+    multilabel = True
     rgb_bands = ["b04", "b03", "b02"]
     split_sizes = {"train": 20000, "val": 4000, "test": 4000}
 
