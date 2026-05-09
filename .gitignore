@@ -2,6 +2,8 @@ paper/
 results/
 scripts/*
 !scripts/viz_results.py
+!scripts/repack_geobench_v1.py
+!scripts/tune_dataloader.py
 figures/
 
 # Python
