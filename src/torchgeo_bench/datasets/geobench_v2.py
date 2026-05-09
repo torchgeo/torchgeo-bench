@@ -171,7 +171,16 @@ class _V2Dataset(BenchDataset):
         def chained(sample: dict) -> dict:
             sample = canonicalize(sample)  # rename image_b → "image" first
             if transform is not None:
-                sample = transform(sample)  # _resize now finds "image" safely
+                if "image" in sample:
+                    sample = transform(sample)  # _resize now finds "image" safely
+                else:
+                    # treesatai applies its transforms on the per-modality dict
+                    # (image_aerial / image_s2 / image_s1) *before* stacking, so
+                    # the framework's resize transform must operate on each
+                    # modality independently here.
+                    for key in [k for k in sample if k.startswith("image_")]:
+                        wrapped = transform({"image": sample[key]})
+                        sample[key] = wrapped["image"]
             return sample
 
         kwargs: dict[str, object] = {
