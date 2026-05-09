@@ -133,9 +133,23 @@ required for the sweep.
 
 .. note::
 
-   ``m-forestnet`` and ``forestnet`` are *different* datasets.  V1 uses
-   Landsat with 6 bands; V2 uses Sentinel-2 with the same number of
-   bands but a different sensor and split.
+   V1 and V2 share several CLI names but the underlying data are
+   *different* datasets — different sensors, splits, label spaces, or
+   normalisation conventions:
+
+   * ``m-bigearthnet`` (V1) — original BigEarthNet, 43-class
+     **multilabel** scene tags, S2 top-of-atmosphere DN.
+     ``benv2`` (V2) — BigEarthNet v2.0 with 19-class multilabel and
+     stacked S1 + S2.
+   * ``m-so2sat`` (V1) — 18-band stack including LCZ context.
+     ``so2sat`` (V2) — 10 S2 + 2 S1 bands stored at reflectance scale.
+   * ``m-forestnet`` (V1) — Landsat-8 6-band uint8.
+     ``forestnet`` (V2) — Sentinel-2 6-band uint8 with a different split
+     than V1 despite the same channel count.
+
+   The leaderboard prefixes panel titles with ``GeoBench V1`` /
+   ``GeoBench V2`` so V1 and V2 results are never compared on the same
+   axis.
 
 GeoBench V2 — segmentation
 --------------------------
