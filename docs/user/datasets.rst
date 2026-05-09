@@ -116,14 +116,14 @@ instead of accuracy.
 GeoBench V2 — classification
 ----------------------------
 
-================== ====== ===== ====================================== =====================================
-CLI name           #cls   bands sensor                                 Class
-================== ====== ===== ====================================== =====================================
-``benv2``          19     14    Sentinel-1 + Sentinel-2 (multi-modal)  :class:`~torchgeo_bench.datasets.BENV2`
-``forestnet``      12     6     Sentinel-2                             :class:`~torchgeo_bench.datasets.Forestnet`
-``so2sat``         17     12    Sentinel-1 + Sentinel-2                :class:`~torchgeo_bench.datasets.So2Sat`
-``treesatai``      13     19    Aerial + S2 + S1 (multi-modal)         :class:`~torchgeo_bench.datasets.TreeSatAI`
-================== ====== ===== ====================================== =====================================
+================== ====== ===== ============ ====================================== =====================================
+CLI name           #cls   bands multilabel   sensor                                 Class
+================== ====== ===== ============ ====================================== =====================================
+``benv2``          19     14    **yes**      Sentinel-1 + Sentinel-2 (multi-modal)  :class:`~torchgeo_bench.datasets.BENV2`
+``forestnet``      12     6     no           Sentinel-2                             :class:`~torchgeo_bench.datasets.Forestnet`
+``so2sat``         17     12    no           Sentinel-1 + Sentinel-2                :class:`~torchgeo_bench.datasets.So2Sat`
+``treesatai``      13     19    **yes**      Aerial + S2 + S1 (multi-modal)         :class:`~torchgeo_bench.datasets.TreeSatAI`
+================== ====== ===== ============ ====================================== =====================================
 
 V2 datasets are stored as a single ``.tortilla`` file each, hosted under
 ``aialliance/<name>`` on the Hugging Face Hub.  ``_V2Dataset.get_dataset``
