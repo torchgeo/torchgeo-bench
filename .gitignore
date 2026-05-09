@@ -75,6 +75,7 @@ data/
 !conf/**/*.json
 !**/band_stats.json
 !**/normalizer.json
+!docs/_static/_results_snapshots/*.json
 
 # Logs
 *.log
