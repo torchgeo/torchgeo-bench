@@ -406,6 +406,7 @@ def _build_seg_probe_and_solver(
         freeze_backbone=True,
     )
     criterion = instantiate(eval_cfg.segmentation.criterion)
+    ignore_index = _resolve_segmentation_ignore_index(eval_cfg.segmentation, criterion)
     solver = SegmentationSolver(
         model=probe,
         num_classes=num_classes,
@@ -413,9 +414,24 @@ def _build_seg_probe_and_solver(
         device=str(device),
         criterion=criterion,
         lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
-        ignore_index=eval_cfg.segmentation.get("ignore_index", 255),
+        ignore_index=ignore_index,
     )
     return probe, solver
+
+
+def _resolve_segmentation_ignore_index(seg_cfg: DictConfig, criterion: torch.nn.Module) -> int:
+    """Resolve the ignore index shared by segmentation loss and metrics."""
+    explicit = seg_cfg.get("ignore_index", None)
+    criterion_value = getattr(criterion, "ignore_index", None)
+    if explicit is None:
+        return int(criterion_value) if criterion_value is not None else 255
+    if criterion_value is not None and int(criterion_value) != int(explicit):
+        raise ValueError(
+            "Segmentation ignore_index mismatch: "
+            f"eval.segmentation.ignore_index={explicit} but "
+            f"criterion.ignore_index={criterion_value}."
+        )
+    return int(explicit)
 
 
 def evaluate_intrinsic_dim(
