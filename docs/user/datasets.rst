@@ -172,11 +172,12 @@ CLI name             #cls   bands notes                                        C
 Other
 -----
 
-============  ========================================================
-CLI name      Class
-============  ========================================================
-``eurosat``   :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper)
-============  ========================================================
+==================== ============================================================================
+CLI name             Class
+==================== ============================================================================
+``eurosat``          :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper, random split)
+``eurosat-spatial``  :class:`~torchgeo_bench.datasets.EuroSATSpatial`  (longitude-based split)
+==================== ============================================================================
 
 Selecting datasets
 ------------------
