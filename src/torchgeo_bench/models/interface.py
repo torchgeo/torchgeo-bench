@@ -43,18 +43,18 @@ class BenchModel(nn.Module, ABC):
     Args:
         bands: Ordered list of :class:`BandSpec` describing the input
             channels.  Length determines :attr:`num_channels`.
-        normalization: Selectable input-normalisation strategy.  See
-            :class:`~torchgeo_bench.models._normalization.NormalizationStrategy`.
-            Defaults to ``"bandspec_zscore"``.
+        normalization: Input-normalisation strategy name (one of
+            ``bandspec_zscore`` / ``model_native`` / ``minmax`` /
+            ``minmax_zscore`` / ``identity``).  Defaults to
+            ``"bandspec_zscore"``.
 
     Subclasses may declare:
 
-    * :attr:`expected_input_unit` — what scale the pretrained backbone
-      was fed at training (e.g. ``s2_dn``, ``reflectance_0_1``,
-      ``uint8``).  Used by the ``model_native`` strategy.
-    * :attr:`pretrain_mean` / :attr:`pretrain_std` — per-channel
-      normalisation applied *after* unit conversion under
-      ``model_native``.
+    * ``expected_input_unit`` — what scale the pretrained backbone was
+      fed at training (e.g. ``s2_dn``, ``reflectance_0_1``, ``uint8``).
+      Used by the ``model_native`` strategy.
+    * ``pretrain_mean`` / ``pretrain_std`` — per-channel normalisation
+      applied *after* unit conversion under ``model_native``.
     """
 
     expected_input_unit: InputUnit | None = None

@@ -20,14 +20,23 @@ Datasets emit unnormalized tensors; each model wrapper normalises inside
 :meth:`~torchgeo_bench.models.BenchModel.normalize_inputs` according to
 the strategy selected by ``cfg.dataset.normalization``.  Allowed values:
 
-================== ==================================================================
-``bandspec_zscore`` Per-channel z-score using :class:`BandSpec` mean/std (default).
-``model_native``    Convert to the wrapper's ``expected_input_unit``, then apply any
-                    ``pretrain_mean`` / ``pretrain_std`` declared on the class.
-``minmax``          Scale each channel to ``[0, 1]`` from BandSpec min/max.
-``minmax_zscore``   ``minmax`` then z-score against assumed ``mean=0.5, std=0.25``.
-``identity``        No rescaling (for models whose forward owns normalisation).
-================== ==================================================================
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Strategy
+     - Behaviour
+   * - ``bandspec_zscore``
+     - Per-channel z-score using ``BandSpec`` mean/std (default).
+   * - ``model_native``
+     - Convert to the wrapper's ``expected_input_unit``, then apply any
+       ``pretrain_mean`` / ``pretrain_std`` declared on the class.
+   * - ``minmax``
+     - Scale each channel to ``[0, 1]`` from BandSpec min/max.
+   * - ``minmax_zscore``
+     - ``minmax`` then z-score against assumed ``mean=0.5, std=0.25``.
+   * - ``identity``
+     - No rescaling (for models whose forward owns normalisation).
 
 Older snapshots may carry legacy values such as ``raw`` / ``mean_stdev`` /
 ``percentile_2_98`` — they are kept verbatim for resume safety.

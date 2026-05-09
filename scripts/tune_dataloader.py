@@ -60,7 +60,9 @@ def _build_model(model_cfg: str, bands_list):
     )
 
 
-def _bench(model, dataset, batch_size: int, num_workers: int, device: torch.device, max_batches: int):
+def _bench(
+    model, dataset, batch_size: int, num_workers: int, device: torch.device, max_batches: int
+):
     dl = DataLoader(
         dataset,
         batch_size=batch_size,

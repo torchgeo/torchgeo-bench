@@ -24,7 +24,6 @@ loader can read them without changes.
 
 import argparse
 import io
-import json
 import logging
 import pickle
 import shutil
@@ -57,7 +56,7 @@ def _safe_unpickle(b: bytes) -> dict:
 def _read_sample(hdf5_path: Path) -> tuple[dict[str, np.ndarray], bytes]:
     """Return ``(bands_dict, raw_pickle_bytes)`` for one V1 HDF5 sample."""
     with h5py.File(hdf5_path, "r") as f:
-        bands = {k: f[k][:] for k in f.keys()}
+        bands = {k: f[k][:] for k in f}
         raw_pickle = f.attrs["pickle"]
     return bands, raw_pickle
 
@@ -189,7 +188,9 @@ def main() -> None:
         help="Output root for sharded copies",
     )
     parser.add_argument("--shard-size", type=int, default=1000)
-    parser.add_argument("--validate", action="store_true", help="run a 50-sample bit-equality check")
+    parser.add_argument(
+        "--validate", action="store_true", help="run a 50-sample bit-equality check"
+    )
     args = parser.parse_args()
 
     dataset_dir = Path(args.root) / args.dataset

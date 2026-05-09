@@ -1,5 +1,7 @@
 """Benchmark model implementations and exports."""
 
+from ._input_units import InputUnit
+from ._normalization import NormalizationStrategy
 from .image_stats import ImageStatsBench
 from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
@@ -24,6 +26,8 @@ from .torchgeo_models import (
 
 __all__: list[str] = [
     "BenchModel",
+    "InputUnit",
+    "NormalizationStrategy",
     "RCFBench",
     "ImageStatsBench",
     "TimmPatchBenchModel",
