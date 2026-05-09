@@ -11,6 +11,7 @@ from pathlib import Path
 
 from torch.utils.data import Dataset
 from torchgeo.datasets import EuroSAT as TGEuroSAT
+from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial
 
 from .base import BandSpec, BenchDataset
 
@@ -69,6 +70,48 @@ class EuroSAT(BenchDataset):
         del partition, normalize
         band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
         return TGEuroSAT(
+            root=str(self.data_root()),
+            split=split,
+            bands=band_codes,
+            transforms=transform,
+        )
+
+
+class EuroSATSpatial(EuroSAT):
+    """EuroSAT with longitude-based 60/20/20 train/val/test splits.
+
+    Uses :class:`torchgeo.datasets.EuroSATSpatial`, which partitions tiles
+    by longitude so train/val/test regions are spatially disjoint. Same
+    27000 images, classes, bands, and stats as :class:`EuroSAT`; only the
+    split assignment differs. Stronger generalization signal than the
+    default random split.
+    """
+
+    name = "eurosat-spatial"
+    # Longitude-based 60/20/20: same totals as the random split, just
+    # reassigned across regions.
+    split_sizes = {"train": 16200, "val": 5400, "test": 5400}
+
+    @classmethod
+    def data_root(cls) -> Path:
+        """Return ``Path("data/eurosat")`` — shares the archive with :class:`EuroSAT`."""
+        # Both classes use the same EuroSATallBands.zip; only the split
+        # txt files differ. Sharing the root avoids a second 2GB download.
+        return Path("data/eurosat")
+
+    def get_dataset(
+        self,
+        split: str,
+        *,
+        partition: str = "default",
+        bands: tuple[str, ...] | None = None,
+        transform: Callable | None = None,
+        normalize: str = "mean_stdev",
+    ) -> Dataset:
+        """Return a :class:`torchgeo.datasets.EuroSATSpatial` for the given split."""
+        del partition, normalize
+        band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
+        return TGEuroSATSpatial(
             root=str(self.data_root()),
             split=split,
             bands=band_codes,

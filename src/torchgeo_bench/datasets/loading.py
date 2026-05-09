@@ -21,7 +21,7 @@ from .burn_scars import BurnScars
 from .caffe import CaFFe
 from .cloudsen12 import CloudSEN12
 from .dynamic_earthnet import DynamicEarthNet
-from .eurosat import EuroSAT
+from .eurosat import EuroSAT, EuroSATSpatial
 from .flair2 import FLAIR2
 from .forestnet import Forestnet
 from .fotw import FieldsOfTheWorld
@@ -69,6 +69,7 @@ _REGISTRY: dict[str, type[BenchDataset]] = {
         SpaceNet7,
         # torchgeo template
         EuroSAT,
+        EuroSATSpatial,
     ]
 }
 
