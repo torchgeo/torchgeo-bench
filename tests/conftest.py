@@ -14,6 +14,7 @@ EUROSAT_ROOT = Path("data/eurosat")
 # test-skip branch fires.  The V1 loader otherwise auto-downloads the public
 # WebDataset mirror — which would force CI to pull tens of GBs and time out.
 os.environ.setdefault("GEOBENCH_V1_NO_HF_DOWNLOAD", "1")
+os.environ.setdefault("GEOBENCH_V2_NO_DOWNLOAD", "1")
 
 
 @pytest.fixture

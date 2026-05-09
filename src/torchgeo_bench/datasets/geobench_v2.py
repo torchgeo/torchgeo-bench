@@ -187,7 +187,8 @@ class _V2Dataset(BenchDataset):
             "data_normalizer": nn.Identity,
             # No-op if the tortilla file is already present; otherwise pulls
             # it from the upstream HF mirror (aialliance/<name>) on first use.
-            "download": True,
+            # Set GEOBENCH_V2_NO_DOWNLOAD=1 to disable (CI / offline runs).
+            "download": os.environ.get("GEOBENCH_V2_NO_DOWNLOAD") != "1",
         }
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True
