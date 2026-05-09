@@ -379,25 +379,34 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
 # ---------------------------------------------------------------------------
 
 
+def _resolve_dofa_wavelengths(
+    bands: list[BandSpec],
+    wavelengths: list[float] | None,
+) -> list[float]:
+    """Return one DOFA wavelength per selected input channel."""
+    if wavelengths is not None:
+        if len(wavelengths) != len(bands):
+            raise ValueError(
+                f"DOFA wavelengths length {len(wavelengths)} must match "
+                f"selected channel count {len(bands)}."
+            )
+        return [float(w) for w in wavelengths]
+
+    from ._band_mapping import wavelengths_um
+
+    return wavelengths_um(bands, default_um=0.6)
+
+
 class TorchGeoDOFABench(_TorchGeoBackboneBench):
     """Wrapper for torchgeo DOFA models (dofa_base / dofa_large).
 
     DOFA requires a list of wavelengths (one per input channel in µm).
     ``forward_features(x, wavelengths)`` returns ``(B, D)``.
-
-    .. note::
-
-       The wavelength list is currently hard-coded to Sentinel-2 RGB
-       (``[0.665, 0.56, 0.49]``).  Plumbing per-band wavelengths from
-       :attr:`BenchModel.bands` is tracked in
-       `#15 <https://github.com/torchgeo/torchgeo-bench/issues/15>`_.
     """
 
     # No magnitude check — DOFA's pretrained transform is empty in current
     # torchgeo releases, and dataset units vary widely.
     weights_input_unit = None
-
-    S2_RGB_WAVELENGTHS: list[float] = [0.665, 0.56, 0.49]
 
     def __init__(
         self,
@@ -421,7 +430,7 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
             target_size=target_size,
             input_unit_check=input_unit_check,
         )
-        self.wavelengths = wavelengths or self.S2_RGB_WAVELENGTHS
+        self.wavelengths = _resolve_dofa_wavelengths(bands, wavelengths)
 
     @torch.no_grad()
     def _forward_patch_features(

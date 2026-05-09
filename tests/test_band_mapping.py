@@ -8,6 +8,7 @@ from torchgeo_bench.models._band_mapping import (
     map_to_model_bands,
     wavelengths_um,
 )
+from torchgeo_bench.models.torchgeo_models import _resolve_dofa_wavelengths
 
 
 def _band(name: str, wl: float | None = None) -> BandSpec:
@@ -92,3 +93,17 @@ class TestWavelengthsUm:
         bands = [_band("red", 0.665), _band("vv", None)]
         wls = wavelengths_um(bands, default_um=1.5)
         assert wls == [0.665, 1.5]
+
+
+class TestDofaWavelengths:
+    def test_derived_from_selected_bands(self) -> None:
+        bands = [_band("red", 0.665), _band("green", 0.56), _band("nir", 0.842)]
+        assert _resolve_dofa_wavelengths(bands, None) == [0.665, 0.56, 0.842]
+
+    def test_manual_override_length_must_match_channels(self) -> None:
+        bands = [_band("red", 0.665), _band("green", 0.56)]
+        try:
+            _resolve_dofa_wavelengths(bands, [0.665, 0.56, 0.49])
+        except ValueError:
+            return
+        raise AssertionError("expected ValueError for DOFA wavelength/channel mismatch")
