@@ -23,6 +23,7 @@ from torch.utils.data import Dataset
 from .base import BenchDataset
 
 V1_ROOT = Path("data/classification_v1.0")
+V1_SHARDED_ROOT = Path("data/classification_v1.0_wds")
 
 
 @dataclass
@@ -231,9 +232,29 @@ class _V1Dataset(BenchDataset):
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
     ) -> Dataset:
-        """Return a :class:`GeoBenchv1` for the given split (raw values)."""
+        """Return a torch :class:`Dataset` for the split (raw values).
+
+        Auto-selects between two backends:
+
+        * **Sharded WebDataset** at :data:`V1_SHARDED_ROOT` if present (5–7×
+          faster on NFS, fork-safe at high ``num_workers``).
+        * **Per-sample HDF5** at :data:`V1_ROOT` as fallback for backwards
+          compatibility with the upstream V1 distribution layout.
+        """
         v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split  # type: ignore[assignment]
         source_bands = tuple(spec.source_name for spec in self.select_band_specs(bands))
+        sharded_dir = V1_SHARDED_ROOT / self.name
+        if sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")):
+            from ._v1_webdataset import GeoBenchv1Sharded
+
+            return GeoBenchv1Sharded(
+                root=V1_SHARDED_ROOT,
+                dataset_name=self.name,
+                split=v1_split,
+                partition=partition,
+                bands=source_bands,
+                transform=transform,
+            )
         return GeoBenchv1(
             root=self.data_root(),
             dataset_name=self.name,
