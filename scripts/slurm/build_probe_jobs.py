@@ -45,6 +45,13 @@ SINGLE_BAND_MODE_MODELS: dict[str, str] = {
     # all is 13-ch including cirrus; just sweep RGB for now.
     "olmoearth_base": "rgb",
     "olmoearth_large": "rgb",
+    # 3-channel pretrained backbones (DOFA hardcodes S2-RGB wavelengths;
+    # ScaleMAE-fMoW / EarthLoc are RGB-only).  Multi-band runs would crash
+    # on the input conv shape mismatch.
+    "torchgeo/dofa_base": "rgb",
+    "torchgeo/dofa_large": "rgb",
+    "torchgeo/scalemae_large_fmow": "rgb",
+    "torchgeo/earthloc_s2_resnet50": "rgb",
 }
 
 
