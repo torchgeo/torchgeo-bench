@@ -125,6 +125,12 @@ CLI name           #cls   bands sensor                                 Class
 ``treesatai``      13     19    Aerial + S2 + S1 (multi-modal)         :class:`~torchgeo_bench.datasets.TreeSatAI`
 ================== ====== ===== ====================================== =====================================
 
+V2 datasets are stored as a single ``.tortilla`` file each, hosted under
+``aialliance/<name>`` on the Hugging Face Hub.  ``_V2Dataset.get_dataset``
+passes ``download=True`` to the upstream class, so a missing tortilla is
+fetched on first use — no separate ``torchgeo-bench download`` step
+required for the sweep.
+
 .. note::
 
    ``m-forestnet`` and ``forestnet`` are *different* datasets.  V1 uses

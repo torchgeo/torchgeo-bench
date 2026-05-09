@@ -174,7 +174,12 @@ class _V2Dataset(BenchDataset):
                 sample = transform(sample)  # _resize now finds "image" safely
             return sample
 
-        kwargs: dict[str, object] = {"data_normalizer": nn.Identity}
+        kwargs: dict[str, object] = {
+            "data_normalizer": nn.Identity,
+            # No-op if the tortilla file is already present; otherwise pulls
+            # it from the upstream HF mirror (aialliance/<name>) on first use.
+            "download": True,
+        }
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True
 
