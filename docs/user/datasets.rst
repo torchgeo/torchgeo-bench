@@ -55,6 +55,14 @@ GeoBench V1 — classification
 
 V1 datasets use the ``m-`` prefix on the command line.
 
+The first time a V1 dataset is requested without a local copy under
+``data/classification_v1.0`` or ``data/classification_v1.0_wds``, the
+loader auto-downloads the requested dataset from the public mirror
+``isaaccorley/geobenchv1-webdataset`` on the Hugging Face Hub.  Set
+``GEOBENCH_V1_NO_HF_DOWNLOAD=1`` to disable the auto-download and force a
+local-only path (``torchgeo-bench download geobench_v1`` still works for
+the legacy per-sample HDF5 layout).
+
 .. list-table::
    :header-rows: 1
    :widths: 18 8 8 12 22 32

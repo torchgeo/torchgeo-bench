@@ -7,6 +7,7 @@ HDF5 files using the partition JSON files distributed alongside them.
 
 import io
 import json
+import os
 import pickle
 import warnings
 from collections.abc import Callable
@@ -24,6 +25,10 @@ from .base import BenchDataset
 
 V1_ROOT = Path("data/classification_v1.0")
 V1_SHARDED_ROOT = Path("data/classification_v1.0_wds")
+
+# Public mirror of the WebDataset-converted V1 collection.  Auto-pulled the
+# first time a dataset is requested if no local copy is present.
+V1_HF_REPO_ID = "isaaccorley/geobenchv1-webdataset"
 
 
 @dataclass
@@ -234,16 +239,31 @@ class _V1Dataset(BenchDataset):
     ) -> Dataset:
         """Return a torch :class:`Dataset` for the split (raw values).
 
-        Auto-selects between two backends:
+        Backend resolution order:
 
-        * **Sharded WebDataset** at :data:`V1_SHARDED_ROOT` if present (5–7×
-          faster on NFS, fork-safe at high ``num_workers``).
-        * **Per-sample HDF5** at :data:`V1_ROOT` as fallback for backwards
-          compatibility with the upstream V1 distribution layout.
+        1. **Sharded WebDataset** at :data:`V1_SHARDED_ROOT` if shards already
+           exist locally (5–7× faster on NFS, fork-safe at high
+           ``num_workers``).
+        2. **Per-sample HDF5** at :data:`V1_ROOT` if the legacy distribution
+           layout is present.
+        3. **HuggingFace mirror** :data:`V1_HF_REPO_ID` — auto-downloaded into
+           :data:`V1_SHARDED_ROOT` on first use, then served via the sharded
+           backend.  Disabled by ``GEOBENCH_V1_NO_HF_DOWNLOAD=1``.
         """
         v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split  # type: ignore[assignment]
         source_bands = tuple(spec.source_name for spec in self.select_band_specs(bands))
+
         sharded_dir = V1_SHARDED_ROOT / self.name
+        hdf5_dir = self.data_root() / self.name
+        if (
+            not (sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")))
+            and not hdf5_dir.exists()
+            and os.environ.get("GEOBENCH_V1_NO_HF_DOWNLOAD") != "1"
+        ):
+            from ._v1_webdataset import ensure_sharded_root
+
+            ensure_sharded_root(self.name, V1_SHARDED_ROOT)
+
         if sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")):
             from ._v1_webdataset import GeoBenchv1Sharded
 

@@ -2,14 +2,17 @@
 
 Drops the per-sample HDF5 file-open from ``__getitem__`` (one NFS round-trip
 per sample) by reading from ~22 tar shards instead.  Format is produced by
-``scripts/repack_geobench_v1.py``: each shard contains ``<sid>.bands.npz``
-and ``<sid>.meta.pkl`` files for ~1000 samples.
+``scripts/repack_geobench_v1.py`` and mirrored on the Hub at
+``isaaccorley/geobenchv1-webdataset`` (auto-pulled by
+:func:`ensure_sharded_root` when no local copy is present).
 
-Indexing happens once in ``__init__``: every sample's byte range inside its
-shard is recorded as ``(shard_path, offset, size)`` so ``__getitem__`` does
-a plain ``open()`` + ``seek()`` + ``read()`` and avoids the ``tarfile``
-state machine entirely.  This is fork-safe (each worker opens its own
-file descriptors) and faster (no per-call tar header parsing).
+Each shard contains ``<sid>.bands.npz`` and ``<sid>.meta.pkl`` files for
+~1000 samples.  Indexing happens once in ``__init__``: every sample's byte
+range inside its shard is recorded as ``(shard_path, offset, size)`` so
+``__getitem__`` does a plain ``open()`` + ``seek()`` + ``read()`` and
+avoids the ``tarfile`` state machine entirely.  This is fork-safe (each
+worker opens its own file descriptors) and faster (no per-call tar header
+parsing).
 
 Output dict matches :class:`~torchgeo_bench.datasets.geobench_v1.GeoBenchv1`
 exactly.
@@ -17,6 +20,8 @@ exactly.
 
 import io
 import json
+import logging
+import os
 import pickle
 import tarfile
 from collections.abc import Callable
@@ -26,6 +31,54 @@ from typing import Literal
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+logger = logging.getLogger(__name__)
+
+V1_HF_REPO_ID = "isaaccorley/geobenchv1-webdataset"
+
+
+def ensure_sharded_root(
+    dataset_name: str,
+    sharded_root: Path,
+    *,
+    repo_id: str = V1_HF_REPO_ID,
+    cache_dir: str | os.PathLike | None = None,
+) -> Path:
+    """Snapshot-download the sharded V1 mirror into ``sharded_root`` if absent.
+
+    Pulls only the requested ``dataset_name`` subdirectory so a single-dataset
+    run doesn't download the full 35 GB collection.  Returns the local path of
+    the dataset directory (whether downloaded or already present).
+    """
+    target = Path(sharded_root) / dataset_name
+    if target.exists() and any(target.glob("shard_*.tar")):
+        return target
+
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as e:
+        raise RuntimeError(
+            "huggingface_hub is required to auto-download the GeoBench V1 "
+            "WebDataset mirror.  Install via `pip install huggingface_hub`, "
+            "or set GEOBENCH_V1_NO_HF_DOWNLOAD=1 and provide the data manually."
+        ) from e
+
+    sharded_root = Path(sharded_root)
+    sharded_root.mkdir(parents=True, exist_ok=True)
+    logger.info("Downloading %s/%s -> %s", repo_id, dataset_name, sharded_root)
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type="dataset",
+        local_dir=sharded_root,
+        allow_patterns=[f"{dataset_name}/*"],
+        cache_dir=cache_dir,
+    )
+    if not any(target.glob("shard_*.tar")):
+        raise RuntimeError(
+            f"Auto-download of {repo_id}/{dataset_name} produced no shards under "
+            f"{target}; check the repo layout."
+        )
+    return target
 
 
 class _StubUnpickler(pickle.Unpickler):
