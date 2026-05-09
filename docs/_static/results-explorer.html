@@ -612,17 +612,34 @@ const PLOTLY_LAYOUT_BASE = {
 };
 const PLOTLY_CONFIG = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] };
 
+// V1 datasets are prefixed with "m-"; everything else under
+// torchgeo_bench.datasets is V2.  EuroSAT (the torchgeo wrapper) is its own
+// thing and gets a separate label.
+function _datasetLabel(ds) {
+  if (ds.startsWith("m-")) return `GeoBench V1 · ${ds}`;
+  if (ds === "eurosat") return `EuroSAT (torchgeo)`;
+  return `GeoBench V2 · ${ds}`;
+}
+
 function renderLeaderboard(data) {
   const method = document.getElementById("leaderboard-method").value;
   const topn = parseInt(document.getElementById("leaderboard-topn").value, 10);
   const datasets = uniqSorted(data.map(r => r.dataset));
+  const perDatasetRows = datasets
+    .map(ds => {
+      let rows = data.filter(r => r.dataset === ds && r.method === method);
+      rows.sort((a, b) => b.metric_value - a.metric_value);
+      if (topn > 0) rows = rows.slice(0, topn);
+      return { ds, rows };
+    })
+    .filter(d => d.rows.length);
+
   const traces = [];
-  datasets.forEach((ds, i) => {
-    let rows = data.filter(r => r.dataset === ds && r.method === method);
-    rows.sort((a, b) => b.metric_value - a.metric_value);
-    if (topn > 0) rows = rows.slice(0, topn);
-    rows.reverse();
-    if (!rows.length) return;
+  const ranges = [];
+  perDatasetRows.forEach(({ ds, rows: sortedDesc }, i) => {
+    // Plotly's horizontal bars place `y[0]` at the bottom; reverse the sorted
+    // list so the highest-scoring entry sits at the top of the subplot.
+    const rows = sortedDesc.slice().reverse();
     const labels = rows.map(r => `${r.name} · ${r.normalization}`);
     const vals = rows.map(r => r.metric_value);
     const lo = rows.map(r => r.metric_value - r.ci_lower);
@@ -633,28 +650,41 @@ function renderLeaderboard(data) {
       error_x: { type: "data", array: hi, arrayminus: lo, color: "#66605c", thickness: 1, width: 4 },
       marker: { color: PALETTE[i % PALETTE.length], line: { color: "#262a33", width: 0.5 } },
       name: ds, xaxis: `x${i+1}`, yaxis: `y${i+1}`,
-      hovertemplate: "%{y}<br>accuracy=%{x:.4f}<extra>"+ds+"</extra>",
+      hovertemplate: "%{y}<br>value=%{x:.4f}<extra>"+ds+"</extra>",
     });
+    // Auto-range per subplot: when scores are saturated near 1.0 a fixed
+    // [0, 1] axis collapses all the differences visually.  Centre on the
+    // observed range with a 5pp margin (and a floor at 0.05 so very low
+    // values still get a visible bar).
+    const minV = Math.min(...vals, ...rows.map(r => r.ci_lower));
+    const maxV = Math.max(...vals, ...rows.map(r => r.ci_upper));
+    const span = Math.max(maxV - minV, 0.05);
+    const pad = span * 0.1;
+    const xLo = Math.max(0, minV - pad - 0.02);
+    const xHi = Math.min(1.02, maxV + pad + 0.02);
+    ranges.push([xLo, xHi]);
   });
-  const cols = Math.min(datasets.length, 2);
-  const rows = Math.ceil(datasets.length / cols);
-  // Drop the base `xaxis`/`yaxis` from the spread so they don't alias `xaxis1`
-  // / `yaxis1` (Plotly treats `xaxisN` and `xaxis` as the same axis when N=1,
-  // and the unstyled base would otherwise win for the first subplot).
+
+  const cols = Math.min(perDatasetRows.length, 2);
+  const rows = Math.ceil(perDatasetRows.length / cols);
   const { xaxis: _bx, yaxis: _by, ...layoutBase } = PLOTLY_LAYOUT_BASE;
   const layout = {
     ...layoutBase,
     height: rows * 380 + 80,
     showlegend: false,
     grid: { rows, columns: cols, pattern: "independent" },
-    annotations: datasets.map((ds, i) => ({
-      text: `<b>${ds}</b>`, showarrow: false, x: 0, y: 1.0,
+    annotations: perDatasetRows.map(({ ds }, i) => ({
+      text: `<b>${_datasetLabel(ds)}</b>`, showarrow: false, x: 0, y: 1.0,
       xref: `x${i+1} domain`, yref: `y${i+1} domain`, yanchor: "bottom", xanchor: "left",
       font: { color: "#262a33", size: 13, family: "Inter, sans-serif" },
     })),
   };
-  for (let i = 1; i <= datasets.length; i++) {
-    layout[`xaxis${i}`] = { ...PLOTLY_LAYOUT_BASE.xaxis, title: { text: "accuracy", font: { size: 11 } }, range: [0, 1.02] };
+  for (let i = 1; i <= perDatasetRows.length; i++) {
+    layout[`xaxis${i}`] = {
+      ...PLOTLY_LAYOUT_BASE.xaxis,
+      title: { text: "score", font: { size: 11 } },
+      range: ranges[i - 1],
+    };
     layout[`yaxis${i}`] = { ...PLOTLY_LAYOUT_BASE.yaxis, automargin: true, tickfont: { size: 10 } };
   }
   Plotly.react("chart-leaderboard", traces, layout, PLOTLY_CONFIG);
