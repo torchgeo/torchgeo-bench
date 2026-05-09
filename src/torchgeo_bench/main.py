@@ -803,16 +803,22 @@ def main(cfg: DictConfig) -> None:
                 cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
             ).segmentation
             save_viz = seg_cfg_merged.get("save_viz", False)
-            metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
-                model,
-                train_loader,
-                val_loader,
-                test_loader,
-                cfg,
-                num_classes,
-                device,
-                collect_preds=save_viz,
-            )
+            try:
+                metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
+                    model,
+                    train_loader,
+                    val_loader,
+                    test_loader,
+                    cfg,
+                    num_classes,
+                    device,
+                    collect_preds=save_viz,
+                )
+            except RuntimeError as exc:
+                logger.warning(
+                    f"Skipping {ds_name}/{cfg.model.name} (incompatible channels or runtime error: {exc})"
+                )
+                continue
             all_rows.append(
                 EvaluationResult(
                     **common_meta,
@@ -882,9 +888,15 @@ def main(cfg: DictConfig) -> None:
             if skip_knn and skip_linear and skip_id:
                 continue
 
-            x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
-            x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
-            x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
+            try:
+                x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
+                x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
+                x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
+            except RuntimeError as exc:
+                logger.warning(
+                    f"Skipping {ds_name}/{cfg.model.name} (incompatible channels or runtime error: {exc})"
+                )
+                continue
             feature_dim = x_train.shape[1]
 
             if not skip_knn:
