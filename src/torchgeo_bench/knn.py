@@ -126,11 +126,16 @@ class KNNClassifier:
     def _fit_gpu(self, X: np.ndarray, y: np.ndarray) -> None:
         try:
             from faissknn import FaissKNNClassifier, FaissKNNMultilabelClassifier
-        except ImportError as exc:  # pragma: no cover — covered by env, not unit tests
-            raise ImportError(
-                f"KNNClassifier(device={self.device!r}) requires the 'cuda' extra. "
-                'Install with: pip install -e ".[cuda]"'
-            ) from exc
+        except ImportError:  # pragma: no cover — covered by env, not unit tests
+            logger.warning(
+                "KNNClassifier(device=%r): the 'cuda' extra is not installed "
+                "(faissknn missing); falling back to the CPU faiss-cpu path. "
+                'Install with `pip install -e ".[cuda]"` to enable GPU KNN.',
+                self.device,
+            )
+            self.device = "cpu"
+            self._fit_cpu(X, y)
+            return
 
         if self._multi_label:
             self._n_classes = int(y.shape[1])
