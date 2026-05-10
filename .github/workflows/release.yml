@@ -5,28 +5,61 @@ on:
     tags:
       - "v*"
 
+# Default workflow-level permissions: read-only. Jobs that need more
+# request the specific permission they need (and nothing else).
+permissions:
+  contents: read
+
 jobs:
-  release:
+  # ----------------------------------------------------------------------
+  # Build job: runs untrusted code (build backends, transitive build deps)
+  # but has no publish credentials. Its only output is the dist/ artifact.
+  # ----------------------------------------------------------------------
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
+        with:
+          enable-cache: true
+      - name: Build distributions
+        # NOTE: no `uv sync --extra dev` — PEP 517 builds use isolated
+        # build envs, and shrinking the host env minimises the surface
+        # area available to a hypothetically-malicious build dep.
+        run: uv build
+      - name: Upload distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # ----------------------------------------------------------------------
+  # Publish job: never installs anything from PyPI, never executes any
+  # third-party code beyond actions/download-artifact and the official
+  # pypa/gh-action-pypi-publish action. It is the only job that holds the
+  # OIDC token used to authenticate with PyPI's trusted publisher.
+  # ----------------------------------------------------------------------
+  publish:
     name: Publish to PyPI
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: pypi
+      url: https://pypi.org/p/torchgeo-bench
     permissions:
-      contents: read
-      id-token: write
+      id-token: write   # OIDC for PyPI trusted publisher
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv and setup the python version
-        uses: astral-sh/setup-uv@v8.0.0
+      - name: Download distributions
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53  # v6
         with:
-          enable-cache: true
-
-      - name: Install the project
-        run: uv sync --extra dev
-
-      - name: Build wheel
-        run: uv build
-
-      - name: Publish package
-        run: uv publish
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1
