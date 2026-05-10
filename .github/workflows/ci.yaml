@@ -19,9 +19,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
       - name: Run tests
-        run: uv run pytest -vvv --cov=torchgeo_bench
-      - name: Report coverage
-        run: uv run coverage report -m
+        # `-n auto` parallelises across the runner's CPUs (typically 4 on
+        # GitHub-hosted ubuntu-latest). `--dist=loadfile` groups tests by
+        # file so per-file heavy fixtures aren't repeated across workers.
+        run: uv run pytest -n auto --dist=loadfile
 
   pre-commit:
     runs-on: ubuntu-latest

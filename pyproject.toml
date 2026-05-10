@@ -70,6 +70,7 @@ optional-dependencies.dev = [
   "pyproject-fmt>=2.21",
   "pytest>=7.3",
   "pytest-cov>=4.1",
+  "pytest-xdist>=3.6",
   "ruff>=0.0.270",
 ]
 optional-dependencies.docs = [
@@ -148,9 +149,6 @@ ini_options.python_classes = [ "Test*" ]
 ini_options.python_functions = [ "test_*" ]
 ini_options.addopts = [
   "--verbose",
-  "--cov=torchgeo_bench",
-  "--cov-report=term-missing",
-  "--cov-report=html",
   "-m not slow",
 ]
 ini_options.markers = [
