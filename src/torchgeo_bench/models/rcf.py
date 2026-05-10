@@ -112,7 +112,9 @@ class RCF(nn.Module):
                 (num_patches, num_channels, kernel_size, kernel_size), dtype=np.float32
             )
             idxs = torch.randint(0, len(dataset), (num_patches,), generator=generator).tolist()
-            ys = torch.randint(0, height - kernel_size, (num_patches,), generator=generator).tolist()
+            ys = torch.randint(
+                0, height - kernel_size, (num_patches,), generator=generator
+            ).tolist()
             xs = torch.randint(0, width - kernel_size, (num_patches,), generator=generator).tolist()
 
             for i, (di, y, x) in enumerate(zip(idxs, ys, xs)):
