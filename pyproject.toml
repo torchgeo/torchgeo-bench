@@ -50,12 +50,19 @@ dependencies = [
   "tqdm>=4.65",
 ]
 optional-dependencies.all = [
+  "torchgeo-bench[cuda]",
   "torchgeo-bench[dev]",
   "torchgeo-bench[docs]",
   "torchgeo-bench[id]",
   "torchgeo-bench[sam3]",
   "torchgeo-bench[terratorch]",
   "torchgeo-bench[viz]",
+]
+optional-dependencies.cuda = [
+  # GPU-accelerated KNN via faissknn (CUDA 12.x).
+  # Pulls in faiss-cuda-cu128 wheels which require manylinux_2_34
+  # (glibc >= 2.34); on older systems install will fail at sync time.
+  "faissknn>=0.0.3",
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",

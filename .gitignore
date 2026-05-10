@@ -5,10 +5,12 @@ scripts/*
 !scripts/repack_geobench_v1.py
 !scripts/tune_dataloader.py
 !scripts/regen_results_explorer.py
+!scripts/test_knn_gpu_smoke.py
 !scripts/slurm/
 scripts/slurm/*
 !scripts/slurm/build_probe_jobs.py
 !scripts/slurm/probe_sweep.sh
+!scripts/slurm/knn_gpu_smoke.sh
 figures/
 
 # Python
