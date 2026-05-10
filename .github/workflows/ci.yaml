@@ -48,5 +48,13 @@ jobs:
           key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}-dev
       - name: Install dependencies
         run: uv sync --extra dev --frozen
+      # Cache the pre-commit hook environments (~/.cache/pre-commit/),
+      # keyed on the pinned hook revisions in .pre-commit-config.yaml.
+      # Saves ~20-30s on every CI run by skipping hook-env setup.
+      - name: Cache pre-commit hooks
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
       - name: Run pre-commit
         run: uv run pre-commit run --all-files -v
