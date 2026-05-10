@@ -5,16 +5,19 @@ from .geobench_v2 import _V2Dataset
 
 
 class TreeSatAI(_V2Dataset):
-    """Aerial + Sentinel-2 + SAR tree species classification (13 classes).
+    """Aerial + Sentinel-2 + SAR tree species classification (15 classes).
 
     Multi-sensor dataset with aerial RGB+NIR, 12 Sentinel-2 bands, and 3 SAR bands.
+    Class indices follow the upstream ``GeoBenchTreeSatAI.classes`` ordering:
+    Abies, Acer, Alnus, Betula, Cleared, Fagus, Fraxinus, Larix, Picea, Pinus,
+    Populus, Prunus, Pseudotsuga, Quercus, Tilia.
     """
 
     band_order_strategy = "by_sensor"
 
     name = "treesatai"
     task = "classification"
-    num_classes = 13
+    num_classes = 15
     multilabel = True
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 4000, "val": 1000, "test": 2000}
