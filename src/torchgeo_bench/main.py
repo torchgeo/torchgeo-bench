@@ -211,10 +211,11 @@ def evaluate_knn(
     seed: int,
     n_bootstrap: int,
     verbose: bool = False,
+    device: str = "cpu",
 ) -> tuple[float, float, float]:
     """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
     multi_label = y_train.ndim == 2
-    clf = KNNClassifier(n_neighbors=5)
+    clf = KNNClassifier(n_neighbors=5, device=device)
     clf.fit(x_train, y_train)
 
     if multi_label:
@@ -894,6 +895,7 @@ def main(cfg: DictConfig) -> None:
                     cfg.seed,
                     cfg.eval.bootstrap,
                     verbose=cfg.verbose,
+                    device=cfg.device,
                 )
                 all_rows.append(
                     EvaluationResult(
