@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # GeoBench Cleanlab Audit — Initial Report
 
 Audit of label quality and class structure across all GeoBench V1 + V2
