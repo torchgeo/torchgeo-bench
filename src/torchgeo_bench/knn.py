@@ -22,8 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 def _is_cpu_device(device: str) -> bool:
-    """Treat ``cpu`` (default) as CPU; anything else (``cuda``, ``cuda:0``, …)
-    routes through faissknn's GPU path."""
+    """Return True for the CPU faiss-cpu path, False for the GPU faissknn path.
+
+    Anything other than ``"cpu"`` (e.g. ``"cuda"``, ``"cuda:0"``) routes
+    through ``faissknn``.
+    """
     return str(device).lower() == "cpu"
 
 
@@ -126,7 +129,7 @@ class KNNClassifier:
         except ImportError as exc:  # pragma: no cover — covered by env, not unit tests
             raise ImportError(
                 f"KNNClassifier(device={self.device!r}) requires the 'cuda' extra. "
-                "Install with: pip install -e \".[cuda]\""
+                'Install with: pip install -e ".[cuda]"'
             ) from exc
 
         if self._multi_label:
