@@ -298,9 +298,9 @@ class LogisticRegression:
         with torch.inference_mode():
             logits = self._model(X_tensor)
             if self.multi_label:
-                probs = torch.sigmoid(logits).detach().cpu().numpy()
+                probs = torch.sigmoid(logits).cpu().numpy()
             else:
-                probs = torch.softmax(logits, dim=1).detach().cpu().numpy()
+                probs = torch.softmax(logits, dim=1).cpu().numpy()
         return probs
 
     def decision_function(self, X: Tensor) -> np.ndarray:
@@ -321,7 +321,7 @@ class LogisticRegression:
         X_tensor = X.to(self.device, dtype=torch.float32, non_blocking=True).contiguous()
         self._model.eval()
         with torch.inference_mode():
-            logits = self._model(X_tensor).detach().cpu().numpy()
+            logits = self._model(X_tensor).cpu().numpy()
         return logits
 
     def __repr__(self) -> str:  # pragma: no cover

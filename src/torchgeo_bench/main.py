@@ -657,22 +657,23 @@ def main(cfg: DictConfig) -> None:
     completed_runs: set[tuple[str, ...]] = set()
     if cfg.resume and os.path.exists(output_path):
         existing_df = pd.read_csv(cfg.output)
-        # Track (dataset, method, model, name, normalization, image_size,
-        # interpolation, partition, bands) tuples
-        for _, row in existing_df.iterrows():
-            completed_runs.add(
-                (
-                    str(row.get("dataset", "")),
-                    str(row.get("method", "")),
-                    str(row.get("model", "")),
-                    str(row.get("name", "")),
-                    str(row.get("normalization", "")),
-                    str(row.get("image_size", "")),
-                    str(row.get("interpolation", "")),
-                    str(row.get("partition", "")),
-                    str(row.get("bands", "")),
-                )
-            )
+        key_cols = (
+            "dataset",
+            "method",
+            "model",
+            "name",
+            "normalization",
+            "image_size",
+            "interpolation",
+            "partition",
+            "bands",
+        )
+        for col in key_cols:
+            if col not in existing_df.columns:
+                existing_df[col] = ""
+        completed_runs = set(
+            map(tuple, existing_df[list(key_cols)].fillna("").astype(str).to_numpy())
+        )
         logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 

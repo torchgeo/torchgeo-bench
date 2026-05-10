@@ -46,14 +46,14 @@ def extract_features(
         with torch.no_grad(), torch.inference_mode():
             features = model(images)
             if isinstance(features, torch.Tensor):
-                features = features.detach().cpu().numpy()
+                features = features.cpu().numpy()
             else:
                 if "norm" in features:
-                    features = features["norm"].detach().cpu().numpy()
+                    features = features["norm"].cpu().numpy()
                 elif "global_pool" in features:
-                    features = features["global_pool"].detach().cpu().numpy()
+                    features = features["global_pool"].cpu().numpy()
                 elif "head.global_pool" in features:
-                    features = features["head.global_pool"].detach().cpu().numpy().squeeze()
+                    features = features["head.global_pool"].cpu().numpy().squeeze()
                 else:
                     raise ValueError(f"Unexpected features format: {features.keys()}")
 

@@ -11,10 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  # ----------------------------------------------------------------------
   # Build job: runs untrusted code (build backends, transitive build deps)
   # but has no publish credentials. Its only output is the dist/ artifact.
-  # ----------------------------------------------------------------------
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-latest
@@ -40,12 +38,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ----------------------------------------------------------------------
   # Publish job: never installs anything from PyPI, never executes any
   # third-party code beyond actions/download-artifact and the official
   # pypa/gh-action-pypi-publish action. It is the only job that holds the
   # OIDC token used to authenticate with PyPI's trusted publisher.
-  # ----------------------------------------------------------------------
   publish:
     name: Publish to PyPI
     needs: build
