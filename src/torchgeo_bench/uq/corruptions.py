@@ -106,6 +106,18 @@ CLOUD_DATASET_CALIBRATIONS: dict[str, CloudDatasetCalibration] = {
         upper_fracs=(0.98, 0.98, 0.98),
         severity_presets=CLOUD_SEVERITY_PRESETS,
     ),
+    "advance": CloudDatasetCalibration(
+        optical_band_names=("red", "green", "blue"),
+        lower_fracs=(0.02, 0.02, 0.02),
+        upper_fracs=(0.98, 0.98, 0.98),
+        severity_presets=CLOUD_SEVERITY_PRESETS,
+    ),
+    "resisc45": CloudDatasetCalibration(
+        optical_band_names=("red", "green", "blue"),
+        lower_fracs=(0.02, 0.02, 0.02),
+        upper_fracs=(0.98, 0.98, 0.98),
+        severity_presets=CLOUD_SEVERITY_PRESETS,
+    ),
 }
 
 

@@ -10,6 +10,7 @@ Public API
 """
 
 from .base import BandSpec, BenchDataset
+from .advance import ADVANCE
 from .benv2 import BENV2
 from .burn_scars import BurnScars
 from .caffe import CaFFe
@@ -32,6 +33,7 @@ from .m_forestnet import MForestnet
 from .m_pv4ger import MPv4ger
 from .m_so2sat import MSo2Sat
 from .pastis import PASTIS
+from .resisc45 import RESISC45
 from .so2sat import So2Sat
 from .spacenet2 import SpaceNet2
 from .spacenet7 import SpaceNet7
@@ -46,6 +48,7 @@ __all__ = [
     "get_datasets",
     "list_datasets",
     # Individual dataset classes
+    "ADVANCE",
     "BENV2",
     "BurnScars",
     "CaFFe",
@@ -64,6 +67,7 @@ __all__ = [
     "MPv4ger",
     "MSo2Sat",
     "PASTIS",
+    "RESISC45",
     "So2Sat",
     "SpaceNet2",
     "SpaceNet7",

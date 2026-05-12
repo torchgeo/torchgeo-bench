@@ -2,7 +2,12 @@ import pytest
 import torch
 
 from torchgeo_bench.datasets.base import BandSpec
-from torchgeo_bench.uq.corruptions import CorruptionTransform, SKIP_POISSON_GAUSSIAN
+from torchgeo_bench.uq.corruptions import (
+    CLOUD_DATASET_CALIBRATIONS,
+    CorruptionTransform,
+    SKIP_POISSON_GAUSSIAN,
+    _resolve_cloud_calibration,
+)
 from torchgeo_bench.uq.viz_corruptions import generate_grid
 
 
@@ -181,6 +186,20 @@ def test_cloud_missing_calibration_raises():
     )
     with pytest.raises(ValueError, match="No cloud calibration"):
         _ = tfm(x)
+
+
+@pytest.mark.parametrize("dataset_name", ["advance", "resisc45"])
+def test_cloud_calibration_registered_for_advance_and_resisc45(dataset_name):
+    assert dataset_name in CLOUD_DATASET_CALIBRATIONS
+    optical_indices, lower, upper, _ = _resolve_cloud_calibration(
+        dataset_name=dataset_name,
+        band_specs=_bands(),
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    assert optical_indices == [0, 1, 2]
+    assert lower.shape == (3, 1, 1)
+    assert upper.shape == (3, 1, 1)
 
 
 def test_cloud_pattern_mode_validation():
