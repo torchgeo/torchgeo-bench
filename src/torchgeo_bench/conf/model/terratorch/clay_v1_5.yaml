@@ -1,0 +1,6 @@
+_target_: torchgeo_bench.models.TerraTorchClayBench
+backbone_name: timm_clay_v1_base
+pretrained: true
+target_size: 256  # Clay's pretrained pos_embed is fixed to 32x32 patches @ patch_size=8
+modality: sentinel-2-l2a
+name: tt_clay_v1_5_base

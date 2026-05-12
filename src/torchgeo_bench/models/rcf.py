@@ -111,13 +111,15 @@ class RCF(nn.Module):
             patches = np.zeros(
                 (num_patches, num_channels, kernel_size, kernel_size), dtype=np.float32
             )
-            idxs = torch.randint(0, len(dataset), (num_patches,), generator=generator).numpy()
-            ys = torch.randint(0, height - kernel_size, (num_patches,), generator=generator).numpy()
-            xs = torch.randint(0, width - kernel_size, (num_patches,), generator=generator).numpy()
+            idxs = torch.randint(0, len(dataset), (num_patches,), generator=generator).tolist()
+            ys = torch.randint(
+                0, height - kernel_size, (num_patches,), generator=generator
+            ).tolist()
+            xs = torch.randint(0, width - kernel_size, (num_patches,), generator=generator).tolist()
 
-            for i in range(num_patches):
-                img = dataset[idxs[i]]["image"]
-                patches[i] = img[:, ys[i] : ys[i] + kernel_size, xs[i] : xs[i] + kernel_size]
+            for i, (di, y, x) in enumerate(zip(idxs, ys, xs)):
+                img = dataset[di]["image"]
+                patches[i] = img[:, y : y + kernel_size, x : x + kernel_size]
 
             patches = self._normalize(patches)
             self.weights = torch.tensor(patches)
@@ -229,8 +231,8 @@ class _NormalizingDatasetView(Dataset):
     def __init__(self, base: Dataset, mean: torch.Tensor, std: torch.Tensor) -> None:
         self._base = base
         # Per-channel (C, 1, 1) tensors for sample-level normalization.
-        self._mean = mean.detach().clone().view(-1, 1, 1).cpu().float()
-        self._std = std.detach().clone().clamp_min(1e-8).view(-1, 1, 1).cpu().float()
+        self._mean = mean.detach().view(-1, 1, 1).cpu().float()
+        self._std = std.detach().clamp_min(1e-8).view(-1, 1, 1).cpu().float()
 
     def __len__(self) -> int:
         return len(self._base)  # type: ignore[arg-type]
@@ -268,9 +270,11 @@ class RCFBench(BenchModel):
         dataset: NonGeoDataset | None = None,
         **_kwargs,
     ) -> None:
-        super().__init__(bands=bands)
+        super().__init__(bands=bands, **_kwargs)
         if mode == "empirical" and dataset is not None:
-            dataset = _NormalizingDatasetView(dataset, self.input_mean, self.input_std)
+            mean = torch.tensor([b.mean for b in self.bands], dtype=torch.float32)
+            std = torch.tensor([b.std for b in self.bands], dtype=torch.float32)
+            dataset = _NormalizingDatasetView(dataset, mean, std)
         self.rcf = RCF(
             in_channels=self.num_channels,
             features=features,

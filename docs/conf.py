@@ -57,6 +57,8 @@ nitpick_ignore = [
     ("py:class", "torchgeo_bench.datasets.geobench_v1._V1Dataset"),
     ("py:class", "torchgeo_bench.datasets.geobench_v2._V2Dataset"),
     ("py:class", "torchgeo_bench.models.torchgeo_models._TorchGeoBackboneBench"),
+    ("py:class", "torchgeo_bench.models._normalization.NormalizationStrategy"),
+    ("py:class", "torchgeo_bench.models._input_units.InputUnit"),
     ("py:class", "torchgeo_bench.segmentation_probe.CachedFeaturesDataset"),
     ("py:class", "torchgeo_bench.segmentation_probe.GPUTensorCache"),
     ("py:class", "CachedFeaturesDataset"),

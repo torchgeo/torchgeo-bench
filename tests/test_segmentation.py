@@ -1,8 +1,10 @@
 import pytest
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
+from torchgeo_bench.main import _build_seg_probe_and_solver
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
     GPUTensorCache,
@@ -57,6 +59,19 @@ class ViTBackbone(nn.Module):
         return x
 
 
+class TwoChannelBackbone(nn.Module):
+    """Backbone with a BenchModel-like num_channels attribute."""
+
+    num_channels = 2
+
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 8, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        return self.conv(x).mean(dim=(-2, -1))
+
+
 @pytest.fixture
 def mock_backbone():
     return MockBackbone()
@@ -103,6 +118,73 @@ def test_probe_unknown_head_type(mock_backbone):
     with pytest.raises(ValueError, match="Unknown head_type"):
         SegmentationProbe(
             backbone=mock_backbone, layer_names=["layer1"], num_classes=2, head_type="invalid_type"
+        )
+
+
+def test_build_seg_probe_requires_spatial_layers(mock_backbone):
+    """Segmentation evaluation refuses the global-output fallback."""
+    eval_cfg = OmegaConf.create(
+        {
+            "segmentation": {
+                "layers": [],
+                "head_type": "fpn",
+                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 255},
+                "lr_scheduler": "none",
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="requires eval.segmentation.layers"):
+        _build_seg_probe_and_solver(
+            mock_backbone,
+            num_classes=NUM_CLASSES,
+            eval_cfg=eval_cfg,
+            device=torch.device("cpu"),
+            lr=1e-3,
+        )
+
+
+def test_build_seg_solver_uses_criterion_ignore_index(mock_backbone):
+    """Metrics inherit the loss ignore_index when no separate override is set."""
+    eval_cfg = OmegaConf.create(
+        {
+            "segmentation": {
+                "layers": ["layer1"],
+                "head_type": "linear",
+                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 7},
+                "lr_scheduler": "none",
+            }
+        }
+    )
+    _, solver = _build_seg_probe_and_solver(
+        mock_backbone,
+        num_classes=NUM_CLASSES,
+        eval_cfg=eval_cfg,
+        device=torch.device("cpu"),
+        lr=1e-3,
+    )
+    assert solver.ignore_index == 7
+
+
+def test_build_seg_solver_rejects_ignore_index_mismatch(mock_backbone):
+    """Loss and metric ignore indices must not silently diverge."""
+    eval_cfg = OmegaConf.create(
+        {
+            "segmentation": {
+                "layers": ["layer1"],
+                "head_type": "linear",
+                "ignore_index": 255,
+                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 7},
+                "lr_scheduler": "none",
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="ignore_index mismatch"):
+        _build_seg_probe_and_solver(
+            mock_backbone,
+            num_classes=NUM_CLASSES,
+            eval_cfg=eval_cfg,
+            device=torch.device("cpu"),
+            lr=1e-3,
         )
 
 
@@ -291,6 +373,15 @@ def test_probe_vit_token_features():
     # 'blocks' is an Identity that passes through (B, L, C); hook it directly
     probe = make_probe(backbone, ["blocks"], head_type="linear")
     images = torch.randn(2, 3, 64, 64)
+    logits = probe(images)
+    assert logits.shape == (2, NUM_CLASSES, 64, 64)
+
+
+def test_probe_dry_run_uses_backbone_num_channels():
+    """Dry-run channel inference supports non-RGB benchmark models."""
+    backbone = TwoChannelBackbone()
+    probe = make_probe(backbone, [], head_type="linear")
+    images = torch.randn(2, 2, 64, 64)
     logits = probe(images)
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 

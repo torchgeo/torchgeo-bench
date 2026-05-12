@@ -15,7 +15,7 @@ from .burn_scars import BurnScars
 from .caffe import CaFFe
 from .cloudsen12 import CloudSEN12
 from .dynamic_earthnet import DynamicEarthNet
-from .eurosat import EuroSAT
+from .eurosat import EuroSAT, EuroSATSpatial
 from .flair2 import FLAIR2
 from .forestnet import Forestnet
 from .fotw import FieldsOfTheWorld
@@ -52,6 +52,7 @@ __all__ = [
     "CloudSEN12",
     "DynamicEarthNet",
     "EuroSAT",
+    "EuroSATSpatial",
     "FLAIR2",
     "Forestnet",
     "FieldsOfTheWorld",

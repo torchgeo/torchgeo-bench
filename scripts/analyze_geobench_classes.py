@@ -126,7 +126,6 @@ def analyze_dataset(
 
             desc = f"{dataset_name}/{split}"
             for batch in tqdm(dataloader, desc=desc, disable=not verbose):
-                # Get labels or masks
                 if task_type == "classification":
                     if "label" in batch:
                         values = batch["label"]
@@ -143,7 +142,6 @@ def analyze_dataset(
                 if values is None:
                     continue
 
-                # Convert to tensor if needed
                 if isinstance(values, list):
                     values = (
                         torch.stack(values)
@@ -151,17 +149,14 @@ def analyze_dataset(
                         else torch.tensor(values)
                     )
 
-                # Get unique values
                 unique = torch.unique(values).tolist()
                 split_result["unique_values"].update(unique)
                 results["all_unique_values"].update(unique)
 
-                # Update counts
                 for val in unique:
                     count = (values == val).sum().item()
                     results["value_counts"][val] += count
 
-                # Track min/max
                 val_min = values.min().item()
                 val_max = values.max().item()
                 if split_result["min_value"] is None or val_min < split_result["min_value"]:

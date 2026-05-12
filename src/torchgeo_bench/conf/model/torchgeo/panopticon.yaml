@@ -1,0 +1,7 @@
+_target_: torchgeo_bench.models.TorchGeoPanopticonBench
+factory: panopticon_vitb14
+weights_class: Panopticon_Weights
+weights_member: VIT_BASE14
+auto_resize: true
+target_size: 224
+name: tgeo_panopticon

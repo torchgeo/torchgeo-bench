@@ -62,9 +62,10 @@ class KuroSiwo(_V2Dataset):
         canonicalize = self.canonicalize_sample
 
         def chained(sample: dict) -> dict:
+            sample = canonicalize(sample)
             if transform is not None:
                 sample = transform(sample)
-            return canonicalize(sample)
+            return sample
 
         return GeoBenchv2(
             root=self.data_root(),

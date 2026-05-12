@@ -130,7 +130,7 @@ class SAM3Encoder(BenchModel):
         model_name_or_path: str = "facebook/sam3",
         **_kwargs,
     ) -> None:
-        super().__init__(bands=bands)
+        super().__init__(bands=bands, **_kwargs)
 
         if self.num_channels != 3:
             raise ValueError(

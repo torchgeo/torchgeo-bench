@@ -63,3 +63,5 @@ torchgeo wrappers
 -----------------
 
 .. autoclass:: EuroSAT
+
+.. autoclass:: EuroSATSpatial

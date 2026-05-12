@@ -33,7 +33,7 @@ from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
-from torchgeo_bench.datasets import get_datasets
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import extract_features
 
@@ -65,16 +65,19 @@ MODEL_CONFIGS = {
     },
 }
 
-# Mirrors the main pipeline's c_range default (small, focused grid).
-C_VALUES = [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0]
-ADAM_LRS = [1e-3, 1e-2, 1e-1, 1.0]
+# Wider grid than the original (1e-3..100) to make sure we bracket each
+# (model, dataset)'s optimum on both ends.
+C_VALUES = [1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1000.0]
+# Wider Adam LR grid (1e-5..3.0) — the original (1e-3..1.0) saturated at the
+# boundary in 5 of 10 (model, dataset) cells, so we need to extend both ends.
+ADAM_LRS = [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1.0, 3.0]
 
 # Match main.py's linear-probe call (LogisticRegression(C=c, max_iter=2000, tol=1e-6)).
 MAX_ITER = 2000
 TOL = 1e-6
 
 
-def instantiate_model(model_cfg: dict, num_channels: int) -> torch.nn.Module:
+def instantiate_model(model_cfg: dict, bands: list) -> torch.nn.Module:
     """Instantiate a model from its ``MODEL_CONFIGS`` entry."""
     target = model_cfg["_target_"]
     module_name, class_name = target.rsplit(".", 1)
@@ -82,7 +85,7 @@ def instantiate_model(model_cfg: dict, num_channels: int) -> torch.nn.Module:
     cls = getattr(module, class_name)
 
     kwargs = {k: v for k, v in model_cfg.items() if k not in ("_target_", "name")}
-    kwargs["num_channels"] = num_channels
+    kwargs["bands"] = bands
     return cls(**kwargs)
 
 
@@ -146,6 +149,13 @@ def run_dataset(
         logger.info("Resume: %d existing rows for %s", len(completed), dataset_name)
 
     logger.info("Loading %s dataset...", dataset_name)
+    bench = get_bench_dataset_class(dataset_name)()
+    if bench.multilabel:
+        logger.info(
+            "=== %s === skipping (multi-label not supported by this comparison)", dataset_name
+        )
+        return all_rows
+    bands_list = bench.select_band_specs(tuple(bench.rgb_bands))
     train_dataset, train_loader, val_loader, test_loader = get_datasets(
         dataset_name=dataset_name,
         partition_name="default",
@@ -155,6 +165,9 @@ def run_dataset(
         interpolation="bilinear",
     )
     num_channels = train_dataset[0]["image"].shape[0]
+    assert len(bands_list) == num_channels, (
+        f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} for {dataset_name}"
+    )
 
     for model_name, model_cfg in MODEL_CONFIGS.items():
         remaining = [
@@ -180,7 +193,7 @@ def run_dataset(
         )
 
         logger.info("  Loading model %s...", model_name)
-        model = instantiate_model(model_cfg, num_channels)
+        model = instantiate_model(model_cfg, bands_list)
         model.to(device).eval()
 
         logger.info("  Extracting features...")

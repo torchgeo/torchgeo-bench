@@ -91,7 +91,7 @@ class OlmoEarthBenchModel(BenchModel):
         normalize: bool = False,
         **_kwargs,
     ) -> None:
-        super().__init__(bands=bands)
+        super().__init__(bands=bands, **_kwargs)
 
         if self.num_channels not in (3, 12):
             raise ValueError(

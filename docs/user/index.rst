@@ -14,6 +14,7 @@ and models, and interpreting the results.
    models
    configuration
    results-format
+   results-explorer
    methodology
    segmentation-layers
    contributing
