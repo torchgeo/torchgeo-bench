@@ -59,6 +59,7 @@ EXPECTED_SIZES: dict[str, dict[str, int]] = {
     "spacenet7": {"train": 3500, "val": 652, "test": 1152},
     # torchgeo template
     "eurosat": {"train": 16200, "val": 5400, "test": 5400},
+    "eurosat-spatial": {"train": 16200, "val": 5400, "test": 5400},
 }
 
 

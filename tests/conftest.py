@@ -1,5 +1,6 @@
 """Pytest configuration and fixtures for torchgeo-bench tests."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,12 @@ import pytest
 GEOBENCH_ROOT = Path("data/classification_v1.0")
 GEOBENCH_V2_ROOT = Path("data/geobenchv2")
 EUROSAT_ROOT = Path("data/eurosat")
+
+# Tests rely on the dataset-not-on-disk path raising FileNotFoundError so the
+# test-skip branch fires.  The V1 loader otherwise auto-downloads the public
+# WebDataset mirror — which would force CI to pull tens of GBs and time out.
+os.environ.setdefault("GEOBENCH_V1_NO_HF_DOWNLOAD", "1")
+os.environ.setdefault("GEOBENCH_V2_NO_DOWNLOAD", "1")
 
 
 @pytest.fixture

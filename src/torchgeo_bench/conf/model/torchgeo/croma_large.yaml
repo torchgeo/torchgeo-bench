@@ -1,0 +1,9 @@
+_target_: torchgeo_bench.models.TorchGeoCromaBench
+factory: croma_large
+weights_class: CROMALarge_Weights
+weights_member: CROMA_VIT
+auto_resize: true
+target_size: 120
+name: tgeo_croma_large
+eval:
+  c_range: [-6, 5, 60]

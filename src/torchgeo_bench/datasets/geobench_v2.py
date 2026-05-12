@@ -171,10 +171,25 @@ class _V2Dataset(BenchDataset):
         def chained(sample: dict) -> dict:
             sample = canonicalize(sample)  # rename image_b → "image" first
             if transform is not None:
-                sample = transform(sample)  # _resize now finds "image" safely
+                if "image" in sample:
+                    sample = transform(sample)  # _resize now finds "image" safely
+                else:
+                    # treesatai applies its transforms on the per-modality dict
+                    # (image_aerial / image_s2 / image_s1) *before* stacking, so
+                    # the framework's resize transform must operate on each
+                    # modality independently here.
+                    for key in [k for k in sample if k.startswith("image_")]:
+                        wrapped = transform({"image": sample[key]})
+                        sample[key] = wrapped["image"]
             return sample
 
-        kwargs: dict[str, object] = {"data_normalizer": nn.Identity}
+        kwargs: dict[str, object] = {
+            "data_normalizer": nn.Identity,
+            # No-op if the tortilla file is already present; otherwise pulls
+            # it from the upstream HF mirror (aialliance/<name>) on first use.
+            # Set GEOBENCH_V2_NO_DOWNLOAD=1 to disable (CI / offline runs).
+            "download": os.environ.get("GEOBENCH_V2_NO_DOWNLOAD") != "1",
+        }
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True
 

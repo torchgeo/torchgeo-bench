@@ -33,49 +33,57 @@ import torch.nn as nn
 
 from torchgeo_bench.datasets.base import BandSpec
 
+from ._input_units import InputUnit
+from ._normalization import NormalizationStrategy, build_normalizer
+
 
 class BenchModel(nn.Module, ABC):
     """Abstract base interface for benchmarkable models.
 
     Args:
         bands: Ordered list of :class:`BandSpec` describing the input
-            channels.  Length determines :attr:`num_channels`; the
-            ``mean``/``std`` fields seed the default per-channel z-score
-            applied by :meth:`normalize_inputs`.
+            channels.  Length determines :attr:`num_channels`.
+        normalization: Input-normalisation strategy name (one of
+            ``bandspec_zscore`` / ``model_native`` / ``minmax`` /
+            ``minmax_zscore`` / ``identity``).  Defaults to
+            ``"bandspec_zscore"``.
+
+    Subclasses may declare:
+
+    * ``expected_input_unit`` — what scale the pretrained backbone was
+      fed at training (e.g. ``s2_dn``, ``reflectance_0_1``, ``uint8``).
+      Used by the ``model_native`` strategy.
+    * ``pretrain_mean`` / ``pretrain_std`` — per-channel normalisation
+      applied *after* unit conversion under ``model_native``.
     """
 
-    def __init__(self, bands: list[BandSpec], **_: object) -> None:
+    expected_input_unit: InputUnit | None = None
+    pretrain_mean: list[float] | None = None
+    pretrain_std: list[float] | None = None
+
+    def __init__(
+        self,
+        bands: list[BandSpec],
+        normalization: NormalizationStrategy | str = NormalizationStrategy.BANDSPEC_ZSCORE,
+        **_: object,
+    ) -> None:
         super().__init__()
         if not bands:
             raise ValueError("BenchModel requires a non-empty list of BandSpec.")
         self.bands: list[BandSpec] = list(bands)
         self.num_channels: int = len(self.bands)
-
-        mean = torch.tensor([b.mean for b in self.bands], dtype=torch.float32).view(
-            1, self.num_channels, 1, 1
+        self.normalization = NormalizationStrategy(normalization)
+        self._normalizer = build_normalizer(
+            self.normalization,
+            bands=self.bands,
+            expected_input_unit=self.expected_input_unit,
+            pretrain_mean=self.pretrain_mean,
+            pretrain_std=self.pretrain_std,
         )
-        std = torch.tensor([b.std for b in self.bands], dtype=torch.float32).view(
-            1, self.num_channels, 1, 1
-        )
-        std = std.clamp_min(1e-8)
-        self.register_buffer("input_mean", mean)
-        self.register_buffer("input_std", std)
 
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Per-channel z-score against ``BandSpec.{mean, std}``.
-
-        Buffers are cast to the input tensor's dtype on access so that the
-        model works under mixed precision without surprises.
-
-        Args:
-            images: Raw input tensor of shape ``(B, C, H, W)``.
-
-        Returns:
-            Normalized tensor of the same shape and dtype as ``images``.
-        """
-        mean = self.input_mean.to(dtype=images.dtype)
-        std = self.input_std.to(dtype=images.dtype)
-        return (images - mean) / std
+        """Apply the configured normalisation strategy."""
+        return self._normalizer(images)
 
     @abstractmethod
     def _forward_patch_features(

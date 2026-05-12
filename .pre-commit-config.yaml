@@ -13,10 +13,10 @@ repos:
       - id: check-json
       - id: sort-simple-yaml
       - id: pretty-format-json
-        exclude: ^slides-js/
+        exclude: ^(slides-js/|docs/_static/_results_snapshots/)
       - id: debug-statements
       - id: check-added-large-files
-        args: ["--maxkb=1000"]
+        args: ["--maxkb=2000"]
       - id: check-merge-conflict
       - id: trailing-whitespace
       - id: requirements-txt-fixer

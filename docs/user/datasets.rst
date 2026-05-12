@@ -55,6 +55,14 @@ GeoBench V1 — classification
 
 V1 datasets use the ``m-`` prefix on the command line.
 
+The first time a V1 dataset is requested without a local copy under
+``data/classification_v1.0`` or ``data/classification_v1.0_wds``, the
+loader auto-downloads the requested dataset from the public mirror
+``isaaccorley/geobenchv1-webdataset`` on the Hugging Face Hub.  Set
+``GEOBENCH_V1_NO_HF_DOWNLOAD=1`` to disable the auto-download and force a
+local-only path (``torchgeo-bench download geobench_v1`` still works for
+the legacy per-sample HDF5 layout).
+
 .. list-table::
    :header-rows: 1
    :widths: 18 8 8 12 22 32
@@ -108,20 +116,40 @@ instead of accuracy.
 GeoBench V2 — classification
 ----------------------------
 
-================== ====== ===== ====================================== =====================================
-CLI name           #cls   bands sensor                                 Class
-================== ====== ===== ====================================== =====================================
-``benv2``          19     14    Sentinel-1 + Sentinel-2 (multi-modal)  :class:`~torchgeo_bench.datasets.BENV2`
-``forestnet``      12     6     Sentinel-2                             :class:`~torchgeo_bench.datasets.Forestnet`
-``so2sat``         17     12    Sentinel-1 + Sentinel-2                :class:`~torchgeo_bench.datasets.So2Sat`
-``treesatai``      13     19    Aerial + S2 + S1 (multi-modal)         :class:`~torchgeo_bench.datasets.TreeSatAI`
-================== ====== ===== ====================================== =====================================
+================== ====== ===== ============ ====================================== =====================================
+CLI name           #cls   bands multilabel   sensor                                 Class
+================== ====== ===== ============ ====================================== =====================================
+``benv2``          19     14    **yes**      Sentinel-1 + Sentinel-2 (multi-modal)  :class:`~torchgeo_bench.datasets.BENV2`
+``forestnet``      12     6     no           Sentinel-2                             :class:`~torchgeo_bench.datasets.Forestnet`
+``so2sat``         17     12    no           Sentinel-1 + Sentinel-2                :class:`~torchgeo_bench.datasets.So2Sat`
+``treesatai``      13     19    **yes**      Aerial + S2 + S1 (multi-modal)         :class:`~torchgeo_bench.datasets.TreeSatAI`
+================== ====== ===== ============ ====================================== =====================================
+
+V2 datasets are stored as a single ``.tortilla`` file each, hosted under
+``aialliance/<name>`` on the Hugging Face Hub.  ``_V2Dataset.get_dataset``
+passes ``download=True`` to the upstream class, so a missing tortilla is
+fetched on first use — no separate ``torchgeo-bench download`` step
+required for the sweep.
 
 .. note::
 
-   ``m-forestnet`` and ``forestnet`` are *different* datasets.  V1 uses
-   Landsat with 6 bands; V2 uses Sentinel-2 with the same number of
-   bands but a different sensor and split.
+   V1 and V2 share several CLI names but the underlying data are
+   *different* datasets — different sensors, splits, label spaces, or
+   normalisation conventions:
+
+   * ``m-bigearthnet`` (V1) — original BigEarthNet, 43-class
+     **multilabel** scene tags, S2 top-of-atmosphere DN.
+     ``benv2`` (V2) — BigEarthNet v2.0 with 19-class multilabel and
+     stacked S1 + S2.
+   * ``m-so2sat`` (V1) — 18-band stack including LCZ context.
+     ``so2sat`` (V2) — 10 S2 + 2 S1 bands stored at reflectance scale.
+   * ``m-forestnet`` (V1) — Landsat-8 6-band uint8.
+     ``forestnet`` (V2) — Sentinel-2 6-band uint8 with a different split
+     than V1 despite the same channel count.
+
+   The leaderboard prefixes panel titles with ``GeoBench V1`` /
+   ``GeoBench V2`` so V1 and V2 results are never compared on the same
+   axis.
 
 GeoBench V2 — segmentation
 --------------------------
@@ -144,11 +172,12 @@ CLI name             #cls   bands notes                                        C
 Other
 -----
 
-============  ========================================================
-CLI name      Class
-============  ========================================================
-``eurosat``   :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper)
-============  ========================================================
+==================== ============================================================================
+CLI name             Class
+==================== ============================================================================
+``eurosat``          :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper, random split)
+``eurosat-spatial``  :class:`~torchgeo_bench.datasets.EuroSATSpatial`  (longitude-based split)
+==================== ============================================================================
 
 Selecting datasets
 ------------------

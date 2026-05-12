@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.11.6,<0.12" ]
 
 [project]
 name = "torchgeo-bench"
-version = "0.2.0"
+version = "0.3.0"
 description = "Lightweight benchmarking framework for geospatial models"
 readme = "README.md"
 keywords = [
@@ -45,17 +45,32 @@ dependencies = [
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
-  "torchgeo>=0.8",
+  "torchgeo @ git+https://github.com/microsoft/torchgeo.git@e585e2c07f7a",
   "torchvision>=0.15",
   "tqdm>=4.65",
 ]
 optional-dependencies.all = [
+  "torchgeo-bench[cleanlab]",
+  "torchgeo-bench[cuda]",
   "torchgeo-bench[dev]",
   "torchgeo-bench[docs]",
   "torchgeo-bench[hpo]",
   "torchgeo-bench[id]",
   "torchgeo-bench[sam3]",
+  "torchgeo-bench[terratorch]",
   "torchgeo-bench[viz]",
+]
+optional-dependencies.cleanlab = [
+  "cleanlab>=2.7",
+  "imagehash>=4.3",
+  "matplotlib>=3.5",
+  "pillow>=9",
+]
+optional-dependencies.cuda = [
+  # GPU-accelerated KNN via faissknn (CUDA 12.x).
+  # Pulls in faiss-cuda-cu128 wheels which require manylinux_2_34
+  # (glibc >= 2.34); on older systems install will fail at sync time.
+  "faissknn>=0.0.3",
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
@@ -63,6 +78,7 @@ optional-dependencies.dev = [
   "pyproject-fmt>=2.21",
   "pytest>=7.3",
   "pytest-cov>=4.1",
+  "pytest-xdist>=3.6",
   "ruff>=0.0.270",
 ]
 optional-dependencies.docs = [
@@ -83,6 +99,9 @@ optional-dependencies.olmoearth = [
 ]
 optional-dependencies.sam3 = [
   "transformers>=4.50",
+]
+optional-dependencies.terratorch = [
+  "terratorch>=1",
 ]
 optional-dependencies.viz = [
   "matplotlib>=3.5",
@@ -141,9 +160,6 @@ ini_options.python_classes = [ "Test*" ]
 ini_options.python_functions = [ "test_*" ]
 ini_options.addopts = [
   "--verbose",
-  "--cov=torchgeo_bench",
-  "--cov-report=term-missing",
-  "--cov-report=html",
   "-m not slow",
 ]
 ini_options.markers = [

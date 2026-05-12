@@ -238,7 +238,8 @@ class SegmentationProbe(nn.Module):
 
     def _dry_run_channels(self) -> list[int]:
         device = self._backbone_device()
-        dummy = torch.randn(1, 3, 224, 224, device=device)
+        in_channels = int(getattr(self.backbone, "num_channels", 3))
+        dummy = torch.randn(1, in_channels, 224, 224, device=device)
         if not self.layer_names:
             self.layer_names = ["backbone_output"]
             self.hooks.append(self.backbone.register_forward_hook(self._hook_fn("backbone_output")))

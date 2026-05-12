@@ -212,10 +212,11 @@ def evaluate_knn(
     seed: int,
     n_bootstrap: int,
     verbose: bool = False,
+    device: str = "cpu",
 ) -> tuple[float, float, float]:
     """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
     multi_label = y_train.ndim == 2
-    clf = KNNClassifier(n_neighbors=5)
+    clf = KNNClassifier(n_neighbors=5, device=device)
     clf.fit(x_train, y_train)
 
     if multi_label:
@@ -395,14 +396,21 @@ def _build_seg_probe_and_solver(
     Returns:
         Tuple of (probe, solver).
     """
+    layer_names = list(eval_cfg.segmentation.layers)
+    if not layer_names:
+        raise ValueError(
+            "Segmentation evaluation requires eval.segmentation.layers to name "
+            "spatial backbone layers. Refusing to probe the global backbone output."
+        )
     probe = SegmentationProbe(
         backbone=model,
-        layer_names=eval_cfg.segmentation.layers,
+        layer_names=layer_names,
         num_classes=num_classes,
         head_type=eval_cfg.segmentation.head_type,
         freeze_backbone=True,
     )
     criterion = instantiate(eval_cfg.segmentation.criterion)
+    ignore_index = _resolve_segmentation_ignore_index(eval_cfg.segmentation, criterion)
     solver = SegmentationSolver(
         model=probe,
         num_classes=num_classes,
@@ -411,9 +419,24 @@ def _build_seg_probe_and_solver(
         device=str(device),
         criterion=criterion,
         lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
-        ignore_index=eval_cfg.segmentation.get("ignore_index", 255),
+        ignore_index=ignore_index,
     )
     return probe, solver
+
+
+def _resolve_segmentation_ignore_index(seg_cfg: DictConfig, criterion: torch.nn.Module) -> int:
+    """Resolve the ignore index shared by segmentation loss and metrics."""
+    explicit = seg_cfg.get("ignore_index", None)
+    criterion_value = getattr(criterion, "ignore_index", None)
+    if explicit is None:
+        return int(criterion_value) if criterion_value is not None else 255
+    if criterion_value is not None and int(criterion_value) != int(explicit):
+        raise ValueError(
+            "Segmentation ignore_index mismatch: "
+            f"eval.segmentation.ignore_index={explicit} but "
+            f"criterion.ignore_index={criterion_value}."
+        )
+    return int(explicit)
 
 
 def evaluate_intrinsic_dim(
@@ -658,7 +681,11 @@ def main(cfg: DictConfig) -> None:
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     all_rows: list[dict] = []
-    c_start, c_stop, c_num = cfg.eval.c_range
+    model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
+    if model_eval is not None and model_eval.get("c_range", None) is not None:
+        c_start, c_stop, c_num = model_eval.c_range
+    else:
+        c_start, c_stop, c_num = cfg.eval.c_range
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
 
@@ -666,29 +693,29 @@ def main(cfg: DictConfig) -> None:
     completed_runs: set[tuple[str, ...]] = set()
     if cfg.resume and os.path.exists(output_path):
         existing_df = pd.read_csv(cfg.output)
-        # Track (dataset, method, model, name, normalization, image_size,
-        # interpolation, partition, bands) tuples
-        for _, row in existing_df.iterrows():
-            completed_runs.add(
-                (
-                    str(row.get("dataset", "")),
-                    str(row.get("method", "")),
-                    str(row.get("model", "")),
-                    str(row.get("name", "")),
-                    str(row.get("normalization", "")),
-                    str(row.get("image_size", "")),
-                    str(row.get("interpolation", "")),
-                    str(row.get("partition", "")),
-                    str(row.get("bands", "")),
-                )
-            )
+        key_cols = (
+            "dataset",
+            "method",
+            "model",
+            "name",
+            "normalization",
+            "image_size",
+            "interpolation",
+            "partition",
+            "bands",
+        )
+        for col in key_cols:
+            if col not in existing_df.columns:
+                existing_df[col] = ""
+        completed_runs = set(
+            map(tuple, existing_df[list(key_cols)].fillna("").astype(str).to_numpy())
+        )
         logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
-    # Datasets always emit raw values; the model owns normalization.  The
-    # CSV column is kept for back-compat but pinned to a literal so old/new
-    # rows are clearly not comparable across the model-normalization refactor.
-    normalization = "raw"
+    # Selectable input-normalisation strategy; recorded in the CSV so
+    # ablations across strategies are distinguishable.
+    normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
@@ -729,6 +756,7 @@ def main(cfg: DictConfig) -> None:
                 dataset_name=ds_name,
                 partition_name=cfg.dataset.partition,
                 batch_size=cfg.dataset.batch_size,
+                num_workers=int(cfg.dataset.get("num_workers", 8)),
                 return_val=True,
                 image_size=getattr(cfg.dataset, "image_size", None),
                 interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
@@ -777,7 +805,11 @@ def main(cfg: DictConfig) -> None:
             and str(cfg.model._target_).endswith("RCFBench")
             and str(cfg.model.mode) == "empirical"
         )
-        instantiate_kwargs: dict = {"bands": bands_list, "_convert_": "object"}
+        instantiate_kwargs: dict = {
+            "bands": bands_list,
+            "normalization": normalization,
+            "_convert_": "object",
+        }
         if is_rcf_empirical:
             instantiate_kwargs["dataset"] = train_dataset
         model: BenchModel = instantiate(cfg.model, **instantiate_kwargs)
@@ -900,6 +932,7 @@ def main(cfg: DictConfig) -> None:
                     cfg.seed,
                     cfg.eval.bootstrap,
                     verbose=cfg.verbose,
+                    device=cfg.device,
                 )
                 all_rows.append(
                     EvaluationResult(

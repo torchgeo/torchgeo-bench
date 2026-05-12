@@ -1,6 +1,25 @@
 paper/
 results/
 scripts/*
+!scripts/viz_results.py
+!scripts/repack_geobench_v1.py
+!scripts/tune_dataloader.py
+!scripts/regen_results_explorer.py
+!scripts/test_knn_gpu_smoke.py
+!scripts/cleanlab_extract_probs.py
+!scripts/run_cleanlab_audit.py
+!scripts/render_flagged_gallery.py
+!scripts/eurosat_family_dedup.py
+!scripts/cleanlab_per_class_multilabel.py
+!scripts/cleanlab_per_class_singlelabel.py
+!scripts/slurm/
+scripts/slurm/*
+!scripts/slurm/build_probe_jobs.py
+!scripts/slurm/probe_sweep.sh
+!scripts/slurm/knn_gpu_smoke.sh
+!scripts/slurm/cleanlab_audit.sh
+!scripts/slurm/cleanlab_audit.jobs
+figures/
 
 # Python
 __pycache__/
@@ -70,6 +89,7 @@ data/
 !conf/**/*.json
 !**/band_stats.json
 !**/normalizer.json
+!docs/_static/_results_snapshots/*.json
 
 # Logs
 *.log

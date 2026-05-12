@@ -17,6 +17,8 @@ dataset:
   names: all
   partition: default
   batch_size: 64
+  num_workers: 4              # set 0 to disable dataloader multiprocessing
+  normalization: bandspec_zscore   # bandspec_zscore | model_native | minmax | minmax_zscore | identity
   bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
   image_size: 224           # e.g., 224; if null, no resizing
   interpolation: bilinear     # bilinear | bicubic | nearest; used if image_size set
@@ -24,7 +26,7 @@ dataset:
 # Evaluation settings
 eval:
   bootstrap: 200          # number of bootstrap resamples
-  c_range: [-7, 2, 20]     # log10 sweep start, stop, num samples
+  c_range: [-6, 4, 40]      # log10 [start, stop, num_points]; per-model overrides allowed
   merge_val: true          # merge train+val for final logistic training
   skip_linear: false       # if true, skip LogisticRegression evaluation
 
@@ -40,7 +42,7 @@ eval:
 
   segmentation:
     head_type: "fpn"
-    layers: []
+    layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10
     criterion:
