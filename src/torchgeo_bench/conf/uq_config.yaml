@@ -1,0 +1,24 @@
+defaults:
+  - uq: default
+  - model: ???
+  - _self_
+
+seed: 42
+device: cuda
+verbose: false
+resume: true
+
+dataset:
+  names: all
+  partition: default
+  batch_size: 64
+  num_workers: 4
+  normalization: bandspec_zscore
+  bands: rgb
+  image_size: 224
+  interpolation: bilinear
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

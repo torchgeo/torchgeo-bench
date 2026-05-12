@@ -43,3 +43,24 @@ def test_logistic_regression_accuracy_parity_iris(c_values: list[float]):
         acc_diffs.append(abs(acc_diff))
 
     assert max(acc_diffs) <= 0.01, f"Accuracy parity failed; diffs: {acc_diffs}"
+
+
+def test_module_property_raises_before_fit():
+    model = LogisticRegression(C=1.0, max_iter=10, solver="lbfgs")
+    with pytest.raises(AttributeError, match="Model not fitted"):
+        _ = model.module
+
+
+def test_module_property_returns_linear_after_fit():
+    iris_any = load_iris()
+    X_np = np.asarray(iris_any.data, dtype=np.float32)
+    y_np = np.asarray(iris_any.target, dtype=np.int64)
+    X = torch.from_numpy(X_np)
+    y = torch.from_numpy(y_np)
+
+    model = LogisticRegression(C=1.0, max_iter=200, solver="lbfgs")
+    model.fit(X, y)
+
+    module = model.module
+    assert isinstance(module, torch.nn.Linear)
+    assert module.weight.shape == (len(np.unique(y_np)), X_np.shape[1])

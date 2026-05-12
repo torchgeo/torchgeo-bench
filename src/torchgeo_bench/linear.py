@@ -262,6 +262,20 @@ class LogisticRegression:
         with torch.inference_mode():
             return self._model.bias.detach().cpu().numpy()
 
+    @property
+    def module(self) -> torch.nn.Linear:
+        """Return the fitted linear module used by this probe.
+
+        Returns:
+            Fitted ``torch.nn.Linear`` classification head.
+
+        Raises:
+            AttributeError: If called before ``fit``.
+        """
+        if not self._fitted or self._model is None:
+            raise AttributeError("Model not fitted; call fit() before accessing module.")
+        return self._model
+
     def predict(self, X: Tensor) -> np.ndarray:
         """Predict class labels (single-label) or binary indicators (multi-label).
 

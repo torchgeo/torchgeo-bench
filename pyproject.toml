@@ -57,6 +57,7 @@ optional-dependencies.all = [
   "torchgeo-bench[id]",
   "torchgeo-bench[sam3]",
   "torchgeo-bench[terratorch]",
+  "torchgeo-bench[uq]",
   "torchgeo-bench[viz]",
 ]
 optional-dependencies.cleanlab = [
@@ -98,6 +99,11 @@ optional-dependencies.sam3 = [
 ]
 optional-dependencies.terratorch = [
   "terratorch>=1",
+]
+optional-dependencies.uq = [
+  "laplace-torch>=0.1",
+  "mapie>=0.8",
+  "opensimplex>=0.4",
 ]
 optional-dependencies.viz = [
   "matplotlib>=3.5",
