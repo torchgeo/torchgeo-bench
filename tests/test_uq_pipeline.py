@@ -84,13 +84,15 @@ def test_expected_metrics_for_method():
         "brier",
         "predictive_entropy",
         "sharpness",
-        "aurc",
+        "raw_aurc",
+        "eaurc",
         "selective_acc_90",
     }
     assert _expected_metrics("conformal") == {
         "empirical_coverage",
         "mean_set_size",
-        "aurc",
+        "raw_aurc",
+        "eaurc",
         "selective_acc_90",
     }
 
@@ -170,6 +172,6 @@ def test_run_uq_block_writes_csv(tmp_path, monkeypatch):
     )
 
     df = pd.read_csv(csv_path)
-    assert len(rows) == 7
+    assert len(rows) == 8
     assert set(df["metric_name"]) == _expected_metrics("uncalibrated")
     assert np.isfinite(df["metric_value"].to_numpy(dtype=np.float64)).all()

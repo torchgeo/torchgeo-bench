@@ -103,7 +103,7 @@ optional-dependencies.terratorch = [
 optional-dependencies.uq = [
   "laplace-torch>=0.1",
   "mapie>=0.8",
-  "opensimplex>=0.4",
+  "satellite-cloud-generator>=0.4",
 ]
 optional-dependencies.viz = [
   "matplotlib>=3.5",

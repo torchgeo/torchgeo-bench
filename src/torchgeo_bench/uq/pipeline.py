@@ -21,13 +21,14 @@ from torchgeo_bench.main import append_rows_atomic
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.uq.corruptions import CorruptionTransform, SKIP_POISSON_GAUSSIAN
 from torchgeo_bench.uq.metrics import (
-    aurc,
     brier_score,
     ece,
     empirical_coverage,
+    excess_aurc,
     mean_set_size,
     nll,
     predictive_entropy,
+    raw_aurc,
     selective_accuracy,
     sharpness,
 )
@@ -116,8 +117,17 @@ def _expected_metrics(uq_method: str) -> set[str]:
         Set of metric names required to mark a resume block as complete.
     """
     if uq_method == "conformal":
-        return {"empirical_coverage", "mean_set_size", "aurc", "selective_acc_90"}
-    return {"ece", "nll", "brier", "predictive_entropy", "sharpness", "aurc", "selective_acc_90"}
+        return {"empirical_coverage", "mean_set_size", "raw_aurc", "eaurc", "selective_acc_90"}
+    return {
+        "ece",
+        "nll",
+        "brier",
+        "predictive_entropy",
+        "sharpness",
+        "raw_aurc",
+        "eaurc",
+        "selective_acc_90",
+    }
 
 
 def _build_resume_set(csv_path: str) -> set[tuple[str, ...]]:
@@ -201,6 +211,7 @@ def _run_uq_block(
     test_loader: DataLoader | None = None,
     device: str | torch.device = "cpu",
     band_specs: list[BandSpec] | None = None,
+    cloud_pattern_mode: str = "fixed_across_severity",
     verbose: bool = False,
 ) -> list[dict]:
     """Evaluate one UQ method for one corruption condition.
@@ -225,6 +236,7 @@ def _run_uq_block(
         test_loader: Optional test loader used with ``model``.
         device: Device used for feature extraction when needed.
         band_specs: Band metadata required for non-clean corruptions.
+        cloud_pattern_mode: Cloud RNG mode for cloud corruption.
         verbose: Whether to enable verbose extraction logs.
 
     Returns:
@@ -245,6 +257,8 @@ def _run_uq_block(
                 severity=severity,
                 seed=seed,
                 band_specs=band_specs,
+                dataset_name=common_meta["dataset"],
+                cloud_pattern_mode=cloud_pattern_mode,
             )
         X_test, y_test = extract_features(model, test_loader, device, transforms=transforms, verbose=verbose)
 
@@ -259,7 +273,8 @@ def _run_uq_block(
         metrics = {
             "empirical_coverage": empirical_coverage(pred_sets, y_test),
             "mean_set_size": mean_set_size(pred_sets),
-            "aurc": aurc(conf, point_preds, y_test),
+            "raw_aurc": raw_aurc(conf, point_preds, y_test),
+            "eaurc": excess_aurc(conf, point_preds, y_test),
             "selective_acc_90": selective_accuracy(conf, point_preds, y_test, coverage=0.9),
         }
     else:
@@ -272,7 +287,8 @@ def _run_uq_block(
             "brier": brier_score(probs, y_test),
             "predictive_entropy": predictive_entropy(probs),
             "sharpness": sharpness(probs),
-            "aurc": aurc(conf, y_pred, y_test),
+            "raw_aurc": raw_aurc(conf, y_pred, y_test),
+            "eaurc": excess_aurc(conf, y_pred, y_test),
             "selective_acc_90": selective_accuracy(conf, y_pred, y_test, coverage=0.9),
         }
 
@@ -314,6 +330,12 @@ def main(cfg: DictConfig) -> None:
     device = torch.device(str(cfg.device))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
     normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
+    cloud_pattern_mode = str(getattr(cfg.uq, "cloud_pattern_mode", "fixed_across_severity"))
+    if cloud_pattern_mode not in {"fixed_across_severity", "independent_per_severity"}:
+        raise ValueError(
+            "uq.cloud_pattern_mode must be one of "
+            "{'fixed_across_severity', 'independent_per_severity'}"
+        )
 
     prior_results = pd.read_csv(str(cfg.uq.prior_results)) if os.path.exists(str(cfg.uq.prior_results)) else None
     if prior_results is None:
@@ -476,6 +498,8 @@ def main(cfg: DictConfig) -> None:
                         severity=severity,
                         seed=cfg.seed,
                         band_specs=band_specs,
+                        dataset_name=dataset_name,
+                        cloud_pattern_mode=cloud_pattern_mode,
                     )
                 X_test, y_test = extract_features(
                     model,
@@ -518,6 +542,7 @@ def main(cfg: DictConfig) -> None:
                         seed=int(cfg.seed),
                         X_test=X_test,
                         y_test=y_test,
+                        cloud_pattern_mode=cloud_pattern_mode,
                     )
 
     logger.info("UQ benchmark complete. Results appended to %s", output_path)

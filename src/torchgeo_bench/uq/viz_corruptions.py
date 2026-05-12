@@ -63,27 +63,44 @@ def _resolve_display_indices(sample: torch.Tensor, rgb_indices: list[int]) -> li
     return valid[:3]
 
 
-def _to_rgb(sample: torch.Tensor, rgb_indices: list[int]) -> np.ndarray:
-    """Convert a ``(C, H, W)`` sample into a display-ready RGB image.
+def _to_rgb_display(
+    sample: torch.Tensor,
+    rgb_indices: list[int],
+    *,
+    low_pct: float = 1.0,
+    high_pct: float = 99.5,
+    compress: float = 6.0,
+    gamma: float = 2.2,
+) -> np.ndarray:
+    """Convert ``(C, H, W)`` sample into display RGB for MSI imagery.
 
-    Args:
-        sample: Input sample tensor with shape ``(C, H, W)``.
-        rgb_indices: Preferred channel indices for RGB visualization.
-
-    Returns:
-        Normalized RGB array with shape ``(H, W, 3)``.
+    Uses per-image percentile clipping, then simple tone mapping to keep
+    cloud highlights from saturating while lifting dark midtones.
     """
     idx = _resolve_display_indices(sample, rgb_indices)
-
     rgb = sample[idx].detach().cpu().numpy().transpose(1, 2, 0).astype(np.float32)
-    out = np.empty_like(rgb)
+
+    low = np.zeros(3, dtype=np.float32)
+    high = np.ones(3, dtype=np.float32)
     for chan in range(3):
-        lo, hi = np.percentile(rgb[..., chan], [1, 99])
+        vals = rgb[..., chan]
+        vals = vals[np.isfinite(vals)]
+        if vals.size == 0:
+            continue
+        lo = float(np.percentile(vals, low_pct))
+        hi = float(np.percentile(vals, high_pct))
         if hi <= lo:
-            out[..., chan] = 0.0
-        else:
-            out[..., chan] = np.clip((rgb[..., chan] - lo) / (hi - lo), 0.0, 1.0)
-    return out
+            lo = float(np.min(vals))
+            hi = float(np.max(vals))
+            if hi <= lo:
+                hi = lo + 1e-6
+        low[chan] = lo
+        high[chan] = hi
+
+    rgb = np.nan_to_num(rgb, nan=0.0, posinf=0.0, neginf=0.0)
+    out = np.clip((rgb - low.reshape(1, 1, 3)) / np.maximum(high - low, 1e-6).reshape(1, 1, 3), 0.0, 1.0)
+    out = np.log1p(compress * out) / np.log1p(compress)
+    return np.clip(out, 0.0, 1.0) ** (1.0 / gamma)
 
 
 def _load_test_samples(
@@ -121,7 +138,16 @@ def _load_test_samples(
     _, _, _, test_loader = loaded
     batch = next(iter(test_loader))
     images = batch["image"]
-    return images[:n_samples], band_specs, rgb_indices
+    if images.shape[0] <= n_samples:
+        return images[:n_samples], band_specs, rgb_indices
+
+    # Prefer informative samples (higher spatial contrast in display bands)
+    # so corruption progression is visible in the saved grid.
+    idx = _resolve_display_indices(images[0], rgb_indices)
+    rgb = images[:, idx]
+    scores = rgb.std(dim=(1, 2, 3))
+    topk = torch.topk(scores, k=n_samples, largest=True).indices
+    return images[topk], band_specs, rgb_indices
 
 
 def generate_grid(
@@ -132,6 +158,7 @@ def generate_grid(
     n_samples: int = 4,
     rgb_indices: list[int] | None = None,
     seed: int = 0,
+    cloud_pattern_mode: str = "fixed_across_severity",
 ) -> Path:
     """Render and save an 11-column corruption grid for a dataset.
 
@@ -143,6 +170,9 @@ def generate_grid(
         n_samples: Number of rows to render from ``samples``.
         rgb_indices: Optional RGB channel indices for display.
         seed: Base random seed for deterministic corruption generation.
+        cloud_pattern_mode: Cloud RNG mode. Use ``fixed_across_severity`` to
+            keep one cloud pattern per image across severities, or
+            ``independent_per_severity`` for different patterns per severity.
 
     Returns:
         Path to the generated PNG file.
@@ -154,6 +184,35 @@ def generate_grid(
 
     samples = samples[:n_samples].detach().clone()
     n_rows = samples.shape[0]
+    display_indices = _resolve_display_indices(samples[0], rgb_indices)
+
+    cloud_batches: dict[int, torch.Tensor] = {}
+    for severity in [1, 2, 3, 4, 5]:
+        cloud_t = CorruptionTransform(
+            "cloud",
+            severity,
+            seed,
+            band_specs,
+            dataset_name=dataset_name,
+            cloud_pattern_mode=cloud_pattern_mode,
+        )
+        cloud_batches[severity] = cloud_t(samples)
+
+    noise_skipped = dataset_name in SKIP_POISSON_GAUSSIAN
+    noise_batches: dict[int, torch.Tensor | None] = {}
+    for severity in [1, 2, 3, 4, 5]:
+        if noise_skipped:
+            noise_batches[severity] = None
+            continue
+        noise_t = CorruptionTransform(
+            "poisson_gaussian",
+            severity,
+            seed,
+            band_specs,
+            dataset_name=dataset_name,
+        )
+        noise_batches[severity] = noise_t(samples)
+
     n_cols = 11
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.4 * n_cols, 2.4 * n_rows))
     if n_rows == 1:
@@ -175,23 +234,15 @@ def generate_grid(
     for col, header in enumerate(headers):
         axes[0, col].set_title(header)
 
-    noise_skipped = dataset_name in SKIP_POISSON_GAUSSIAN
     for row in range(n_rows):
         clean = samples[row]
         variants: list[torch.Tensor | None] = [clean]
 
         for severity in [1, 2, 3, 4, 5]:
-            cloud_t = CorruptionTransform("cloud_shadow", severity, seed + row * 100, band_specs)
-            variants.append(cloud_t(clean.unsqueeze(0))[0])
+            variants.append(cloud_batches[severity][row])
 
         for severity in [1, 2, 3, 4, 5]:
-            if noise_skipped:
-                variants.append(None)
-            else:
-                noise_t = CorruptionTransform(
-                    "poisson_gaussian", severity, seed + row * 100 + 7, band_specs
-                )
-                variants.append(noise_t(clean.unsqueeze(0))[0])
+            variants.append(None if noise_batches[severity] is None else noise_batches[severity][row])
 
         for col, img in enumerate(variants):
             ax = axes[row, col]
@@ -199,7 +250,7 @@ def generate_grid(
             if img is None:
                 ax.text(0.5, 0.5, "—", ha="center", va="center", fontsize=18)
             else:
-                ax.imshow(_to_rgb(img, rgb_indices))
+                ax.imshow(_to_rgb_display(img, display_indices))
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -221,6 +272,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-samples", type=int, default=4, help="Number of test samples to render.")
     parser.add_argument("--out", type=Path, default=Path("viz/corruptions"), help="Output directory.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed for corruption generation.")
+    parser.add_argument(
+        "--cloud-pattern-mode",
+        type=str,
+        choices=["fixed_across_severity", "independent_per_severity"],
+        default="fixed_across_severity",
+        help="Cloud pattern RNG mode across severities.",
+    )
     return parser
 
 
@@ -242,6 +300,7 @@ def main() -> int:
         n_samples=args.n_samples,
         rgb_indices=rgb_indices,
         seed=args.seed,
+        cloud_pattern_mode=args.cloud_pattern_mode,
     )
     logger.info("Saved corruption grid to %s", out_path)
     return 0

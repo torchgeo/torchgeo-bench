@@ -11,8 +11,10 @@ methods:
 
 corruptions:
   - clean
-  - cloud_shadow
+  - cloud
   - poisson_gaussian
+
+cloud_pattern_mode: fixed_across_severity
 
 corruption_severities: [1, 2, 3, 4, 5]
 conformal_alpha: 0.1

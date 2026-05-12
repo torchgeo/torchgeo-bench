@@ -5,9 +5,11 @@ from torchgeo_bench.uq.metrics import (
     brier_score,
     ece,
     empirical_coverage,
+    excess_aurc,
     mean_set_size,
     nll,
     predictive_entropy,
+    raw_aurc,
     selective_accuracy,
     sharpness,
 )
@@ -73,11 +75,27 @@ def test_sharpness_one_hot():
     assert np.isclose(sharpness(uniform), 1.0 / C, atol=1e-8)
 
 
-def test_aurc_perfect_confidence():
+def test_raw_aurc_matches_manual():
     y_true = np.array([0, 1, 0, 1], dtype=np.int64)
     y_pred = np.array([0, 1, 1, 0], dtype=np.int64)
     confidence = np.array([1.0, 1.0, 0.0, 0.0], dtype=np.float64)
-    assert np.isclose(aurc(confidence, y_pred, y_true), 0.0, atol=1e-8)
+    # Risk curve by confidence ranking: [0, 0, 1/3, 1/2].
+    manual_raw = (0.0 + 0.0 + (1.0 / 3.0) + 0.5) / 4.0
+    assert np.isclose(raw_aurc(confidence, y_pred, y_true), manual_raw, atol=1e-8)
+
+
+def test_excess_aurc_perfect_confidence():
+    y_true = np.array([0, 1, 0, 1], dtype=np.int64)
+    y_pred = np.array([0, 1, 1, 0], dtype=np.int64)
+    confidence = np.array([1.0, 1.0, 0.0, 0.0], dtype=np.float64)
+    assert np.isclose(excess_aurc(confidence, y_pred, y_true), 0.0, atol=1e-8)
+
+
+def test_aurc_alias_matches_excess_aurc():
+    y_true = np.array([0, 1, 0, 1], dtype=np.int64)
+    y_pred = np.array([0, 1, 1, 0], dtype=np.int64)
+    confidence = np.array([0.9, 0.8, 0.2, 0.1], dtype=np.float64)
+    assert np.isclose(aurc(confidence, y_pred, y_true), excess_aurc(confidence, y_pred, y_true))
 
 
 def test_selective_accuracy_full_coverage():
