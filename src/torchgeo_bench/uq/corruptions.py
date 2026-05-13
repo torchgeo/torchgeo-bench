@@ -7,12 +7,83 @@ import torch
 from torchgeo_bench.datasets.base import BandSpec
 
 SKIP_POISSON_GAUSSIAN: frozenset[str] = frozenset({"m-so2sat", "so2sat"})
-SENSOR_NOISE_PARAMS: dict[str, tuple[float, float]] = {
-    "s2": (8e-5, 0.02),
-    "landsat": (1e-4, 0.05),
-    "aerial": (5e-5, 0.02),
+
+
+@dataclass(frozen=True)
+class _NoiseSeverityPreset:
+    """Sensor noise settings for one severity level."""
+
+    photon_count: float
+    read_std_frac: float
+
+
+@dataclass(frozen=True)
+class _NoiseSensorCalibration:
+    """Per-sensor calibration for Poisson-Gaussian corruption."""
+
+    severity_presets: dict[int, _NoiseSeverityPreset]
+
+
+def _build_noise_severity_presets(levels: tuple[tuple[float, float], ...]) -> dict[int, _NoiseSeverityPreset]:
+    """Build five calibrated severity presets from ``(photon_count, read_std_frac)`` pairs."""
+    if len(levels) != 5:
+        raise ValueError(f"Expected five noise severity levels, got {len(levels)}")
+
+    presets = {
+        severity: _NoiseSeverityPreset(photon_count=photon_count, read_std_frac=read_std_frac)
+        for severity, (photon_count, read_std_frac) in enumerate(levels, start=1)
+    }
+    for severity, preset in presets.items():
+        if preset.photon_count <= 0:
+            raise ValueError(
+                f"Noise preset severity {severity} must use positive photon_count, got "
+                f"{preset.photon_count}"
+            )
+        if preset.read_std_frac < 0:
+            raise ValueError(
+                f"Noise preset severity {severity} must use non-negative read_std_frac, got "
+                f"{preset.read_std_frac}"
+            )
+    return presets
+
+
+NOISE_SENSOR_CALIBRATIONS: dict[str, _NoiseSensorCalibration] = {
+    # Lower photon counts increase shot noise; read_std_frac controls additive readout noise
+    # in normalized [0, 1] space before mapping back to native band ranges.
+    "s2": _NoiseSensorCalibration(
+        severity_presets=_build_noise_severity_presets(
+            (
+                (9000.0, 0.0025),
+                (6000.0, 0.0035),
+                (3500.0, 0.0050),
+                (1800.0, 0.0075),
+                (800.0, 0.0110),
+            )
+        )
+    ),
+    "landsat": _NoiseSensorCalibration(
+        severity_presets=_build_noise_severity_presets(
+            (
+                (7000.0, 0.0030),
+                (4500.0, 0.0045),
+                (2500.0, 0.0065),
+                (1200.0, 0.0095),
+                (550.0, 0.0140),
+            )
+        )
+    ),
+    "aerial": _NoiseSensorCalibration(
+        severity_presets=_build_noise_severity_presets(
+            (
+                (12000.0, 0.0018),
+                (8000.0, 0.0028),
+                (4500.0, 0.0042),
+                (2200.0, 0.0060),
+                (1000.0, 0.0090),
+            )
+        )
+    ),
 }
-NOISE_SCALES: list[float] = [1.0, 2.0, 4.0, 8.0, 16.0]
 
 
 @dataclass(frozen=True)
@@ -414,26 +485,28 @@ class CorruptionTransform:
         c, _, _ = image.shape
         device = image.device
         dtype = image.dtype
-        scale = NOISE_SCALES[self.severity - 1]
-
-        alpha_list: list[float] = []
-        sigma_list: list[float] = []
-        for band in self.band_specs:
-            sensor = band.sensor if band.sensor in SENSOR_NOISE_PARAMS else "aerial"
-            alpha_frac, sigma_frac = SENSOR_NOISE_PARAMS[sensor]
-            alpha_list.append(max(alpha_frac * max(band.mean, 1e-6) * scale, 1e-12))
-            sigma_list.append(max(sigma_frac * max(band.std, 1e-6) * scale, 0.0))
-
-        alpha = torch.tensor(alpha_list, device=device, dtype=dtype).view(c, 1, 1)
-        sigma = torch.tensor(sigma_list, device=device, dtype=dtype).view(c, 1, 1)
         min_vals, max_vals = _tensor_range(self.band_specs, device=device, dtype=dtype)
+        span_vals = (max_vals - min_vals).clamp(min=1e-6)
+        image_norm = ((image - min_vals) / span_vals).clamp(0.0, 1.0)
+
+        photon_counts_list: list[float] = []
+        read_std_frac_list: list[float] = []
+        for band in self.band_specs:
+            sensor = band.sensor if band.sensor in NOISE_SENSOR_CALIBRATIONS else "aerial"
+            preset = NOISE_SENSOR_CALIBRATIONS[sensor].severity_presets[self.severity]
+            photon_counts_list.append(preset.photon_count)
+            read_std_frac_list.append(preset.read_std_frac)
+
+        photon_counts = torch.tensor(photon_counts_list, device=device, dtype=dtype).view(c, 1, 1)
+        read_std_frac = torch.tensor(read_std_frac_list, device=device, dtype=dtype).view(c, 1, 1)
 
         gen = torch.Generator(device=device)
         gen.manual_seed(self.seed + global_idx)
 
-        shot = torch.poisson((image.clamp(min=0.0) / alpha).clamp(min=0.0), generator=gen) * alpha
-        readout = sigma * torch.randn(image.shape, device=device, dtype=dtype, generator=gen)
-        out = shot + readout
+        shot_counts = (image_norm * photon_counts).clamp(min=0.0)
+        shot_norm = torch.poisson(shot_counts, generator=gen) / photon_counts
+        readout_norm = read_std_frac * torch.randn(image.shape, device=device, dtype=dtype, generator=gen)
+        out = (shot_norm + readout_norm) * span_vals + min_vals
         out = torch.maximum(out, min_vals)
         out = torch.minimum(out, max_vals)
         return out

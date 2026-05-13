@@ -239,7 +239,7 @@ def test_cloud_pattern_mode_changes_realization():
         seed=17,
         band_specs=_bands(),
         dataset_name="m-eurosat",
-        cloud_pattern_mode="fixed_across_severity",
+        cloud_pattern_mode="fixed",
     )
     tfm_independent = CorruptionTransform(
         "cloud",
@@ -247,7 +247,7 @@ def test_cloud_pattern_mode_changes_realization():
         seed=17,
         band_specs=_bands(),
         dataset_name="m-eurosat",
-        cloud_pattern_mode="independent_per_severity",
+        cloud_pattern_mode="independent",
     )
     y_fixed = tfm_fixed(x)
     y_independent = tfm_independent(x)
@@ -269,6 +269,59 @@ def test_poisson_gaussian_values_clamped():
     assert float(y.max()) <= 255.0
 
 
+def test_poisson_gaussian_severity_progression():
+    x = torch.rand((8, 3, 128, 128), dtype=torch.float32) * 255.0
+    deltas: list[float] = []
+    for severity in [1, 2, 3, 4, 5]:
+        tfm = CorruptionTransform("poisson_gaussian", severity=severity, seed=21, band_specs=_bands())
+        y = tfm(x)
+        deltas.append(float(torch.mean(torch.abs(y - x))))
+
+    non_decreasing_steps = sum(next_delta >= delta - 1e-3 for delta, next_delta in zip(deltas, deltas[1:]))
+    assert non_decreasing_steps >= 3
+    assert deltas[-1] > deltas[0] * 1.35
+
+
+def test_poisson_gaussian_determinism_and_seed_diversity():
+    x = torch.rand((2, 3, 64, 64), dtype=torch.float32) * 255.0
+    tfm_a = CorruptionTransform("poisson_gaussian", severity=3, seed=123, band_specs=_bands())
+    tfm_b = CorruptionTransform("poisson_gaussian", severity=3, seed=123, band_specs=_bands())
+    tfm_c = CorruptionTransform("poisson_gaussian", severity=3, seed=124, band_specs=_bands())
+
+    y_a = tfm_a(x)
+    y_b = tfm_b(x)
+    y_c = tfm_c(x)
+    assert torch.allclose(y_a, y_b)
+    assert not torch.allclose(y_a, y_c)
+
+
+def test_poisson_gaussian_non_degenerate_on_low_signal():
+    x = torch.zeros((4, 3, 64, 64), dtype=torch.float32)
+    tfm = CorruptionTransform("poisson_gaussian", severity=3, seed=8, band_specs=_bands())
+    y = tfm(x)
+
+    assert float(y.min()) >= 0.0
+    assert float(y.max()) <= 255.0
+    assert float(torch.mean(torch.abs(y - x))) > 0.05
+
+
+def test_poisson_gaussian_mixed_range_bands_clamped():
+    band_specs = _mixed_sensor_bands()
+    x = torch.rand((2, len(band_specs), 32, 32), dtype=torch.float32)
+    x[:, 0:3] *= 255.0
+    x[:, 3] = -30.0 + 33.0 * x[:, 3]
+    x[:, 4] = -35.0 + 35.0 * x[:, 4]
+
+    tfm = CorruptionTransform("poisson_gaussian", severity=4, seed=43, band_specs=band_specs)
+    y = tfm(x)
+
+    mins = torch.tensor([band.min for band in band_specs], dtype=torch.float32).view(1, -1, 1, 1)
+    maxs = torch.tensor([band.max for band in band_specs], dtype=torch.float32).view(1, -1, 1, 1)
+    assert bool((y >= mins).all())
+    assert bool((y <= maxs).all())
+    assert float(torch.mean(torch.abs(y - x))) > 0.0
+
+
 def test_skip_poisson_gaussian_constant():
     assert "m-so2sat" in SKIP_POISSON_GAUSSIAN
     assert "so2sat" in SKIP_POISSON_GAUSSIAN
@@ -285,7 +338,7 @@ def test_viz_corruptions_runs(tmp_path):
         band_specs=_bands(),
         out_dir=tmp_path,
         n_samples=2,
-        cloud_pattern_mode="independent_per_severity",
+        cloud_pattern_mode="independent",
     )
     assert out.suffix == ".png"
     assert out.exists()
