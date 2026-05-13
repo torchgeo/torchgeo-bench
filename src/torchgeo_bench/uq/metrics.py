@@ -93,6 +93,35 @@ def predictive_entropy(probs: np.ndarray) -> float:
     return float((-clipped * np.log(clipped)).sum(axis=1).mean())
 
 
+def normalized_predictive_entropy(probs: np.ndarray) -> float:
+    """Return mean predictive entropy normalized to ``[0, 1]``.
+
+    Args:
+        probs: Class probabilities with shape ``(N, C)``.
+
+    Returns:
+        Mean predictive entropy divided by ``log(C)``.
+    """
+    if probs.ndim != 2:
+        raise ValueError(f"probs must be 2D, got shape {probs.shape}")
+    n_classes = probs.shape[1]
+    if n_classes <= 1:
+        return 0.0
+    return float(predictive_entropy(probs) / np.log(float(n_classes)))
+
+
+def max_probability(probs: np.ndarray) -> float:
+    """Return mean maximum class probability.
+
+    Args:
+        probs: Class probabilities with shape ``(N, C)``.
+
+    Returns:
+        Mean confidence of top predicted class.
+    """
+    return float(probs.max(axis=1).mean())
+
+
 def sharpness(probs: np.ndarray) -> float:
     """Return mean max-class probability.
 
@@ -102,7 +131,7 @@ def sharpness(probs: np.ndarray) -> float:
     Returns:
         Mean confidence of top predicted class.
     """
-    return float(probs.max(axis=1).mean())
+    return max_probability(probs)
 
 
 def _risk_coverage_curve(

@@ -6,8 +6,10 @@ from torchgeo_bench.uq.metrics import (
     ece,
     empirical_coverage,
     excess_aurc,
+    max_probability,
     mean_set_size,
     nll,
+    normalized_predictive_entropy,
     predictive_entropy,
     raw_aurc,
     selective_accuracy,
@@ -66,6 +68,15 @@ def test_predictive_entropy_uniform():
     assert np.isclose(predictive_entropy(one_hot), 0.0, atol=1e-8)
 
 
+def test_normalized_predictive_entropy_range():
+    C = 7
+    uniform = np.full((16, C), 1.0 / C, dtype=np.float64)
+    assert np.isclose(normalized_predictive_entropy(uniform), 1.0, atol=1e-8)
+
+    one_hot = np.eye(C, dtype=np.float64)[np.arange(16) % C]
+    assert np.isclose(normalized_predictive_entropy(one_hot), 0.0, atol=1e-8)
+
+
 def test_sharpness_one_hot():
     C = 6
     one_hot = np.eye(C, dtype=np.float64)[np.arange(12) % C]
@@ -73,6 +84,18 @@ def test_sharpness_one_hot():
 
     uniform = np.full((12, C), 1.0 / C, dtype=np.float64)
     assert np.isclose(sharpness(uniform), 1.0 / C, atol=1e-8)
+
+
+def test_max_probability_matches_sharpness():
+    probs = np.array(
+        [
+            [0.8, 0.2],
+            [0.1, 0.9],
+            [0.5, 0.5],
+        ],
+        dtype=np.float64,
+    )
+    assert np.isclose(max_probability(probs), sharpness(probs), atol=1e-8)
 
 
 def test_raw_aurc_matches_manual():
