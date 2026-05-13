@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from torchgeo.datasets.errors import DatasetNotFoundError
 
@@ -19,7 +19,14 @@ from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.main import append_rows_atomic
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.uq.corruptions import CorruptionTransform, SKIP_POISSON_GAUSSIAN
+from torchgeo_bench.uq.corruptions import SKIP_POISSON_GAUSSIAN, CorruptionTransform
+from torchgeo_bench.uq.methods import (
+    ConformalPredictor,
+    DeepEnsemble,
+    LaplaceProbe,
+    TemperatureScaling,
+    Uncalibrated,
+)
 from torchgeo_bench.uq.metrics import (
     brier_score,
     ece,
@@ -34,14 +41,19 @@ from torchgeo_bench.uq.metrics import (
     selective_accuracy,
     sharpness,
 )
-from torchgeo_bench.uq.methods import (
-    ConformalPredictor,
-    DeepEnsemble,
-    LaplaceProbe,
-    TemperatureScaling,
-    Uncalibrated,
-)
 from torchgeo_bench.uq.splits import stratified_cal_split
+from torchgeo_bench.uq.traces import (
+    append_manifest_row_atomic,
+    build_config_hash,
+    build_conformal_trace_frame,
+    build_manifest_row,
+    build_probabilistic_trace_frame,
+    check_trace_block_status,
+    init_trace_run,
+    maybe_warn_trace_integrity,
+    resolve_trace_partition_path,
+    write_trace_block_atomic,
+)
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
@@ -274,6 +286,7 @@ def _run_uq_block(
     device: str | torch.device = "cpu",
     band_specs: list[BandSpec] | None = None,
     cloud_pattern_mode: str = "fixed_across_severity",
+    trace_ctx: dict[str, Any] | None = None,
     verbose: bool = False,
 ) -> list[dict]:
     """Evaluate one UQ method for one corruption condition.
@@ -299,6 +312,7 @@ def _run_uq_block(
         device: Device used for feature extraction when needed.
         band_specs: Band metadata required for non-clean corruptions.
         cloud_pattern_mode: Cloud RNG mode for cloud corruption.
+        trace_ctx: Optional trace persistence context dictionary.
         verbose: Whether to enable verbose extraction logs.
 
     Returns:
@@ -341,6 +355,18 @@ def _run_uq_block(
             "eaurc": excess_aurc(conf, point_preds, y_test),
             "selective_acc_90": selective_accuracy(conf, point_preds, y_test, coverage=0.9),
         }
+        trace_df = None
+        if trace_ctx and bool(trace_ctx.get("include_conformal", False)):
+            trace_df = build_conformal_trace_frame(
+                run_id=str(trace_ctx["run_id"]),
+                common_meta=common_meta,
+                uq_method=method_name,
+                corruption_type=corruption_type,
+                severity=int(severity),
+                y_true=y_test,
+                y_pred=point_preds.astype(np.int64, copy=False),
+                pred_sets=pred_sets,
+            )
     else:
         probs = method.predict_proba(X_test)
         y_pred = probs.argmax(axis=1)
@@ -357,6 +383,17 @@ def _run_uq_block(
             "eaurc": excess_aurc(conf, y_pred, y_test),
             "selective_acc_90": selective_accuracy(conf, y_pred, y_test, coverage=0.9),
         }
+        trace_df = None
+        if trace_ctx:
+            trace_df = build_probabilistic_trace_frame(
+                run_id=str(trace_ctx["run_id"]),
+                common_meta=common_meta,
+                uq_method=method_name,
+                corruption_type=corruption_type,
+                severity=int(severity),
+                y_true=y_test,
+                probs=probs,
+            )
 
     for metric_name, metric_value in metrics.items():
         row = {
@@ -373,6 +410,45 @@ def _run_uq_block(
             "feature_dim": int(feature_dim),
         }
         rows.append(row)
+
+    if trace_ctx and trace_df is not None:
+        trace_path = resolve_trace_partition_path(
+            trace_root=str(trace_ctx["trace_root"]),
+            run_id=str(trace_ctx["run_id"]),
+            dataset=str(common_meta["dataset"]),
+            backbone=str(common_meta["name"]),
+            uq_method=method_name,
+            corruption_type=corruption_type,
+            severity=int(severity),
+            trace_format=str(trace_ctx["trace_format"]),
+        )
+        manifest_row = build_manifest_row(
+            trace_path=trace_path,
+            trace_format=str(trace_ctx["trace_format"]),
+            schema_version=str(trace_ctx["schema_version"]),
+            config_hash=str(trace_ctx["config_hash"]),
+            git_sha=str(trace_ctx["git_sha"]),
+            n_test=int(len(y_test)),
+            run_id=str(trace_ctx["run_id"]),
+            common_meta=common_meta,
+            uq_method=method_name,
+            corruption_type=corruption_type,
+            severity=int(severity),
+        )
+        status = check_trace_block_status(
+            manifest_path=str(trace_ctx["manifest_path"]),
+            manifest_row=manifest_row,
+        )
+        maybe_warn_trace_integrity(status=status, row=manifest_row)
+        is_complete = bool(status["is_complete"])
+        if not is_complete or bool(trace_ctx["overwrite"]):
+            write_trace_block_atomic(
+                trace_path=trace_path,
+                trace_df=trace_df,
+                trace_format=str(trace_ctx["trace_format"]),
+                compression=str(trace_ctx["compression"]),
+            )
+            append_manifest_row_atomic(str(trace_ctx["manifest_path"]), manifest_row)
 
     append_rows_atomic(output_path, rows)
     return rows
@@ -399,6 +475,36 @@ def main(cfg: DictConfig) -> None:
     cloud_pattern_mode = _normalize_cloud_pattern_mode(
         str(getattr(cfg.uq, "cloud_pattern_mode", "fixed_across_severity"))
     )
+    trace_cfg = getattr(cfg.uq, "trace", None)
+    trace_enabled = bool(getattr(trace_cfg, "enabled", False)) if trace_cfg is not None else False
+    trace_ctx: dict[str, Any] | None = None
+    if trace_enabled:
+        cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+        if not isinstance(cfg_dict, dict):
+            raise TypeError("Hydra config must resolve to a dictionary.")
+        config_hash = build_config_hash(cfg_dict)
+        trace_root = str(getattr(trace_cfg, "root", "results/uq_traces"))
+        trace_run = init_trace_run(
+            trace_root=trace_root,
+            run_id=getattr(trace_cfg, "run_id", None),
+            config_hash=config_hash,
+            trace_format=str(getattr(trace_cfg, "format", "parquet")),
+            schema_version=str(getattr(trace_cfg, "schema_version", "v1")),
+            resume=bool(cfg.resume),
+        )
+        trace_ctx = {
+            **trace_run,
+            "trace_root": trace_root,
+            "compression": str(getattr(trace_cfg, "compression", "zstd")),
+            "overwrite": bool(getattr(trace_cfg, "overwrite", False)),
+            "include_conformal": bool(getattr(trace_cfg, "include_conformal", False)),
+        }
+        logger.info(
+            "Trace persistence enabled (run_id=%s, root=%s, format=%s).",
+            trace_ctx["run_id"],
+            trace_ctx["trace_root"],
+            trace_ctx["trace_format"],
+        )
 
     prior_results = pd.read_csv(str(cfg.uq.prior_results)) if os.path.exists(str(cfg.uq.prior_results)) else None
     if prior_results is None:
@@ -587,6 +693,44 @@ def main(cfg: DictConfig) -> None:
                         str(int(severity)),
                     )
                     if cfg.resume and key in completed:
+                        if trace_ctx:
+                            trace_path = resolve_trace_partition_path(
+                                trace_root=str(trace_ctx["trace_root"]),
+                                run_id=str(trace_ctx["run_id"]),
+                                dataset=str(dataset_name),
+                                backbone=str(cfg.model.name),
+                                uq_method=str(method_name),
+                                corruption_type=str(corruption_type),
+                                severity=int(severity),
+                                trace_format=str(trace_ctx["trace_format"]),
+                            )
+                            manifest_row = build_manifest_row(
+                                trace_path=trace_path,
+                                trace_format=str(trace_ctx["trace_format"]),
+                                schema_version=str(trace_ctx["schema_version"]),
+                                config_hash=str(trace_ctx["config_hash"]),
+                                git_sha=str(trace_ctx["git_sha"]),
+                                n_test=int(len(y_test)),
+                                run_id=str(trace_ctx["run_id"]),
+                                common_meta=common_meta,
+                                uq_method=str(method_name),
+                                corruption_type=str(corruption_type),
+                                severity=int(severity),
+                            )
+                            status = check_trace_block_status(
+                                manifest_path=str(trace_ctx["manifest_path"]),
+                                manifest_row=manifest_row,
+                            )
+                            if not bool(status["is_complete"]):
+                                logger.warning(
+                                    "Resume skip: scalar metrics exist but trace block is incomplete/missing "
+                                    "(dataset=%s backbone=%s method=%s corruption=%s severity=%d).",
+                                    dataset_name,
+                                    cfg.model.name,
+                                    method_name,
+                                    corruption_type,
+                                    severity,
+                                )
                         continue
 
                     _run_uq_block(
@@ -606,6 +750,7 @@ def main(cfg: DictConfig) -> None:
                         X_test=X_test,
                         y_test=y_test,
                         cloud_pattern_mode=cloud_pattern_mode,
+                        trace_ctx=trace_ctx,
                     )
 
     logger.info("UQ benchmark complete. Results appended to %s", output_path)

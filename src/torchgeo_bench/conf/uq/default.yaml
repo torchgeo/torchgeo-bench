@@ -21,3 +21,17 @@ conformal_alpha: 0.1
 ece_bins: 15
 output: results/uq_results.csv
 prior_results: results/all_results.csv
+
+trace:
+  enabled: false
+  root: results/uq_traces
+  run_id: null
+  format: parquet
+  compression: zstd
+  overwrite: false
+  schema_version: v1
+  include_conformal: false
+
+reliability:
+  bins: 15
+  binning: equal_width
