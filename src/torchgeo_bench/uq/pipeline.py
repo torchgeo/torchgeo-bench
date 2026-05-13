@@ -173,20 +173,50 @@ def _lookup_best_c(prior_results: pd.DataFrame, row_filter: dict[str, Any]) -> f
         ValueError: If the filter matches multiple linear rows.
     """
     subset = prior_results.copy()
-    for col, val in row_filter.items():
-        if col not in subset.columns:
-            subset[col] = ""
-        subset = subset[subset[col].fillna("").astype(str) == str(val)]
 
-    subset = subset[subset["method"].fillna("").astype(str) == "linear"]
+    if "method" in subset.columns and "best_c" in subset.columns:
+        for col, val in row_filter.items():
+            if col not in subset.columns:
+                continue
+            subset = subset[subset[col].fillna("").astype(str) == str(val)]
+
+        subset = subset[subset["method"].fillna("").astype(str) == "linear"]
+        if subset.empty:
+            return None
+        if len(subset) > 1:
+            raise ValueError(f"Found duplicate prior linear rows for lookup key: {row_filter}")
+
+        best_c = subset["best_c"].iloc[0]
+        if pd.isna(best_c):
+            return None
+        return float(best_c)
+
+    # Fallback for sweep CSVs that only include dataset/model and C values.
+    if "C" not in subset.columns or "dataset" not in subset.columns or "model" not in subset.columns:
+        return None
+
+    dataset = row_filter.get("dataset")
+    if dataset is not None:
+        subset = subset[subset["dataset"].fillna("").astype(str) == str(dataset)]
+        if subset.empty:
+            return None
+
+    name = row_filter.get("name")
+    if name is not None:
+        subset = subset[subset["model"].fillna("").astype(str) == str(name)]
     if subset.empty:
         return None
-    if len(subset) > 1:
-        raise ValueError(f"Found duplicate prior linear rows for lookup key: {row_filter}")
 
-    best_c = subset["best_c"].iloc[0]
+    if "val_acc" in subset.columns:
+        subset = subset.sort_values(by="val_acc", ascending=False)
+    best_c = subset["C"].iloc[0]
     if pd.isna(best_c):
         return None
+    logger.info(
+        "Using sweep prior_results format without method/best_c; selecting C=%s for %s.",
+        best_c,
+        row_filter,
+    )
     return float(best_c)
 
 
