@@ -58,6 +58,13 @@ _RESUME_KEY_COLS: tuple[str, ...] = (
     "severity",
 )
 
+_CLOUD_PATTERN_MODE_MAP: dict[str, str] = {
+    "fixed_across_severity": "fixed",
+    "independent_per_severity": "independent",
+    "fixed": "fixed",
+    "independent": "independent",
+}
+
 
 def _is_uq_classification_dataset(ds_cls: type) -> bool:
     """Return whether a dataset class is in scope for UQ runs.
@@ -105,6 +112,27 @@ def _normalize_bands_value(bands: object) -> str:
     except TypeError:
         return str(bands)
     return ",".join(values)
+
+
+def _normalize_cloud_pattern_mode(cloud_pattern_mode: str) -> str:
+    """Map pipeline cloud pattern modes to transform-compatible mode values.
+
+    Args:
+        cloud_pattern_mode: Cloud mode from config or internal callers.
+
+    Returns:
+        Mode accepted by ``CorruptionTransform``.
+
+    Raises:
+        ValueError: If the mode is not recognized.
+    """
+    try:
+        return _CLOUD_PATTERN_MODE_MAP[cloud_pattern_mode]
+    except KeyError as exc:
+        raise ValueError(
+            "uq.cloud_pattern_mode must be one of "
+            f"{sorted(_CLOUD_PATTERN_MODE_MAP)}."
+        ) from exc
 
 
 def _expected_metrics(uq_method: str) -> set[str]:
@@ -275,6 +303,8 @@ def _run_uq_block(
     Raises:
         ValueError: If required inputs are missing.
     """
+    cloud_pattern_mode = _normalize_cloud_pattern_mode(cloud_pattern_mode)
+
     if X_test is None or y_test is None:
         if model is None or test_loader is None:
             raise ValueError("Either (X_test, y_test) or (model, test_loader) must be provided.")
@@ -360,12 +390,9 @@ def main(cfg: DictConfig) -> None:
     device = torch.device(str(cfg.device))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
     normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
-    cloud_pattern_mode = str(getattr(cfg.uq, "cloud_pattern_mode", "fixed_across_severity"))
-    if cloud_pattern_mode not in {"fixed_across_severity", "independent_per_severity"}:
-        raise ValueError(
-            "uq.cloud_pattern_mode must be one of "
-            "{'fixed_across_severity', 'independent_per_severity'}"
-        )
+    cloud_pattern_mode = _normalize_cloud_pattern_mode(
+        str(getattr(cfg.uq, "cloud_pattern_mode", "fixed_across_severity"))
+    )
 
     prior_results = pd.read_csv(str(cfg.uq.prior_results)) if os.path.exists(str(cfg.uq.prior_results)) else None
     if prior_results is None:

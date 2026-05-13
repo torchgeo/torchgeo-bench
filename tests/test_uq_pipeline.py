@@ -5,6 +5,7 @@ from torchgeo_bench.uq.pipeline import (
     _build_resume_set,
     _expected_metrics,
     _is_uq_classification_dataset,
+    _normalize_cloud_pattern_mode,
     _run_uq_block,
 )
 
@@ -175,3 +176,15 @@ def test_run_uq_block_writes_csv(tmp_path, monkeypatch):
     assert len(rows) == 8
     assert set(df["metric_name"]) == _expected_metrics("uncalibrated")
     assert np.isfinite(df["metric_value"].to_numpy(dtype=np.float64)).all()
+
+
+def test_normalize_cloud_pattern_mode():
+    assert _normalize_cloud_pattern_mode("fixed_across_severity") == "fixed"
+    assert _normalize_cloud_pattern_mode("independent_per_severity") == "independent"
+    assert _normalize_cloud_pattern_mode("fixed") == "fixed"
+    assert _normalize_cloud_pattern_mode("independent") == "independent"
+
+
+def test_normalize_cloud_pattern_mode_invalid():
+    with np.testing.assert_raises(ValueError):
+        _normalize_cloud_pattern_mode("invalid")

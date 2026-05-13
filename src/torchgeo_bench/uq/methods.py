@@ -263,7 +263,7 @@ class _SKLearnProbeWrapper:
 
 
 class ConformalPredictor:
-    """RAPS conformal predictor on top of a fitted probe."""
+    """Conformal predictor on top of a fitted probe."""
 
     def __init__(self, probe: LogisticRegression) -> None:
         self._probe = probe
@@ -272,6 +272,18 @@ class ConformalPredictor:
         self._cal_y: np.ndarray | None = None
         self._wrapper: _SKLearnProbeWrapper | None = None
         self._mode: str | None = None
+        self._conformity_score: str = "raps"
+
+    def _select_conformity_score(self, y_cal: np.ndarray) -> str:
+        """Return a MAPIE-compatible conformity score for calibration labels.
+
+        Args:
+            y_cal: Calibration labels with shape ``(N,)``.
+
+        Returns:
+            ``"lac"`` for binary targets, otherwise ``"raps"``.
+        """
+        return "lac" if np.unique(y_cal).size == 2 else "raps"
 
     def fit(self, X_cal: np.ndarray, y_cal: np.ndarray) -> None:
         """Fit conformal calibration in prefit mode on calibration embeddings.
@@ -285,20 +297,22 @@ class ConformalPredictor:
         """
         X_cal_np = X_cal.astype(np.float32, copy=False)
         y_cal_np = y_cal.astype(np.int64, copy=False)
+        self._conformity_score = self._select_conformity_score(y_cal_np)
         self._cal_X = X_cal_np
         self._cal_y = y_cal_np
         self._wrapper = _SKLearnProbeWrapper(self._probe)
 
-        try:
-            from mapie.classification import MapieClassifier
+        if self._conformity_score == "raps":
+            try:
+                from mapie.classification import MapieClassifier
 
-            mapie = MapieClassifier(estimator=self._wrapper, method="raps", cv="prefit")
-            mapie.fit(X_cal_np, y_cal_np)
-            self._mapie = mapie
-            self._mode = "legacy"
-            return
-        except (ImportError, AttributeError):
-            pass
+                mapie = MapieClassifier(estimator=self._wrapper, method="raps", cv="prefit")
+                mapie.fit(X_cal_np, y_cal_np)
+                self._mapie = mapie
+                self._mode = "legacy"
+                return
+            except (ImportError, AttributeError):
+                pass
 
         try:
             from mapie.classification import SplitConformalClassifier
@@ -310,7 +324,7 @@ class ConformalPredictor:
         conformal = SplitConformalClassifier(
             estimator=self._wrapper,
             confidence_level=0.9,
-            conformity_score="raps",
+            conformity_score=self._conformity_score,
             prefit=True,
         )
         conformal.conformalize(X_cal_np, y_cal_np)
@@ -346,7 +360,7 @@ class ConformalPredictor:
             conformal = SplitConformalClassifier(
                 estimator=self._wrapper,
                 confidence_level=1.0 - alpha,
-                conformity_score="raps",
+                conformity_score=self._conformity_score,
                 prefit=True,
             )
             conformal.conformalize(self._cal_X, self._cal_y)

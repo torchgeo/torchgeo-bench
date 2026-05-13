@@ -120,3 +120,10 @@ def test_conformal_coverage_at_alpha_01(fitted_probe):
     _, pred_sets = method.predict_sets(X_test, alpha=0.1)
     covered = pred_sets[np.arange(len(y_test)), y_test].mean()
     assert float(covered) >= 0.9
+
+
+def test_conformal_select_conformity_score_binary_and_multiclass(fitted_probe):
+    probe, _ = fitted_probe
+    method = ConformalPredictor(probe)
+    assert method._select_conformity_score(np.array([0, 1, 0, 1], dtype=np.int64)) == "lac"
+    assert method._select_conformity_score(np.array([0, 1, 2, 1], dtype=np.int64)) == "raps"
