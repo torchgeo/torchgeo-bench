@@ -10,6 +10,7 @@ import torch
 
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.models._normalization import NormalizationStrategy, build_normalizer
 from torchgeo_bench.uq.corruptions import (
     SKIP_POISSON_GAUSSIAN,
     CorruptionTransform,
@@ -17,6 +18,35 @@ from torchgeo_bench.uq.corruptions import (
 )
 
 logger = logging.getLogger(__name__)
+
+DISPLAY_LOW_PCT = 1.0
+DISPLAY_HIGH_PCT = 99.5
+DISPLAY_SAMPLE_COUNT = 512
+DISPLAY_SAMPLE_PIXELS = 1024
+CACHE_VERSION = 2
+PERCENTILE_CACHE_NAME = "torchgeo_bench_display_percentiles.json"
+
+DISPLAY_PERCENTILES_BY_DATASET: dict[str, tuple[float, float]] = {
+    "so2sat": (0.5, 99.0),
+    "m-so2sat": (0.5, 99.0),
+    "eurosat": (0.5, 99.0),
+    "m-eurosat": (0.5, 99.0),
+    "eurosat-spatial": (0.5, 99.0),
+}
+
+TONE_MAPPED_DATASETS: frozenset[str] = frozenset(
+    {
+        "so2sat",
+        "m-so2sat",
+        "eurosat",
+        "m-eurosat",
+        "eurosat-spatial",
+    }
+)
+
+
+def _dataset_display_percentiles(dataset_name: str) -> tuple[float, float]:
+    return DISPLAY_PERCENTILES_BY_DATASET.get(dataset_name, (DISPLAY_LOW_PCT, DISPLAY_HIGH_PCT))
 
 
 def _import_plotting():
@@ -68,6 +98,18 @@ def _resolve_display_indices(sample: torch.Tensor, rgb_indices: list[int]) -> li
     return valid[:3]
 
 
+def _resolve_dataset_cache_dir(dataset_name: str) -> Path:
+    ds_cls = get_bench_dataset_class(dataset_name)
+    bench = ds_cls()
+    root = Path(bench.data_root())
+    dataset_root = root / dataset_name
+    return dataset_root if dataset_root.exists() else root
+
+
+def _percentile_cache_path(dataset_root: Path) -> Path:
+    return dataset_root / PERCENTILE_CACHE_NAME
+
+
 def _to_rgb_display(
     sample: torch.Tensor,
     rgb_indices: list[int],
@@ -101,6 +143,23 @@ def _to_rgb_display(
     return np.clip(out, 0.0, 1.0) ** (1.0 / gamma)
 
 
+def _to_rgb_display_linear(
+    sample: torch.Tensor,
+    rgb_indices: list[int],
+    *,
+    low: np.ndarray,
+    high: np.ndarray,
+    gamma: float = 1.0,
+) -> np.ndarray:
+    idx = _resolve_display_indices(sample, rgb_indices)
+    rgb = sample[idx].detach().cpu().numpy().transpose(1, 2, 0).astype(np.float32)
+    rgb = np.nan_to_num(rgb, nan=0.0, posinf=0.0, neginf=0.0)
+    out = np.clip((rgb - low.reshape(1, 1, 3)) / np.maximum(high - low, 1e-6).reshape(1, 1, 3), 0.0, 1.0)
+    if gamma != 1.0:
+        out = np.clip(out, 0.0, 1.0) ** (1.0 / gamma)
+    return out
+
+
 def _compute_display_bounds(
     sample: torch.Tensor,
     rgb_indices: list[int],
@@ -129,6 +188,228 @@ def _compute_display_bounds(
         low[chan] = lo
         high[chan] = hi
     return low, high
+
+
+def _sample_rgb_pixels(
+    sample: torch.Tensor,
+    rgb_indices: list[int],
+    *,
+    max_pixels: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    idx = _resolve_display_indices(sample, rgb_indices)
+    rgb = sample[idx].detach().cpu().numpy().astype(np.float32)
+    _, height, width = rgb.shape
+    flat = rgb.reshape(3, height * width).transpose(1, 0)
+    if flat.shape[0] <= max_pixels:
+        return flat
+    pick = rng.choice(flat.shape[0], size=max_pixels, replace=False)
+    return flat[pick]
+
+
+def _sample_luma_pixels(
+    sample: torch.Tensor,
+    rgb_indices: list[int],
+    *,
+    max_pixels: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    idx = _resolve_display_indices(sample, rgb_indices)
+    rgb = sample[idx].detach().cpu().numpy().astype(np.float32)
+    _, height, width = rgb.shape
+    luma = rgb.mean(axis=0).reshape(height * width)
+    if luma.shape[0] <= max_pixels:
+        return luma
+    pick = rng.choice(luma.shape[0], size=max_pixels, replace=False)
+    return luma[pick]
+
+
+def _load_cache_samples(
+    dataset_name: str,
+    n_samples: int,
+) -> tuple[torch.Tensor, list[BandSpec], list[int]]:
+    ds_cls = get_bench_dataset_class(dataset_name)
+    bench = ds_cls()
+    bands_resolved = tuple(bench.rgb_bands)
+    band_specs = bench.select_band_specs(bands_resolved)
+    loaded_band_names = [spec.name for spec in band_specs]
+    rgb_indices = [loaded_band_names.index(name) for name in bench.rgb_bands if name in loaded_band_names]
+
+    loaded = get_datasets(
+        dataset_name=dataset_name,
+        partition_name="default",
+        batch_size=64,
+        num_workers=0,
+        return_val=True,
+        image_size=224,
+        interpolation="bilinear",
+        bands="rgb",
+    )
+    if loaded is None:
+        raise RuntimeError(f"Failed to load dataset {dataset_name}")
+    _, _, _, test_loader = loaded
+
+    images: list[torch.Tensor] = []
+    for batch in test_loader:
+        images.append(batch["image"])
+        total = sum(item.shape[0] for item in images)
+        if total >= n_samples:
+            break
+    if not images:
+        raise RuntimeError(f"No samples available for dataset {dataset_name}")
+    stacked = torch.cat(images, dim=0)
+    return stacked[:n_samples], band_specs, rgb_indices
+
+
+def _compute_display_percentiles(
+    dataset_name: str,
+    band_specs: list[BandSpec],
+    rgb_indices: list[int],
+    *,
+    seed: int,
+    cloud_pattern_mode: str,
+    n_samples: int,
+    max_pixels: int,
+) -> dict[str, object]:
+    low_pct, high_pct = _dataset_display_percentiles(dataset_name)
+    rng = np.random.default_rng(seed)
+    samples, _, _ = _load_cache_samples(dataset_name, n_samples)
+    samples = samples.detach().clone()
+
+    normalizer = build_normalizer(NormalizationStrategy.BANDSPEC_ZSCORE, bands=band_specs)
+    noise_skipped = dataset_name in SKIP_POISSON_GAUSSIAN
+
+    cloud_batches: dict[int, torch.Tensor] = {}
+    for severity in [1, 2, 3, 4, 5]:
+        cloud_t = CorruptionTransform(
+            "cloud",
+            severity,
+            seed,
+            band_specs,
+            dataset_name=dataset_name,
+            cloud_pattern_mode=cloud_pattern_mode,
+        )
+        cloud_batches[severity] = cloud_t(samples)
+
+    noise_batches: dict[int, torch.Tensor | None] = {}
+    for severity in [1, 2, 3, 4, 5]:
+        if noise_skipped:
+            noise_batches[severity] = None
+            continue
+        noise_t = CorruptionTransform(
+            "poisson_gaussian",
+            severity,
+            seed,
+            band_specs,
+            dataset_name=dataset_name,
+        )
+        noise_batches[severity] = noise_t(samples)
+
+    raw_pixels: list[np.ndarray] = []
+    norm_pixels: list[np.ndarray] = []
+    delta_pixels: list[np.ndarray] = []
+
+    for row in range(samples.shape[0]):
+        clean = samples[row]
+        clean_norm = normalizer(clean.unsqueeze(0)).squeeze(0)
+
+        raw_pixels.append(
+            _sample_rgb_pixels(clean, rgb_indices, max_pixels=max_pixels, rng=rng)
+        )
+        norm_pixels.append(
+            _sample_rgb_pixels(clean_norm, rgb_indices, max_pixels=max_pixels, rng=rng)
+        )
+
+        for severity in [1, 2, 3, 4, 5]:
+            clouded = cloud_batches[severity][row]
+            clouded_norm = normalizer(clouded.unsqueeze(0)).squeeze(0)
+            raw_pixels.append(
+                _sample_rgb_pixels(clouded, rgb_indices, max_pixels=max_pixels, rng=rng)
+            )
+            norm_pixels.append(
+                _sample_rgb_pixels(clouded_norm, rgb_indices, max_pixels=max_pixels, rng=rng)
+            )
+            delta = clouded_norm - clean_norm
+            delta_pixels.append(
+                _sample_luma_pixels(delta, rgb_indices, max_pixels=max_pixels, rng=rng)
+            )
+
+        for severity in [1, 2, 3, 4, 5]:
+            noised = noise_batches[severity]
+            if noised is None:
+                continue
+            noised_row = noised[row]
+            noised_norm = normalizer(noised_row.unsqueeze(0)).squeeze(0)
+            raw_pixels.append(
+                _sample_rgb_pixels(noised_row, rgb_indices, max_pixels=max_pixels, rng=rng)
+            )
+            norm_pixels.append(
+                _sample_rgb_pixels(noised_norm, rgb_indices, max_pixels=max_pixels, rng=rng)
+            )
+            delta = noised_norm - clean_norm
+            delta_pixels.append(
+                _sample_luma_pixels(delta, rgb_indices, max_pixels=max_pixels, rng=rng)
+            )
+
+    raw_stack = np.concatenate(raw_pixels, axis=0)
+    norm_stack = np.concatenate(norm_pixels, axis=0)
+    delta_stack = np.concatenate(delta_pixels, axis=0)
+
+    raw_low = np.percentile(raw_stack, low_pct, axis=0).astype(np.float32)
+    raw_high = np.percentile(raw_stack, high_pct, axis=0).astype(np.float32)
+    norm_low = np.percentile(norm_stack, low_pct, axis=0).astype(np.float32)
+    norm_high = np.percentile(norm_stack, high_pct, axis=0).astype(np.float32)
+    delta_low = float(np.percentile(delta_stack, low_pct))
+    delta_high = float(np.percentile(delta_stack, high_pct))
+    delta_bound = max(abs(delta_low), abs(delta_high), 1e-6)
+
+    return {
+        "version": CACHE_VERSION,
+        "dataset": dataset_name,
+        "n_samples": n_samples,
+        "low_pct": low_pct,
+        "high_pct": high_pct,
+        "raw": {"low": raw_low.tolist(), "high": raw_high.tolist()},
+        "normalized": {"low": norm_low.tolist(), "high": norm_high.tolist()},
+        "delta_luma": {"bound": float(delta_bound)},
+    }
+
+
+def _load_or_compute_percentiles(
+    dataset_name: str,
+    band_specs: list[BandSpec],
+    rgb_indices: list[int],
+    *,
+    seed: int,
+    cloud_pattern_mode: str,
+) -> dict[str, object]:
+    dataset_root = _resolve_dataset_cache_dir(dataset_name)
+    dataset_root.mkdir(parents=True, exist_ok=True)
+    cache_path = _percentile_cache_path(dataset_root)
+    low_pct, high_pct = _dataset_display_percentiles(dataset_name)
+    if cache_path.exists():
+        with cache_path.open("r", encoding="utf-8") as file:
+            cached = json.load(file)
+        if (
+            cached.get("version") == CACHE_VERSION
+            and cached.get("dataset") == dataset_name
+            and cached.get("low_pct") == low_pct
+            and cached.get("high_pct") == high_pct
+        ):
+            return cached
+
+    stats = _compute_display_percentiles(
+        dataset_name,
+        band_specs,
+        rgb_indices,
+        seed=seed,
+        cloud_pattern_mode=cloud_pattern_mode,
+        n_samples=DISPLAY_SAMPLE_COUNT,
+        max_pixels=DISPLAY_SAMPLE_PIXELS,
+    )
+    with cache_path.open("w", encoding="utf-8") as file:
+        json.dump(stats, file, indent=2, sort_keys=True)
+    return stats
 
 
 def _summarize_cloud_batches(
@@ -251,7 +532,7 @@ def generate_grid(
     n_samples: int = 4,
     rgb_indices: list[int] | None = None,
     seed: int = 0,
-    cloud_pattern_mode: str = "fixed_across_severity",
+    cloud_pattern_mode: str = "fixed",
 ) -> Path:
     """Render and save an 11-column corruption grid for a dataset.
 
@@ -263,9 +544,9 @@ def generate_grid(
         n_samples: Number of rows to render from ``samples``.
         rgb_indices: Optional RGB channel indices for display.
         seed: Base random seed for deterministic corruption generation.
-        cloud_pattern_mode: Cloud RNG mode. Use ``fixed_across_severity`` to
+        cloud_pattern_mode: Cloud RNG mode. Use ``fixed`` to
             keep one cloud pattern per image across severities, or
-            ``independent_per_severity`` for different patterns per severity.
+            ``independent`` for different patterns per severity.
 
     Returns:
         Path to the generated PNG file.
@@ -278,6 +559,40 @@ def generate_grid(
     samples = samples[:n_samples].detach().clone()
     n_rows = samples.shape[0]
     display_indices = _resolve_display_indices(samples[0], rgb_indices)
+
+    percentiles = _load_or_compute_percentiles(
+        dataset_name,
+        band_specs,
+        display_indices,
+        seed=seed,
+        cloud_pattern_mode=cloud_pattern_mode,
+    )
+    raw_low = np.array(percentiles["raw"]["low"], dtype=np.float32)
+    raw_high = np.array(percentiles["raw"]["high"], dtype=np.float32)
+    norm_low = np.array(percentiles["normalized"]["low"], dtype=np.float32)
+    norm_high = np.array(percentiles["normalized"]["high"], dtype=np.float32)
+    delta_bound = float(percentiles["delta_luma"]["bound"])
+
+    normalizer = build_normalizer(NormalizationStrategy.BANDSPEC_ZSCORE, bands=band_specs)
+    use_tone_map = dataset_name in TONE_MAPPED_DATASETS
+
+    def _render_rgb(sample: torch.Tensor, *, low: np.ndarray, high: np.ndarray) -> np.ndarray:
+        if use_tone_map:
+            return _to_rgb_display(
+                sample,
+                display_indices,
+                low=low,
+                high=high,
+                compress=6.0,
+                gamma=2.2,
+            )
+        return _to_rgb_display_linear(
+            sample,
+            display_indices,
+            low=low,
+            high=high,
+            gamma=1.0,
+        )
 
     cloud_batches: dict[int, torch.Tensor] = {}
     cloud_masks: dict[int, torch.Tensor] = {}
@@ -307,10 +622,37 @@ def generate_grid(
         )
         noise_batches[severity] = noise_t(samples)
 
-    n_cols = 11
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.4 * n_cols, 2.4 * n_rows))
-    if n_rows == 1:
-        axes = np.expand_dims(axes, axis=0)
+    def _render_grid(
+        variants_by_row: list[list[torch.Tensor | None]],
+        *,
+        out_path: Path,
+        cmap: str | None = None,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        draw_dash_for_none: bool = True,
+        is_rgb: bool = True,
+    ) -> None:
+        n_cols = len(variants_by_row[0])
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.4 * n_cols, 2.4 * n_rows))
+        if n_rows == 1:
+            axes = np.expand_dims(axes, axis=0)
+        for col, header in enumerate(headers):
+            axes[0, col].set_title(header)
+        for row in range(n_rows):
+            for col, img in enumerate(variants_by_row[row]):
+                ax = axes[row, col]
+                ax.axis("off")
+                if img is None:
+                    if draw_dash_for_none:
+                        ax.text(0.5, 0.5, "—", ha="center", va="center", fontsize=18)
+                    continue
+                if is_rgb:
+                    ax.imshow(img)
+                else:
+                    ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
 
     headers = [
         "clean",
@@ -325,42 +667,90 @@ def generate_grid(
         "noise s4",
         "noise s5",
     ]
-    for col, header in enumerate(headers):
-        axes[0, col].set_title(header)
+
+    raw_variants: list[list[np.ndarray | None]] = []
+    norm_variants: list[list[np.ndarray | None]] = []
+    delta_variants: list[list[np.ndarray | None]] = []
+    alpha_variants: list[list[np.ndarray | None]] = []
 
     for row in range(n_rows):
         clean = samples[row]
-        display_low, display_high = _compute_display_bounds(clean, display_indices)
-        variants: list[torch.Tensor | None] = [clean]
+        clean_norm = normalizer(clean.unsqueeze(0)).squeeze(0)
+
+        row_raw: list[np.ndarray | None] = [
+            _render_rgb(clean, low=raw_low, high=raw_high)
+        ]
+        row_norm: list[np.ndarray | None] = [
+            _render_rgb(clean_norm, low=norm_low, high=norm_high)
+        ]
+        row_delta: list[np.ndarray | None] = [
+            np.zeros((clean.shape[1], clean.shape[2]), dtype=np.float32)
+        ]
+        row_alpha: list[np.ndarray | None] = [None]
 
         for severity in [1, 2, 3, 4, 5]:
-            variants.append(cloud_batches[severity][row])
+            clouded = cloud_batches[severity][row]
+            clouded_norm = normalizer(clouded.unsqueeze(0)).squeeze(0)
+            row_raw.append(
+                _render_rgb(clouded, low=raw_low, high=raw_high)
+            )
+            row_norm.append(
+                _render_rgb(clouded_norm, low=norm_low, high=norm_high)
+            )
+            delta_luma = (clouded_norm - clean_norm).mean(dim=0).detach().cpu().numpy().astype(np.float32)
+            row_delta.append(delta_luma)
+            row_alpha.append(cloud_masks[severity][row].detach().cpu().numpy().astype(np.float32))
 
         for severity in [1, 2, 3, 4, 5]:
-            variants.append(None if noise_batches[severity] is None else noise_batches[severity][row])
+            noised = None if noise_batches[severity] is None else noise_batches[severity][row]
+            if noised is None:
+                row_raw.append(None)
+                row_norm.append(None)
+                row_delta.append(None)
+                row_alpha.append(None)
+                continue
+            noised_norm = normalizer(noised.unsqueeze(0)).squeeze(0)
+            row_raw.append(
+                _render_rgb(noised, low=raw_low, high=raw_high)
+            )
+            row_norm.append(
+                _render_rgb(noised_norm, low=norm_low, high=norm_high)
+            )
+            delta_luma = (noised_norm - clean_norm).mean(dim=0).detach().cpu().numpy().astype(np.float32)
+            row_delta.append(delta_luma)
+            row_alpha.append(None)
 
-        for col, img in enumerate(variants):
-            ax = axes[row, col]
-            ax.axis("off")
-            if img is None:
-                ax.text(0.5, 0.5, "—", ha="center", va="center", fontsize=18)
-            else:
-                ax.imshow(
-                    _to_rgb_display(
-                        img,
-                        display_indices,
-                        low=display_low,
-                        high=display_high,
-                    )
-                )
+        raw_variants.append(row_raw)
+        norm_variants.append(row_norm)
+        delta_variants.append(row_delta)
+        alpha_variants.append(row_alpha)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{dataset_name}_corruptions.png"
+    out_path = out_dir / f"{dataset_name}_corruptions_raw.png"
+    norm_path = out_dir / f"{dataset_name}_corruptions_norm.png"
+    delta_path = out_dir / f"{dataset_name}_corruptions_delta.png"
+    alpha_path = out_dir / f"{dataset_name}_corruptions_alpha.png"
     stats_path = out_dir / f"{dataset_name}_corruptions_stats.json"
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+
+    _render_grid(raw_variants, out_path=out_path, is_rgb=True)
+    _render_grid(norm_variants, out_path=norm_path, is_rgb=True)
+    _render_grid(
+        delta_variants,
+        out_path=delta_path,
+        cmap="coolwarm",
+        vmin=-delta_bound,
+        vmax=delta_bound,
+        is_rgb=False,
+    )
+    _render_grid(
+        alpha_variants,
+        out_path=alpha_path,
+        cmap="gray",
+        vmin=0.0,
+        vmax=1.0,
+        is_rgb=False,
+    )
     stats = _summarize_cloud_batches(
         dataset_name=dataset_name,
         clean_samples=samples,
@@ -387,8 +777,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cloud-pattern-mode",
         type=str,
-        choices=["fixed_across_severity", "independent_per_severity"],
-        default="fixed_across_severity",
+        choices=["fixed", "independent"],
+        default="fixed",
         help="Cloud pattern RNG mode across severities.",
     )
     return parser

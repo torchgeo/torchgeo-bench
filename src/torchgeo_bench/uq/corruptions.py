@@ -22,9 +22,9 @@ class CloudSeverityPreset:
     min_lvl: tuple[float, float]
     max_lvl: tuple[float, float]
     clear_threshold: float
-    decay_factor: float = 1.25
+    decay_factor: float = 2.0
     locality_degree: int = 1
-    channel_offset: int = 0
+    channel_offset: int = 1
     blur_scaling: float = 0.0
     cloud_color: bool = True
     channel_magnitude_shift: float = 0.02
@@ -43,11 +43,11 @@ class CloudDatasetCalibration:
 CLOUD_CLEAR_THRESHOLDS: dict[int, float] = {
     # SatelliteCloudGenerator uses clear_threshold as a coverage gate:
     # lower threshold -> more retained cloud mask (0.0 is maximal coverage).
-    1: 0.98,
-    2: 0.9,
-    3: 0.8,
-    4: 0.6,
-    5: 0.4,
+    1: 0.9,
+    2: 0.65,
+    3: 0.4,
+    4: 0.25,
+    5: 0,
 }
 
 
@@ -74,67 +74,67 @@ CLOUD_DATASET_CALIBRATIONS: dict[str, CloudDatasetCalibration] = {
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.42, 0.50, 0.58, 0.66, 0.74)),
+        severity_presets=_build_cloud_severity_presets((0.42, 0.50, 0.58, 0.66, 0.90)),
     ),
     "m-forestnet": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.48, 0.56, 0.64, 0.72, 0.80)),
+        severity_presets=_build_cloud_severity_presets((0.48, 0.56, 0.64, 0.72, 0.90)),
     ),
     "m-so2sat": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.40, 0.48, 0.56, 0.64, 0.72)),
+        severity_presets=_build_cloud_severity_presets((0.40, 0.48, 0.56, 0.64, 0.90)),
     ),
     "m-pv4ger": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.50, 0.58, 0.66, 0.74, 0.82)),
+        severity_presets=_build_cloud_severity_presets((0.8, 1.0, 1.0, 1.25, 2.0)),
     ),
     "m-brick-kiln": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.52, 0.60, 0.68, 0.76, 0.84)),
+        severity_presets=_build_cloud_severity_presets((0.52, 0.60, 0.68, 0.76, 0.90)),
     ),
     "forestnet": CloudDatasetCalibration(
         optical_band_names=("b04", "b03", "b02"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.46, 0.54, 0.62, 0.70, 0.78)),
+        severity_presets=_build_cloud_severity_presets((0.46, 0.54, 0.62, 0.70, 0.90)),
     ),
     "so2sat": CloudDatasetCalibration(
         optical_band_names=("b04", "b03", "b02"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.40, 0.48, 0.56, 0.64, 0.72)),
+        severity_presets=_build_cloud_severity_presets((0.40, 0.48, 0.56, 0.64, 0.90)),
     ),
     "eurosat": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.44, 0.52, 0.60, 0.68, 0.76)),
+        severity_presets=_build_cloud_severity_presets((0.44, 0.52, 0.60, 0.68, 0.90)),
     ),
     "eurosat-spatial": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.44, 0.52, 0.60, 0.68, 0.76)),
+        severity_presets=_build_cloud_severity_presets((0.44, 0.52, 0.60, 0.68, 0.90)),
     ),
     "advance": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.60, 0.68, 0.76, 0.84, 0.90)),
+        severity_presets=_build_cloud_severity_presets((0.8, 1.0, 1.0, 1.25, 2.0)),
     ),
     "resisc45": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.58, 0.66, 0.74, 0.82, 0.88)),
+        severity_presets=_build_cloud_severity_presets((0.8, 1.0, 1.0, 1.25, 2.0)),
     ),
 }
 
@@ -235,8 +235,8 @@ class CorruptionTransform:
         seed: Base seed used for deterministic per-image corruption.
         band_specs: Per-channel statistics and sensor metadata.
         dataset_name: Dataset key used by cloud calibration.
-        cloud_pattern_mode: Cloud RNG mode. ``"fixed_across_severity"`` reuses
-            the same per-image cloud realization across severities. ``"independent_per_severity"``
+        cloud_pattern_mode: Cloud RNG mode. ``"fixed"`` reuses
+            the same per-image cloud realization across severities. ``"independent"``
             samples a different realization for each severity.
     """
 
@@ -247,7 +247,7 @@ class CorruptionTransform:
         seed: int,
         band_specs: list[BandSpec],
         dataset_name: str | None = None,
-        cloud_pattern_mode: str = "fixed_across_severity",
+        cloud_pattern_mode: str = "fixed",
     ) -> None:
         if corruption_type not in {"cloud", "poisson_gaussian"}:
             raise ValueError(
@@ -259,10 +259,10 @@ class CorruptionTransform:
             raise ValueError("band_specs must be non-empty")
         if corruption_type == "cloud" and not dataset_name:
             raise ValueError("dataset_name is required for cloud corruption.")
-        if cloud_pattern_mode not in {"fixed_across_severity", "independent_per_severity"}:
+        if cloud_pattern_mode not in {"fixed", "independent"}:
             raise ValueError(
                 "cloud_pattern_mode must be one of "
-                "{'fixed_across_severity', 'independent_per_severity'}"
+                "{'fixed', 'independent'}"
             )
 
         self.corruption_type = corruption_type
@@ -364,7 +364,7 @@ class CorruptionTransform:
         synth_input = ((optical - lower) / denom).clamp(0.0, 1.0).unsqueeze(0)
 
         synth_seed = self.seed + global_idx
-        if self.cloud_pattern_mode == "independent_per_severity":
+        if self.cloud_pattern_mode == "independent":
             synth_seed += 1_000_000 * self.severity
         with torch.random.fork_rng(devices=_seed_devices(device), enabled=True):
             torch.manual_seed(synth_seed)
