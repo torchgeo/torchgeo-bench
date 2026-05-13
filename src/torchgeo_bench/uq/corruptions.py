@@ -60,33 +60,33 @@ NOISE_SENSOR_CALIBRATIONS: dict[str, _NoiseSensorCalibration] = {
     "s2": _NoiseSensorCalibration(
         severity_presets=_build_noise_severity_presets(
             (
-                (9000.0, 0.0025),
-                (6000.0, 0.0035),
-                (3500.0, 0.0050),
-                (1800.0, 0.0075),
-                (800.0, 0.0110),
+                (6000.0, 0.01),
+                (3500.0, 0.014),
+                (1800.0, 0.02),
+                (900.0, 0.03),
+                (450.0, 0.07),
             )
         )
     ),
     "landsat": _NoiseSensorCalibration(
         severity_presets=_build_noise_severity_presets(
             (
-                (7000.0, 0.0030),
-                (4500.0, 0.0045),
-                (2500.0, 0.0065),
-                (1200.0, 0.0095),
-                (550.0, 0.0140),
+                (5950.0, 0.0030),
+                (3825.0, 0.0045),
+                (2125.0, 0.0065),
+                (1020.0, 0.0095),
+                (467.5, 0.0140),
             )
         )
     ),
     "aerial": _NoiseSensorCalibration(
         severity_presets=_build_noise_severity_presets(
             (
-                (12000.0, 0.0018),
-                (8000.0, 0.0028),
-                (4500.0, 0.0042),
-                (2200.0, 0.0060),
-                (1000.0, 0.0090),
+                (3600.0, 0.0018),
+                (826.47, 0.15135),
+                (189.74, 0.30090),
+                (43.56, 0.45045),
+                (10.0, 0.60000),
             )
         )
     ),
@@ -97,22 +97,22 @@ NOISE_DATASET_OVERRIDES: dict[str, _NoiseDatasetOverride] = {
     "so2sat": _NoiseDatasetOverride(
         severity_presets=_build_noise_severity_presets(
             (
-                (7000.0, 0.0035),
-                (4200.0, 0.0050),
-                (2400.0, 0.0075),
-                (1200.0, 0.0110),
-                (600.0, 0.0160),
+                (5737.5, 0.002188),
+                (3825.0, 0.0089141),
+                (2231.25, 0.01),
+                (1147.5, 0.02),
+                (200.0, 0.07),
             )
         )
     ),
     "m-so2sat": _NoiseDatasetOverride(
         severity_presets=_build_noise_severity_presets(
             (
-                (7000.0, 0.0035),
-                (4200.0, 0.0050),
-                (2400.0, 0.0075),
-                (1200.0, 0.0110),
-                (600.0, 0.0160),
+                (5737.5, 0.002188),
+                (3825.0, 0.0089141),
+                (2231.25, 0.01),
+                (1147.5, 0.02),
+                (200.0, 0.07),
             )
         )
     ),
