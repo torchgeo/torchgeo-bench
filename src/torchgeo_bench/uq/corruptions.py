@@ -6,7 +6,7 @@ import torch
 
 from torchgeo_bench.datasets.base import BandSpec
 
-SKIP_POISSON_GAUSSIAN: frozenset[str] = frozenset({"m-so2sat", "so2sat"})
+SKIP_POISSON_GAUSSIAN: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,13 @@ class _NoiseSeverityPreset:
 @dataclass(frozen=True)
 class _NoiseSensorCalibration:
     """Per-sensor calibration for Poisson-Gaussian corruption."""
+
+    severity_presets: dict[int, _NoiseSeverityPreset]
+
+
+@dataclass(frozen=True)
+class _NoiseDatasetOverride:
+    """Dataset-local override ladder for Poisson-Gaussian corruption."""
 
     severity_presets: dict[int, _NoiseSeverityPreset]
 
@@ -80,6 +87,32 @@ NOISE_SENSOR_CALIBRATIONS: dict[str, _NoiseSensorCalibration] = {
                 (4500.0, 0.0042),
                 (2200.0, 0.0060),
                 (1000.0, 0.0090),
+            )
+        )
+    ),
+}
+
+
+NOISE_DATASET_OVERRIDES: dict[str, _NoiseDatasetOverride] = {
+    "so2sat": _NoiseDatasetOverride(
+        severity_presets=_build_noise_severity_presets(
+            (
+                (7000.0, 0.0035),
+                (4200.0, 0.0050),
+                (2400.0, 0.0075),
+                (1200.0, 0.0110),
+                (600.0, 0.0160),
+            )
+        )
+    ),
+    "m-so2sat": _NoiseDatasetOverride(
+        severity_presets=_build_noise_severity_presets(
+            (
+                (7000.0, 0.0035),
+                (4200.0, 0.0050),
+                (2400.0, 0.0075),
+                (1200.0, 0.0110),
+                (600.0, 0.0160),
             )
         )
     ),
@@ -491,9 +524,19 @@ class CorruptionTransform:
 
         photon_counts_list: list[float] = []
         read_std_frac_list: list[float] = []
+        dataset_override = None
+        if self.dataset_name is not None:
+            dataset_override = NOISE_DATASET_OVERRIDES.get(self.dataset_name)
+        override_preset = None
+        if dataset_override is not None:
+            override_preset = dataset_override.severity_presets[self.severity]
+
         for band in self.band_specs:
-            sensor = band.sensor if band.sensor in NOISE_SENSOR_CALIBRATIONS else "aerial"
-            preset = NOISE_SENSOR_CALIBRATIONS[sensor].severity_presets[self.severity]
+            if override_preset is not None:
+                preset = override_preset
+            else:
+                sensor = band.sensor if band.sensor in NOISE_SENSOR_CALIBRATIONS else "aerial"
+                preset = NOISE_SENSOR_CALIBRATIONS[sensor].severity_presets[self.severity]
             photon_counts_list.append(preset.photon_count)
             read_std_frac_list.append(preset.read_std_frac)
 

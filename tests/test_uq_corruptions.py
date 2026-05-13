@@ -88,6 +88,41 @@ def _mixed_sensor_bands() -> list[BandSpec]:
     ]
 
 
+def _so2sat_rgb_bands() -> list[BandSpec]:
+    return [
+        BandSpec(
+            sensor="s2",
+            name="b04",
+            source_name="B04",
+            mean=0.1138,
+            std=0.0733,
+            min=0.0001,
+            max=2.8,
+            wavelength_um=0.665,
+        ),
+        BandSpec(
+            sensor="s2",
+            name="b03",
+            source_name="B03",
+            mean=0.1172,
+            std=0.052,
+            min=0.0001,
+            max=2.8,
+            wavelength_um=0.56,
+        ),
+        BandSpec(
+            sensor="s2",
+            name="b02",
+            source_name="B02",
+            mean=0.1295,
+            std=0.0414,
+            min=0.0001,
+            max=2.8,
+            wavelength_um=0.49,
+        ),
+    ]
+
+
 def test_cloud_output_shape():
     _require_cloud_dependency()
     x = torch.rand((2, 3, 16, 16), dtype=torch.float32) * 255.0
@@ -323,8 +358,79 @@ def test_poisson_gaussian_mixed_range_bands_clamped():
 
 
 def test_skip_poisson_gaussian_constant():
-    assert "m-so2sat" in SKIP_POISSON_GAUSSIAN
-    assert "so2sat" in SKIP_POISSON_GAUSSIAN
+    assert "m-so2sat" not in SKIP_POISSON_GAUSSIAN
+    assert "so2sat" not in SKIP_POISSON_GAUSSIAN
+    assert SKIP_POISSON_GAUSSIAN == frozenset()
+
+
+def test_poisson_gaussian_so2sat_progression():
+    min_val = 0.0001
+    max_val = 2.8
+    x = min_val + torch.rand((8, 3, 128, 128), dtype=torch.float32) * (max_val - min_val)
+    deltas: list[float] = []
+    for severity in [1, 2, 3, 4, 5]:
+        tfm = CorruptionTransform(
+            "poisson_gaussian",
+            severity=severity,
+            seed=21,
+            band_specs=_so2sat_rgb_bands(),
+            dataset_name="so2sat",
+        )
+        y = tfm(x)
+        deltas.append(float(torch.mean(torch.abs(y - x))))
+
+    non_decreasing_steps = sum(next_delta >= delta - 1e-4 for delta, next_delta in zip(deltas, deltas[1:]))
+    assert non_decreasing_steps >= 3
+    assert deltas[-1] > deltas[0] * 1.5
+
+
+def test_poisson_gaussian_so2sat_determinism():
+    min_val = 0.0001
+    max_val = 2.8
+    x = min_val + torch.rand((4, 3, 64, 64), dtype=torch.float32) * (max_val - min_val)
+    tfm_a = CorruptionTransform(
+        "poisson_gaussian",
+        severity=3,
+        seed=123,
+        band_specs=_so2sat_rgb_bands(),
+        dataset_name="so2sat",
+    )
+    tfm_b = CorruptionTransform(
+        "poisson_gaussian",
+        severity=3,
+        seed=123,
+        band_specs=_so2sat_rgb_bands(),
+        dataset_name="so2sat",
+    )
+    tfm_c = CorruptionTransform(
+        "poisson_gaussian",
+        severity=3,
+        seed=124,
+        band_specs=_so2sat_rgb_bands(),
+        dataset_name="so2sat",
+    )
+
+    y_a = tfm_a(x)
+    y_b = tfm_b(x)
+    y_c = tfm_c(x)
+    assert torch.allclose(y_a, y_b)
+    assert not torch.allclose(y_a, y_c)
+
+
+def test_poisson_gaussian_so2sat_bounds():
+    min_val = 0.0001
+    max_val = 2.8
+    x = min_val + torch.rand((4, 3, 64, 64), dtype=torch.float32) * (max_val - min_val)
+    tfm = CorruptionTransform(
+        "poisson_gaussian",
+        severity=5,
+        seed=333,
+        band_specs=_so2sat_rgb_bands(),
+        dataset_name="so2sat",
+    )
+    y = tfm(x)
+    assert float(y.min()) >= min_val - 1e-6
+    assert float(y.max()) <= max_val + 1e-6
 
 
 def test_viz_corruptions_runs(tmp_path):
