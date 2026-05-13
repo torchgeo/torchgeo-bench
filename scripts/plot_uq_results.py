@@ -21,6 +21,7 @@ PROBABILISTIC_METHODS: tuple[str, ...] = (
     "deep_ensemble",
 )
 CONFORMAL_METHOD = "conformal"
+ALL_METHODS: tuple[str, ...] = PROBABILISTIC_METHODS + (CONFORMAL_METHOD,)
 
 PROBABILISTIC_CORE_METRICS: tuple[str, ...] = (
     "ece",
@@ -198,6 +199,16 @@ def _resolve_backbone(df: pd.DataFrame) -> pd.Series:
     return pd.Series(["unknown"] * len(df), index=df.index, dtype="string")
 
 
+def _resolve_model_name(df: pd.DataFrame) -> pd.Series:
+    if "name" in df.columns:
+        return df["name"].fillna("").astype("string")
+    if "backbone" in df.columns:
+        return df["backbone"].fillna("").astype("string")
+    if "model" in df.columns:
+        return df["model"].fillna("").astype("string")
+    return pd.Series(["unknown"] * len(df), index=df.index, dtype="string")
+
+
 def _normalize_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, object]]]:
     alerts: list[dict[str, object]] = []
     normalized = df.copy()
@@ -218,6 +229,8 @@ def _normalize_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, obj
     normalized["metric_name"] = normalized["metric_name"].fillna("").astype("string").str.lower()
     normalized["backbone"] = _resolve_backbone(normalized).fillna("").astype("string")
     normalized.loc[normalized["backbone"].str.strip() == "", "backbone"] = "unknown"
+    normalized["model_name"] = _resolve_model_name(normalized).fillna("").astype("string")
+    normalized.loc[normalized["model_name"].str.strip() == "", "model_name"] = "unknown"
 
     severity_num = pd.to_numeric(normalized["severity"], errors="coerce")
     invalid_numeric = severity_num.isna() & normalized["severity"].notna()
@@ -445,6 +458,11 @@ def _resolve_axis_values(
     return sorted(set(values))
 
 
+def _resolve_present_order(values: Sequence[str], preferred_order: Sequence[str]) -> list[str]:
+    present = set(values)
+    return [item for item in preferred_order if item in present]
+
+
 def _facet_figure(plt, nrows: int, ncols: int, *, width: float, height: float):
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(max(width * ncols, 4), max(height * nrows, 3)))
     if nrows == 1 and ncols == 1:
@@ -639,6 +657,150 @@ def _plot_method_trends(
             fig.suptitle(f"{title_prefix}: {metric} vs severity ({corruption})", fontsize=12, y=0.99)
             fig.tight_layout(rect=(0.0, 0.0, 1.0, layout_top))
             out_path = outdir / f"{_slugify(metric)}__{_slugify(corruption)}.{fmt}"
+            fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+            plt.close(fig)
+            generated.append(out_path)
+
+    return generated, skipped
+
+
+def _prepare_dataset_trend_grid(
+    df: pd.DataFrame,
+    *,
+    dataset: str,
+    corruption_type: str,
+    metrics: Sequence[str],
+) -> tuple[pd.DataFrame, list[str], list[str], list[int]]:
+    finite_mask = df["metric_value_num"].replace([np.inf, -np.inf], np.nan).notna()
+    subset = df[
+        finite_mask
+        & df["severity_int"].notna()
+        & (df["dataset"] == dataset)
+        & (df["corruption_type"].isin(["clean", corruption_type]))
+        & (df["metric_name"].isin(metrics))
+    ].copy()
+    if subset.empty:
+        return subset, [], [], []
+
+    subset["severity_int"] = subset["severity_int"].astype(int)
+    methods = _resolve_present_order(subset["uq_method"].astype(str).tolist(), ALL_METHODS)
+    models = sorted(subset["model_name"].dropna().astype(str).unique().tolist())
+    severities = sorted(subset["severity_int"].dropna().astype(int).unique().tolist())
+    return subset, methods, models, severities
+
+
+def _plot_dataset_trend_grids(
+    plt,
+    df: pd.DataFrame,
+    *,
+    datasets: list[str],
+    metrics: list[str],
+    corruption_types: list[str],
+    outdir: Path,
+    fmt: str,
+    dpi: int,
+) -> tuple[list[Path], list[str]]:
+    generated: list[Path] = []
+    skipped: list[str] = []
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    for dataset in datasets:
+        for corruption in corruption_types:
+            subset, methods, models, severities = _prepare_dataset_trend_grid(
+                df,
+                dataset=dataset,
+                corruption_type=corruption,
+                metrics=metrics,
+            )
+            if subset.empty:
+                skipped.append(f"dataset-trends {dataset} / {corruption}: no rows")
+                continue
+            if not methods:
+                skipped.append(f"dataset-trends {dataset} / {corruption}: no methods")
+                continue
+            if not models:
+                skipped.append(f"dataset-trends {dataset} / {corruption}: no models")
+                continue
+
+            fig, axes = _facet_figure(plt, len(metrics), len(methods), width=3.8, height=2.9)
+            model_colors = {model: plt.get_cmap("tab10")(idx % 10) for idx, model in enumerate(models)}
+            has_any_line = False
+
+            for i, metric in enumerate(metrics):
+                for j, method in enumerate(methods):
+                    ax = axes[i, j]
+                    panel = subset[(subset["metric_name"] == metric) & (subset["uq_method"] == method)]
+                    panel_has_line = False
+                    for model in models:
+                        model_rows = panel[panel["model_name"] == model]
+                        if model_rows.empty:
+                            continue
+                        agg = (
+                            model_rows.groupby("severity_int", as_index=False)["metric_value_num"]
+                            .mean()
+                            .sort_values("severity_int")
+                        )
+                        if agg.empty:
+                            continue
+                        ax.plot(
+                            agg["severity_int"].to_numpy(dtype=int),
+                            agg["metric_value_num"].to_numpy(dtype=float),
+                            marker="o",
+                            markersize=3.2,
+                            linewidth=1.5,
+                            label=model,
+                            color=model_colors[model],
+                        )
+                        panel_has_line = True
+                        has_any_line = True
+                    if not panel_has_line:
+                        ax.text(0.5, 0.5, "no data", transform=ax.transAxes, ha="center", va="center", fontsize=8)
+                    ax.grid(alpha=0.25)
+                    if severities:
+                        ax.set_xticks(severities)
+                    if i == 0:
+                        ax.set_title(method, fontsize=10)
+                    if j == 0:
+                        ax.set_ylabel(metric)
+                    else:
+                        ax.set_ylabel("")
+                    if i == len(metrics) - 1:
+                        ax.set_xlabel("severity")
+                    else:
+                        ax.set_xlabel("")
+
+            if not has_any_line:
+                plt.close(fig)
+                skipped.append(f"dataset-trends {dataset} / {corruption}: all panels empty")
+                continue
+
+            handles: list[object] = []
+            labels: list[str] = []
+            for ax in axes.ravel():
+                panel_handles, panel_labels = ax.get_legend_handles_labels()
+                if panel_handles:
+                    handles = panel_handles
+                    labels = panel_labels
+                    break
+            layout_top = 0.93
+            if handles:
+                fig.legend(
+                    handles,
+                    labels,
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, 0.965),
+                    ncol=min(5, len(handles)),
+                    frameon=False,
+                    fontsize=8,
+                )
+                layout_top = 0.88
+            fig.suptitle(
+                f"Dataset trends: {dataset} ({corruption})",
+                fontsize=12,
+                y=0.995,
+            )
+            fig.tight_layout(rect=(0.0, 0.0, 1.0, layout_top))
+            out_path = outdir / f"{_slugify(dataset)}__{_slugify(corruption)}.{fmt}"
             fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
             plt.close(fig)
             generated.append(out_path)
@@ -1012,6 +1174,7 @@ def _run(args: argparse.Namespace) -> int:
 
     if not trend_corruptions:
         logger.warning("No trend corruptions selected or present (excluding clean).")
+    dataset_grid_corruptions = [corruption for corruption in trend_corruptions if corruption != "clean"]
 
     prob_df = filtered_df[filtered_df["uq_method"].isin(PROBABILISTIC_METHODS)]
     conformal_df = filtered_df[filtered_df["uq_method"] == CONFORMAL_METHOD]
@@ -1097,6 +1260,26 @@ def _run(args: argparse.Namespace) -> int:
         skipped_messages.extend(conf_skipped)
     else:
         logger.info("Skipping conformal trend plots (no metrics and/or no corruptions).")
+
+    dataset_trends_dir = args.outdir / "by_dataset_trends"
+    dataset_grid_metrics = [
+        metric for metric in requested_metrics if metric in set(filtered_df["metric_name"].astype(str).tolist())
+    ]
+    if dataset_grid_metrics and dataset_grid_corruptions:
+        dataset_generated, dataset_skipped = _plot_dataset_trend_grids(
+            plt,
+            filtered_df,
+            datasets=datasets,
+            metrics=dataset_grid_metrics,
+            corruption_types=dataset_grid_corruptions,
+            outdir=dataset_trends_dir,
+            fmt=args.format.lower(),
+            dpi=args.dpi,
+        )
+        generated_files.extend(dataset_generated)
+        skipped_messages.extend(dataset_skipped)
+    else:
+        logger.info("Skipping dataset trend grids (no metrics and/or no non-clean corruptions).")
 
     if args.trace_dir is not None:
         reliability_outdir = (
