@@ -3,6 +3,7 @@
 import logging
 import os
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import hydra
@@ -43,11 +44,11 @@ from torchgeo_bench.uq.metrics import (
 )
 from torchgeo_bench.uq.splits import stratified_cal_split
 from torchgeo_bench.uq.traces import (
-    append_manifest_row_atomic,
     build_config_hash,
     build_conformal_trace_frame,
-    build_manifest_row,
     build_probabilistic_trace_frame,
+    build_trace_block_key,
+    build_trace_link_row,
     check_trace_block_status,
     init_trace_run,
     maybe_warn_trace_integrity,
@@ -61,6 +62,7 @@ logger = logging.getLogger(__name__)
 _RESUME_KEY_COLS: tuple[str, ...] = (
     "model",
     "name",
+    "seed",
     "dataset",
     "normalization",
     "image_size",
@@ -281,6 +283,7 @@ def _run_uq_block(
     seed: int,
     X_test: np.ndarray | None = None,
     y_test: np.ndarray | None = None,
+    sample_ids: np.ndarray | None = None,
     model: BenchModel | None = None,
     test_loader: DataLoader | None = None,
     device: str | torch.device = "cpu",
@@ -307,6 +310,7 @@ def _run_uq_block(
         seed: Random seed used for corruption determinism.
         X_test: Optional precomputed test embeddings.
         y_test: Optional precomputed test labels.
+        sample_ids: Optional stable sample identifiers aligned with ``y_test``.
         model: Optional model used to extract test embeddings when ``X_test`` is not provided.
         test_loader: Optional test loader used with ``model``.
         device: Device used for feature extraction when needed.
@@ -338,12 +342,27 @@ def _run_uq_block(
                 dataset_name=common_meta["dataset"],
                 cloud_pattern_mode=cloud_pattern_mode,
             )
-        X_test, y_test = extract_features(model, test_loader, device, transforms=transforms, verbose=verbose)
+        extracted = extract_features(
+            model,
+            test_loader,
+            device,
+            transforms=transforms,
+            verbose=verbose,
+            return_sample_ids=trace_ctx is not None,
+        )
+        if trace_ctx is not None:
+            X_test, y_test, sample_ids = extracted
+        else:
+            X_test, y_test = extracted
 
     assert X_test is not None
     assert y_test is not None
 
     rows: list[dict[str, Any]] = []
+    trace_df = None
+    trace_link: dict[str, str] = {}
+    trace_path: Path | None = None
+    trace_block_key: str | None = None
     if method_name == "conformal":
         point_preds, pred_sets = method.predict_sets(X_test, alpha=conformal_alpha)
         set_sizes = pred_sets.sum(axis=1).astype(np.float64)
@@ -355,17 +374,28 @@ def _run_uq_block(
             "eaurc": excess_aurc(conf, point_preds, y_test),
             "selective_acc_90": selective_accuracy(conf, point_preds, y_test, coverage=0.9),
         }
-        trace_df = None
         if trace_ctx and bool(trace_ctx.get("include_conformal", False)):
-            trace_df = build_conformal_trace_frame(
+            trace_block_key = build_trace_block_key(
                 run_id=str(trace_ctx["run_id"]),
                 common_meta=common_meta,
                 uq_method=method_name,
                 corruption_type=corruption_type,
                 severity=int(severity),
+            )
+            trace_df = build_conformal_trace_frame(
+                trace_block_key=trace_block_key,
+                run_id=str(trace_ctx["run_id"]),
+                common_meta=common_meta,
+                uq_method=method_name,
+                corruption_type=corruption_type,
+                severity=int(severity),
+                config_hash=str(trace_ctx["config_hash"]),
+                git_sha=str(trace_ctx["git_sha"]),
+                created_at_utc=str(trace_ctx["created_at_utc"]),
                 y_true=y_test,
                 y_pred=point_preds.astype(np.int64, copy=False),
                 pred_sets=pred_sets,
+                sample_ids=sample_ids,
             )
     else:
         probs = method.predict_proba(X_test)
@@ -383,17 +413,59 @@ def _run_uq_block(
             "eaurc": excess_aurc(conf, y_pred, y_test),
             "selective_acc_90": selective_accuracy(conf, y_pred, y_test, coverage=0.9),
         }
-        trace_df = None
         if trace_ctx:
-            trace_df = build_probabilistic_trace_frame(
+            trace_block_key = build_trace_block_key(
                 run_id=str(trace_ctx["run_id"]),
                 common_meta=common_meta,
                 uq_method=method_name,
                 corruption_type=corruption_type,
                 severity=int(severity),
+            )
+            trace_df = build_probabilistic_trace_frame(
+                trace_block_key=trace_block_key,
+                run_id=str(trace_ctx["run_id"]),
+                common_meta=common_meta,
+                uq_method=method_name,
+                corruption_type=corruption_type,
+                severity=int(severity),
+                config_hash=str(trace_ctx["config_hash"]),
+                git_sha=str(trace_ctx["git_sha"]),
+                created_at_utc=str(trace_ctx["created_at_utc"]),
                 y_true=y_test,
                 probs=probs,
+                sample_ids=sample_ids,
             )
+
+    if trace_ctx and trace_df is not None and trace_block_key is not None:
+        trace_path = resolve_trace_partition_path(
+            trace_dataset_root=str(trace_ctx["trace_dataset_root"]),
+            trace_block_key=trace_block_key,
+            dataset=str(common_meta["dataset"]),
+            backbone=str(common_meta["backbone"]),
+            uq_method=method_name,
+            corruption_type=corruption_type,
+            severity=int(severity),
+        )
+        status = check_trace_block_status(
+            trace_path=trace_path,
+            expected_n_test=int(len(y_test)),
+        )
+        maybe_warn_trace_integrity(
+            status=status,
+            trace_path=trace_path,
+            block_key=trace_block_key,
+        )
+        if not bool(status["is_complete"]) or bool(trace_ctx["overwrite"]):
+            write_trace_block_atomic(
+                trace_path=trace_path,
+                trace_df=trace_df,
+                compression=str(trace_ctx["compression"]),
+            )
+        trace_link = build_trace_link_row(
+            trace_dataset_root=str(trace_ctx["trace_dataset_root"]),
+            run_id=str(trace_ctx["run_id"]),
+            trace_block_key=trace_block_key,
+        )
 
     for metric_name, metric_value in metrics.items():
         row = {
@@ -408,47 +480,9 @@ def _run_uq_block(
             "n_test": int(len(y_test)),
             "best_c": float(best_c),
             "feature_dim": int(feature_dim),
+            **trace_link,
         }
         rows.append(row)
-
-    if trace_ctx and trace_df is not None:
-        trace_path = resolve_trace_partition_path(
-            trace_root=str(trace_ctx["trace_root"]),
-            run_id=str(trace_ctx["run_id"]),
-            dataset=str(common_meta["dataset"]),
-            backbone=str(common_meta["name"]),
-            uq_method=method_name,
-            corruption_type=corruption_type,
-            severity=int(severity),
-            trace_format=str(trace_ctx["trace_format"]),
-        )
-        manifest_row = build_manifest_row(
-            trace_path=trace_path,
-            trace_format=str(trace_ctx["trace_format"]),
-            schema_version=str(trace_ctx["schema_version"]),
-            config_hash=str(trace_ctx["config_hash"]),
-            git_sha=str(trace_ctx["git_sha"]),
-            n_test=int(len(y_test)),
-            run_id=str(trace_ctx["run_id"]),
-            common_meta=common_meta,
-            uq_method=method_name,
-            corruption_type=corruption_type,
-            severity=int(severity),
-        )
-        status = check_trace_block_status(
-            manifest_path=str(trace_ctx["manifest_path"]),
-            manifest_row=manifest_row,
-        )
-        maybe_warn_trace_integrity(status=status, row=manifest_row)
-        is_complete = bool(status["is_complete"])
-        if not is_complete or bool(trace_ctx["overwrite"]):
-            write_trace_block_atomic(
-                trace_path=trace_path,
-                trace_df=trace_df,
-                trace_format=str(trace_ctx["trace_format"]),
-                compression=str(trace_ctx["compression"]),
-            )
-            append_manifest_row_atomic(str(trace_ctx["manifest_path"]), manifest_row)
 
     append_rows_atomic(output_path, rows)
     return rows
@@ -483,27 +517,25 @@ def main(cfg: DictConfig) -> None:
         if not isinstance(cfg_dict, dict):
             raise TypeError("Hydra config must resolve to a dictionary.")
         config_hash = build_config_hash(cfg_dict)
-        trace_root = str(getattr(trace_cfg, "root", "results/uq_traces"))
+        trace_dataset_root = str(
+            getattr(trace_cfg, "dataset_root", getattr(trace_cfg, "root", "results/uq_traces"))
+        )
         trace_run = init_trace_run(
-            trace_root=trace_root,
+            trace_dataset_root=trace_dataset_root,
             run_id=getattr(trace_cfg, "run_id", None),
             config_hash=config_hash,
-            trace_format=str(getattr(trace_cfg, "format", "parquet")),
-            schema_version=str(getattr(trace_cfg, "schema_version", "v1")),
             resume=bool(cfg.resume),
         )
         trace_ctx = {
             **trace_run,
-            "trace_root": trace_root,
             "compression": str(getattr(trace_cfg, "compression", "zstd")),
             "overwrite": bool(getattr(trace_cfg, "overwrite", False)),
             "include_conformal": bool(getattr(trace_cfg, "include_conformal", False)),
         }
         logger.info(
-            "Trace persistence enabled (run_id=%s, root=%s, format=%s).",
+            "Trace persistence enabled (run_id=%s, root=%s).",
             trace_ctx["run_id"],
-            trace_ctx["trace_root"],
-            trace_ctx["trace_format"],
+            trace_ctx["trace_dataset_root"],
         )
 
     prior_results = pd.read_csv(str(cfg.uq.prior_results)) if os.path.exists(str(cfg.uq.prior_results)) else None
@@ -644,6 +676,7 @@ def main(cfg: DictConfig) -> None:
         common_meta = {
             "model": str(cfg.model._target_),
             "name": str(cfg.model.name),
+            "backbone": str(cfg.model.name),
             "dataset": dataset_name,
             "normalization": normalization,
             "image_size": getattr(cfg.dataset, "image_size", None),
@@ -670,18 +703,25 @@ def main(cfg: DictConfig) -> None:
                         dataset_name=dataset_name,
                         cloud_pattern_mode=cloud_pattern_mode,
                     )
-                X_test, y_test = extract_features(
+                sample_ids: np.ndarray | None = None
+                extracted = extract_features(
                     model,
                     test_loader,
                     device,
                     transforms=transform,
                     verbose=cfg.verbose,
+                    return_sample_ids=trace_ctx is not None,
                 )
+                if trace_ctx:
+                    X_test, y_test, sample_ids = extracted
+                else:
+                    X_test, y_test = extracted
 
                 for method_name, method in methods.items():
                     key = (
                         str(cfg.model._target_),
                         str(cfg.model.name),
+                        str(cfg.seed),
                         dataset_name,
                         normalization,
                         str(getattr(cfg.dataset, "image_size", None)),
@@ -694,32 +734,25 @@ def main(cfg: DictConfig) -> None:
                     )
                     if cfg.resume and key in completed:
                         if trace_ctx:
-                            trace_path = resolve_trace_partition_path(
-                                trace_root=str(trace_ctx["trace_root"]),
-                                run_id=str(trace_ctx["run_id"]),
-                                dataset=str(dataset_name),
-                                backbone=str(cfg.model.name),
-                                uq_method=str(method_name),
-                                corruption_type=str(corruption_type),
-                                severity=int(severity),
-                                trace_format=str(trace_ctx["trace_format"]),
-                            )
-                            manifest_row = build_manifest_row(
-                                trace_path=trace_path,
-                                trace_format=str(trace_ctx["trace_format"]),
-                                schema_version=str(trace_ctx["schema_version"]),
-                                config_hash=str(trace_ctx["config_hash"]),
-                                git_sha=str(trace_ctx["git_sha"]),
-                                n_test=int(len(y_test)),
+                            trace_block_key = build_trace_block_key(
                                 run_id=str(trace_ctx["run_id"]),
                                 common_meta=common_meta,
                                 uq_method=str(method_name),
                                 corruption_type=str(corruption_type),
                                 severity=int(severity),
                             )
+                            trace_path = resolve_trace_partition_path(
+                                trace_dataset_root=str(trace_ctx["trace_dataset_root"]),
+                                trace_block_key=trace_block_key,
+                                dataset=str(dataset_name),
+                                backbone=str(cfg.model.name),
+                                uq_method=str(method_name),
+                                corruption_type=str(corruption_type),
+                                severity=int(severity),
+                            )
                             status = check_trace_block_status(
-                                manifest_path=str(trace_ctx["manifest_path"]),
-                                manifest_row=manifest_row,
+                                trace_path=trace_path,
+                                expected_n_test=int(len(y_test)),
                             )
                             if not bool(status["is_complete"]):
                                 logger.warning(
@@ -749,6 +782,7 @@ def main(cfg: DictConfig) -> None:
                         seed=int(cfg.seed),
                         X_test=X_test,
                         y_test=y_test,
+                        sample_ids=sample_ids,
                         cloud_pattern_mode=cloud_pattern_mode,
                         trace_ctx=trace_ctx,
                     )

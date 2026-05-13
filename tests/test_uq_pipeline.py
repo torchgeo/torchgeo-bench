@@ -14,6 +14,7 @@ def _base_row(metric_name: str) -> dict[str, object]:
     return {
         "model": "m.t",
         "name": "resnet50",
+        "seed": 42,
         "dataset": "m-eurosat",
         "normalization": "bandspec_zscore",
         "image_size": 224,
@@ -42,6 +43,7 @@ def test_build_resume_set_complete_key(tmp_path):
     key = (
         "m.t",
         "resnet50",
+        "42",
         "m-eurosat",
         "bandspec_zscore",
         "224",
@@ -65,6 +67,7 @@ def test_build_resume_set_partial_key(tmp_path):
     key = (
         "m.t",
         "resnet50",
+        "42",
         "m-eurosat",
         "bandspec_zscore",
         "224",
@@ -146,6 +149,7 @@ def test_run_uq_block_writes_csv(tmp_path, monkeypatch):
     common_meta = {
         "model": "m.t",
         "name": "resnet50",
+        "backbone": "resnet50",
         "dataset": "m-eurosat",
         "normalization": "bandspec_zscore",
         "image_size": 224,

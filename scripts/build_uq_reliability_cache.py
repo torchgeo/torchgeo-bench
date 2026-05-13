@@ -8,13 +8,14 @@ from pathlib import Path
 import pandas as pd
 
 from torchgeo_bench.uq.reliability import build_reliability_frame
+from torchgeo_bench.uq.traces import scan_traces
 
 logger = logging.getLogger(__name__)
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--trace-dir", type=Path, required=True, help="Trace run directory (run_id=...).")
+    parser.add_argument("--trace-dir", type=Path, required=True, help="Trace parquet dataset root.")
     parser.add_argument(
         "--out",
         type=Path,
@@ -31,47 +32,58 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_manifest(trace_dir: Path) -> pd.DataFrame:
-    manifest_path = trace_dir / "manifest.csv"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
-    manifest = pd.read_csv(manifest_path)
-    if manifest.empty:
-        raise ValueError(f"Manifest is empty: {manifest_path}")
-    return manifest
-
-
-def _load_trace(path: Path, fmt: str) -> pd.DataFrame:
-    fmt_norm = fmt.strip().lower()
-    if fmt_norm == "parquet":
-        return pd.read_parquet(path)
-    if fmt_norm == "csv":
-        return pd.read_csv(path)
-    raise ValueError(f"Unsupported trace format in manifest: {fmt}")
-
-
 def _run(args: argparse.Namespace) -> int:
-    manifest = _load_manifest(args.trace_dir)
+    trace_df = scan_traces(
+        args.trace_dir,
+        columns=[
+            "trace_block_key",
+            "run_id",
+            "model",
+            "backbone",
+            "dataset",
+            "partition",
+            "bands",
+            "normalization",
+            "image_size",
+            "interpolation",
+            "uq_method",
+            "corruption_type",
+            "severity",
+            "seed",
+            "confidence",
+            "correct",
+        ],
+    )
     output_path = args.out
     if output_path is None:
         output_path = args.trace_dir / "reliability_cache.parquet"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows: list[pd.DataFrame] = []
-    for entry in manifest.to_dict(orient="records"):
-        trace_path = Path(str(entry["trace_path"]))
-        fmt = str(entry.get("trace_format", "parquet"))
-        if not trace_path.exists():
-            logger.warning("Skipping missing trace file: %s", trace_path)
-            continue
+    if trace_df.empty:
+        logger.warning("No trace rows were found under %s.", args.trace_dir)
+        return 0
 
-        trace_df = _load_trace(trace_path, fmt)
-        if "confidence" not in trace_df.columns or "correct" not in trace_df.columns:
-            logger.warning("Skipping trace missing confidence/correct columns: %s", trace_path)
-            continue
-
-        conf = pd.to_numeric(trace_df["confidence"], errors="coerce")
-        corr = pd.to_numeric(trace_df["correct"], errors="coerce")
+    group_cols = [
+        "trace_block_key",
+        "run_id",
+        "model",
+        "backbone",
+        "dataset",
+        "partition",
+        "bands",
+        "normalization",
+        "image_size",
+        "interpolation",
+        "uq_method",
+        "corruption_type",
+        "severity",
+        "seed",
+    ]
+    for key_vals, block_df in trace_df.groupby(group_cols, dropna=False):
+        entry = dict(zip(group_cols, key_vals, strict=False))
+        conf = pd.to_numeric(block_df["confidence"], errors="coerce")
+        corr = pd.to_numeric(block_df["correct"], errors="coerce")
         valid = conf.notna() & corr.notna()
         if valid.sum() == 0:
             continue
@@ -83,10 +95,10 @@ def _run(args: argparse.Namespace) -> int:
             binning=str(args.binning),
         )
         for col in [
+            "trace_block_key",
             "run_id",
             "model",
             "backbone",
-            "name",
             "dataset",
             "partition",
             "bands",

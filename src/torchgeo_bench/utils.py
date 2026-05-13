@@ -12,7 +12,8 @@ def extract_features(
     device: str | torch.device,
     transforms: object | None = None,
     verbose: bool = True,
-) -> tuple[np.ndarray, np.ndarray]:
+    return_sample_ids: bool = False,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Extract feature embeddings and labels from a dataloader.
 
     Args:
@@ -21,12 +22,17 @@ def extract_features(
         device: Device to run inference on.
         transforms: Optional transform applied to images before the model.
         verbose: Whether to display a progress bar.
+        return_sample_ids: Whether to return batched sample identifiers when the
+            dataset exposes them.
 
     Returns:
-        Tuple of (features, labels) as NumPy arrays.
+        Tuple of (features, labels) as NumPy arrays. When
+        ``return_sample_ids=True``, returns ``(features, labels, sample_ids)``.
     """
     x_all = []
     y_all = []
+    sample_ids_all: list[np.ndarray] | None = [] if return_sample_ids else None
+    saw_missing_sample_ids = False
 
     iterator = tqdm(dataloader, total=len(dataloader)) if verbose else dataloader
 
@@ -39,6 +45,12 @@ def extract_features(
                 "SegmentationProbe.extract_segmentation_features() instead."
             )
         labels = batch["label"].numpy()
+        if return_sample_ids:
+            raw_sample_ids = batch.get("sample_id")
+            if raw_sample_ids is None:
+                saw_missing_sample_ids = True
+            elif sample_ids_all is not None:
+                sample_ids_all.append(np.asarray(raw_sample_ids, dtype=object))
 
         if transforms is not None:
             images = transforms(images)
@@ -69,4 +81,10 @@ def extract_features(
     x_all = np.concatenate(x_all, axis=0)
     y_all = np.concatenate(y_all, axis=0)
 
-    return x_all, y_all
+    if not return_sample_ids:
+        return x_all, y_all
+
+    sample_ids: np.ndarray | None = None
+    if not saw_missing_sample_ids and sample_ids_all:
+        sample_ids = np.concatenate(sample_ids_all, axis=0)
+    return x_all, y_all, sample_ids

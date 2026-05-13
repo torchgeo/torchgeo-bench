@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from torchgeo_bench.uq.reliability import build_reliability_frame
+from torchgeo_bench.uq.traces import scan_traces
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--trace-dir",
         type=Path,
         default=None,
-        help="Optional trace run directory (run_id=...) for reliability plots.",
+        help="Optional trace parquet dataset root for reliability plots.",
     )
     parser.add_argument(
         "--reliability-bins",
@@ -971,30 +972,45 @@ def _load_reliability_cache(trace_dir: Path) -> pd.DataFrame:
     )
 
 
-def _build_reliability_from_traces(trace_dir: Path, bins: int, binning: str) -> pd.DataFrame:
-    manifest_path = trace_dir / "manifest.csv"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Trace manifest not found: {manifest_path}")
-    manifest = pd.read_csv(manifest_path)
+def _build_reliability_from_traces(
+    trace_dir: Path,
+    bins: int,
+    binning: str,
+    *,
+    block_keys: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    trace_df = scan_traces(
+        trace_dir,
+        block_keys=block_keys,
+        columns=[
+            "trace_block_key",
+            "dataset",
+            "backbone",
+            "uq_method",
+            "corruption_type",
+            "severity",
+            "model",
+            "confidence",
+            "correct",
+        ],
+    )
+    if trace_df.empty:
+        return pd.DataFrame()
+
     rows: list[pd.DataFrame] = []
-    for entry in manifest.to_dict(orient="records"):
-        trace_path = Path(str(entry["trace_path"]))
-        if not trace_path.exists():
-            logger.warning("Missing trace file listed in manifest: %s", trace_path)
-            continue
-        fmt = str(entry.get("trace_format", "parquet")).lower().strip()
-        if fmt == "parquet":
-            trace_df = pd.read_parquet(trace_path)
-        elif fmt == "csv":
-            trace_df = pd.read_csv(trace_path)
-        else:
-            logger.warning("Skipping unsupported trace format '%s': %s", fmt, trace_path)
-            continue
-        if "confidence" not in trace_df.columns or "correct" not in trace_df.columns:
-            logger.warning("Skipping trace without confidence/correct columns: %s", trace_path)
-            continue
-        conf = pd.to_numeric(trace_df["confidence"], errors="coerce")
-        corr = pd.to_numeric(trace_df["correct"], errors="coerce")
+    group_cols = [
+        "trace_block_key",
+        "dataset",
+        "backbone",
+        "uq_method",
+        "corruption_type",
+        "severity",
+        "model",
+    ]
+    for key_vals, block_df in trace_df.groupby(group_cols, dropna=False):
+        entry = dict(zip(group_cols, key_vals, strict=False))
+        conf = pd.to_numeric(block_df["confidence"], errors="coerce")
+        corr = pd.to_numeric(block_df["correct"], errors="coerce")
         valid = conf.notna() & corr.notna()
         if valid.sum() == 0:
             continue
@@ -1005,19 +1021,33 @@ def _build_reliability_from_traces(trace_dir: Path, bins: int, binning: str) -> 
             binning=binning,
         )
         for col in [
+            "trace_block_key",
             "dataset",
             "backbone",
             "uq_method",
             "corruption_type",
             "severity",
             "model",
-            "name",
         ]:
             rel_df[col] = entry.get(col)
         rows.append(rel_df)
     if not rows:
         return pd.DataFrame()
     return pd.concat(rows, ignore_index=True)
+
+
+def _resolve_trace_dataset_root(csv_df: pd.DataFrame, trace_dir: Path | None) -> Path | None:
+    if trace_dir is not None:
+        return trace_dir
+    if "trace_dataset_root" not in csv_df.columns:
+        return None
+
+    candidates = (
+        csv_df["trace_dataset_root"].fillna("").astype(str).str.strip().replace("", pd.NA).dropna().unique()
+    )
+    if len(candidates) == 0:
+        return None
+    return Path(str(candidates[0]))
 
 
 def _plot_reliability_from_cache(
@@ -1281,19 +1311,34 @@ def _run(args: argparse.Namespace) -> int:
     else:
         logger.info("Skipping dataset trend grids (no metrics and/or no non-clean corruptions).")
 
-    if args.trace_dir is not None:
+    trace_root = _resolve_trace_dataset_root(filtered_df, args.trace_dir)
+    if trace_root is not None:
         reliability_outdir = (
             args.reliability_outdir
             if args.reliability_outdir is not None
             else args.outdir / "reliability"
         )
         if args.reliability_use_cache:
-            reliability_df = _load_reliability_cache(args.trace_dir)
+            reliability_df = _load_reliability_cache(trace_root)
         else:
+            block_keys = None
+            if "trace_block_key" in filtered_df.columns:
+                keys = (
+                    filtered_df["trace_block_key"]
+                    .fillna("")
+                    .astype(str)
+                    .str.strip()
+                    .replace("", pd.NA)
+                    .dropna()
+                    .unique()
+                    .tolist()
+                )
+                block_keys = keys or None
             reliability_df = _build_reliability_from_traces(
-                args.trace_dir,
+                trace_root,
                 bins=int(args.reliability_bins),
                 binning=str(args.reliability_binning),
+                block_keys=block_keys,
             )
         rel_generated, rel_skipped = _plot_reliability_from_cache(
             plt,

@@ -29,19 +29,26 @@ def test_build_probabilistic_trace_frame_schema_and_values():
     )
 
     trace_df = build_probabilistic_trace_frame(
+        trace_block_key="block-123",
         run_id="run-123",
         common_meta=_common_meta(),
         uq_method="uncalibrated",
         corruption_type="clean",
         severity=0,
+        config_hash="cfg-123",
+        git_sha="deadbeef",
+        created_at_utc="2026-05-13T00:00:00Z",
         y_true=y_true,
         probs=probs,
+        sample_ids=np.array(["s0", "s1", "s2"], dtype=object),
     )
 
     assert list(trace_df.columns) == list(TRACE_REQUIRED_COLUMNS)
     assert len(trace_df) == 3
+    assert trace_df["trace_block_key"].iloc[0] == "block-123"
     assert trace_df["run_id"].nunique() == 1
     assert trace_df["run_id"].iloc[0] == "run-123"
+    assert trace_df["sample_id"].tolist() == ["s0", "s1", "s2"]
     assert trace_df["sample_idx"].tolist() == [0, 1, 2]
     assert trace_df["y_true"].tolist() == [0, 1, 2]
     assert trace_df["y_pred"].tolist() == [0, 2, 1]

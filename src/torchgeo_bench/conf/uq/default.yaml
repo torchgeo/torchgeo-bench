@@ -24,12 +24,10 @@ prior_results: results/all_results.csv
 
 trace:
   enabled: false
-  root: results/uq_traces
+  dataset_root: results/uq_traces
   run_id: null
-  format: parquet
   compression: zstd
   overwrite: false
-  schema_version: v1
   include_conformal: false
 
 reliability:

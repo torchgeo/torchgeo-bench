@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from torchgeo_bench.uq.error_pr import compute_error_pr
+from torchgeo_bench.uq.traces import scan_traces
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def _parse_csv_list(raw: str | None) -> list[str] | None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--trace-dir", type=Path, required=True, help="Trace run directory (run_id=...).")
+    parser.add_argument("--trace-dir", type=Path, required=True, help="Trace parquet dataset root.")
     parser.add_argument("--outdir", type=Path, required=True, help="Output directory for plots and summary.")
     parser.add_argument(
         "--uncertainties",
@@ -50,38 +51,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--format", type=str, default="png", help="Figure format (default: png).")
     parser.add_argument("--dpi", type=int, default=200, help="Figure DPI.")
     return parser
-
-
-def _load_manifest(trace_dir: Path) -> pd.DataFrame:
-    manifest_path = trace_dir / "manifest.csv"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
-    manifest = pd.read_csv(manifest_path)
-    if manifest.empty:
-        raise ValueError(f"Manifest is empty: {manifest_path}")
-    return manifest
-
-
-def _load_trace_frames(manifest: pd.DataFrame) -> pd.DataFrame:
-    frames: list[pd.DataFrame] = []
-    for row in manifest.to_dict(orient="records"):
-        trace_path = Path(str(row["trace_path"]))
-        fmt = str(row.get("trace_format", "parquet")).lower().strip()
-        if not trace_path.exists():
-            logger.warning("Skipping missing trace file: %s", trace_path)
-            continue
-        if fmt == "parquet":
-            frame = pd.read_parquet(trace_path)
-        elif fmt == "csv":
-            frame = pd.read_csv(trace_path)
-        else:
-            logger.warning("Skipping trace with unsupported format '%s': %s", fmt, trace_path)
-            continue
-        frames.append(frame)
-
-    if not frames:
-        raise ValueError("No trace files could be loaded.")
-    return pd.concat(frames, ignore_index=True)
 
 
 def _prepare_uncertainty_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -194,8 +163,9 @@ def _run(args: argparse.Namespace) -> int:
     if args.format.lower() != "png":
         raise ValueError("--format currently supports only 'png'.")
 
-    manifest = _load_manifest(args.trace_dir)
-    trace_df = _load_trace_frames(manifest)
+    trace_df = scan_traces(args.trace_dir)
+    if trace_df.empty:
+        raise ValueError(f"No trace rows found under {args.trace_dir}.")
     trace_df = _prepare_uncertainty_columns(trace_df)
 
     datasets = _parse_csv_list(args.datasets)

@@ -5,22 +5,27 @@ import json
 import logging
 import os
 import subprocess
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
 import pandas as pd
-
-from torchgeo_bench.main import append_rows_atomic
+import pyarrow as pa
+import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 
 logger = logging.getLogger(__name__)
 
 TRACE_REQUIRED_COLUMNS: tuple[str, ...] = (
+    "trace_block_key",
     "run_id",
+    "config_hash",
+    "git_sha",
+    "created_at_utc",
     "model",
     "backbone",
-    "name",
     "dataset",
     "partition",
     "bands",
@@ -31,6 +36,7 @@ TRACE_REQUIRED_COLUMNS: tuple[str, ...] = (
     "corruption_type",
     "severity",
     "seed",
+    "sample_id",
     "sample_idx",
     "y_true",
     "y_pred",
@@ -44,57 +50,31 @@ TRACE_REQUIRED_COLUMNS: tuple[str, ...] = (
 
 TRACE_KEY_COLUMNS: tuple[str, ...] = (
     "model",
-    "name",
-    "dataset",
-    "normalization",
-    "image_size",
-    "interpolation",
-    "partition",
-    "bands",
-    "uq_method",
-    "corruption_type",
-    "severity",
-    "seed",
-)
-
-MANIFEST_REQUIRED_COLUMNS: tuple[str, ...] = (
-    "run_id",
-    "model",
     "backbone",
-    "name",
     "dataset",
-    "partition",
-    "bands",
     "normalization",
     "image_size",
     "interpolation",
+    "partition",
+    "bands",
     "uq_method",
     "corruption_type",
     "severity",
     "seed",
-    "trace_path",
-    "trace_format",
-    "n_test",
-    "schema_version",
-    "created_at_utc",
-    "config_hash",
-    "git_sha",
 )
 
-MANIFEST_KEY_COLUMNS: tuple[str, ...] = (
-    "run_id",
-    "model",
-    "name",
+TRACE_LINK_COLUMNS: tuple[str, ...] = (
+    "trace_dataset_root",
+    "trace_run_id",
+    "trace_block_key",
+)
+
+TRACE_PARTITION_COLUMNS: tuple[str, ...] = (
     "dataset",
-    "normalization",
-    "image_size",
-    "interpolation",
-    "partition",
-    "bands",
+    "backbone",
     "uq_method",
     "corruption_type",
     "severity",
-    "seed",
 )
 
 
@@ -146,116 +126,125 @@ def _generate_run_id() -> str:
     return f"{ts}-{uuid4().hex[:8]}"
 
 
-def _find_resume_run_id(trace_root: Path, config_hash: str) -> str | None:
-    candidates: list[tuple[float, str]] = []
-    for run_dir in trace_root.glob("run_id=*"):
-        meta_path = run_dir / "meta.json"
-        if not meta_path.exists():
+def _trace_partitioning() -> ds.Partitioning:
+    schema = pa.schema(
+        [
+            pa.field("dataset", pa.string()),
+            pa.field("backbone", pa.string()),
+            pa.field("uq_method", pa.string()),
+            pa.field("corruption_type", pa.string()),
+            pa.field("severity", pa.int32()),
+        ]
+    )
+    return ds.partitioning(schema=schema, flavor="hive")
+
+
+def _trace_fragment_paths(root: Path) -> list[str]:
+    paths: list[str] = []
+    for path in root.rglob("*.parquet"):
+        rel_parts = path.relative_to(root).parts
+        if len(rel_parts) < 6:
             continue
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        if not rel_parts[0].startswith("dataset="):
             continue
-        if str(meta.get("config_hash", "")) != config_hash:
+        if not rel_parts[1].startswith("backbone="):
             continue
-        run_id = str(meta.get("run_id", "")).strip()
-        if not run_id:
+        if not rel_parts[2].startswith("uq_method="):
             continue
-        candidates.append((run_dir.stat().st_mtime, run_id))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]
+        if not rel_parts[3].startswith("corruption_type="):
+            continue
+        if not rel_parts[4].startswith("severity="):
+            continue
+        paths.append(str(path))
+    return paths
 
 
 def init_trace_run(
     *,
-    trace_root: str,
+    trace_dataset_root: str,
     run_id: str | None,
     config_hash: str,
-    trace_format: str,
-    schema_version: str,
     resume: bool,
 ) -> dict[str, str]:
-    """Initialize run directory and run metadata for trace persistence."""
-    fmt = trace_format.lower().strip()
-    if fmt not in {"parquet", "csv"}:
-        raise TraceConfigError(f"uq.trace.format must be one of ['parquet', 'csv'], got: {trace_format}")
-
-    root = Path(trace_root)
+    """Initialize trace dataset metadata for the current run."""
+    root = Path(trace_dataset_root)
     root.mkdir(parents=True, exist_ok=True)
 
-    resolved_run_id = (run_id or "").strip() or None
-    if resolved_run_id is None and resume:
-        resolved_run_id = _find_resume_run_id(root, config_hash)
-    if resolved_run_id is None:
-        resolved_run_id = _generate_run_id()
-
-    run_dir = root / f"run_id={resolved_run_id}"
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    meta_path = run_dir / "meta.json"
-    manifest_path = run_dir / "manifest.csv"
-    git_sha = resolve_git_sha()
-
-    meta = {
-        "run_id": resolved_run_id,
-        "trace_root": str(root),
-        "run_dir": str(run_dir),
-        "trace_format": fmt,
-        "schema_version": schema_version,
-        "config_hash": config_hash,
-        "git_sha": git_sha,
-        "updated_at_utc": utc_now_iso(),
-    }
-    if meta_path.exists():
-        try:
-            prev_meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            prev_meta = {}
-        created_at = str(prev_meta.get("created_at_utc", "")).strip() or utc_now_iso()
-    else:
-        created_at = utc_now_iso()
-    meta["created_at_utc"] = created_at
-
-    tmp_path = meta_path.with_name(f"{meta_path.name}.tmp.{os.getpid()}.{uuid4().hex}")
-    tmp_path.write_text(json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(tmp_path, meta_path)
+    resolved_run_id = (run_id or "").strip()
+    if not resolved_run_id:
+        resolved_run_id = f"cfg-{config_hash[:12]}" if resume else _generate_run_id()
 
     return {
         "run_id": resolved_run_id,
-        "run_dir": str(run_dir),
-        "manifest_path": str(manifest_path),
-        "trace_format": fmt,
-        "schema_version": schema_version,
+        "trace_dataset_root": str(root),
         "config_hash": config_hash,
-        "git_sha": git_sha,
+        "git_sha": resolve_git_sha(),
+        "created_at_utc": utc_now_iso(),
     }
+
+
+def build_trace_block_key(
+    *,
+    run_id: str,
+    common_meta: Mapping[str, object],
+    uq_method: str,
+    corruption_type: str,
+    severity: int,
+) -> str:
+    """Return a deterministic block key for one trace-producing evaluation block."""
+    payload = {
+        "run_id": run_id,
+        "model": str(common_meta.get("model", "")),
+        "backbone": str(common_meta.get("backbone", common_meta.get("name", ""))),
+        "dataset": str(common_meta.get("dataset", "")),
+        "partition": str(common_meta.get("partition", "")),
+        "bands": str(common_meta.get("bands", "")),
+        "normalization": str(common_meta.get("normalization", "")),
+        "image_size": common_meta.get("image_size"),
+        "interpolation": str(common_meta.get("interpolation", "")),
+        "uq_method": str(uq_method),
+        "corruption_type": str(corruption_type),
+        "severity": int(severity),
+        "seed": int(common_meta.get("seed", 0)),
+    }
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()[:20]
 
 
 def resolve_trace_partition_path(
     *,
-    trace_root: str,
-    run_id: str,
+    trace_dataset_root: str,
+    trace_block_key: str,
     dataset: str,
     backbone: str,
     uq_method: str,
     corruption_type: str,
     severity: int,
-    trace_format: str,
 ) -> Path:
-    """Return partitioned trace output path for one evaluation block."""
-    ext = "parquet" if trace_format.lower() == "parquet" else "csv"
+    """Return the parquet fragment path for one completed trace block."""
     return (
-        Path(trace_root)
-        / f"run_id={_safe_part(run_id)}"
+        Path(trace_dataset_root)
         / f"dataset={_safe_part(dataset)}"
         / f"backbone={_safe_part(backbone)}"
         / f"uq_method={_safe_part(uq_method)}"
         / f"corruption_type={_safe_part(corruption_type)}"
         / f"severity={int(severity)}"
-        / f"part-000.{ext}"
+        / f"trace_block_key={trace_block_key}.parquet"
     )
+
+
+def build_trace_link_row(
+    *,
+    trace_dataset_root: str,
+    run_id: str,
+    trace_block_key: str,
+) -> dict[str, str]:
+    """Return scalar-result columns that link back to trace rows."""
+    return {
+        "trace_dataset_root": str(Path(trace_dataset_root)),
+        "trace_run_id": run_id,
+        "trace_block_key": trace_block_key,
+    }
 
 
 def _per_sample_entropy(probs: np.ndarray) -> np.ndarray:
@@ -269,23 +258,56 @@ def _per_sample_normalized_entropy(probs: np.ndarray) -> np.ndarray:
     return _per_sample_entropy(probs) / np.log(float(probs.shape[1]))
 
 
+def _normalize_sample_ids(
+    *,
+    sample_ids: Sequence[str] | np.ndarray | None,
+    sample_idx: np.ndarray,
+    common_meta: Mapping[str, object],
+) -> np.ndarray:
+    dataset = str(common_meta.get("dataset", "unknown"))
+    partition = str(common_meta.get("partition", "default"))
+    fallback = np.array(
+        [f"{dataset}:{partition}:{int(idx)}" for idx in sample_idx],
+        dtype=object,
+    )
+    if sample_ids is None:
+        return fallback
+
+    values = np.asarray(sample_ids, dtype=object)
+    if values.shape[0] != sample_idx.shape[0]:
+        raise ValueError("sample_ids and sample_idx must have equal first dimension")
+
+    normalized = np.array([str(value).strip() for value in values], dtype=object)
+    empty_mask = normalized == ""
+    normalized[empty_mask] = fallback[empty_mask]
+    return normalized
+
+
 def _base_trace_columns(
     *,
+    trace_block_key: str,
     run_id: str,
-    common_meta: dict[str, object],
+    common_meta: Mapping[str, object],
     uq_method: str,
     corruption_type: str,
     severity: int,
+    config_hash: str,
+    git_sha: str,
+    created_at_utc: str,
     sample_idx: np.ndarray,
+    sample_ids: Sequence[str] | np.ndarray | None,
     y_true: np.ndarray,
     y_pred: np.ndarray,
 ) -> dict[str, object]:
     correct = (y_true == y_pred).astype(np.int8)
     return {
+        "trace_block_key": trace_block_key,
         "run_id": run_id,
+        "config_hash": config_hash,
+        "git_sha": git_sha,
+        "created_at_utc": created_at_utc,
         "model": str(common_meta.get("model", "")),
-        "backbone": str(common_meta.get("name", "")),
-        "name": str(common_meta.get("name", "")),
+        "backbone": str(common_meta.get("backbone", common_meta.get("name", ""))),
         "dataset": str(common_meta.get("dataset", "")),
         "partition": str(common_meta.get("partition", "")),
         "bands": str(common_meta.get("bands", "")),
@@ -296,6 +318,11 @@ def _base_trace_columns(
         "corruption_type": str(corruption_type),
         "severity": int(severity),
         "seed": int(common_meta.get("seed", 0)),
+        "sample_id": _normalize_sample_ids(
+            sample_ids=sample_ids,
+            sample_idx=sample_idx,
+            common_meta=common_meta,
+        ),
         "sample_idx": sample_idx.astype(np.int64),
         "y_true": y_true.astype(np.int64),
         "y_pred": y_pred.astype(np.int64),
@@ -306,13 +333,18 @@ def _base_trace_columns(
 
 def build_probabilistic_trace_frame(
     *,
+    trace_block_key: str,
     run_id: str,
-    common_meta: dict[str, object],
+    common_meta: Mapping[str, object],
     uq_method: str,
     corruption_type: str,
     severity: int,
+    config_hash: str,
+    git_sha: str,
+    created_at_utc: str,
     y_true: np.ndarray,
     probs: np.ndarray,
+    sample_ids: Sequence[str] | np.ndarray | None = None,
 ) -> pd.DataFrame:
     """Build a per-sample trace frame for probabilistic UQ methods."""
     if probs.ndim != 2:
@@ -328,19 +360,26 @@ def build_probabilistic_trace_frame(
     sample_idx = np.arange(n, dtype=np.int64)
 
     data = _base_trace_columns(
+        trace_block_key=trace_block_key,
         run_id=run_id,
         common_meta=common_meta,
         uq_method=uq_method,
         corruption_type=corruption_type,
         severity=severity,
+        config_hash=config_hash,
+        git_sha=git_sha,
+        created_at_utc=created_at_utc,
         sample_idx=sample_idx,
+        sample_ids=sample_ids,
         y_true=y_true,
         y_pred=y_pred,
     )
     data["max_probability"] = confidence
     data["confidence"] = confidence
     data["predictive_entropy"] = _per_sample_entropy(probs).astype(np.float64)
-    data["normalized_predictive_entropy"] = _per_sample_normalized_entropy(probs).astype(np.float64)
+    data["normalized_predictive_entropy"] = _per_sample_normalized_entropy(probs).astype(
+        np.float64
+    )
 
     frame = pd.DataFrame(data)
     return frame[list(TRACE_REQUIRED_COLUMNS)]
@@ -348,14 +387,19 @@ def build_probabilistic_trace_frame(
 
 def build_conformal_trace_frame(
     *,
+    trace_block_key: str,
     run_id: str,
-    common_meta: dict[str, object],
+    common_meta: Mapping[str, object],
     uq_method: str,
     corruption_type: str,
     severity: int,
+    config_hash: str,
+    git_sha: str,
+    created_at_utc: str,
     y_true: np.ndarray,
     y_pred: np.ndarray,
     pred_sets: np.ndarray,
+    sample_ids: Sequence[str] | np.ndarray | None = None,
 ) -> pd.DataFrame:
     """Build a per-sample trace frame for conformal prediction."""
     if pred_sets.ndim != 2:
@@ -371,12 +415,17 @@ def build_conformal_trace_frame(
     confidence = (1.0 / np.maximum(set_size.astype(np.float64), 1.0)).astype(np.float64)
 
     data = _base_trace_columns(
+        trace_block_key=trace_block_key,
         run_id=run_id,
         common_meta=common_meta,
         uq_method=uq_method,
         corruption_type=corruption_type,
         severity=severity,
+        config_hash=config_hash,
+        git_sha=git_sha,
+        created_at_utc=created_at_utc,
         sample_idx=sample_idx,
+        sample_ids=sample_ids,
         y_true=y_true,
         y_pred=y_pred,
     )
@@ -396,156 +445,111 @@ def write_trace_block_atomic(
     *,
     trace_path: Path,
     trace_df: pd.DataFrame,
-    trace_format: str,
     compression: str,
 ) -> None:
-    """Write trace block atomically in configured format."""
+    """Write a trace parquet fragment atomically."""
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = trace_path.with_name(f"{trace_path.name}.tmp.{os.getpid()}.{uuid4().hex}")
 
-    fmt = trace_format.lower().strip()
-    if fmt == "parquet":
-        try:
-            trace_df.to_parquet(tmp_path, index=False, compression=compression)
-        except (ImportError, ModuleNotFoundError) as exc:
-            raise TraceWriteError(
-                "Parquet trace writing requires a parquet engine (e.g., pyarrow)."
-            ) from exc
-    elif fmt == "csv":
-        trace_df.to_csv(tmp_path, index=False)
-    else:
-        raise TraceConfigError(f"Unsupported trace format: {trace_format}")
+    try:
+        trace_df.to_parquet(tmp_path, index=False, compression=compression)
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise TraceWriteError("Parquet trace writing requires pyarrow.") from exc
 
     os.replace(tmp_path, trace_path)
 
 
-def append_manifest_row_atomic(manifest_path: str, row: dict[str, object]) -> None:
-    """Append one manifest row with atomic CSV semantics."""
-    append_rows_atomic(manifest_path, [row])
-
-
-def build_manifest_row(
-    *,
-    trace_path: Path,
-    trace_format: str,
-    schema_version: str,
-    config_hash: str,
-    git_sha: str,
-    n_test: int,
-    run_id: str,
-    common_meta: dict[str, object],
-    uq_method: str,
-    corruption_type: str,
-    severity: int,
-) -> dict[str, object]:
-    """Build one manifest row for a completed trace block."""
-    row: dict[str, object] = {
-        "run_id": run_id,
-        "model": str(common_meta.get("model", "")),
-        "backbone": str(common_meta.get("name", "")),
-        "name": str(common_meta.get("name", "")),
-        "dataset": str(common_meta.get("dataset", "")),
-        "partition": str(common_meta.get("partition", "")),
-        "bands": str(common_meta.get("bands", "")),
-        "normalization": str(common_meta.get("normalization", "")),
-        "image_size": common_meta.get("image_size"),
-        "interpolation": str(common_meta.get("interpolation", "")),
-        "uq_method": str(uq_method),
-        "corruption_type": str(corruption_type),
-        "severity": int(severity),
-        "seed": int(common_meta.get("seed", 0)),
-        "trace_path": str(trace_path),
-        "trace_format": trace_format,
-        "n_test": int(n_test),
-        "schema_version": str(schema_version),
-        "created_at_utc": utc_now_iso(),
-        "config_hash": config_hash,
-        "git_sha": git_sha,
-    }
-    return row
-
-
-def _manifest_filter(df: pd.DataFrame, row: dict[str, object]) -> pd.Series:
-    if df.empty:
-        return pd.Series([], dtype=bool)
-
-    mask = pd.Series(True, index=df.index)
-    for col in MANIFEST_KEY_COLUMNS:
-        lhs = df[col].fillna("").astype(str) if col in df.columns else ""
-        rhs = "" if row.get(col) is None else str(row.get(col))
-        mask &= lhs == rhs
-    return mask
-
-
-def _read_trace_n_rows(path: Path, trace_format: str) -> int | None:
-    if not path.exists():
+def read_trace_row_count(trace_path: Path) -> int | None:
+    """Return the number of rows in a parquet trace fragment when it exists."""
+    if not trace_path.exists():
         return None
-    fmt = trace_format.lower().strip()
-    if fmt == "parquet":
-        df = pd.read_parquet(path, columns=["sample_idx"])
-        return int(len(df))
-    if fmt == "csv":
-        df = pd.read_csv(path, usecols=["sample_idx"])
-        return int(len(df))
-    raise TraceConfigError(f"Unsupported trace format: {trace_format}")
+    return int(pq.ParquetFile(trace_path).metadata.num_rows)
 
 
 def check_trace_block_status(
     *,
-    manifest_path: str,
-    manifest_row: dict[str, object],
+    trace_path: Path,
+    expected_n_test: int,
 ) -> dict[str, object]:
     """Return completeness and integrity status for one trace block."""
-    status: dict[str, object] = {
-        "manifest_rows": 0,
-        "is_complete": False,
-        "missing": False,
-        "duplicate_manifest": False,
-        "row_count_mismatch": False,
+    n_rows = read_trace_row_count(trace_path)
+    exists = n_rows is not None
+    is_complete = exists and n_rows == expected_n_test
+    return {
+        "exists": exists,
+        "is_complete": bool(is_complete),
+        "row_count_mismatch": exists and n_rows != expected_n_test,
+        "n_rows": n_rows,
     }
-
-    trace_path = Path(str(manifest_row["trace_path"]))
-    trace_format = str(manifest_row["trace_format"])
-    expected_n_test = int(manifest_row["n_test"])
-
-    if not os.path.exists(manifest_path):
-        status["missing"] = not trace_path.exists()
-        n_rows = _read_trace_n_rows(trace_path, trace_format)
-        status["is_complete"] = n_rows == expected_n_test
-        status["row_count_mismatch"] = (n_rows is not None) and (n_rows != expected_n_test)
-        return status
-
-    manifest_df = pd.read_csv(manifest_path)
-    for col in MANIFEST_KEY_COLUMNS:
-        if col not in manifest_df.columns:
-            manifest_df[col] = ""
-
-    match_mask = _manifest_filter(manifest_df, manifest_row)
-    match_count = int(match_mask.sum())
-    status["manifest_rows"] = match_count
-    status["duplicate_manifest"] = match_count > 1
-
-    n_rows = _read_trace_n_rows(trace_path, trace_format)
-    trace_ok = n_rows == expected_n_test
-    status["row_count_mismatch"] = (n_rows is not None) and (n_rows != expected_n_test)
-    status["missing"] = (match_count == 0) or (n_rows is None)
-    status["is_complete"] = (match_count >= 1) and trace_ok
-    return status
 
 
 def maybe_warn_trace_integrity(
     *,
-    status: dict[str, object],
-    row: dict[str, object],
+    status: Mapping[str, object],
+    trace_path: Path,
+    block_key: str,
 ) -> None:
     """Emit warnings for incomplete or inconsistent trace block state."""
-    key = (
-        f"dataset={row['dataset']} backbone={row['backbone']} method={row['uq_method']} "
-        f"corruption={row['corruption_type']} severity={row['severity']}"
-    )
-    if bool(status.get("duplicate_manifest", False)):
-        logger.warning("Trace manifest has duplicate rows for %s", key)
     if bool(status.get("row_count_mismatch", False)):
-        logger.warning("Trace row-count mismatch for %s (path=%s)", key, row["trace_path"])
-    if bool(status.get("missing", False)) and int(status.get("manifest_rows", 0)) > 0:
-        logger.warning("Trace file missing for manifest entry %s", key)
+        logger.warning("Trace row-count mismatch for block=%s (path=%s)", block_key, trace_path)
+
+
+def _coerce_filter_values(key: str, values: Sequence[object]) -> list[object]:
+    if key == "severity":
+        return [int(value) for value in values]
+    return [str(value) for value in values]
+
+
+def _coerce_filter_value(key: str, value: object) -> object:
+    if key == "severity":
+        return int(value)
+    return str(value)
+
+
+def _build_filter_expression(
+    *,
+    filters: Mapping[str, object] | None,
+    block_keys: Sequence[str] | None,
+) -> ds.Expression | None:
+    expression: ds.Expression | None = None
+    if block_keys:
+        key_expr = ds.field("trace_block_key").isin([str(key) for key in block_keys])
+        expression = key_expr if expression is None else expression & key_expr
+
+    if not filters:
+        return expression
+
+    for key, value in filters.items():
+        if value is None:
+            continue
+        if isinstance(value, Sequence) and not isinstance(value, str):
+            values = list(value)
+            if not values:
+                continue
+            clause = ds.field(key).isin(_coerce_filter_values(key, values))
+        else:
+            clause = ds.field(key) == _coerce_filter_value(key, value)
+        expression = clause if expression is None else expression & clause
+    return expression
+
+
+def scan_traces(
+    trace_dataset_root: str | Path,
+    *,
+    filters: Mapping[str, object] | None = None,
+    block_keys: Sequence[str] | None = None,
+    columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Scan the parquet trace dataset with predicate pushdown."""
+    root = Path(trace_dataset_root)
+    if not root.exists():
+        raise FileNotFoundError(f"Trace dataset root not found: {root}")
+
+    fragment_paths = _trace_fragment_paths(root)
+    if not fragment_paths:
+        return pd.DataFrame(columns=list(columns or TRACE_REQUIRED_COLUMNS))
+
+    dataset = ds.dataset(fragment_paths, format="parquet")
+    expression = _build_filter_expression(filters=filters, block_keys=block_keys)
+    table = dataset.to_table(columns=list(columns) if columns is not None else None, filter=expression)
+    return table.to_pandas()

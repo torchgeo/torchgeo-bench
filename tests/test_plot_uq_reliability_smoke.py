@@ -83,56 +83,58 @@ def test_plot_uq_reliability_smoke(tmp_path):
                 "metric_name": "ece",
                 "metric_value": 0.1,
                 "name": "resnet50",
+                "backbone": "resnet50",
                 "model": "m.t",
+                "trace_dataset_root": str(tmp_path / "uq_traces"),
+                "trace_run_id": "run-1",
+                "trace_block_key": "block-1",
             }
         ]
     ).to_csv(csv_path, index=False)
 
-    trace_run_dir = tmp_path / "uq_traces" / "run_id=run-1"
+    trace_run_dir = (
+        tmp_path
+        / "uq_traces"
+        / "dataset=m-eurosat"
+        / "backbone=resnet50"
+        / "uq_method=uncalibrated"
+        / "corruption_type=clean"
+        / "severity=0"
+    )
     trace_run_dir.mkdir(parents=True)
 
-    trace_path = trace_run_dir / "part-000.csv"
+    trace_path = trace_run_dir / "trace_block_key=block-1.parquet"
     pd.DataFrame(
         {
+            "trace_block_key": ["block-1"] * 4,
+            "run_id": ["run-1"] * 4,
+            "config_hash": ["abc"] * 4,
+            "git_sha": [""] * 4,
+            "created_at_utc": ["2026-05-13T00:00:00Z"] * 4,
+            "model": ["m.t"] * 4,
             "dataset": ["m-eurosat"] * 4,
             "backbone": ["resnet50"] * 4,
             "uq_method": ["uncalibrated"] * 4,
             "corruption_type": ["clean"] * 4,
             "severity": [0] * 4,
+            "partition": ["default"] * 4,
+            "bands": ["rgb"] * 4,
+            "normalization": ["bandspec_zscore"] * 4,
+            "image_size": [224] * 4,
+            "interpolation": ["bilinear"] * 4,
+            "seed": [42] * 4,
+            "sample_id": ["s0", "s1", "s2", "s3"],
             "confidence": [0.9, 0.7, 0.6, 0.2],
             "correct": [1, 1, 0, 0],
             "sample_idx": [0, 1, 2, 3],
+            "y_true": [0, 1, 0, 1],
+            "y_pred": [0, 1, 1, 0],
+            "max_probability": [0.9, 0.7, 0.6, 0.2],
+            "predictive_entropy": [0.1, 0.2, 0.3, 0.4],
+            "normalized_predictive_entropy": [0.1, 0.2, 0.3, 0.4],
+            "is_error": [0, 0, 1, 1],
         }
-    ).to_csv(trace_path, index=False)
-
-    manifest_path = trace_run_dir / "manifest.csv"
-    pd.DataFrame(
-        [
-            {
-                "run_id": "run-1",
-                "model": "m.t",
-                "backbone": "resnet50",
-                "name": "resnet50",
-                "dataset": "m-eurosat",
-                "partition": "default",
-                "bands": "rgb",
-                "normalization": "bandspec_zscore",
-                "image_size": 224,
-                "interpolation": "bilinear",
-                "uq_method": "uncalibrated",
-                "corruption_type": "clean",
-                "severity": 0,
-                "seed": 42,
-                "trace_path": str(trace_path),
-                "trace_format": "csv",
-                "n_test": 4,
-                "schema_version": "v1",
-                "created_at_utc": "2026-05-13T00:00:00Z",
-                "config_hash": "abc",
-                "git_sha": "",
-            }
-        ]
-    ).to_csv(manifest_path, index=False)
+    ).to_parquet(trace_path, index=False)
 
     outdir = tmp_path / "out"
     cmd = [
@@ -142,7 +144,7 @@ def test_plot_uq_reliability_smoke(tmp_path):
         "--outdir",
         str(outdir),
         "--trace-dir",
-        str(trace_run_dir),
+        str(tmp_path / "uq_traces"),
         "--format",
         "png",
     ]
