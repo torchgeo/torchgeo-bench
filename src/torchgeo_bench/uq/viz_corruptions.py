@@ -1,6 +1,7 @@
 """Standalone visualizer for cloud and noise corruption severities."""
 
 import argparse
+import json
 import logging
 from pathlib import Path
 
@@ -9,7 +10,11 @@ import torch
 
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.datasets.base import BandSpec
-from torchgeo_bench.uq.corruptions import CorruptionTransform, SKIP_POISSON_GAUSSIAN
+from torchgeo_bench.uq.corruptions import (
+    SKIP_POISSON_GAUSSIAN,
+    CorruptionTransform,
+    _resolve_cloud_calibration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +72,8 @@ def _to_rgb_display(
     sample: torch.Tensor,
     rgb_indices: list[int],
     *,
+    low: np.ndarray | None = None,
+    high: np.ndarray | None = None,
     low_pct: float = 1.0,
     high_pct: float = 99.5,
     compress: float = 6.0,
@@ -77,6 +84,31 @@ def _to_rgb_display(
     Uses per-image percentile clipping, then simple tone mapping to keep
     cloud highlights from saturating while lifting dark midtones.
     """
+    idx = _resolve_display_indices(sample, rgb_indices)
+    rgb = sample[idx].detach().cpu().numpy().transpose(1, 2, 0).astype(np.float32)
+
+    if low is None or high is None:
+        low, high = _compute_display_bounds(
+            sample,
+            idx,
+            low_pct=low_pct,
+            high_pct=high_pct,
+        )
+
+    rgb = np.nan_to_num(rgb, nan=0.0, posinf=0.0, neginf=0.0)
+    out = np.clip((rgb - low.reshape(1, 1, 3)) / np.maximum(high - low, 1e-6).reshape(1, 1, 3), 0.0, 1.0)
+    out = np.log1p(compress * out) / np.log1p(compress)
+    return np.clip(out, 0.0, 1.0) ** (1.0 / gamma)
+
+
+def _compute_display_bounds(
+    sample: torch.Tensor,
+    rgb_indices: list[int],
+    *,
+    low_pct: float = 1.0,
+    high_pct: float = 99.5,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute one fixed display range for a sample."""
     idx = _resolve_display_indices(sample, rgb_indices)
     rgb = sample[idx].detach().cpu().numpy().transpose(1, 2, 0).astype(np.float32)
 
@@ -96,11 +128,72 @@ def _to_rgb_display(
                 hi = lo + 1e-6
         low[chan] = lo
         high[chan] = hi
+    return low, high
 
-    rgb = np.nan_to_num(rgb, nan=0.0, posinf=0.0, neginf=0.0)
-    out = np.clip((rgb - low.reshape(1, 1, 3)) / np.maximum(high - low, 1e-6).reshape(1, 1, 3), 0.0, 1.0)
-    out = np.log1p(compress * out) / np.log1p(compress)
-    return np.clip(out, 0.0, 1.0) ** (1.0 / gamma)
+
+def _summarize_cloud_batches(
+    dataset_name: str,
+    clean_samples: torch.Tensor,
+    band_specs: list[BandSpec],
+    cloud_batches: dict[int, torch.Tensor],
+    cloud_masks: dict[int, torch.Tensor],
+) -> dict[str, object]:
+    """Summarize cloud coverage, alpha, and brightness shifts for calibration."""
+    optical_indices, lower, upper, _ = _resolve_cloud_calibration(
+        dataset_name=dataset_name,
+        band_specs=band_specs,
+        device=clean_samples.device,
+        dtype=clean_samples.dtype,
+    )
+    denom = (upper - lower).clamp(min=1e-6)
+
+    severity_stats: dict[str, dict[str, float]] = {}
+    for severity, corrupted_samples in cloud_batches.items():
+        coverage_fractions: list[float] = []
+        thick_coverage_fractions: list[float] = []
+        mean_cloud_alphas: list[float] = []
+        mean_luma_shifts: list[float] = []
+        median_luma_shifts: list[float] = []
+
+        for row in range(clean_samples.shape[0]):
+            alpha = cloud_masks[severity][row]
+            clouded = alpha > 1e-6
+            thick_cloud = alpha > 0.10
+
+            coverage_fractions.append(float(clouded.float().mean()))
+            thick_coverage_fractions.append(float(thick_cloud.float().mean()))
+
+            if not bool(clouded.any()):
+                mean_cloud_alphas.append(0.0)
+                mean_luma_shifts.append(0.0)
+                median_luma_shifts.append(0.0)
+                continue
+
+            clean_optical = ((clean_samples[row, optical_indices] - lower) / denom).clamp(0.0, 1.0)
+            corrupted_optical = ((corrupted_samples[row, optical_indices] - lower) / denom).clamp(
+                0.0,
+                1.0,
+            )
+            delta_luma = corrupted_optical.mean(dim=0) - clean_optical.mean(dim=0)
+
+            mean_cloud_alphas.append(float(alpha[clouded].mean()))
+            mean_luma_shifts.append(float(delta_luma[clouded].mean()))
+            median_luma_shifts.append(float(delta_luma[clouded].median()))
+
+        count = float(len(coverage_fractions))
+        severity_stats[str(severity)] = {
+            "coverage_fraction_mean": float(sum(coverage_fractions) / count),
+            "thick_coverage_fraction_mean": float(sum(thick_coverage_fractions) / count),
+            "mean_cloud_alpha_clouded": float(sum(mean_cloud_alphas) / count),
+            "mean_luma_shift_clouded": float(sum(mean_luma_shifts) / count),
+            "median_luma_shift_clouded": float(sum(median_luma_shifts) / count),
+        }
+
+    return {
+        "dataset": dataset_name,
+        "n_samples": int(clean_samples.shape[0]),
+        "severity_stats": severity_stats,
+    }
 
 
 def _load_test_samples(
@@ -187,6 +280,7 @@ def generate_grid(
     display_indices = _resolve_display_indices(samples[0], rgb_indices)
 
     cloud_batches: dict[int, torch.Tensor] = {}
+    cloud_masks: dict[int, torch.Tensor] = {}
     for severity in [1, 2, 3, 4, 5]:
         cloud_t = CorruptionTransform(
             "cloud",
@@ -196,7 +290,7 @@ def generate_grid(
             dataset_name=dataset_name,
             cloud_pattern_mode=cloud_pattern_mode,
         )
-        cloud_batches[severity] = cloud_t(samples)
+        cloud_batches[severity], cloud_masks[severity] = cloud_t.apply_cloud_with_mask(samples)
 
     noise_skipped = dataset_name in SKIP_POISSON_GAUSSIAN
     noise_batches: dict[int, torch.Tensor | None] = {}
@@ -236,6 +330,7 @@ def generate_grid(
 
     for row in range(n_rows):
         clean = samples[row]
+        display_low, display_high = _compute_display_bounds(clean, display_indices)
         variants: list[torch.Tensor | None] = [clean]
 
         for severity in [1, 2, 3, 4, 5]:
@@ -250,14 +345,31 @@ def generate_grid(
             if img is None:
                 ax.text(0.5, 0.5, "—", ha="center", va="center", fontsize=18)
             else:
-                ax.imshow(_to_rgb_display(img, display_indices))
+                ax.imshow(
+                    _to_rgb_display(
+                        img,
+                        display_indices,
+                        low=display_low,
+                        high=display_high,
+                    )
+                )
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{dataset_name}_corruptions.png"
+    stats_path = out_dir / f"{dataset_name}_corruptions_stats.json"
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+    stats = _summarize_cloud_batches(
+        dataset_name=dataset_name,
+        clean_samples=samples,
+        band_specs=band_specs,
+        cloud_batches=cloud_batches,
+        cloud_masks=cloud_masks,
+    )
+    with stats_path.open("w", encoding="utf-8") as file:
+        json.dump(stats, file, indent=2, sort_keys=True)
     return out_path
 
 

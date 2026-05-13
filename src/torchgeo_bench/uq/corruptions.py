@@ -40,83 +40,101 @@ class CloudDatasetCalibration:
     severity_presets: dict[int, CloudSeverityPreset]
 
 
-CLOUD_SEVERITY_PRESETS: dict[int, CloudSeverityPreset] = {
-    # SatelliteCloudGenerator uses clear_threshold as cloud coverage gate:
-    # lower threshold -> more retained cloud mask (0.0 is maximal cloud coverage).
-    # Severity is therefore driven primarily by decreasing clear_threshold.
-    1: CloudSeverityPreset(min_lvl=(0.00, 0.02), max_lvl=(0.45, 0.60), clear_threshold=0.98),
-    2: CloudSeverityPreset(min_lvl=(0.00, 0.02), max_lvl=(0.45, 0.60), clear_threshold=0.9),
-    3: CloudSeverityPreset(min_lvl=(0.00, 0.02), max_lvl=(0.45, 0.60), clear_threshold=0.8),
-    4: CloudSeverityPreset(min_lvl=(0.00, 0.02), max_lvl=(0.50, 0.65), clear_threshold=0.6),
-    5: CloudSeverityPreset(min_lvl=(0.00, 0.02), max_lvl=(0.55, 0.72), clear_threshold=0.4),
+CLOUD_CLEAR_THRESHOLDS: dict[int, float] = {
+    # SatelliteCloudGenerator uses clear_threshold as a coverage gate:
+    # lower threshold -> more retained cloud mask (0.0 is maximal coverage).
+    1: 0.98,
+    2: 0.9,
+    3: 0.8,
+    4: 0.6,
+    5: 0.4,
 }
+
+
+def _fixed_cloud_preset(max_lvl: float, clear_threshold: float) -> CloudSeverityPreset:
+    """Build a cloud preset with zero haze floor outside retained clouds."""
+    return CloudSeverityPreset(
+        min_lvl=(0.0, 0.0),
+        max_lvl=(max_lvl, max_lvl),
+        clear_threshold=clear_threshold,
+    )
+
+
+def _build_cloud_severity_presets(max_lvls: tuple[float, ...]) -> dict[int, CloudSeverityPreset]:
+    """Build a five-level opacity ladder while keeping coverage global."""
+    if len(max_lvls) != 5:
+        raise ValueError(f"Expected five cloud opacity levels, got {len(max_lvls)}")
+    return {
+        severity: _fixed_cloud_preset(max_lvl=max_lvl, clear_threshold=CLOUD_CLEAR_THRESHOLDS[severity])
+        for severity, max_lvl in enumerate(max_lvls, start=1)
+    }
 
 CLOUD_DATASET_CALIBRATIONS: dict[str, CloudDatasetCalibration] = {
     "m-eurosat": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.42, 0.50, 0.58, 0.66, 0.74)),
     ),
     "m-forestnet": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.48, 0.56, 0.64, 0.72, 0.80)),
     ),
     "m-so2sat": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.40, 0.48, 0.56, 0.64, 0.72)),
     ),
     "m-pv4ger": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.50, 0.58, 0.66, 0.74, 0.82)),
     ),
     "m-brick-kiln": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.52, 0.60, 0.68, 0.76, 0.84)),
     ),
     "forestnet": CloudDatasetCalibration(
         optical_band_names=("b04", "b03", "b02"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.46, 0.54, 0.62, 0.70, 0.78)),
     ),
     "so2sat": CloudDatasetCalibration(
         optical_band_names=("b04", "b03", "b02"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.40, 0.48, 0.56, 0.64, 0.72)),
     ),
     "eurosat": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.44, 0.52, 0.60, 0.68, 0.76)),
     ),
     "eurosat-spatial": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.44, 0.52, 0.60, 0.68, 0.76)),
     ),
     "advance": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.60, 0.68, 0.76, 0.84, 0.90)),
     ),
     "resisc45": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
         upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=CLOUD_SEVERITY_PRESETS,
+        severity_presets=_build_cloud_severity_presets((0.58, 0.66, 0.74, 0.82, 0.88)),
     ),
 }
 
@@ -265,6 +283,24 @@ class CorruptionTransform:
         Returns:
             Corrupted image batch with the same shape and dtype as input.
         """
+        out, _ = self._apply_batch(images, return_cloud_masks=False)
+        return out
+
+    def apply_cloud_with_mask(self, images: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply cloud corruption and return the mean per-pixel cloud alpha mask."""
+        if self.corruption_type != "cloud":
+            raise ValueError("apply_cloud_with_mask is only valid for cloud corruption.")
+        out, cloud_masks = self._apply_batch(images, return_cloud_masks=True)
+        assert cloud_masks is not None
+        return out, cloud_masks
+
+    def _apply_batch(
+        self,
+        images: torch.Tensor,
+        *,
+        return_cloud_masks: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Apply the configured corruption to a batch."""
         if images.ndim != 4:
             raise ValueError(f"images must be 4D (B, C, H, W), got shape {tuple(images.shape)}")
         if images.shape[1] != len(self.band_specs):
@@ -275,18 +311,34 @@ class CorruptionTransform:
         in_dtype = images.dtype
         out = images.detach().clone().to(dtype=torch.float32)
         bsz = int(out.shape[0])
+        cloud_masks = None
+        if return_cloud_masks:
+            _, _, height, width = out.shape
+            cloud_masks = torch.zeros((bsz, height, width), device=out.device, dtype=torch.float32)
 
         for i in range(bsz):
             global_idx = self._n_images_seen + i
             if self.corruption_type == "cloud":
-                out[i] = self._apply_cloud(out[i], global_idx)
+                out[i], cloud_mask = self._apply_cloud(
+                    out[i],
+                    global_idx,
+                    return_cloud_mask=return_cloud_masks,
+                )
+                if cloud_masks is not None and cloud_mask is not None:
+                    cloud_masks[i] = cloud_mask
             else:
                 out[i] = self._apply_poisson_gaussian(out[i], global_idx)
 
         self._n_images_seen += bsz
-        return out.to(dtype=in_dtype)
+        return out.to(dtype=in_dtype), cloud_masks
 
-    def _apply_cloud(self, image: torch.Tensor, global_idx: int) -> torch.Tensor:
+    def _apply_cloud(
+        self,
+        image: torch.Tensor,
+        global_idx: int,
+        *,
+        return_cloud_mask: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Apply optical-only cloud synthesis to one image."""
         assert self.dataset_name is not None
         device = image.device
@@ -318,7 +370,7 @@ class CorruptionTransform:
             torch.manual_seed(synth_seed)
             if device.type == "cuda":
                 torch.cuda.manual_seed_all(synth_seed)
-            synth_output = self._scg.add_cloud(
+            synth_result = self._scg.add_cloud(
                 synth_input,
                 min_lvl=preset.min_lvl,
                 max_lvl=preset.max_lvl,
@@ -331,8 +383,15 @@ class CorruptionTransform:
                 blur_scaling=preset.blur_scaling,
                 cloud_color=preset.cloud_color,
                 channel_magnitude_shift=preset.channel_magnitude_shift,
+                return_cloud=return_cloud_mask,
             )
 
+        cloud_mask = None
+        if return_cloud_mask:
+            synth_output, cloud = synth_result
+            cloud_mask = cloud.squeeze(0).mean(dim=0).to(dtype=torch.float32).clamp(0.0, 1.0)
+        else:
+            synth_output = synth_result
         synth_output = synth_output.squeeze(0).clamp(0.0, 1.0)
         out[optical_indices] = synth_output * denom + lower
 
@@ -340,7 +399,7 @@ class CorruptionTransform:
         out[optical_indices] = out[optical_indices].clamp(
             min=min_vals[optical_indices], max=max_vals[optical_indices]
         )
-        return out
+        return out, cloud_mask
 
     def _apply_poisson_gaussian(self, image: torch.Tensor, global_idx: int) -> torch.Tensor:
         """Apply sensor-aware Poisson-Gaussian noise to one image.

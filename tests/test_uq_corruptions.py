@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import torch
 
@@ -202,6 +204,20 @@ def test_cloud_calibration_registered_for_advance_and_resisc45(dataset_name):
     assert upper.shape == (3, 1, 1)
 
 
+def test_cloud_calibration_uses_zero_haze_floor():
+    for calibration in CLOUD_DATASET_CALIBRATIONS.values():
+        for severity in range(1, 6):
+            assert calibration.severity_presets[severity].min_lvl == (0.0, 0.0)
+
+
+def test_cloud_calibration_uses_stronger_opacity_for_bright_rgb_datasets():
+    advance_max = CLOUD_DATASET_CALIBRATIONS["advance"].severity_presets[5].max_lvl[0]
+    resisc_max = CLOUD_DATASET_CALIBRATIONS["resisc45"].severity_presets[5].max_lvl[0]
+    so2sat_max = CLOUD_DATASET_CALIBRATIONS["so2sat"].severity_presets[5].max_lvl[0]
+    assert advance_max > so2sat_max
+    assert resisc_max > so2sat_max
+
+
 def test_cloud_pattern_mode_validation():
     with pytest.raises(ValueError, match="cloud_pattern_mode"):
         _ = CorruptionTransform(
@@ -274,6 +290,13 @@ def test_viz_corruptions_runs(tmp_path):
     assert out.suffix == ".png"
     assert out.exists()
     assert out.stat().st_size > 0
+    stats_path = tmp_path / "m-eurosat_corruptions_stats.json"
+    assert stats_path.exists()
+    with stats_path.open("r", encoding="utf-8") as file:
+        stats = json.load(file)
+    assert stats["dataset"] == "m-eurosat"
+    assert "1" in stats["severity_stats"]
+    assert "mean_cloud_alpha_clouded" in stats["severity_stats"]["1"]
 
 
 def test_viz_corruptions_handles_dataset_space_rgb_indices(tmp_path):
