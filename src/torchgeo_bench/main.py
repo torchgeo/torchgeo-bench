@@ -4,6 +4,7 @@ import fcntl
 import io
 import logging
 import os
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -634,6 +635,12 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
 @hydra.main(config_path="conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
+    warnings.filterwarnings("ignore", category=UserWarning, module="rasterio")
+    warnings.filterwarnings(
+        "ignore",
+        message="Dataset has no geotransform, gcps, or rpcs",
+        category=UserWarning,
+    )
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
 
@@ -871,7 +878,9 @@ def main(cfg: DictConfig) -> None:
             # Classification (single-label or multi-label)
             metric_name = "micro_mAP" if is_multilabel else "accuracy"
 
-            skip_knn = cfg.resume and knn_key in completed_runs
+            skip_knn = bool(getattr(cfg.eval, "skip_knn", False)) or (
+                cfg.resume and knn_key in completed_runs
+            )
             skip_linear = (cfg.resume and linear_key in completed_runs) or getattr(
                 cfg.eval, "skip_linear", False
             )

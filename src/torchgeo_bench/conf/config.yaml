@@ -28,6 +28,7 @@ eval:
   bootstrap: 200          # number of bootstrap resamples
   c_range: [-6, 4, 40]      # log10 [start, stop, num_points]; per-model overrides allowed
   merge_val: true          # merge train+val for final logistic training
+  skip_knn: false          # if true, skip KNN-5 evaluation
   skip_linear: false       # if true, skip LogisticRegression evaluation
 
   # Optional intrinsic dimension (ID) metrics on extracted embeddings.

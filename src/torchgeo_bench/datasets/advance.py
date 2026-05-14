@@ -15,10 +15,11 @@ from torchgeo.datasets.errors import DatasetNotFoundError
 from .base import BandSpec, BenchDataset
 
 SPLIT_SEED = 42
-SPLIT_VERSION = "v1"
+SPLIT_VERSION = "v2"
 SPLIT_FILENAME = f"torchgeo_bench_split_seed{SPLIT_SEED}_{SPLIT_VERSION}.json"
 STATS_FILENAME = f"torchgeo_bench_band_stats_seed{SPLIT_SEED}_{SPLIT_VERSION}.json"
 EXPECTED_SPLIT_SIZES: dict[str, int] = {"train": 3045, "val": 1015, "test": 1015}
+SPLIT_RATIOS: dict[str, float] = {"train": 0.6, "val": 0.2, "test": 0.2}
 RGB_NAMES = ("red", "green", "blue")
 RGB_WAVELENGTHS = {"red": 0.665, "green": 0.56, "blue": 0.49}
 
@@ -60,7 +61,13 @@ class _AdvanceDatasetView(Dataset):
 
 
 class ADVANCE(BenchDataset):
-    """ADVANCE audio-visual scene dataset with torchgeo-bench fixed split."""
+    """ADVANCE audio-visual scene dataset with torchgeo-bench fixed split.
+
+    Split logic follows the class-stratified ratios from the official repo
+    (train/test 80/20) and extends it to 60/20/20 for train/val/test.
+    Reference: https://github.com/DTaoo/Multimodal-Aerial-Scene-Recognition/
+    blob/b5345f5e1b4b490b2a1ab1317236a9fe81bef761/resnet-image/utils.py
+    """
 
     name = "advance"
     task = "classification"
@@ -151,6 +158,64 @@ class ADVANCE(BenchDataset):
             mapping[rel_path] = idx
         return mapping
 
+    def _label_for_index(self, index: int) -> int:
+        assert self._dataset is not None
+        file_entry = self._dataset.files[index]
+        label = file_entry.get("label")
+        if label is None:
+            sample = self._dataset[index]
+            label = sample["label"]
+        return int(label)
+
+    def _class_stratified_paths(self) -> dict[int, list[str]]:
+        assert self._dataset is not None
+        label_to_paths: dict[int, list[str]] = {}
+        for idx, file_entry in enumerate(self._dataset.files):
+            rel_path = self._relative_vision_path(file_entry["image"])
+            label = self._label_for_index(idx)
+            label_to_paths.setdefault(label, []).append(rel_path)
+        return label_to_paths
+
+    def _split_counts_for_class(self, count: int) -> dict[str, int]:
+        train = int(round(count * SPLIT_RATIOS["train"]))
+        val = int(round(count * SPLIT_RATIOS["val"]))
+        test = count - train - val
+        if train < 0 or val < 0 or test < 0:
+            raise ValueError(f"Invalid split allocation for class size {count}.")
+        return {"train": train, "val": val, "test": test}
+
+    def _rebalance_split_totals(
+        self,
+        class_splits: dict[int, dict[str, list[str]]],
+        totals: dict[str, int],
+    ) -> None:
+        targets = dict(EXPECTED_SPLIT_SIZES)
+        splits = ["train", "val", "test"]
+        while any(totals[split] != targets[split] for split in splits):
+            surplus_splits = [s for s in splits if totals[s] > targets[s]]
+            deficit_splits = [s for s in splits if totals[s] < targets[s]]
+            if not surplus_splits or not deficit_splits:
+                break
+
+            surplus_splits.sort(key=lambda s: (targets[s] - totals[s]))
+            deficit_splits.sort(key=lambda s: (targets[s] - totals[s]), reverse=True)
+            from_split = surplus_splits[0]
+            to_split = deficit_splits[0]
+
+            moved = False
+            for label in sorted(class_splits):
+                if class_splits[label][from_split]:
+                    sample = class_splits[label][from_split].pop()
+                    class_splits[label][to_split].append(sample)
+                    totals[from_split] -= 1
+                    totals[to_split] += 1
+                    moved = True
+                    break
+            if not moved:
+                raise ValueError(
+                    "Unable to rebalance ADVANCE splits to expected sizes."
+                )
+
     def _make_split_payload(self) -> dict:
         all_paths = sorted(self._path_to_index)
         total_expected = sum(EXPECTED_SPLIT_SIZES.values())
@@ -161,17 +226,48 @@ class ADVANCE(BenchDataset):
             )
 
         rng = random.Random(SPLIT_SEED)
-        rng.shuffle(all_paths)
+        label_to_paths = self._class_stratified_paths()
+        class_splits: dict[int, dict[str, list[str]]] = {}
 
-        train_n = EXPECTED_SPLIT_SIZES["train"]
-        val_n = EXPECTED_SPLIT_SIZES["val"]
-        train_paths = all_paths[:train_n]
-        val_paths = all_paths[train_n : train_n + val_n]
-        test_paths = all_paths[train_n + val_n :]
+        for label in sorted(label_to_paths):
+            paths = list(label_to_paths[label])
+            rng.shuffle(paths)
+            counts = self._split_counts_for_class(len(paths))
+            train_end = counts["train"]
+            val_end = train_end + counts["val"]
+            class_splits[label] = {
+                "train": paths[:train_end],
+                "val": paths[train_end:val_end],
+                "test": paths[val_end:],
+            }
+
+        totals = {
+            split: sum(len(class_splits[label][split]) for label in class_splits)
+            for split in ("train", "val", "test")
+        }
+        if totals != EXPECTED_SPLIT_SIZES:
+            self._rebalance_split_totals(class_splits, totals)
+        if totals != EXPECTED_SPLIT_SIZES:
+            raise ValueError(
+                "ADVANCE split sizes do not match expected totals after rebalancing."
+            )
+
+        train_paths: list[str] = []
+        val_paths: list[str] = []
+        test_paths: list[str] = []
+        for label in sorted(class_splits):
+            train_paths.extend(class_splits[label]["train"])
+            val_paths.extend(class_splits[label]["val"])
+            test_paths.extend(class_splits[label]["test"])
+
+        rng.shuffle(train_paths)
+        rng.shuffle(val_paths)
+        rng.shuffle(test_paths)
 
         return {
             "seed": SPLIT_SEED,
             "version": SPLIT_VERSION,
+            "ratios": SPLIT_RATIOS,
             "train": train_paths,
             "val": val_paths,
             "test": test_paths,
