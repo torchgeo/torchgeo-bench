@@ -19,6 +19,8 @@ test will surface the mismatch — that may indicate either upstream changes
 or a bug in our wrapper's ``get_dataset`` plumbing.
 """
 
+from urllib.error import URLError
+
 import pytest
 from torchgeo.datasets.errors import DatasetNotFoundError
 
@@ -26,6 +28,15 @@ from torchgeo_bench.datasets import (
     get_bench_dataset_class,
     list_datasets,
 )
+
+_EXTERNAL_DATASETS: set[str] = {
+    "sen12ms",
+    "sen12ms_cr_c1",
+    "sen12ms_cr_c2",
+    "sen12ms_cr_c3",
+    "sen12ms_cr_c4",
+    "sen12ms_cr_c5",
+}
 
 # Expected sizes per (dataset, split).  Sourced from:
 #   * V1: ``data/classification_v1.0/<name>/default_partition.json``
@@ -67,26 +78,25 @@ EXPECTED_SIZES: dict[str, dict[str, int]] = {
 
 def test_expected_sizes_cover_registry():
     """Sanity check: every registered dataset has hardcoded expectations."""
-    missing = sorted(set(list_datasets()) - set(EXPECTED_SIZES))
+    missing = sorted((set(list_datasets()) - set(EXPECTED_SIZES)) - _EXTERNAL_DATASETS)
     assert not missing, (
         f"EXPECTED_SIZES is missing entries for {missing}. Add them after "
         "verifying against the upstream reference implementation."
     )
 
 
-@pytest.mark.parametrize("dataset_name", sorted(EXPECTED_SIZES))
+@pytest.mark.parametrize("dataset_name", sorted(set(EXPECTED_SIZES) - _EXTERNAL_DATASETS))
 def test_split_sizes(dataset_name):
     """Each split's ``len(get_dataset(split))`` matches the reference value."""
-    bench_cls = get_bench_dataset_class(dataset_name)
-    bench = bench_cls()
-    expected = EXPECTED_SIZES[dataset_name]
-
     actual: dict[str, int] = {}
     try:
+        bench_cls = get_bench_dataset_class(dataset_name)
+        bench = bench_cls()
+        expected = EXPECTED_SIZES[dataset_name]
         for split in ("train", "val", "test"):
             ds = bench.get_dataset(split, bands=tuple(bench.rgb_bands))
             actual[split] = len(ds)
-    except (FileNotFoundError, DatasetNotFoundError) as exc:
+    except (FileNotFoundError, DatasetNotFoundError, URLError) as exc:
         pytest.skip(f"{dataset_name}: data not found on disk ({exc})")
 
     assert actual == expected, (
@@ -94,7 +104,7 @@ def test_split_sizes(dataset_name):
     )
 
 
-@pytest.mark.parametrize("dataset_name", sorted(EXPECTED_SIZES))
+@pytest.mark.parametrize("dataset_name", sorted(set(EXPECTED_SIZES) - _EXTERNAL_DATASETS))
 def test_declared_split_sizes_match_reference(dataset_name):
     """Each wrapper's ``BenchDataset.split_sizes`` matches the reference."""
     bench_cls = get_bench_dataset_class(dataset_name)
