@@ -15,8 +15,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from .base import BenchDataset
 from .advance import ADVANCE
+from .base import BenchDataset
 from .benv2 import BENV2
 from .burn_scars import BurnScars
 from .caffe import CaFFe
@@ -35,6 +35,7 @@ from .m_pv4ger import MPv4ger
 from .m_so2sat import MSo2Sat
 from .pastis import PASTIS
 from .resisc45 import RESISC45
+from .sen12ms_cr import SEN12MS, SEN12MSCRC1, SEN12MSCRC2, SEN12MSCRC3, SEN12MSCRC4, SEN12MSCRC5
 from .so2sat import So2Sat
 from .spacenet2 import SpaceNet2
 from .spacenet7 import SpaceNet7
@@ -74,6 +75,12 @@ _REGISTRY: dict[str, type[BenchDataset]] = {
         EuroSAT,
         EuroSATSpatial,
         RESISC45,
+        SEN12MS,
+        SEN12MSCRC1,
+        SEN12MSCRC2,
+        SEN12MSCRC3,
+        SEN12MSCRC4,
+        SEN12MSCRC5,
     ]
 }
 
