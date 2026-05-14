@@ -5,6 +5,7 @@ laplace_batch_size: 512
 methods:
   - uncalibrated
   - temp_scaling
+  - bootstrap_ensemble
   - deep_ensemble
   - laplace
   - conformal
@@ -19,6 +20,7 @@ cloud_pattern_mode: fixed_across_severity
 corruption_severities: [1, 2, 3, 4, 5]
 conformal_alpha: 0.1
 ece_bins: 15
+ece_binning: equal_width
 output: results/uq_results.csv
 prior_results: results/all_results.csv
 

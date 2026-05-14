@@ -90,8 +90,63 @@ class TemperatureScaling:
         return probs.detach().cpu().numpy()
 
 
-class DeepEnsemble:
-    """Bootstrap ensemble of independently-fitted linear probes."""
+class _EnsembleBase:
+    """Shared prediction logic for linear probe ensembles."""
+
+    _members: list[LogisticRegression]
+
+    def _member_probs(self, X: np.ndarray) -> np.ndarray:
+        """Return stacked per-member probability arrays with shape ``(M, N, C)``."""
+        if not self._members:
+            raise RuntimeError(f"{self.__class__.__name__} has not been fit yet.")
+        X_t = torch.from_numpy(X.astype(np.float32, copy=False))
+        return np.stack([m.predict_proba(X_t) for m in self._members], axis=0)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Return ensemble-averaged class probabilities.
+
+        Args:
+            X: Input embeddings with shape ``(N, D)``.
+
+        Returns:
+            Probability matrix with shape ``(N, C)``.
+
+        Raises:
+            RuntimeError: If ``fit`` has not been called.
+        """
+        return self._member_probs(X).mean(axis=0)
+
+    def predict_confidence(self, X: np.ndarray) -> np.ndarray:
+        """Return BALD-based confidence scores for selective prediction.
+
+        Confidence is ``1 - normalised_BALD`` where BALD is the mutual
+        information between predictions and model parameters (epistemic
+        uncertainty).  Higher values mean the ensemble members agree and are
+        collectively confident.
+
+        Args:
+            X: Input embeddings with shape ``(N, D)``.
+
+        Returns:
+            Confidence scores with shape ``(N,)`` in ``[0, 1]``.
+        """
+        member_probs = self._member_probs(X)  # (M, N, C)
+        mean_probs = member_probs.mean(axis=0)  # (N, C)
+        n_classes = mean_probs.shape[1]
+
+        clipped_mean = np.clip(mean_probs, 1e-12, 1.0)
+        H_mean = -(clipped_mean * np.log(clipped_mean)).sum(axis=1)  # (N,)
+
+        clipped_members = np.clip(member_probs, 1e-12, 1.0)
+        H_members = -(clipped_members * np.log(clipped_members)).sum(axis=2).mean(axis=0)  # (N,)
+
+        bald = np.maximum(0.0, H_mean - H_members)  # (N,)
+        max_bald = np.log(float(n_classes)) if n_classes > 1 else 1.0
+        return 1.0 - bald / max_bald
+
+
+class BootstrapEnsemble(_EnsembleBase):
+    """Bootstrap ensemble of independently-fitted linear probes (lbfgs)."""
 
     def __init__(self, n: int = 5) -> None:
         if n <= 0:
@@ -106,12 +161,12 @@ class DeepEnsemble:
         best_c: float,
         seed: int = 0,
     ) -> None:
-        """Fit ensemble members on bootstrap resamples.
+        """Fit ensemble members on bootstrap resamples of the training data.
 
         Args:
             X_train: Training embeddings with shape ``(N, D)``.
             y_train: Training labels with shape ``(N,)``.
-            best_c: Regularization value for each member.
+            best_c: Regularization strength for each member.
             seed: Base RNG seed for bootstrap sampling and member initialization.
         """
         self._members = []
@@ -131,23 +186,48 @@ class DeepEnsemble:
             member.fit(x_boot, y_boot)
             self._members.append(member)
 
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Return ensemble-averaged class probabilities.
+
+class DeepEnsemble(_EnsembleBase):
+    """Deep ensemble of linear probes trained with AdamW from random initializations.
+
+    Unlike ``BootstrapEnsemble``, all members train on the full training set.
+    Diversity comes from different random weight initializations and AdamW
+    mini-batch stochasticity, following Lakshminarayanan et al. (2017).
+    """
+
+    def __init__(self, n: int = 5) -> None:
+        if n <= 0:
+            raise ValueError(f"n must be positive, got {n}")
+        self.n = int(n)
+        self._members: list[LogisticRegression] = []
+
+    def fit(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        best_c: float,
+        seed: int = 0,
+    ) -> None:
+        """Fit ensemble members on the full training set with different random initializations.
 
         Args:
-            X: Input embeddings with shape ``(N, D)``.
-
-        Returns:
-            Probability matrix with shape ``(N, C)``.
-
-        Raises:
-            RuntimeError: If ``fit`` has not been called.
+            X_train: Training embeddings with shape ``(N, D)``.
+            y_train: Training labels with shape ``(N,)``.
+            best_c: Regularization strength for each member.
+            seed: Base RNG seed for weight initialization and mini-batch ordering.
         """
-        if not self._members:
-            raise RuntimeError("DeepEnsemble has not been fit yet.")
-        X_t = torch.from_numpy(X.astype(np.float32, copy=False))
-        probs = np.stack([m.predict_proba(X_t) for m in self._members], axis=0)
-        return probs.mean(axis=0)
+        self._members = []
+        x_t = torch.from_numpy(X_train.astype(np.float32, copy=False))
+        y_t = torch.from_numpy(y_train.astype(np.int64, copy=False))
+        for i in range(self.n):
+            member = LogisticRegression(
+                C=best_c,
+                solver="adam",
+                random_state=seed + i,
+                random_init=True,
+            )
+            member.fit(x_t, y_t)
+            self._members.append(member)
 
 
 class LaplaceProbe:
@@ -267,11 +347,8 @@ class ConformalPredictor:
 
     def __init__(self, probe: LogisticRegression) -> None:
         self._probe = probe
-        self._mapie = None
-        self._cal_X: np.ndarray | None = None
-        self._cal_y: np.ndarray | None = None
-        self._wrapper: _SKLearnProbeWrapper | None = None
-        self._mode: str | None = None
+        self._conformal = None
+        self._fitted_alpha: float | None = None
         self._conformity_score: str = "raps"
 
     def _select_conformity_score(self, y_cal: np.ndarray) -> str:
@@ -285,34 +362,23 @@ class ConformalPredictor:
         """
         return "lac" if np.unique(y_cal).size == 2 else "raps"
 
-    def fit(self, X_cal: np.ndarray, y_cal: np.ndarray) -> None:
+    def fit(self, X_cal: np.ndarray, y_cal: np.ndarray, alpha: float = 0.1) -> None:
         """Fit conformal calibration in prefit mode on calibration embeddings.
 
         Args:
             X_cal: Calibration embeddings with shape ``(N, D)``.
             y_cal: Calibration labels with shape ``(N,)``.
+            alpha: Miscoverage level for the fitted conformal object.
 
         Raises:
             ModuleNotFoundError: If MAPIE is not installed.
         """
+        if not (0.0 < alpha < 1.0):
+            raise ValueError(f"alpha must be in (0, 1), got {alpha}")
         X_cal_np = X_cal.astype(np.float32, copy=False)
         y_cal_np = y_cal.astype(np.int64, copy=False)
         self._conformity_score = self._select_conformity_score(y_cal_np)
-        self._cal_X = X_cal_np
-        self._cal_y = y_cal_np
-        self._wrapper = _SKLearnProbeWrapper(self._probe)
-
-        if self._conformity_score == "raps":
-            try:
-                from mapie.classification import MapieClassifier
-
-                mapie = MapieClassifier(estimator=self._wrapper, method="raps", cv="prefit")
-                mapie.fit(X_cal_np, y_cal_np)
-                self._mapie = mapie
-                self._mode = "legacy"
-                return
-            except (ImportError, AttributeError):
-                pass
+        wrapper = _SKLearnProbeWrapper(self._probe)
 
         try:
             from mapie.classification import SplitConformalClassifier
@@ -322,14 +388,14 @@ class ConformalPredictor:
             ) from exc
 
         conformal = SplitConformalClassifier(
-            estimator=self._wrapper,
-            confidence_level=0.9,
+            estimator=wrapper,
+            confidence_level=1.0 - alpha,
             conformity_score=self._conformity_score,
             prefit=True,
         )
         conformal.conformalize(X_cal_np, y_cal_np)
-        self._mapie = conformal
-        self._mode = "split_conformal"
+        self._conformal = conformal
+        self._fitted_alpha = float(alpha)
 
     def predict_sets(self, X_test: np.ndarray, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
         """Predict point labels and conformal prediction sets.
@@ -346,26 +412,34 @@ class ConformalPredictor:
         Raises:
             RuntimeError: If ``fit`` has not been called.
         """
-        if self._mapie is None or self._mode is None:
+        if self._conformal is None or self._fitted_alpha is None:
             raise RuntimeError("ConformalPredictor has not been fit yet.")
-        X_test_np = X_test.astype(np.float32, copy=False)
-
-        if self._mode == "legacy":
-            point_preds, pred_sets = self._mapie.predict(X_test_np, alpha=alpha)
-        else:
-            from mapie.classification import SplitConformalClassifier
-
-            if self._wrapper is None or self._cal_X is None or self._cal_y is None:
-                raise RuntimeError("ConformalPredictor calibration state is missing.")
-            conformal = SplitConformalClassifier(
-                estimator=self._wrapper,
-                confidence_level=1.0 - alpha,
-                conformity_score=self._conformity_score,
-                prefit=True,
+        if not np.isclose(float(alpha), self._fitted_alpha):
+            raise ValueError(
+                "ConformalPredictor was fit with alpha="
+                f"{self._fitted_alpha:.6g}; refit to use alpha={float(alpha):.6g}."
             )
-            conformal.conformalize(self._cal_X, self._cal_y)
-            point_preds, pred_sets = conformal.predict_set(X_test_np)
+        X_test_np = X_test.astype(np.float32, copy=False)
+        point_preds, pred_sets = self._conformal.predict_set(X_test_np)
 
         if pred_sets.ndim == 3:
             pred_sets = pred_sets[:, :, 0]
         return point_preds.astype(np.int64, copy=False), pred_sets.astype(bool, copy=False)
+
+    def predict_confidence(self, X: np.ndarray) -> np.ndarray:
+        """Return continuous confidence scores from the underlying probe.
+
+        For LAC this equals ``1 - conformity_score(predicted_class)`` exactly.
+        For RAPS it is the best available continuous proxy without reimplementing
+        the full score function.  Use these scores for selective-classification
+        metrics (AURC, E-AURC, selective accuracy) instead of the coarse
+        ``1 / set_size`` signal.
+
+        Args:
+            X: Input embeddings with shape ``(N, D)``.
+
+        Returns:
+            Max-probability confidence scores with shape ``(N,)``.
+        """
+        X_t = torch.from_numpy(X.astype(np.float32, copy=False))
+        return self._probe.predict_proba(X_t).max(axis=1)

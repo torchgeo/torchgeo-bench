@@ -22,6 +22,7 @@ from torchgeo_bench.main import append_rows_atomic
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.uq.corruptions import SKIP_POISSON_GAUSSIAN, CorruptionTransform
 from torchgeo_bench.uq.methods import (
+    BootstrapEnsemble,
     ConformalPredictor,
     DeepEnsemble,
     LaplaceProbe,
@@ -40,7 +41,6 @@ from torchgeo_bench.uq.metrics import (
     predictive_entropy,
     raw_aurc,
     selective_accuracy,
-    sharpness,
 )
 from torchgeo_bench.uq.splits import stratified_cal_split
 from torchgeo_bench.uq.traces import (
@@ -161,15 +161,15 @@ def _expected_metrics(uq_method: str) -> set[str]:
         Set of metric names required to mark a resume block as complete.
     """
     if uq_method == "conformal":
-        return {"empirical_coverage", "mean_set_size", "raw_aurc", "eaurc", "selective_acc_90"}
+        return {"accuracy", "empirical_coverage", "mean_set_size"}
     return {
+        "accuracy",
         "ece",
         "nll",
         "brier",
         "predictive_entropy",
         "normalized_predictive_entropy",
         "max_probability",
-        "sharpness",
         "raw_aurc",
         "eaurc",
         "selective_acc_90",
@@ -281,6 +281,7 @@ def _run_uq_block(
     feature_dim: int,
     best_c: float,
     seed: int,
+    ece_binning: str = "equal_width",
     X_test: np.ndarray | None = None,
     y_test: np.ndarray | None = None,
     sample_ids: np.ndarray | None = None,
@@ -302,6 +303,7 @@ def _run_uq_block(
         corruption_type: Corruption name (or ``"clean"``).
         severity: Corruption severity level.
         ece_bins: Number of bins for ECE.
+        ece_binning: Binning mode for scalar ECE (``equal_width`` or ``equal_mass``).
         conformal_alpha: Miscoverage level for conformal methods.
         n_cal: Calibration sample count.
         n_train: Probe training sample count.
@@ -365,14 +367,10 @@ def _run_uq_block(
     trace_block_key: str | None = None
     if method_name == "conformal":
         point_preds, pred_sets = method.predict_sets(X_test, alpha=conformal_alpha)
-        set_sizes = pred_sets.sum(axis=1).astype(np.float64)
-        conf = 1.0 / np.maximum(set_sizes, 1.0)
         metrics = {
+            "accuracy": float((point_preds == y_test).mean()),
             "empirical_coverage": empirical_coverage(pred_sets, y_test),
             "mean_set_size": mean_set_size(pred_sets),
-            "raw_aurc": raw_aurc(conf, point_preds, y_test),
-            "eaurc": excess_aurc(conf, point_preds, y_test),
-            "selective_acc_90": selective_accuracy(conf, point_preds, y_test, coverage=0.9),
         }
         if trace_ctx and bool(trace_ctx.get("include_conformal", False)):
             trace_block_key = build_trace_block_key(
@@ -400,15 +398,20 @@ def _run_uq_block(
     else:
         probs = method.predict_proba(X_test)
         y_pred = probs.argmax(axis=1)
-        conf = probs.max(axis=1)
+        # For methods with a dedicated confidence signal (e.g. ensemble BALD),
+        # use it for ranking metrics; fall back to max probability otherwise.
+        if hasattr(method, "predict_confidence"):
+            conf = method.predict_confidence(X_test)
+        else:
+            conf = probs.max(axis=1)
         metrics = {
-            "ece": ece(probs, y_test, n_bins=ece_bins),
+            "accuracy": float((y_pred == y_test).mean()),
+            "ece": ece(probs, y_test, n_bins=ece_bins, binning=ece_binning),
             "nll": nll(probs, y_test),
             "brier": brier_score(probs, y_test),
             "predictive_entropy": predictive_entropy(probs),
             "normalized_predictive_entropy": normalized_predictive_entropy(probs),
             "max_probability": max_probability(probs),
-            "sharpness": sharpness(probs),
             "raw_aurc": raw_aurc(conf, y_pred, y_test),
             "eaurc": excess_aurc(conf, y_pred, y_test),
             "selective_acc_90": selective_accuracy(conf, y_pred, y_test, coverage=0.9),
@@ -654,6 +657,10 @@ def main(cfg: DictConfig) -> None:
             ts = TemperatureScaling(probe)
             ts.fit(X_cal, y_cal)
             methods["temp_scaling"] = ts
+        if "bootstrap_ensemble" in cfg.uq.methods:
+            be = BootstrapEnsemble(n=int(cfg.uq.n_ensemble))
+            be.fit(X_final_train, y_final_train, best_c=best_c, seed=cfg.seed)
+            methods["bootstrap_ensemble"] = be
         if "deep_ensemble" in cfg.uq.methods:
             de = DeepEnsemble(n=int(cfg.uq.n_ensemble))
             de.fit(X_final_train, y_final_train, best_c=best_c, seed=cfg.seed)
@@ -668,7 +675,7 @@ def main(cfg: DictConfig) -> None:
         if "conformal" in cfg.uq.methods:
             try:
                 conf = ConformalPredictor(probe)
-                conf.fit(X_cal, y_cal)
+                conf.fit(X_cal, y_cal, alpha=float(cfg.uq.conformal_alpha))
                 methods["conformal"] = conf
             except ModuleNotFoundError as exc:
                 logger.warning("Skipping conformal for dataset %s: %s", dataset_name, exc)
@@ -774,6 +781,7 @@ def main(cfg: DictConfig) -> None:
                         corruption_type=str(corruption_type),
                         severity=int(severity),
                         ece_bins=int(cfg.uq.ece_bins),
+                        ece_binning=str(getattr(cfg.uq, "ece_binning", "equal_width")),
                         conformal_alpha=float(cfg.uq.conformal_alpha),
                         n_cal=len(X_cal),
                         n_train=len(X_final_train),

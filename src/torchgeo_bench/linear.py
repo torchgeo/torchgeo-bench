@@ -50,6 +50,7 @@ class LogisticRegression:
         tol: float = 1e-4,
         patience: int = 1,  # only used by Adam path now
         random_state: int | None = None,
+        random_init: bool = False,
         device: str | torch.device | None = None,
         verbose: bool = False,
         use_tf32: bool = True,  # enable TF32 on CUDA for speed
@@ -68,6 +69,7 @@ class LogisticRegression:
         self.tol = float(tol)
         self.patience = int(patience)
         self.random_state = random_state
+        self.random_init = bool(random_init)
         requested_device = torch.device(device) if device is not None else torch.device("cpu")
         if requested_device.type == "cuda" and not torch.cuda.is_available():
             logger.warning("CUDA requested but not available; falling back to CPU.")
@@ -95,7 +97,10 @@ class LogisticRegression:
 
     def _build_model(self, n_features: int, n_classes: int) -> None:
         model = torch.nn.Linear(n_features, n_classes, bias=True)
-        torch.nn.init.zeros_(model.weight)
+        if self.random_init:
+            torch.nn.init.kaiming_uniform_(model.weight)
+        else:
+            torch.nn.init.zeros_(model.weight)
         torch.nn.init.zeros_(model.bias)
         model.to(self.device)
         self._model = model

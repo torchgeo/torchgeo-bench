@@ -13,7 +13,6 @@ from torchgeo_bench.uq.metrics import (
     predictive_entropy,
     raw_aurc,
     selective_accuracy,
-    sharpness,
 )
 
 
@@ -37,6 +36,35 @@ def test_ece_worst_case():
     )
     y_true = np.array([1, 1, 1, 1], dtype=np.int64)
     assert abs(ece(probs, y_true, n_bins=2) - 1.0) < 1e-8
+
+
+def test_ece_equal_width_and_equal_mass_modes():
+    probs = np.array(
+        [
+            [0.6721, 0.2847, 0.0432],
+            [0.0095, 0.4667, 0.5238],
+            [0.3227, 0.3881, 0.2892],
+            [0.5332, 0.4652, 0.0016],
+            [0.5291, 0.0207, 0.4502],
+            [0.1112, 0.5462, 0.3426],
+            [0.3992, 0.5630, 0.0377],
+            [0.0862, 0.4650, 0.4488],
+        ],
+        dtype=np.float64,
+    )
+    y_true = np.array([0, 1, 2, 1, 1, 2, 2, 2], dtype=np.int64)
+    ece_width = ece(probs, y_true, n_bins=5, binning="equal_width")
+    ece_mass = ece(probs, y_true, n_bins=5, binning="equal_mass")
+    assert np.isclose(ece_width, 0.4845423426343915)
+    assert np.isclose(ece_mass, 0.4025625)
+    assert not np.isclose(ece_width, ece_mass)
+
+
+def test_ece_invalid_binning_raises():
+    probs = np.array([[0.7, 0.3], [0.2, 0.8]], dtype=np.float64)
+    y_true = np.array([0, 1], dtype=np.int64)
+    with np.testing.assert_raises(ValueError):
+        ece(probs, y_true, n_bins=4, binning="invalid")
 
 
 def test_nll_uniform():
@@ -77,16 +105,7 @@ def test_normalized_predictive_entropy_range():
     assert np.isclose(normalized_predictive_entropy(one_hot), 0.0, atol=1e-8)
 
 
-def test_sharpness_one_hot():
-    C = 6
-    one_hot = np.eye(C, dtype=np.float64)[np.arange(12) % C]
-    assert np.isclose(sharpness(one_hot), 1.0, atol=1e-8)
-
-    uniform = np.full((12, C), 1.0 / C, dtype=np.float64)
-    assert np.isclose(sharpness(uniform), 1.0 / C, atol=1e-8)
-
-
-def test_max_probability_matches_sharpness():
+def test_max_probability():
     probs = np.array(
         [
             [0.8, 0.2],
@@ -95,7 +114,7 @@ def test_max_probability_matches_sharpness():
         ],
         dtype=np.float64,
     )
-    assert np.isclose(max_probability(probs), sharpness(probs), atol=1e-8)
+    assert np.isclose(max_probability(probs), (0.8 + 0.9 + 0.5) / 3.0, atol=1e-8)
 
 
 def test_raw_aurc_matches_manual():

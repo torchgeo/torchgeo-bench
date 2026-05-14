@@ -83,23 +83,21 @@ def test_build_resume_set_partial_key(tmp_path):
 
 def test_expected_metrics_for_method():
     assert _expected_metrics("uncalibrated") == {
+        "accuracy",
         "ece",
         "nll",
         "brier",
         "predictive_entropy",
         "normalized_predictive_entropy",
         "max_probability",
-        "sharpness",
         "raw_aurc",
         "eaurc",
         "selective_acc_90",
     }
     assert _expected_metrics("conformal") == {
+        "accuracy",
         "empirical_coverage",
         "mean_set_size",
-        "raw_aurc",
-        "eaurc",
-        "selective_acc_90",
     }
 
 
@@ -167,6 +165,7 @@ def test_run_uq_block_writes_csv(tmp_path, monkeypatch):
         corruption_type="clean",
         severity=0,
         ece_bins=15,
+        ece_binning="equal_width",
         conformal_alpha=0.1,
         n_cal=40,
         n_train=160,
@@ -182,6 +181,72 @@ def test_run_uq_block_writes_csv(tmp_path, monkeypatch):
     assert len(rows) == 10
     assert set(df["metric_name"]) == _expected_metrics("uncalibrated")
     assert np.isfinite(df["metric_value"].to_numpy(dtype=np.float64)).all()
+
+
+def test_run_uq_block_conformal_writes_reduced_metrics(tmp_path):
+    csv_path = tmp_path / "uq_results.csv"
+    X_test = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    y_test = np.array([0, 1, 2, 1], dtype=np.int64)
+
+    class _DummyConformal:
+        def predict_sets(self, X: np.ndarray, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+            assert alpha == 0.1
+            point_preds = np.array([0, 0, 2, 1], dtype=np.int64)
+            pred_sets = np.array(
+                [
+                    [True, False, False],
+                    [True, True, False],
+                    [False, False, True],
+                    [False, True, False],
+                ],
+                dtype=bool,
+            )
+            assert X.shape == X_test.shape
+            return point_preds, pred_sets
+
+    common_meta = {
+        "model": "m.t",
+        "name": "resnet50",
+        "backbone": "resnet50",
+        "dataset": "m-eurosat",
+        "normalization": "bandspec_zscore",
+        "image_size": 224,
+        "interpolation": "bilinear",
+        "partition": "default",
+        "bands": "rgb",
+        "seed": 42,
+    }
+
+    rows = _run_uq_block(
+        method_name="conformal",
+        method=_DummyConformal(),
+        output_path=str(csv_path),
+        common_meta=common_meta,
+        corruption_type="clean",
+        severity=0,
+        ece_bins=15,
+        ece_binning="equal_width",
+        conformal_alpha=0.1,
+        n_cal=40,
+        n_train=160,
+        feature_dim=3,
+        best_c=1.0,
+        seed=42,
+        X_test=X_test,
+        y_test=y_test,
+    )
+
+    df = pd.read_csv(csv_path)
+    assert len(rows) == 3
+    assert set(df["metric_name"]) == _expected_metrics("conformal")
 
 
 def test_normalize_cloud_pattern_mode():

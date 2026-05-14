@@ -3,13 +3,19 @@
 import numpy as np
 
 
-def ece(probs: np.ndarray, y_true: np.ndarray, n_bins: int = 15) -> float:
-    """Compute adaptive expected calibration error with equal-mass bins.
+def ece(
+    probs: np.ndarray,
+    y_true: np.ndarray,
+    n_bins: int = 15,
+    binning: str = "equal_width",
+) -> float:
+    """Compute expected calibration error with configurable binning.
 
     Args:
         probs: Class probabilities with shape ``(N, C)``.
         y_true: True labels with shape ``(N,)``.
-        n_bins: Number of equal-mass confidence bins.
+        n_bins: Number of confidence bins.
+        binning: ``"equal_width"`` or ``"equal_mass"``.
 
     Returns:
         Expected calibration error.
@@ -20,6 +26,8 @@ def ece(probs: np.ndarray, y_true: np.ndarray, n_bins: int = 15) -> float:
         raise ValueError(f"y_true must be 1D, got shape {y_true.shape}")
     if probs.shape[0] != y_true.shape[0]:
         raise ValueError("probs and y_true must have matching first dimension")
+    if n_bins <= 0:
+        raise ValueError(f"n_bins must be positive, got {n_bins}")
 
     conf = probs.max(axis=1)
     pred = probs.argmax(axis=1)
@@ -28,19 +36,23 @@ def ece(probs: np.ndarray, y_true: np.ndarray, n_bins: int = 15) -> float:
     if n == 0:
         return 0.0
 
-    quantiles = np.linspace(0.0, 1.0, n_bins + 1)
-    bin_edges = np.quantile(conf, quantiles)
-    bin_edges[0] = 0.0
-    bin_edges[-1] = 1.0
+    if binning == "equal_width":
+        bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    elif binning == "equal_mass":
+        quantiles = np.linspace(0.0, 1.0, n_bins + 1)
+        bin_edges = np.quantile(conf, quantiles)
+        bin_edges[0] = 0.0
+        bin_edges[-1] = 1.0
+    else:
+        raise ValueError(
+            f"Unknown ECE binning mode '{binning}'. Expected 'equal_width' or 'equal_mass'."
+        )
 
     total = 0.0
     for i in range(n_bins):
         lo = bin_edges[i]
         hi = bin_edges[i + 1]
-        if i == n_bins - 1:
-            mask = (conf >= lo) & (conf <= hi)
-        else:
-            mask = (conf >= lo) & (conf < hi)
+        mask = (conf >= lo) & (conf <= hi) if i == n_bins - 1 else (conf >= lo) & (conf < hi)
         if not np.any(mask):
             continue
         acc = correct[mask].mean()
@@ -120,18 +132,6 @@ def max_probability(probs: np.ndarray) -> float:
         Mean confidence of top predicted class.
     """
     return float(probs.max(axis=1).mean())
-
-
-def sharpness(probs: np.ndarray) -> float:
-    """Return mean max-class probability.
-
-    Args:
-        probs: Class probabilities with shape ``(N, C)``.
-
-    Returns:
-        Mean confidence of top predicted class.
-    """
-    return max_probability(probs)
 
 
 def _risk_coverage_curve(

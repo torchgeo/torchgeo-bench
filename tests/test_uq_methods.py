@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.uq.methods import (
+    BootstrapEnsemble,
     ConformalPredictor,
     DeepEnsemble,
     LaplaceProbe,
@@ -67,6 +68,37 @@ def test_temperature_scaling_predict_proba_shape(fitted_probe):
     assert np.allclose(probs.sum(axis=1), 1.0)
 
 
+def test_bootstrap_ensemble_predict_proba_shape(fitted_probe):
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = BootstrapEnsemble(n=3)
+    method.fit(X_train, y_train, best_c=1.0, seed=0)
+    probs = method.predict_proba(X_test)
+    assert probs.shape == (X_test.shape[0], 3)
+    assert np.allclose(probs.sum(axis=1), 1.0)
+
+
+def test_bootstrap_ensemble_predict_confidence_shape_and_range(fitted_probe):
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = BootstrapEnsemble(n=3)
+    method.fit(X_train, y_train, best_c=1.0, seed=0)
+    conf = method.predict_confidence(X_test)
+    assert conf.shape == (X_test.shape[0],)
+    assert np.all((conf >= 0.0) & (conf <= 1.0))
+
+
+def test_bootstrap_ensemble_confidence_reflects_disagreement(fitted_probe):
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = BootstrapEnsemble(n=5)
+    method.fit(X_train, y_train, best_c=1.0, seed=0)
+
+    rng = np.random.default_rng(42)
+    X_noise = rng.standard_normal(X_test.shape).astype(np.float32)
+
+    conf_test = method.predict_confidence(X_test).mean()
+    conf_noise = method.predict_confidence(X_noise).mean()
+    assert conf_test > conf_noise
+
+
 def test_deep_ensemble_predict_proba_shape(fitted_probe):
     _, (X_train, y_train, _, _, X_test, _) = fitted_probe
     method = DeepEnsemble(n=3)
@@ -74,6 +106,37 @@ def test_deep_ensemble_predict_proba_shape(fitted_probe):
     probs = method.predict_proba(X_test)
     assert probs.shape == (X_test.shape[0], 3)
     assert np.allclose(probs.sum(axis=1), 1.0)
+
+
+def test_deep_ensemble_predict_confidence_shape_and_range(fitted_probe):
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = DeepEnsemble(n=3)
+    method.fit(X_train, y_train, best_c=1.0, seed=0)
+    conf = method.predict_confidence(X_test)
+    assert conf.shape == (X_test.shape[0],)
+    assert np.all((conf >= 0.0) & (conf <= 1.0))
+
+
+def test_deep_ensemble_members_differ(fitted_probe):
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = DeepEnsemble(n=3)
+    method.fit(X_train, y_train, best_c=1.0, seed=0)
+    member_probs = method._member_probs(X_test)  # (3, N, C)
+    # Members trained from different random inits should produce different predictions.
+    assert not np.allclose(member_probs[0], member_probs[1])
+
+
+def test_deep_ensemble_confidence_reflects_disagreement(fitted_probe):
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = DeepEnsemble(n=5)
+    method.fit(X_train, y_train, best_c=1.0, seed=0)
+
+    rng = np.random.default_rng(42)
+    X_noise = rng.standard_normal(X_test.shape).astype(np.float32)
+
+    conf_test = method.predict_confidence(X_test).mean()
+    conf_noise = method.predict_confidence(X_noise).mean()
+    assert conf_test > conf_noise
 
 
 def test_laplace_predict_proba_shape(fitted_probe):
@@ -127,3 +190,48 @@ def test_conformal_select_conformity_score_binary_and_multiclass(fitted_probe):
     method = ConformalPredictor(probe)
     assert method._select_conformity_score(np.array([0, 1, 0, 1], dtype=np.int64)) == "lac"
     assert method._select_conformity_score(np.array([0, 1, 2, 1], dtype=np.int64)) == "raps"
+
+
+def test_conformal_predict_confidence_shape_and_range(fitted_probe):
+    if importlib.util.find_spec("mapie") is None:
+        pytest.skip("mapie not installed")
+
+    probe, (_, _, X_cal, y_cal, X_test, _) = fitted_probe
+    method = ConformalPredictor(probe)
+    try:
+        method.fit(X_cal, y_cal)
+    except (ImportError, ModuleNotFoundError, ValueError) as exc:
+        pytest.skip(f"conformal unavailable at runtime: {exc}")
+    conf = method.predict_confidence(X_test)
+    assert conf.shape == (X_test.shape[0],)
+    assert np.all((conf > 0.0) & (conf <= 1.0))
+
+
+def test_conformal_confidence_continuous(fitted_probe):
+    """predict_confidence must have more than O(C) distinct values."""
+    if importlib.util.find_spec("mapie") is None:
+        pytest.skip("mapie not installed")
+
+    probe, (_, _, X_cal, y_cal, X_test, _) = fitted_probe
+    method = ConformalPredictor(probe)
+    try:
+        method.fit(X_cal, y_cal)
+    except (ImportError, ModuleNotFoundError, ValueError) as exc:
+        pytest.skip(f"conformal unavailable at runtime: {exc}")
+    conf = method.predict_confidence(X_test)
+    # Probe has 3 classes; a discrete 1/set_size signal would have ≤ 3 unique values.
+    assert len(np.unique(conf)) > 3
+
+
+def test_conformal_predict_sets_rejects_unfitted_alpha(fitted_probe):
+    if importlib.util.find_spec("mapie") is None:
+        pytest.skip("mapie not installed")
+
+    probe, (_, _, X_cal, y_cal, X_test, _) = fitted_probe
+    method = ConformalPredictor(probe)
+    try:
+        method.fit(X_cal, y_cal, alpha=0.1)
+    except (ImportError, ModuleNotFoundError, ValueError) as exc:
+        pytest.skip(f"conformal unavailable at runtime: {exc}")
+    with pytest.raises(ValueError):
+        method.predict_sets(X_test, alpha=0.2)

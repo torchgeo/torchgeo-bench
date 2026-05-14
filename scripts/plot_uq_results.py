@@ -25,6 +25,7 @@ CONFORMAL_METHOD = "conformal"
 ALL_METHODS: tuple[str, ...] = PROBABILISTIC_METHODS + (CONFORMAL_METHOD,)
 
 PROBABILISTIC_CORE_METRICS: tuple[str, ...] = (
+    "accuracy",
     "ece",
     "nll",
     "brier",
@@ -32,12 +33,12 @@ PROBABILISTIC_CORE_METRICS: tuple[str, ...] = (
 )
 PROBABILISTIC_SECONDARY_METRICS: tuple[str, ...] = (
     "predictive_entropy",
-    "sharpness",
     "eaurc",
     "raw_aurc",
 )
 PROBABILISTIC_ALL_METRICS: tuple[str, ...] = PROBABILISTIC_CORE_METRICS + PROBABILISTIC_SECONDARY_METRICS
 CONFORMAL_METRICS: tuple[str, ...] = (
+    "accuracy",
     "empirical_coverage",
     "mean_set_size",
 )
@@ -334,6 +335,7 @@ def _run_range_checks(df: pd.DataFrame, alerts: list[dict[str, object]]) -> None
         return
 
     checks: dict[str, tuple[float | None, float | None]] = {
+        "accuracy": (0.0, 1.0),
         "ece": (0.0, None),
         "brier": (0.0, None),
         "empirical_coverage": (0.0, 1.0),
