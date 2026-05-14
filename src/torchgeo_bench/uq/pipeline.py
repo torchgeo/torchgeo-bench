@@ -205,7 +205,7 @@ def _build_resume_set(csv_path: str) -> set[tuple[str, ...]]:
     return completed
 
 
-def _lookup_best_c(prior_results: pd.DataFrame, row_filter: dict[str, Any]) -> float | None:
+def _do_lookup(prior_results: pd.DataFrame, row_filter: dict[str, Any]) -> float | None:
     """Resolve ``best_c`` from prior linear-probe results.
 
     Args:
@@ -264,6 +264,37 @@ def _lookup_best_c(prior_results: pd.DataFrame, row_filter: dict[str, Any]) -> f
         row_filter,
     )
     return float(best_c)
+
+
+def _lookup_best_c(
+    prior_results: pd.DataFrame,
+    row_filter: dict[str, Any],
+    *,
+    alias_dataset: str | None = None,
+) -> float | None:
+    """Resolve ``best_c`` from direct match, with optional dataset alias fallback.
+
+    Args:
+        prior_results: Prior benchmark results table.
+        row_filter: Key-value pairs used to filter to one matching row.
+        alias_dataset: Optional dataset name to try when direct lookup misses.
+
+    Returns:
+        ``best_c`` when resolved; otherwise ``None``.
+    """
+    best_c = _do_lookup(prior_results, row_filter)
+    if best_c is not None or alias_dataset is None:
+        return best_c
+
+    alias_filter = {**row_filter, "dataset": alias_dataset}
+    best_c = _do_lookup(prior_results, alias_filter)
+    if best_c is not None:
+        logger.info(
+            "best_c for dataset=%s not found; using alias=%s.",
+            row_filter.get("dataset"),
+            alias_dataset,
+        )
+    return best_c
 
 
 def _run_uq_block(
@@ -620,6 +651,7 @@ def main(cfg: DictConfig) -> None:
         X_final_train = np.concatenate([X_train, X_val_rem], axis=0)
         y_final_train = np.concatenate([y_train, y_val_rem], axis=0)
 
+        alias_dataset = getattr(ds_cls, "prior_results_alias", None)
         best_c = _lookup_best_c(
             prior_results,
             {
@@ -629,6 +661,7 @@ def main(cfg: DictConfig) -> None:
                 "partition": cfg.dataset.partition,
                 "bands": bands_value,
             },
+            alias_dataset=alias_dataset,
         )
         if best_c is None:
             logger.warning(

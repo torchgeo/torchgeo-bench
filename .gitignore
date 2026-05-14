@@ -15,6 +15,7 @@ scripts/*
 !scripts/plot_uq_results.py
 !scripts/plot_uq_error_curves.py
 !scripts/build_uq_reliability_cache.py
+!scripts/run_cka.sh
 !scripts/slurm/
 scripts/slurm/*
 !scripts/slurm/build_probe_jobs.py

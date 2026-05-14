@@ -1,0 +1,81 @@
+output: results/cka_results.csv
+prior_results: results/all_results.csv
+traces_root: results/cka_traces
+write_sample_traces: true
+
+corruptions:
+  - cloud
+  - poisson_gaussian
+
+corruption_severities: [1, 2, 3, 4, 5]
+cloud_pattern_mode: fixed_across_severity
+
+cal_size: 400
+confidence_threshold: 0.9
+
+layers:
+  resnet50:
+    - backbone.layer1
+    - backbone.layer2
+    - backbone.layer3
+    - backbone.layer4
+  resnet18:
+    - backbone.layer1
+    - backbone.layer2
+    - backbone.layer3
+    - backbone.layer4
+  mobilenetv3_large_100:
+    - backbone.blocks.1
+    - backbone.blocks.2
+    - backbone.blocks.4
+    - backbone.blocks.6
+  convnext_large_dinov3:
+    - backbone.stages.0
+    - backbone.stages.1
+    - backbone.stages.2
+    - backbone.stages.3
+  swin_tiny_patch4_window7_224:
+    - backbone.layers.0
+    - backbone.layers.1
+    - backbone.layers.2
+    - backbone.layers.3
+  vit_base_patch16_224:
+    - backbone.blocks.2
+    - backbone.blocks.5
+    - backbone.blocks.8
+    - backbone.blocks.11
+  vit_large_patch16_dinov3sat:
+    - backbone.blocks.5
+    - backbone.blocks.11
+    - backbone.blocks.17
+    - backbone.blocks.23
+  tgeo_dofa_base:
+    - backbone.blocks.2
+    - backbone.blocks.5
+    - backbone.blocks.8
+    - backbone.blocks.11
+  tgeo_panopticon:
+    - backbone.blocks.2
+    - backbone.blocks.5
+    - backbone.blocks.8
+    - backbone.blocks.11
+  olmoearth_v1_base:
+    - encoder_model.blocks.2
+    - encoder_model.blocks.5
+    - encoder_model.blocks.8
+    - encoder_model.blocks.11
+  tt_clay_v1_5_base:
+    - backbone.blocks.2
+    - backbone.blocks.5
+    - backbone.blocks.8
+    - backbone.blocks.11
+  tt_prithvi_eo_v2_300_tl:
+    - backbone.blocks.5
+    - backbone.blocks.11
+    - backbone.blocks.17
+    - backbone.blocks.23
+  tt_terramind_v1_base:
+    - backbone.blocks.2
+    - backbone.blocks.5
+    - backbone.blocks.8
+    - backbone.blocks.11
