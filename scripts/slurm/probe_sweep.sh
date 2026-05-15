@@ -65,4 +65,5 @@ torchgeo-bench run \
   dataset.normalization="${NORM}" \
   resume=true \
   output=results/all_results.csv \
-  eval.intrinsic_dim.enabled=true
+  eval.intrinsic_dim.enabled=true \
+  eval.model_perf.enabled=true

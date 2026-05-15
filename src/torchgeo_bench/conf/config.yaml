@@ -40,6 +40,15 @@ eval:
     max_samples: 10000               # null disables subsampling
     device: null                     # null = auto (cuda if available, else cpu)
 
+  # Backbone performance metrics (throughput, peak GPU mem, latency,
+  # params, GMACs). One row per metric with method="model_perf".
+  # GMACs requires fvcore (`pip install 'torchgeo-bench[perf]'`); other
+  # metrics work without extra deps.
+  model_perf:
+    enabled: false
+    n_warmup: 3                      # forward passes discarded before timing
+    n_measure: 20                    # timed forward passes
+
   segmentation:
     head_type: "fpn"
     layers: []                 # must be overridden per model for segmentation datasets
