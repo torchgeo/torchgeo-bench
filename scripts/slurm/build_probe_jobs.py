@@ -54,6 +54,8 @@ SINGLE_BAND_MODE_MODELS: dict[str, str] = {
     "torchgeo/earthloc_s2_resnet50": "rgb",
     # DINOv3 ViT-Large pretrained on sat493m (RGB satellite imagery).
     "timm/vit/vit_large_patch16_dinov3sat": "rgb",
+    # DINOv3 ViT-Large web-pretrained (RGB natural imagery baseline).
+    "timm/vit/vit_large_patch16_dinov3": "rgb",
 }
 
 
@@ -79,6 +81,8 @@ DEFAULT_MODELS: list[str] = [
     "torchgeo/earthloc_s2_resnet50",
     # DINOv3 ViT-Large pretrained on satellite imagery (sat493m, RGB-only)
     "timm/vit/vit_large_patch16_dinov3sat",
+    # DINOv3 ViT-Large web-pretrained (natural-image baseline, RGB-only)
+    "timm/vit/vit_large_patch16_dinov3",
     # OlmoEarth (direct olmoearth-pretrain-minimal path)
     "olmoearth_base",
     # baselines
