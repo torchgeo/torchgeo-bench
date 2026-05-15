@@ -66,4 +66,4 @@ torchgeo-bench run \
   resume=true \
   output=results/all_results.csv \
   eval.intrinsic_dim.enabled=true \
-  eval.model_perf.enabled=true
+  eval.profile.enabled=true
