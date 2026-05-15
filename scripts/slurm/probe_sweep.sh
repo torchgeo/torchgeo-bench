@@ -57,10 +57,17 @@ done
 export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-/projects/bgtj/isaaccorley/cache/geobreeze_weights}
 mkdir -p "$MODEL_WEIGHTS_DIR"
 
+# Shared HuggingFace cache so big terratorch/torchgeo backbones don't
+# re-download per task.  HF_HOME is the umbrella var (covers hub, datasets,
+# transformers) and overrides the per-job $HOME/.cache/huggingface default.
+export HF_HOME=${HF_HOME:-/projects/bgtj/isaaccorley/cache/hf}
+mkdir -p "$HF_HOME"
+
 torchgeo-bench run \
   model="${MODEL}" \
   dataset.names="[${DATASET}]" \
   dataset.bands="${BANDS}" \
+  dataset.batch_size="${TGB_BATCH_SIZE:-256}" \
   dataset.num_workers="${TGB_NUM_WORKERS:-4}" \
   dataset.normalization="${NORM}" \
   resume=true \

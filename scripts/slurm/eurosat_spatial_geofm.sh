@@ -8,10 +8,24 @@
 # for method in {knn5, linear, intrinsic_dim, profile}.
 #
 # Usage:
-#   bash scripts/slurm/eurosat_spatial_geofm.sh            # submit array
-#   DRY_RUN=1 bash scripts/slurm/eurosat_spatial_geofm.sh  # print sbatch cmd, don't submit
+#   bash scripts/slurm/eurosat_spatial_geofm.sh                # gpu_a100
+#   bash scripts/slurm/eurosat_spatial_geofm.sh --preempt      # preempt partition
+#   DRY_RUN=1 bash scripts/slurm/eurosat_spatial_geofm.sh ...  # print sbatch cmd, don't submit
+#
+# --preempt: submit to the preempt partition with --requeue, so jobs
+# killed by higher-priority work are re-queued automatically.  Combined
+# with resume=true in probe_sweep.sh, killed tasks pick up cleanly on the
+# next slot; many more concurrent slots cuts wall time substantially.
 
 set -euo pipefail
+
+PREEMPT=0
+for arg in "$@"; do
+  case "$arg" in
+    --preempt) PREEMPT=1 ;;
+    *) echo "unknown arg: $arg" >&2; exit 2 ;;
+  esac
+done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -32,8 +46,11 @@ SBATCH_CMD=(
   sbatch
   --array="0-${ARRAY_MAX}"
   --export=ALL,JOBS_FILE="$JOBS_FILE"
-  scripts/slurm/probe_sweep.sh
 )
+if [[ "$PREEMPT" -eq 1 ]]; then
+  SBATCH_CMD+=(--partition=preempt --requeue)
+fi
+SBATCH_CMD+=(scripts/slurm/probe_sweep.sh)
 
 echo "[3/3] ${SBATCH_CMD[*]}"
 if [[ "${DRY_RUN:-0}" == "1" ]]; then

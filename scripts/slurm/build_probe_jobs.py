@@ -83,8 +83,10 @@ DEFAULT_MODELS: list[str] = [
     "timm/vit/vit_large_patch16_dinov3sat",
     # DINOv3 ViT-Large web-pretrained (natural-image baseline, RGB-only)
     "timm/vit/vit_large_patch16_dinov3",
-    # OlmoEarth (direct olmoearth-pretrain-minimal path)
-    "olmoearth_base",
+    # OlmoEarth (direct olmoearth-pretrain-minimal path) — disabled: HF
+    # weight download hangs on the cluster; re-enable after caching weights
+    # locally.
+    # "olmoearth_base",
     # baselines
     "rcf",
     "imagestats",
