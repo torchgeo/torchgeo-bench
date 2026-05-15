@@ -2061,6 +2061,15 @@ wheels = [
 ]
 
 [[package]]
+name = "nvidia-ml-py"
+version = "13.595.45"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ce/49/c29f6e30d8662d2e94fef17739ea7309cc76aba269922ae999e4cc07f268/nvidia_ml_py-13.595.45.tar.gz", hash = "sha256:c9f34897fe0441ff35bc8f35baf80f830a20b0f4e6ce71e0a325bc0e66acf079", size = 50780, upload-time = "2026-03-19T16:59:44.956Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/24/fc256107d23597fa33d319505ce77160fa1a2349c096d01901ffc7cb7fc4/nvidia_ml_py-13.595.45-py3-none-any.whl", hash = "sha256:b65a7977f503d56154b14d683710125ef93594adb63fbf7e559336e3318f1376", size = 51776, upload-time = "2026-03-19T16:59:43.603Z" },
+]
+
+[[package]]
 name = "nvidia-nccl-cu13"
 version = "2.28.9"
 source = { registry = "https://pypi.org/simple" }
@@ -2616,6 +2625,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+]
+
+[[package]]
+name = "pynvml"
+version = "13.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nvidia-ml-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5c/57/da7dc63a79f59e082e26a66ac02d87d69ea316b35b35b7a00d82f3ce3d2f/pynvml-13.0.1.tar.gz", hash = "sha256:1245991d9db786b4d2f277ce66869bd58f38ac654e38c9397d18f243c8f6e48f", size = 35226, upload-time = "2025-09-05T20:33:25.377Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/4a/cac76c174bb439a0c46c9a4413fcbea5c6cabfb01879f7bbdb9fdfaed76c/pynvml-13.0.1-py3-none-any.whl", hash = "sha256:e2b20e0a501eeec951e2455b7ab444759cf048e0e13a57b08049fa2775266aa8", size = 28810, upload-time = "2025-09-05T20:33:24.13Z" },
 ]
 
 [[package]]
@@ -3964,6 +3985,7 @@ all = [
     { name = "pillow" },
     { name = "pre-commit" },
     { name = "pydata-sphinx-theme" },
+    { name = "pynvml" },
     { name = "pyproject-fmt" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -4006,8 +4028,9 @@ id = [
 olmoearth = [
     { name = "olmoearth-pretrain-minimal" },
 ]
-perf = [
+profile = [
     { name = "fvcore" },
+    { name = "pynvml" },
 ]
 sam3 = [
     { name = "transformers" },
@@ -4025,7 +4048,7 @@ requires-dist = [
     { name = "cleanlab", marker = "extra == 'cleanlab'", specifier = ">=2.7" },
     { name = "faiss-cpu", specifier = ">=1.7" },
     { name = "faissknn", marker = "extra == 'cuda'", specifier = ">=0.0.3" },
-    { name = "fvcore", marker = "extra == 'perf'", specifier = ">=0.1.5" },
+    { name = "fvcore", marker = "extra == 'profile'", specifier = ">=0.1.5" },
     { name = "geobenchv2", specifier = ">=0.9" },
     { name = "h5py", specifier = ">=3.8" },
     { name = "huggingface-hub", specifier = ">=0.20" },
@@ -4044,6 +4067,7 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'viz'", specifier = ">=9" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.3" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.15" },
+    { name = "pynvml", marker = "extra == 'profile'", specifier = ">=11.5" },
     { name = "pyproject-fmt", marker = "extra == 'dev'", specifier = ">=2.21" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
@@ -4061,7 +4085,7 @@ requires-dist = [
     { name = "torchgeo-bench", extras = ["dev"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["docs"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["id"], marker = "extra == 'all'" },
-    { name = "torchgeo-bench", extras = ["perf"], marker = "extra == 'all'" },
+    { name = "torchgeo-bench", extras = ["profile"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["sam3"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["terratorch"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["viz"], marker = "extra == 'all'" },
@@ -4070,7 +4094,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.65" },
     { name = "transformers", marker = "extra == 'sam3'", specifier = ">=4.50" },
 ]
-provides-extras = ["all", "cleanlab", "cuda", "dev", "docs", "id", "olmoearth", "perf", "sam3", "terratorch", "viz"]
+provides-extras = ["all", "cleanlab", "cuda", "dev", "docs", "id", "olmoearth", "profile", "sam3", "terratorch", "viz"]
 
 [[package]]
 name = "torchid"
