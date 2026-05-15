@@ -1,0 +1,99 @@
+# Cloud GPU on-demand list prices ($/hr) by (provider, instance_type, gpu_model).
+#
+# Sources (last refreshed 2026-05-15):
+#   - AWS:    https://aws.amazon.com/ec2/instance-types/  (us-east-1 on-demand)
+#   - Azure:  https://azure.microsoft.com/pricing/details/virtual-machines/  (East US pay-as-you-go)
+#   - GCP:    https://cloud.google.com/compute/all-pricing  (us-central1 on-demand)
+#
+# Notes:
+#   - Prices listed are for a *single instance* (which may host multiple GPUs);
+#     divide by `num_gpus` to amortise per-GPU.
+#   - List price is generous; spot/savings-plans/CUDs run 30–70% cheaper.
+#   - The `gpu_model` field must match the NVML name string captured by
+#     model_profile.measure_profile (use `nvidia-smi -L` to verify).
+
+instances:
+  # ---------- NVIDIA A100 40 GB ----------
+  - provider: aws
+    instance_type: p4d.24xlarge
+    gpu_model: NVIDIA A100-SXM4-40GB
+    num_gpus: 8
+    usd_per_hr: 32.7726
+  - provider: gcp
+    instance_type: a2-highgpu-1g
+    gpu_model: NVIDIA A100-SXM4-40GB
+    num_gpus: 1
+    usd_per_hr: 3.6730
+  - provider: azure
+    instance_type: Standard_ND96asr_v4
+    gpu_model: NVIDIA A100-SXM4-40GB
+    num_gpus: 8
+    usd_per_hr: 27.197
+
+  # ---------- NVIDIA A100 80 GB ----------
+  - provider: aws
+    instance_type: p4de.24xlarge
+    gpu_model: NVIDIA A100-SXM4-80GB
+    num_gpus: 8
+    usd_per_hr: 40.9656
+  - provider: gcp
+    instance_type: a2-ultragpu-1g
+    gpu_model: NVIDIA A100-SXM4-80GB
+    num_gpus: 1
+    usd_per_hr: 5.07
+  - provider: azure
+    instance_type: Standard_ND96amsr_A100_v4
+    gpu_model: NVIDIA A100-SXM4-80GB
+    num_gpus: 8
+    usd_per_hr: 32.77
+
+  # ---------- NVIDIA H100 80 GB ----------
+  - provider: aws
+    instance_type: p5.48xlarge
+    gpu_model: NVIDIA H100 80GB HBM3
+    num_gpus: 8
+    usd_per_hr: 98.32
+  - provider: gcp
+    instance_type: a3-highgpu-1g
+    gpu_model: NVIDIA H100 80GB HBM3
+    num_gpus: 1
+    usd_per_hr: 11.06
+  - provider: azure
+    instance_type: Standard_ND96isr_H100_v5
+    gpu_model: NVIDIA H100 80GB HBM3
+    num_gpus: 8
+    usd_per_hr: 98.32
+
+  # ---------- NVIDIA L4 / L40S (inference-class) ----------
+  - provider: aws
+    instance_type: g6.xlarge
+    gpu_model: NVIDIA L4
+    num_gpus: 1
+    usd_per_hr: 0.8048
+  - provider: gcp
+    instance_type: g2-standard-4
+    gpu_model: NVIDIA L4
+    num_gpus: 1
+    usd_per_hr: 0.7050
+  - provider: aws
+    instance_type: g6e.xlarge
+    gpu_model: NVIDIA L40S
+    num_gpus: 1
+    usd_per_hr: 1.8610
+
+  # ---------- NVIDIA T4 (legacy inference) ----------
+  - provider: aws
+    instance_type: g4dn.xlarge
+    gpu_model: Tesla T4
+    num_gpus: 1
+    usd_per_hr: 0.526
+  - provider: gcp
+    instance_type: n1-standard-4 + 1x T4
+    gpu_model: Tesla T4
+    num_gpus: 1
+    usd_per_hr: 0.35
+  - provider: azure
+    instance_type: Standard_NC4as_T4_v3
+    gpu_model: Tesla T4
+    num_gpus: 1
+    usd_per_hr: 0.526

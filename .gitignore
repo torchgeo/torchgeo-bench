@@ -12,6 +12,11 @@ scripts/*
 !scripts/eurosat_family_dedup.py
 !scripts/cleanlab_per_class_multilabel.py
 !scripts/cleanlab_per_class_singlelabel.py
+!scripts/analyze_compute_cost.py
+!scripts/cost/
+scripts/cost/*
+!scripts/cost/gpu_prices.yaml
+!scripts/cost/carbon_intensity.yaml
 !scripts/slurm/
 scripts/slurm/*
 !scripts/slurm/build_probe_jobs.py
