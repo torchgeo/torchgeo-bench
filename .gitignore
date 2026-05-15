@@ -24,6 +24,7 @@ scripts/slurm/*
 !scripts/slurm/knn_gpu_smoke.sh
 !scripts/slurm/cleanlab_audit.sh
 !scripts/slurm/cleanlab_audit.jobs
+!scripts/slurm/eurosat_spatial_geofm.sh
 figures/
 
 # Python
