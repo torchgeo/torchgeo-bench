@@ -26,6 +26,7 @@ from torchgeo_bench.datasets import (
 from torchgeo_bench.intrinsic_dim import compute_intrinsic_dim
 from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
+from torchgeo_bench.model_perf import measure_model_perf
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.segmentation_probe import (
     SegmentationProbe,
@@ -491,6 +492,51 @@ def evaluate_intrinsic_dim(
     return rows
 
 
+def evaluate_model_perf(
+    model: BenchModel,
+    sample_loader: DataLoader,
+    device: torch.device,
+    n_warmup: int,
+    n_measure: int,
+    common_meta: dict,
+    feature_dim: int,
+    n_counts: dict[str, int],
+) -> list[dict]:
+    """Measure backbone throughput / memory / GMACs and return CSV rows.
+
+    One row per metric, with ``method="model_perf"``.
+    """
+    try:
+        sample = next(iter(sample_loader))["image"].to(device)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[model-perf] could not fetch sample batch: {exc}; skipping")
+        return []
+
+    metrics = measure_model_perf(model, sample, device, n_warmup=n_warmup, n_measure=n_measure)
+    rows: list[dict] = []
+    for name, value in metrics.items():
+        if value is None:
+            continue
+        rows.append(
+            EvaluationResult(
+                **common_meta,
+                method="model_perf",
+                metric_name=name,
+                metric_value=float(value),
+                ci_lower=0.0,
+                ci_upper=0.0,
+                feature_dim=feature_dim,
+                best_c=None,
+                best_lr=None,
+                best_batch_size=None,
+                n_train=n_counts.get("train", 0),
+                n_val=n_counts.get("val", 0),
+                n_test=n_counts.get("test", 0),
+            ).to_row()
+        )
+    return rows
+
+
 def evaluate_segmentation(
     model: torch.nn.Module,
     train_loader: DataLoader,
@@ -714,6 +760,7 @@ def main(cfg: DictConfig) -> None:
         seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
         id_key = (ds_name, "intrinsic_dim", cfg.model._target_, cfg.model.name, *config_tuple)
+        perf_key = (ds_name, "model_perf", cfg.model._target_, cfg.model.name, *config_tuple)
 
         try:
             result = get_datasets(
@@ -878,8 +925,11 @@ def main(cfg: DictConfig) -> None:
             id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
             id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
             skip_id = (not id_enabled) or (cfg.resume and id_key in completed_runs)
+            perf_cfg = getattr(cfg.eval, "model_perf", None)
+            perf_enabled = bool(perf_cfg and perf_cfg.get("enabled", False))
+            skip_perf = (not perf_enabled) or (cfg.resume and perf_key in completed_runs)
 
-            if skip_knn and skip_linear and skip_id:
+            if skip_knn and skip_linear and skip_id and skip_perf:
                 continue
 
             x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
@@ -967,6 +1017,23 @@ def main(cfg: DictConfig) -> None:
                     verbose=cfg.verbose,
                 )
                 all_rows.extend(id_rows)
+
+            if not skip_perf:
+                perf_rows = evaluate_model_perf(
+                    model=model,
+                    sample_loader=train_loader,
+                    device=torch.device(cfg.device),
+                    n_warmup=int(perf_cfg.get("n_warmup", 3)),
+                    n_measure=int(perf_cfg.get("n_measure", 20)),
+                    common_meta=common_meta,
+                    feature_dim=feature_dim,
+                    n_counts={
+                        "train": len(x_train),
+                        "val": len(x_val),
+                        "test": len(x_test),
+                    },
+                )
+                all_rows.extend(perf_rows)
 
         append_rows_atomic(output_path, all_rows)
         all_rows.clear()
