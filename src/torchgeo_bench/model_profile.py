@@ -7,12 +7,18 @@ dataloader overhead. Reports:
 - ``latency_ms_per_batch_p50`` — median per-batch forward latency
 - ``peak_gpu_mem_gb`` — peak CUDA memory during measurement
 - ``params_m`` — total parameter count (millions)
-- ``gmacs`` — MACs for one sample, via ``fvcore`` if installed; ``None`` otherwise
+- ``reserved_gpu_mem_gb`` — allocator-reserved VRAM (vs ``peak`` which is
+  the actually-used high-water mark; ratio reveals fragmentation)
+- ``gflops`` — FLOPs for one sample via ``torch.utils.flop_counter``
+  (stdlib, no extra dep; handles modern ops like SDPA / ViT attention
+  that fvcore misses)
 - ``gpu_power_w_avg`` — mean GPU power draw during the timed loop (NVIDIA only)
 - ``energy_wh_per_1k_samples`` — derived from power * time / samples
+- ``sm_utilization_avg`` — mean GPU compute-utilization percentage during
+  the timed loop (NVIDIA only)
 
-GMACs requires ``fvcore``; energy/power requires ``pynvml`` (both in the
-``[profile]`` extra). All other metrics work without extra deps.
+Energy/power/SM-utilization require ``pynvml`` (in the ``[profile]``
+extra). All other metrics work without extras.
 """
 
 import contextlib
@@ -32,34 +38,41 @@ def _count_params(model: nn.Module) -> float:
     return total / 1e6
 
 
-def _count_gmacs(model: nn.Module, sample: torch.Tensor) -> float | None:
+def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float | None:
+    """Run one forward pass under torch's FlopCounterMode for a single sample.
+
+    Uses ``torch.utils.flop_counter`` (in stdlib torch since 2.0) — no extra
+    deps and handles modern ops (SDPA, ViT attention) that fvcore misses.
+    Returns ``None`` if the import is unavailable or the counter errors.
+    """
     try:
-        from fvcore.nn import FlopCountAnalysis
+        from torch.utils.flop_counter import FlopCounterMode
     except ImportError:
-        logger.info("fvcore not installed — GMACs unavailable (`pip install fvcore`).")
+        logger.info("torch.utils.flop_counter unavailable — GFLOPs disabled.")
         return None
 
     one = sample[:1]
     try:
-        flop = FlopCountAnalysis(model, one)
-        flop.unsupported_ops_warnings(False)
-        flop.uncalled_modules_warnings(False)
-        return float(flop.total()) / 1e9
+        with FlopCounterMode(display=False) as counter, torch.inference_mode():
+            model(one)
+        return float(counter.get_total_flops()) / 1e9
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"fvcore FlopCountAnalysis failed: {exc}")
+        logger.warning(f"FlopCounterMode failed: {exc}")
         return None
 
 
-class _NvmlPowerSampler:
-    """Background thread that polls NVML power draw (mW) into a list.
+class _NvmlSampler:
+    """Background thread polling NVML power (mW) and GPU utilization (%).
 
     No-ops when pynvml is unavailable or NVML init fails; ``samples_w``
-    stays empty and callers should treat power as ``None``.
+    and ``samples_sm_util`` stay empty and callers should treat the
+    derived metrics as ``None``.
     """
 
     def __init__(self, gpu_index: int, interval_s: float = 0.05) -> None:
         self.interval_s = interval_s
         self.samples_w: list[float] = []
+        self.samples_sm_util: list[float] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._handle = None
@@ -71,9 +84,9 @@ class _NvmlPowerSampler:
             self._pynvml = pynvml
             self._handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
         except Exception as exc:  # noqa: BLE001
-            logger.info(f"pynvml unavailable — GPU power/energy disabled ({exc}).")
+            logger.info(f"pynvml unavailable — GPU power/util disabled ({exc}).")
 
-    def __enter__(self) -> "_NvmlPowerSampler":
+    def __enter__(self) -> "_NvmlSampler":
         if self._handle is None:
             return self
         self._stop.clear()
@@ -94,6 +107,8 @@ class _NvmlPowerSampler:
             try:
                 mw = self._pynvml.nvmlDeviceGetPowerUsage(self._handle)
                 self.samples_w.append(mw / 1000.0)
+                util = self._pynvml.nvmlDeviceGetUtilizationRates(self._handle)
+                self.samples_sm_util.append(float(util.gpu))
             except Exception:  # noqa: BLE001
                 break
             self._stop.wait(self.interval_s)
@@ -135,7 +150,7 @@ def measure_profile(
             torch.cuda.reset_peak_memory_stats(device)
 
         per_batch_ms: list[float] = []
-        with _NvmlPowerSampler(gpu_index) as power:
+        with _NvmlSampler(gpu_index) as nvml:
             t0 = time.perf_counter()
             for _ in range(n_measure):
                 tb0 = time.perf_counter()
@@ -144,12 +159,14 @@ def measure_profile(
                     torch.cuda.synchronize(device)
                 per_batch_ms.append((time.perf_counter() - tb0) * 1000.0)
             total_s = time.perf_counter() - t0
-            power_samples = list(power.samples_w)
+            power_samples = list(nvml.samples_w)
+            util_samples = list(nvml.samples_sm_util)
 
     throughput = (batch_size * n_measure) / total_s
     latency_p50 = median(per_batch_ms)
     peak_gb = torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None
-    gmacs = _count_gmacs(model, sample_batch)
+    reserved_gb = torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None
+    gflops = _count_gflops(model, sample_batch)
     params_m = _count_params(model)
 
     if power_samples:
@@ -159,13 +176,16 @@ def measure_profile(
     else:
         gpu_power_w_avg = None
         energy_wh_per_1k = None
+    sm_util_avg = sum(util_samples) / len(util_samples) if util_samples else None
 
     return {
         "throughput_samples_per_sec": float(throughput),
         "latency_ms_per_batch_p50": float(latency_p50),
         "peak_gpu_mem_gb": float(peak_gb) if peak_gb is not None else None,
+        "reserved_gpu_mem_gb": float(reserved_gb) if reserved_gb is not None else None,
         "params_m": float(params_m),
-        "gmacs": gmacs,
+        "gflops": gflops,
         "gpu_power_w_avg": gpu_power_w_avg,
         "energy_wh_per_1k_samples": energy_wh_per_1k,
+        "sm_utilization_avg": sm_util_avg,
     }

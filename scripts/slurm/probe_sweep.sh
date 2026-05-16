@@ -41,7 +41,7 @@ echo "[$(date)] task=$SLURM_ARRAY_TASK_ID model=$MODEL dataset=$DATASET bands=$B
 
 cd "$SLURM_SUBMIT_DIR"
 
-VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv-3.12}
+VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 source "$VENV/bin/activate"
 
 # Auto-trust torch.hub repos so AnySat etc. don't block on an interactive

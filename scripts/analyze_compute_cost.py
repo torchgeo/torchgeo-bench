@@ -34,9 +34,11 @@ PROFILE_METRICS = (
     "energy_wh_per_1k_samples",
     "gpu_power_w_avg",
     "params_m",
-    "gmacs",
+    "gflops",
     "latency_ms_per_batch_p50",
     "peak_gpu_mem_gb",
+    "reserved_gpu_mem_gb",
+    "sm_utilization_avg",
 )
 
 
