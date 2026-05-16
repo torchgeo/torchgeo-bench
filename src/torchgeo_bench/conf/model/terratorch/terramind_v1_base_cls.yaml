@@ -1,7 +1,0 @@
-_target_: torchgeo_bench.models.TerraTorchTerraMindBench
-backbone_name: terramind_v1_base
-pretrained: true
-target_size: 224
-modality: S2L2A
-name: tt_terramind_v1_base_cls
-pool: cls

@@ -31,10 +31,6 @@ terratorch/prithvi_eo_v2_600_cls eurosat-spatial rgb bandspec_zscore
 terratorch/prithvi_eo_v2_600_cls eurosat-spatial all bandspec_zscore
 terratorch/clay_v1_5_cls eurosat-spatial rgb bandspec_zscore
 terratorch/clay_v1_5_cls eurosat-spatial all bandspec_zscore
-terratorch/terramind_v1_base_cls eurosat-spatial rgb bandspec_zscore
-terratorch/terramind_v1_base_cls eurosat-spatial all bandspec_zscore
-terratorch/terramind_v1_large_cls eurosat-spatial rgb bandspec_zscore
-terratorch/terramind_v1_large_cls eurosat-spatial all bandspec_zscore
 torchgeo/scalemae_large_fmow_cls eurosat-spatial rgb bandspec_zscore
 EOF
 
