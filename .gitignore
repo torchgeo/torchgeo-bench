@@ -25,6 +25,7 @@ scripts/slurm/*
 !scripts/slurm/cleanlab_audit.sh
 !scripts/slurm/cleanlab_audit.jobs
 !scripts/slurm/eurosat_spatial_geofm.sh
+!scripts/slurm/eurosat_spatial_pool_ablation.sh
 figures/
 
 # Python
