@@ -3,7 +3,12 @@
 Reads ``results/all_results.csv``, writes today's snapshot to
 ``docs/_static/_results_snapshots/<label>.json``, then re-inlines every
 committed snapshot (newest first) into the explorer HTML and bumps the
-masthead.  Only ``knn5`` / ``linear`` rows are kept.
+masthead.  Keeps ``knn5`` / ``linear`` / ``profile`` rows; the explorer's
+Compute & efficiency figure joins the latter against the former.
+
+The GPU price / carbon intensity tables under ``scripts/cost/`` are
+inlined as JS constants so the explorer can extrapolate $ and kgCO2 per
+1M inferences in-browser, without a separate fetch.
 
 Usage::
 
@@ -17,10 +22,14 @@ import re
 from datetime import date
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH = ROOT / "results" / "all_results.csv"
 HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
 SNAPSHOT_DIR = ROOT / "docs" / "_static" / "_results_snapshots"
+COST_DIR = ROOT / "scripts" / "cost"
+ALLOWED_METHODS = ("knn5", "linear", "profile")
 
 COLUMNS = [
     "dataset",
@@ -80,7 +89,7 @@ def _load_csv_rows(label: str) -> list[dict]:
     rows = []
     with CSV_PATH.open() as fh:
         for r in csv.DictReader(fh):
-            if r["method"] not in ("knn5", "linear"):
+            if r["method"] not in ALLOWED_METHODS:
                 continue
             if not r.get("metric_value"):
                 continue
@@ -139,24 +148,35 @@ def main() -> None:
     flat_rows = [r for label in ordered_labels for r in snapshots[label]]
     snapshot_meta = [{"label": label, "rows": len(snapshots[label])} for label in ordered_labels]
 
-    n_models = len({r["name"] for r in latest_rows if r["name"]})
+    accuracy_rows = [r for r in latest_rows if r["method"] in ("knn5", "linear")]
+    n_models = len({r["name"] for r in accuracy_rows if r["name"]}) or len(
+        {r["name"] for r in latest_rows if r["name"]}
+    )
     n_datasets = len({r["dataset"] for r in latest_rows})
-    best = max(latest_rows, key=lambda r: r["metric_value"])
+    best = max(accuracy_rows or latest_rows, key=lambda r: r["metric_value"] or 0)
+
+    prices = yaml.safe_load((COST_DIR / "gpu_prices.yaml").read_text())["instances"]
+    carbon = yaml.safe_load((COST_DIR / "carbon_intensity.yaml").read_text())["regions"]
 
     js_columns = "const COLUMNS = " + json.dumps(COLUMNS) + ";"
     js_numeric = "const NUMERIC_COLS = " + json.dumps(sorted(NUMERIC)) + ";"
     js_snaps = "const SNAPSHOTS = " + json.dumps(snapshot_meta) + ";"
     js_default = "const DEFAULT_SNAPSHOT = " + json.dumps(latest_label) + ";"
     js_data = "const DATA = " + json.dumps(flat_rows, separators=(",", ":")) + ";"
+    js_prices = "const GPU_PRICES = " + json.dumps(prices, separators=(",", ":")) + ";"
+    js_carbon = "const CARBON_INTENSITY = " + json.dumps(carbon, separators=(",", ":")) + ";"
 
     text = HTML_PATH.read_text()
     pattern = re.compile(
         r"const COLUMNS = \[.*?\];\s*const NUMERIC_COLS = \[.*?\];"
         r"(?:\s*const SNAPSHOTS = \[.*?\];)?(?:\s*const DEFAULT_SNAPSHOT = \"[^\"]*\";)?"
-        r"\s*const DATA = \[.*?\];",
+        r"\s*const DATA = \[.*?\];"
+        r"(?:\s*const GPU_PRICES = \[.*?\];)?(?:\s*const CARBON_INTENSITY = \[.*?\];)?",
         re.DOTALL,
     )
-    new_block = "\n".join([js_columns, js_numeric, js_snaps, js_default, js_data])
+    new_block = "\n".join(
+        [js_columns, js_numeric, js_snaps, js_default, js_data, js_prices, js_carbon]
+    )
     if not pattern.search(text):
         raise SystemExit("Could not locate COLUMNS/NUMERIC_COLS/DATA block in HTML.")
     text = pattern.sub(new_block, text, count=1)
