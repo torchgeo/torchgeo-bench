@@ -102,7 +102,31 @@ def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
             f"FlopCounterMode no_grad rejected by {type(model).__name__}: "
             f"{exc}; retrying under enable_grad with requires_grad input."
         )
-    return _measure_with_autograd()
+    try:
+        return _measure_with_autograd()
+    except AssertionError as exc:
+        # 'Expected gradient function to be set' even after enable_grad +
+        # requires_grad=True on the input.  Observed on
+        # torchgeo.models.Panopticon: its PanopticonChnFusion path
+        # introduces a tensor (chn_ids / mask / conv3d input) that breaks
+        # the autograd chain before module_tracker's pre-hook fires.
+        # There are no more contexts to try from this module; a fix has
+        # to land in panopticon.py upstream (carry requires_grad through
+        # chnfus) or in torch's module_tracker (don't require grad_fn).
+        # Raise a typed signal so the caller can record gflops=None *for
+        # this specific known-incompatible model* without a generic
+        # swallow.
+        if "Expected gradient function" not in str(exc):
+            raise
+        raise NotImplementedError(
+            f"{type(model).__name__} is incompatible with "
+            f"torch.utils.flop_counter.FlopCounterMode: all three execution "
+            f"contexts (inference_mode, no_grad, enable_grad+requires_grad) "
+            f"fail with the same AssertionError from module_tracker — its "
+            f"forward graph drops grad_fn before the pre-hook fires.  GFLOPs "
+            f"cannot be measured for this model with the current tooling; "
+            f"fix needs to land in the model's own forward or in torch."
+        ) from exc
 
 
 class _NvmlSampler:
@@ -223,7 +247,15 @@ def measure_profile(
     latency_p50 = median(per_batch_ms)
     peak_gb = torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None
     reserved_gb = torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None
-    gflops = _count_gflops(model, sample_batch)
+    # Catch only the typed signal _count_gflops raises for known-
+    # incompatible models (currently Panopticon).  Any other exception
+    # propagates so we keep investigating new failure modes instead of
+    # silently writing None.
+    try:
+        gflops: float | None = _count_gflops(model, sample_batch)
+    except NotImplementedError as exc:
+        logger.warning(f"[profile] {exc}")
+        gflops = None
     params_m = _count_params(model)
 
     if power_samples:
