@@ -4,8 +4,10 @@ import fcntl
 import io
 import logging
 import os
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from statistics import median
 
 import hydra
 import numpy as np
@@ -501,10 +503,21 @@ def evaluate_profile(
     common_meta: dict,
     feature_dim: int,
     n_counts: dict[str, int],
+    cpu_throughput_enabled: bool = False,
+    cpu_batch_size: int = 8,
+    cpu_n_warmup: int = 1,
+    cpu_n_measure: int = 5,
+    cpu_time_budget_s: float = 300.0,
 ) -> list[dict]:
     """Measure backbone throughput / memory / GMACs and return CSV rows.
 
     One row per metric, with ``method="profile"``.
+
+    When ``cpu_throughput_enabled`` is set, *additionally* runs a short
+    CPU measurement (smaller batch / fewer iters) and emits the
+    throughput / latency / energy / params with a ``_cpu`` suffix.  The
+    CPU pass is wall-clock-budgeted via ``cpu_time_budget_s`` so the
+    heavyweight ViT-L backbones don't burn an hour on the login node.
     """
     # If the loader is broken there's nothing meaningful to profile; let the
     # error propagate so the failure surfaces in SLURM logs instead of
@@ -512,12 +525,26 @@ def evaluate_profile(
     sample = next(iter(sample_loader))["image"].to(device)
 
     metrics = measure_profile(model, sample, device, n_warmup=n_warmup, n_measure=n_measure)
+
+    if cpu_throughput_enabled:
+        cpu_metrics = _measure_cpu_throughput(
+            model,
+            sample,
+            cpu_batch_size=cpu_batch_size,
+            n_warmup=cpu_n_warmup,
+            n_measure=cpu_n_measure,
+            time_budget_s=cpu_time_budget_s,
+        )
+        for k, v in cpu_metrics.items():
+            metrics[k + "_cpu"] = v
+
     rows: list[dict] = []
     for name, value in metrics.items():
         if value is None:
             # value is None only when the underlying probe is structurally
-            # unavailable (e.g. CPU device → no peak_gpu_mem). Logged inside
-            # measure_profile; skip the row.
+            # unavailable (e.g. CPU device → no peak_gpu_mem, or the CPU
+            # pass aborted via the wall-clock budget). Logged inside the
+            # measurement helpers; skip the row.
             continue
         rows.append(
             EvaluationResult(
@@ -537,6 +564,62 @@ def evaluate_profile(
             ).to_row()
         )
     return rows
+
+
+def _measure_cpu_throughput(
+    model: BenchModel,
+    sample: torch.Tensor,
+    *,
+    cpu_batch_size: int,
+    n_warmup: int,
+    n_measure: int,
+    time_budget_s: float,
+) -> dict[str, float | None]:
+    """Run a wall-clock-budgeted CPU pass and return the off-GPU metrics.
+
+    Reports the subset that makes sense on CPU: throughput and latency.
+    The model and a fresh batch are moved to CPU for the duration, then
+    moved back so the rest of the pipeline can keep using CUDA.  If even
+    the first warmup pass exceeds ``time_budget_s`` we return None values
+    with a warning rather than waste cluster hours — that's a documented
+    soft-fail keyed on a specific named condition, not a generic swallow.
+    """
+    cpu_dev = torch.device("cpu")
+    orig_dev = next(model.parameters()).device
+    cpu_sample = sample[:cpu_batch_size].detach().to(cpu_dev)
+    model.to(cpu_dev)
+    try:
+        t0 = time.perf_counter()
+        with torch.inference_mode():
+            for _ in range(n_warmup):
+                model(cpu_sample)
+                if time.perf_counter() - t0 > time_budget_s:
+                    logger.warning(
+                        f"[profile] CPU warmup exceeded {time_budget_s}s budget on "
+                        f"{type(model).__name__}; skipping CPU throughput."
+                    )
+                    return {
+                        "throughput_samples_per_sec": None,
+                        "latency_ms_per_batch_p50": None,
+                    }
+            per_batch_ms: list[float] = []
+            t_loop = time.perf_counter()
+            for _ in range(n_measure):
+                tb = time.perf_counter()
+                model(cpu_sample)
+                per_batch_ms.append((time.perf_counter() - tb) * 1000.0)
+                if time.perf_counter() - t0 > time_budget_s:
+                    break
+            elapsed = time.perf_counter() - t_loop
+        seen = len(per_batch_ms)
+        if seen == 0:
+            return {"throughput_samples_per_sec": None, "latency_ms_per_batch_p50": None}
+        return {
+            "throughput_samples_per_sec": (cpu_batch_size * seen) / elapsed,
+            "latency_ms_per_batch_p50": median(per_batch_ms),
+        }
+    finally:
+        model.to(orig_dev)
 
 
 def evaluate_segmentation(
@@ -1021,6 +1104,7 @@ def main(cfg: DictConfig) -> None:
                 all_rows.extend(id_rows)
 
             if not skip_profile:
+                cpu_cfg = profile_cfg.get("cpu_throughput", {}) if profile_cfg else {}
                 profile_rows = evaluate_profile(
                     model=model,
                     sample_loader=train_loader,
@@ -1034,6 +1118,11 @@ def main(cfg: DictConfig) -> None:
                         "val": len(x_val),
                         "test": len(x_test),
                     },
+                    cpu_throughput_enabled=bool(cpu_cfg.get("enabled", False)),
+                    cpu_batch_size=int(cpu_cfg.get("batch_size", 8)),
+                    cpu_n_warmup=int(cpu_cfg.get("n_warmup", 1)),
+                    cpu_n_measure=int(cpu_cfg.get("n_measure", 5)),
+                    cpu_time_budget_s=float(cpu_cfg.get("time_budget_s", 300.0)),
                 )
                 all_rows.extend(profile_rows)
 

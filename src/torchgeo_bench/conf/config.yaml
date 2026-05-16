@@ -50,6 +50,18 @@ eval:
     n_warmup: 3                      # forward passes discarded before timing
     n_measure: 20                    # timed forward passes
 
+    # Optional CPU pass — adds *_cpu metrics so the explorer can show
+    # deployability ("can I run this on a laptop?").  Big ViT-L
+    # backbones take minutes per batch on CPU, hence the wall-clock
+    # budget; tasks that exceed it write None for the cpu metrics with
+    # a warning and don't block the rest of the sweep.
+    cpu_throughput:
+      enabled: false
+      batch_size: 8                  # smaller than GPU batch — CPUs choke at 256
+      n_warmup: 1
+      n_measure: 5
+      time_budget_s: 300.0           # hard cap per (model, dataset)
+
   segmentation:
     head_type: "fpn"
     layers: []                 # must be overridden per model for segmentation datasets

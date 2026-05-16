@@ -73,4 +73,5 @@ torchgeo-bench run \
   resume=true \
   output=results/all_results.csv \
   eval.intrinsic_dim.enabled=true \
-  eval.profile.enabled=true
+  eval.profile.enabled=true \
+  eval.profile.cpu_throughput.enabled=true
