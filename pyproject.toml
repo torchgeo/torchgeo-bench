@@ -95,7 +95,6 @@ optional-dependencies.olmoearth = [
   "olmoearth-pretrain-minimal>=0.0.2",
 ]
 optional-dependencies.profile = [
-  "fvcore>=0.1.5",
   "pynvml>=11.5",
 ]
 optional-dependencies.sam3 = [
