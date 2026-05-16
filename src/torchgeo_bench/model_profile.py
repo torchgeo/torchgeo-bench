@@ -41,24 +41,39 @@ def _count_params(model: nn.Module) -> float:
 def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float | None:
     """Run one forward pass under torch's FlopCounterMode for a single sample.
 
-    Uses ``torch.utils.flop_counter`` (in stdlib torch since 2.0) — no extra
-    deps and handles modern ops (SDPA, ViT attention) that fvcore misses.
-    Returns ``None`` if the import is unavailable or the counter errors.
+    Uses ``torch.utils.flop_counter`` (stdlib torch since 2.0). The counter
+    relies on ``__torch_dispatch__`` and is incompatible with some custom
+    forwards (e.g. ``Panopticon`` raises
+    ``'NoneType' object has no attribute 'next_functions'`` because one of
+    its hooks returns ``None`` where dispatch expects a tensor).
+
+    On dispatch errors we fall back to ``no_grad`` instead of
+    ``inference_mode`` — the latter disables version-counting which some
+    custom modules rely on.  If that also fails we surface the error so
+    callers can decide whether to skip a metric or fail loudly; we no
+    longer swallow it and write ``None`` to the CSV.
     """
-    try:
-        from torch.utils.flop_counter import FlopCounterMode
-    except ImportError:
-        logger.info("torch.utils.flop_counter unavailable — GFLOPs disabled.")
-        return None
+    from torch.utils.flop_counter import FlopCounterMode
 
     one = sample[:1]
-    try:
-        with FlopCounterMode(display=False) as counter, torch.inference_mode():
+
+    def _measure(ctx: "torch.utils._contextlib.ContextDecorator") -> float:
+        with FlopCounterMode(display=False) as counter, ctx:
             model(one)
         return float(counter.get_total_flops()) / 1e9
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"FlopCounterMode failed: {exc}")
-        return None
+
+    try:
+        return _measure(torch.inference_mode())
+    except AttributeError as exc:
+        # Specifically the "NoneType .. next_functions" path; retry under
+        # no_grad which keeps version counters enabled.
+        if "next_functions" not in str(exc):
+            raise
+        logger.info(
+            f"FlopCounterMode inference_mode rejected by {type(model).__name__}: "
+            f"{exc}; retrying under no_grad."
+        )
+        return _measure(torch.no_grad())
 
 
 class _NvmlSampler:
@@ -79,12 +94,17 @@ class _NvmlSampler:
         self._pynvml = None
         try:
             import pynvml
-
+        except ImportError:
+            logger.info("pynvml not installed — GPU power/util disabled.")
+            return
+        try:
             pynvml.nvmlInit()
             self._pynvml = pynvml
             self._handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
-        except Exception as exc:  # noqa: BLE001
-            logger.info(f"pynvml unavailable — GPU power/util disabled ({exc}).")
+        except pynvml.NVMLError as exc:
+            logger.info(
+                f"pynvml installed but NVML init failed — GPU power/util disabled ({exc})."
+            )
 
     def __enter__(self) -> "_NvmlSampler":
         if self._handle is None:
@@ -103,13 +123,21 @@ class _NvmlSampler:
                 self._pynvml.nvmlShutdown()
 
     def _poll(self) -> None:
+        nvml = self._pynvml
         while not self._stop.is_set():
             try:
-                mw = self._pynvml.nvmlDeviceGetPowerUsage(self._handle)
+                mw = nvml.nvmlDeviceGetPowerUsage(self._handle)
                 self.samples_w.append(mw / 1000.0)
-                util = self._pynvml.nvmlDeviceGetUtilizationRates(self._handle)
+                util = nvml.nvmlDeviceGetUtilizationRates(self._handle)
                 self.samples_sm_util.append(float(util.gpu))
-            except Exception:  # noqa: BLE001
+            except nvml.NVMLError as exc:
+                # Specific NVML error mid-run is worth knowing about; don't
+                # silently degrade.  Log and stop polling but keep what
+                # samples we have.
+                logger.warning(
+                    f"NVML poll failed after {len(self.samples_w)} samples ({exc}); "
+                    f"stopping power/util sampling for this measurement."
+                )
                 break
             self._stop.wait(self.interval_s)
 

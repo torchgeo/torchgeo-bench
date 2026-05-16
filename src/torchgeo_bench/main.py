@@ -506,16 +506,18 @@ def evaluate_profile(
 
     One row per metric, with ``method="profile"``.
     """
-    try:
-        sample = next(iter(sample_loader))["image"].to(device)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"[model-perf] could not fetch sample batch: {exc}; skipping")
-        return []
+    # If the loader is broken there's nothing meaningful to profile; let the
+    # error propagate so the failure surfaces in SLURM logs instead of
+    # silently appending zero rows and "succeeding" the task.
+    sample = next(iter(sample_loader))["image"].to(device)
 
     metrics = measure_profile(model, sample, device, n_warmup=n_warmup, n_measure=n_measure)
     rows: list[dict] = []
     for name, value in metrics.items():
         if value is None:
+            # value is None only when the underlying probe is structurally
+            # unavailable (e.g. CPU device → no peak_gpu_mem). Logged inside
+            # measure_profile; skip the row.
             continue
         rows.append(
             EvaluationResult(
