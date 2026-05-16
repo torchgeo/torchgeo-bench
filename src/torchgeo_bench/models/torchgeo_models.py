@@ -33,6 +33,7 @@ from torchvision.transforms.v2 import Normalize as NormalizeV2
 from torchgeo_bench.datasets.base import BandSpec
 
 from ._input_units import InputUnit, detect_input_unit
+from ._pooling import VALID_MODES, pool_tokens
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -354,8 +355,8 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
 class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
     """Wrapper for torchgeo ScaleMAE-Large.
 
-    ``forward_features()`` returns ``(B, N+1, D)`` tokens; we average spatial
-    tokens (dropping CLS at index 0) to produce ``(B, D)``.
+    ``forward_features()`` returns ``(B, N+1, D)`` tokens; ``pool`` selects
+    between CLS, mean-pooled patch tokens, or their concatenation.
     """
 
     weights_input_unit = "uint8_div255"
@@ -370,6 +371,7 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         auto_resize: bool = True,
         target_size: int | None = 224,
         input_unit_check: str = "warn",
+        pool: str = "mean",
         **_kwargs: Any,
     ) -> None:
         super().__init__(
@@ -381,6 +383,9 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
             target_size=target_size,
             input_unit_check=input_unit_check,
         )
+        if pool not in VALID_MODES:
+            raise ValueError(f"pool={pool!r} not in {VALID_MODES}")
+        self.pool = pool
 
     @torch.no_grad()
     def _forward_patch_features(
@@ -390,7 +395,7 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         tokens = self.backbone.forward_features(images)  # (B, N+1, D)
-        return tokens[:, 1:, :].mean(dim=1)
+        return pool_tokens(tokens, mode=self.pool)
 
 
 # ---------------------------------------------------------------------------

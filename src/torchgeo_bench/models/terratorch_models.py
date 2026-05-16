@@ -11,6 +11,7 @@ from torchgeo_bench.datasets.base import BandSpec
 
 from ._band_mapping import map_to_model_bands
 from ._input_units import InputUnit
+from ._pooling import VALID_MODES, pool_tokens
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -37,24 +38,19 @@ def _maybe_resize(images: torch.Tensor, size: int | None) -> torch.Tensor:
     return F.interpolate(images, size=(size, size), mode="bicubic", align_corners=False)
 
 
-def _pool_tokens(tokens: torch.Tensor) -> torch.Tensor:
-    """Mean-pool ``(B, N, D)`` tokens, dropping a CLS token if N is square+1."""
-    if tokens.ndim != 3:
-        return tokens
-    n = tokens.shape[1]
-    side = int(round(n**0.5))
-    if side * side == n - 1:
-        return tokens[:, 1:, :].mean(dim=1)
-    return tokens.mean(dim=1)
-
-
-def _reduce_to_vec(out: torch.Tensor | list | tuple) -> torch.Tensor:
+def _reduce_to_vec(out: torch.Tensor | list | tuple, pool: str) -> torch.Tensor:
     if isinstance(out, list | tuple):
         out = out[-1]
     if out.ndim == 4:
-        return out.mean(dim=(-2, -1))
+        # Spatial feature maps: mean / cls both reduce to a GAP; "both" doubles
+        # the feature dim by concatenating GAP + max-pooled features.
+        gap = out.mean(dim=(-2, -1))
+        if pool == "both":
+            mp = out.amax(dim=(-2, -1))
+            return torch.cat([gap, mp], dim=-1)
+        return gap
     if out.ndim == 3:
-        return _pool_tokens(out)
+        return pool_tokens(out, mode=pool)
     return out
 
 
@@ -69,10 +65,14 @@ class _TerraTorchBench(BenchModel):
         *,
         target_size: int | None = 224,
         backbone_kwargs: dict[str, Any] | None = None,
+        pool: str = "mean",
         **kwargs: Any,
     ) -> None:
         super().__init__(bands=bands, **kwargs)
+        if pool not in VALID_MODES:
+            raise ValueError(f"pool={pool!r} not in {VALID_MODES}")
         self.target_size = target_size
+        self.pool = pool
         self.backbone = _build_backbone(self.backbone_name, **(backbone_kwargs or {}))
         self.backbone.eval()
         for p in self.backbone.parameters():
@@ -87,7 +87,7 @@ class _TerraTorchBench(BenchModel):
     ) -> torch.Tensor:
         del bboxes
         x = _maybe_resize(self._prepare_input(images), self.target_size)
-        return _reduce_to_vec(self.backbone(x))
+        return _reduce_to_vec(self.backbone(x), pool=self.pool)
 
 
 PRITHVI_BANDS: list[str] = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
