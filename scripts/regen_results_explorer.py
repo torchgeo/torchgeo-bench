@@ -29,7 +29,7 @@ CSV_PATH = ROOT / "results" / "all_results.csv"
 HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
 SNAPSHOT_DIR = ROOT / "docs" / "_static" / "_results_snapshots"
 COST_DIR = ROOT / "scripts" / "cost"
-ALLOWED_METHODS = ("knn5", "linear", "profile")
+ALLOWED_METHODS = ("knn5", "linear", "profile", "intrinsic_dim")
 
 COLUMNS = [
     "dataset",
