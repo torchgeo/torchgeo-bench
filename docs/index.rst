@@ -19,3 +19,4 @@
 
    user/index
    api/index
+   interesting-findings
