@@ -169,7 +169,10 @@ class TerraTorchClayBench(_TerraTorchBench):
     ) -> torch.Tensor:
         del bboxes
         x = _maybe_resize(self._prepare_input(images), self.target_size)
-        return _reduce_to_vec(self.backbone(x, waves=self._clay_waves.to(x.device), gsd=self.gsd))
+        return _reduce_to_vec(
+            self.backbone(x, waves=self._clay_waves.to(x.device), gsd=self.gsd),
+            pool=self.pool,
+        )
 
 
 TERRAMIND_S2L2A_BANDS: list[str] = [
@@ -219,4 +222,4 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         del bboxes
         x, _ = map_to_model_bands(images, self.bands, TERRAMIND_S2L2A_BANDS)
         x = _maybe_resize(x, self.target_size)
-        return _reduce_to_vec(self.backbone({self.modality: x}))
+        return _reduce_to_vec(self.backbone({self.modality: x}), pool=self.pool)
