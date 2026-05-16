@@ -100,45 +100,51 @@ class TestComputeBasic:
 
 
 class TestErrorHandling:
+    @requires_torchid
     def test_unknown_estimator_raises(self) -> None:
         """Estimator lookup failures surface immediately — we no longer
-        swallow them as NaN, which previously hid the TwoNN bug."""
+        swallow them as NaN, which previously hid the TwoNN bug.
+
+        Needs the real torchid because the error is raised by
+        ``_load_estimator`` after a successful import; without torchid it
+        raises ImportError first (still a propagated failure, just from
+        a different layer)."""
         X = np.random.RandomState(0).randn(100, 5).astype(np.float32)
         with pytest.raises(ValueError, match="Unknown torchid estimator"):
             compute_intrinsic_dim(
                 X, estimators=["NotARealEstimator"], device="cpu", max_samples=None
             )
 
+    @requires_torchid
     def test_failing_estimator_propagates(self) -> None:
         """A torchid-internal exception propagates — we don't silently
-        write NaN for it, because that previously hid real bugs."""
+        write NaN for it, because that previously hid real bugs.
+
+        Patches the torchid estimators registry rather than swapping the
+        whole module so ``torchid.primitives`` (used by the
+        zero-distance dedup) keeps working."""
+        import torchid.estimators as real_estimators
 
         class _Boom:
             def fit(self, X: torch.Tensor) -> "_Boom":  # noqa: ARG002
                 raise RuntimeError("boom")
 
-        fake_module = mock.MagicMock()
-        fake_module.Boom = _Boom
-        fake_pkg = mock.MagicMock()
-        fake_pkg.estimators = fake_module
-
         X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
         with (
-            mock.patch.dict(
-                "sys.modules", {"torchid": fake_pkg, "torchid.estimators": fake_module}
-            ),
+            mock.patch.object(real_estimators, "Boom", _Boom, create=True),
             pytest.raises(RuntimeError, match="boom"),
         ):
             compute_intrinsic_dim(X, estimators=["Boom"], device="cpu", max_samples=None)
 
     def test_missing_torchid_raises_importerror(self) -> None:
+        """ImportError from ``_load_estimator`` propagates instead of
+        becoming a silent NaN row."""
         from torchgeo_bench import intrinsic_dim as mod
 
         X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
-        # Force ImportError inside _load_estimator regardless of install state.
         with (
-            mock.patch.object(mod, "_load_estimator", side_effect=ImportError("no torchid")),
-            pytest.raises(ImportError, match="no torchid"),
+            mock.patch.object(mod, "_load_estimator", side_effect=ImportError("forced")),
+            pytest.raises(ImportError, match="forced"),
         ):
             compute_intrinsic_dim(X, estimators=["TwoNN"], device="cpu", max_samples=None)
 

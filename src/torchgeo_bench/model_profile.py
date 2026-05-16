@@ -21,7 +21,6 @@ Energy/power/SM-utilization require ``pynvml`` (in the ``[profile]``
 extra). All other metrics work without extras.
 """
 
-import contextlib
 import logging
 import threading
 import time
@@ -102,9 +101,7 @@ class _NvmlSampler:
             self._pynvml = pynvml
             self._handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
         except pynvml.NVMLError as exc:
-            logger.info(
-                f"pynvml installed but NVML init failed — GPU power/util disabled ({exc})."
-            )
+            logger.info(f"pynvml installed but NVML init failed — GPU power/util disabled ({exc}).")
 
     def __enter__(self) -> "_NvmlSampler":
         if self._handle is None:
@@ -119,8 +116,10 @@ class _NvmlSampler:
             self._stop.set()
             self._thread.join()
         if self._pynvml is not None:
-            with contextlib.suppress(Exception):
+            try:
                 self._pynvml.nvmlShutdown()
+            except self._pynvml.NVMLError as exc:
+                logger.warning(f"nvmlShutdown failed: {exc} (likely benign at exit)")
 
     def _poll(self) -> None:
         nvml = self._pynvml

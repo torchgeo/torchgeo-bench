@@ -66,6 +66,20 @@ def _subsample(X: np.ndarray, max_samples: int | None, seed: int) -> np.ndarray:
     return X[idx]
 
 
+def _two_nearest_distances(X: torch.Tensor) -> torch.Tensor:
+    """Pairwise (d1, d2) for each row, computed via ``torch.cdist``.
+
+    Same shape and meaning as ``torchid.primitives.knn(X, k=2)[0]`` but
+    has no torchid dependency, so the dedup runs in environments where
+    we haven't installed the ``[id]`` extra (e.g. CI without
+    Python 3.13).  We don't need indices, just the smallest two
+    distances per row.
+    """
+    dist = torch.cdist(X, X)
+    dist.fill_diagonal_(float("inf"))
+    return dist.topk(k=2, largest=False).values
+
+
 def _drop_zero_distance_rows(X_tensor: torch.Tensor) -> torch.Tensor:
     """Drop rows whose computed nearest-neighbour distance underflows to zero.
 
@@ -80,9 +94,7 @@ def _drop_zero_distance_rows(X_tensor: torch.Tensor) -> torch.Tensor:
     where ``d1 == 0`` or ``d2 == 0`` so the remaining set has well-defined
     distance ratios.
     """
-    from torchid.primitives import knn
-
-    d, _ = knn(X_tensor, k=2)
+    d = _two_nearest_distances(X_tensor)
     keep = (d[:, 0] > 0) & (d[:, 1] > 0)
     n_drop = int((~keep).sum().item())
     if n_drop > 0:
@@ -139,9 +151,7 @@ def compute_intrinsic_dim(
         est: Any = cls().fit(X_tensor)
         value = float(est.dimension_)
         if not np.isfinite(value):
-            from torchid.primitives import knn
-
-            d, _ = knn(X_tensor, k=2)
+            d = _two_nearest_distances(X_tensor)
             d1, d2 = d[:, 0], d[:, 1]
             raise ValueError(
                 f"[intrinsic-dim] {name} returned non-finite dimension ({value}) on "
