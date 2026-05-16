@@ -67,17 +67,27 @@ def _subsample(X: np.ndarray, max_samples: int | None, seed: int) -> np.ndarray:
 
 
 def _two_nearest_distances(X: torch.Tensor) -> torch.Tensor:
-    """Pairwise (d1, d2) for each row, computed via ``torch.cdist``.
+    """Pairwise (d1, d2) for each row, matching torchid's knn precision.
 
-    Same shape and meaning as ``torchid.primitives.knn(X, k=2)[0]`` but
-    has no torchid dependency, so the dedup runs in environments where
-    we haven't installed the ``[id]`` extra (e.g. CI without
-    Python 3.13).  We don't need indices, just the smallest two
-    distances per row.
+    We deliberately replicate torchid's exact squared-distance formula
+    (``x_sq + y_sq − 2·x·y.T`` then ``clamp_(min=0)``) instead of using
+    ``torch.cdist``.  ``cdist`` is more numerically stable on CUDA, so
+    its distances disagree with torchid's at the underflow boundary —
+    that mismatch was hiding a TwoNN nan we just debugged (sweep 88205,
+    Prithvi v1_100): the dedup said ``d1.min = 9.96e-3, zeros = 0`` but
+    torchid's internal knn produced ``d1 == 0`` for the same rows
+    because its squared-distance formula cancels to a tiny negative,
+    gets clamped to 0, and underflows to 0 in fp32 after ``.sqrt()``.
+
+    Replicating the formula keeps dedup and the estimator agreeing on
+    which rows are degenerate.
     """
-    dist = torch.cdist(X, X)
-    dist.fill_diagonal_(float("inf"))
-    return dist.topk(k=2, largest=False).values
+    x_sq = (X * X).sum(dim=1, keepdim=True)
+    y_sq = x_sq.squeeze(1)
+    d_sq = (x_sq + y_sq.unsqueeze(0) - 2.0 * (X @ X.T)).clamp_(min=0.0)
+    d_sq.fill_diagonal_(float("inf"))
+    top2_sq = d_sq.topk(k=2, largest=False).values
+    return top2_sq.sqrt()
 
 
 def _drop_zero_distance_rows(X_tensor: torch.Tensor) -> torch.Tensor:

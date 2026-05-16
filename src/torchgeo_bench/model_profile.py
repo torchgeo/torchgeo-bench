@@ -37,42 +37,72 @@ def _count_params(model: nn.Module) -> float:
     return total / 1e6
 
 
-def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float | None:
+def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
     """Run one forward pass under torch's FlopCounterMode for a single sample.
 
-    Uses ``torch.utils.flop_counter`` (stdlib torch since 2.0). The counter
-    relies on ``__torch_dispatch__`` and is incompatible with some custom
-    forwards (e.g. ``Panopticon`` raises
-    ``'NoneType' object has no attribute 'next_functions'`` because one of
-    its hooks returns ``None`` where dispatch expects a tensor).
+    Uses ``torch.utils.flop_counter`` (stdlib torch since 2.0).  The
+    counter's ``module_tracker`` wants to call
+    ``register_multi_grad_hook`` on the activations, which requires every
+    intermediate tensor to have a ``grad_fn`` (i.e. autograd must be
+    enabled).  Three different contexts have to be tried in order from
+    cheapest to most permissive:
 
-    On dispatch errors we fall back to ``no_grad`` instead of
-    ``inference_mode`` — the latter disables version-counting which some
-    custom modules rely on.  If that also fails we surface the error so
-    callers can decide whether to skip a metric or fail loudly; we no
-    longer swallow it and write ``None`` to the CSV.
+    1. ``torch.inference_mode``: cheapest.  Works for most timm /
+       torchgeo backbones because their forwards don't trigger the
+       module-tracker code paths that need grad_fn.
+    2. ``torch.no_grad``: keeps the version counter that
+       ``inference_mode`` disables.  Catches forwards that rely on
+       ``inference_tensor`` returning a regular tensor.
+    3. ``torch.enable_grad`` with ``requires_grad=True`` on the input:
+       only path that gives every activation a grad_fn.  Required by
+       ``torchgeo.models.Panopticon``, which inside ``MultiheadAttention``
+       triggers ``register_multi_grad_hook`` on a non-leaf tensor and
+       raises ``AssertionError: Expected gradient function to be set``
+       otherwise.  More expensive (autograd graph is built and then
+       discarded) but still a single forward pass.
+
+    Each fallback only triggers on the *specific* exception that earlier
+    fallback can't handle, so genuine bugs in the counter surface
+    instead of being papered over.
     """
     from torch.utils.flop_counter import FlopCounterMode
 
-    one = sample[:1]
+    base = sample[:1]
 
-    def _measure(ctx: "torch.utils._contextlib.ContextDecorator") -> float:
-        with FlopCounterMode(display=False) as counter, ctx:
-            model(one)
+    def _measure_no_autograd(ctx_factory) -> float:
+        with FlopCounterMode(display=False) as counter, ctx_factory():
+            model(base)
+        return float(counter.get_total_flops()) / 1e9
+
+    def _measure_with_autograd() -> float:
+        inp = base.detach().clone().requires_grad_(True)
+        with FlopCounterMode(display=False) as counter, torch.enable_grad():
+            model(inp)
         return float(counter.get_total_flops()) / 1e9
 
     try:
-        return _measure(torch.inference_mode())
+        return _measure_no_autograd(torch.inference_mode)
     except AttributeError as exc:
-        # Specifically the "NoneType .. next_functions" path; retry under
-        # no_grad which keeps version counters enabled.
+        # 'NoneType' object has no attribute 'next_functions' — only
+        # the dispatch-vs-inference-tensor mismatch.
         if "next_functions" not in str(exc):
             raise
         logger.info(
             f"FlopCounterMode inference_mode rejected by {type(model).__name__}: "
             f"{exc}; retrying under no_grad."
         )
-        return _measure(torch.no_grad())
+    try:
+        return _measure_no_autograd(torch.no_grad)
+    except AssertionError as exc:
+        # 'Expected gradient function to be set' — the module_tracker
+        # needs activations to have grad_fn; only enable_grad provides that.
+        if "Expected gradient function" not in str(exc):
+            raise
+        logger.info(
+            f"FlopCounterMode no_grad rejected by {type(model).__name__}: "
+            f"{exc}; retrying under enable_grad with requires_grad input."
+        )
+    return _measure_with_autograd()
 
 
 class _NvmlSampler:
