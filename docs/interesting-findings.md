@@ -70,3 +70,122 @@ Today the wrappers in `src/torchgeo_bench/models/` mostly hard-code
 their pooling choice. Worth adding a `pooling: cls|mean|both` config
 knob and re-running the GeoFM sweep with each — could meaningfully
 change Prithvi / Clay numbers and the resulting ID estimates.
+
+## CLS pool beats mean across full GeoBench (Prithvi, all v1+v2) (2026-05-17)
+
+The 2026-05-16 finding above noted CLS-token collapse on EuroSAT.  The
+full GeoBench v1+v2 sweep (10 datasets, 28 model variants) tells a
+different story: **CLS-token linear-probe accuracy beats mean-pool by
++2 to +6 points across all Prithvi families**, averaged over every
+(dataset, bands, normalization) cell:
+
+| Model family | Δ (cls − mean), avg over 40 cells |
+|---|---|
+| `tt_prithvi_eo_v2_600` | **+0.060** |
+| `tt_prithvi_eo_v2_300` | **+0.060** |
+| `tt_prithvi_eo_v2_300_tl` | **+0.051** |
+| `tt_prithvi_eo_v1_100` | **+0.050** |
+| `tt_prithvi_eo_v2_100_tl` | **+0.021** |
+| `tt_clay_v1_5_base` | -0.002 |
+| `tgeo_scalemae_large_fmow` | -0.006 |
+
+Implication: the previous EuroSAT-only observation was real but
+specific — EuroSAT's visually homogeneous classes plus MAE pretraining
+land enough patches in the same CLS cluster to crater the linear
+probe.  On harder datasets (forestnet, treesatai, the so2sat family)
+the CLS token actually carries more linearly-separable signal than
+average-pooled patches.  Clay and ScaleMAE are roughly neutral.
+
+The pool=cls vs mean ablation should stay; the safe default for
+Prithvi linear probing is CLS, not mean.
+
+## `model_native` is catastrophic for Prithvi (2026-05-17)
+
+The sweep enabled a per-(model, dataset) comparison of
+`bandspec_zscore` vs `model_native` normalization.  Surprising blowup
+on Prithvi:
+
+| Model | bandspec_zscore | model_native | Δ |
+|---|---|---|---|
+| `tt_prithvi_eo_v2_300` | 0.719 | 0.472 | **−0.247** |
+| `tt_prithvi_eo_v2_600` | 0.725 | 0.481 | **−0.244** |
+| `tt_prithvi_eo_v2_100_tl` | 0.712 | 0.474 | **−0.238** |
+| `tt_prithvi_eo_v2_300_tl` | 0.712 | 0.478 | **−0.234** |
+| `tt_prithvi_eo_v1_100` | 0.689 | 0.484 | **−0.205** |
+
+All `prithvi_*_cls` variants drop ~−0.08 to −0.11 (smaller but still
+big).  Clay and Terramind drop ~−0.04, the timm and most torchgeo
+backbones are roughly neutral.
+
+The Prithvi terratorch wrappers declare
+`expected_input_unit = InputUnit.S2_DN`, which under `model_native`
+triggers a `/10000` reflectance conversion before pretrain-stat
+centring.  The conversion is correct on raw S2 DN input, but
+`bandspec_zscore` had already z-scored the input distribution in a
+way the encoder evidently expects — the round-trip through the
+reflectance pipeline takes ~20 points of linear-probe accuracy.
+
+Defensible default: `bandspec_zscore` for all linear probing.  Treat
+`model_native` as a diagnostic, not a baseline.
+
+## DINOv3 (web + sat493m) is competitive with GeoFMs across the board (2026-05-17)
+
+DINOv3 ViT-L (timm checkpoint, no satellite-specific pretraining
+beyond `sat493m`) tops the linear-probe leaderboard on **5 of 10**
+GeoBench classification datasets:
+
+| Dataset | Winner | Score |
+|---|---|---|
+| `m-brick-kiln` | `vit_large_patch16_dinov3sat` | **0.976** |
+| `forestnet` | `vit_large_patch16_dinov3sat` | **0.580** |
+| `m-forestnet` | `vit_large_patch16_dinov3sat` | **0.582** |
+| `treesatai` | `vit_large_patch16_dinov3sat` | **0.682** |
+| `m-pv4ger` | `vit_large_patch16_dinov3` | **0.974** |
+| `m-eurosat` | `tgeo_dofa_large` | 0.973 |
+| `m-so2sat` | `tt_terramind_v1_base` | 0.739 |
+| `so2sat` | `tt_terramind_v1_base` | 0.743 |
+| `benv2` | `tt_terramind_v1_large` | 0.846 |
+| `m-bigearthnet` | `tt_terramind_v1_large` | 0.750 |
+
+`sat493m` was pretrained on Maxar WorldView imagery (heads-up that the
+pretrain mean/std `(0.43, 0.41, 0.30)` come from that domain), yet the
+features transfer cleanly to Sentinel-2 RGB datasets that DINOv3 has
+never seen during pretraining.  `vit_large_patch16_dinov3` (web
+pretrain, ImageNet stats) wins on m-pv4ger (NAIP RGB) where the
+deployment domain is closest to natural imagery.
+
+`model_native` (timm's pretrained stats) is consistently slightly
+worse than `bandspec_zscore` for both DINOv3 variants — single-digit
+negative deltas, max −8% on m-so2sat / so2sat.  Confirms the
+Maxar-derived stats don't transfer perfectly across sensors, even
+when they are *a* reasonable normalization.
+
+## Cross-dataset intrinsic dimensions are small and stable (2026-05-17)
+
+TwoNN median intrinsic dimension across 28 model variants, per
+dataset:
+
+| Dataset | Median TwoNN ID |
+|---|---|
+| `m-bigearthnet` | 12.1 |
+| `benv2` | 12.0 |
+| `m-pv4ger` | 11.3 |
+| `treesatai` | 10.4 |
+| `m-brick-kiln` | 10.1 |
+| `m-eurosat` | 8.7 |
+| `so2sat` | 7.9 |
+| `m-so2sat` | 7.8 |
+| `forestnet` | 6.7 |
+| `m-forestnet` | 6.4 |
+
+Embedded feature manifolds live in 6–12 effective dimensions for
+every backbone we tested, on 768/1024-D embeddings.  The forestnet
+pair sits at the bottom — those are also the hardest-to-classify
+datasets (peak linear acc ~58%), consistent with low intrinsic
+information content.
+
+One outlier worth flagging: `tgeo_resnet50_s2rgb_moco` reports TwoNN
+ID ≈ 365 on so2sat and m-so2sat, vs ≤ 100 for every other
+(model, dataset) cell.  Likely either a normalization mismatch
+inflating the manifold or genuine high-dim noise in that backbone's
+final features — follow-up diagnostic.

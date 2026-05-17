@@ -51,6 +51,7 @@ SINGLE_BAND_MODE_MODELS: dict[str, str] = {
     "torchgeo/dofa_base": "rgb",
     "torchgeo/dofa_large": "rgb",
     "torchgeo/scalemae_large_fmow": "rgb",
+    "torchgeo/scalemae_large_fmow_cls": "rgb",
     "torchgeo/earthloc_s2_resnet50": "rgb",
     # DINOv3 ViT-Large pretrained on sat493m (RGB satellite imagery).
     "timm/vit/vit_large_patch16_dinov3sat": "rgb",
@@ -91,6 +92,20 @@ DEFAULT_MODELS: list[str] = [
     "rcf",
     "imagestats",
 ]
+
+# _cls variants of MAE-pretrained GeoFM backbones.  Pairs with the
+# mean-pool defaults to give a CLS-vs-mean ablation per dataset.
+# Terramind has no CLS token (architecture lacks one) so it's excluded.
+CLS_VARIANT_MODELS: list[str] = [
+    "terratorch/prithvi_eo_v1_100_cls",
+    "terratorch/prithvi_eo_v2_100_tl_cls",
+    "terratorch/prithvi_eo_v2_300_cls",
+    "terratorch/prithvi_eo_v2_300_tl_cls",
+    "terratorch/prithvi_eo_v2_600_cls",
+    "terratorch/clay_v1_5_cls",
+    "torchgeo/scalemae_large_fmow_cls",
+]
+
 
 DEFAULT_CLASSIFICATION_DATASETS: list[str] = [
     "m-eurosat",
@@ -134,6 +149,11 @@ def main() -> None:
     )
     parser.add_argument("--include-segmentation", action="store_true")
     parser.add_argument(
+        "--include-cls-variants",
+        action="store_true",
+        help="Also emit _cls pooling variants for MAE backbones (CLS-vs-mean ablation).",
+    )
+    parser.add_argument(
         "--datasets-version",
         choices=["v1", "v2", "both"],
         default="v1",
@@ -148,6 +168,10 @@ def main() -> None:
     args = parser.parse_args()
 
     models = _parse_csv(args.models, DEFAULT_MODELS)
+    if args.include_cls_variants:
+        for m in CLS_VARIANT_MODELS:
+            if m not in models:
+                models.append(m)
     if args.datasets:
         datasets = _parse_csv(args.datasets, DEFAULT_CLASSIFICATION_DATASETS)
     else:

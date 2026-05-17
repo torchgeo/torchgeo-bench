@@ -466,13 +466,35 @@ def evaluate_intrinsic_dim(
                 f"[intrinsic-dim] split={split_name} X{X.shape} "
                 f"estimators={list(estimators)} device={device}"
             )
-        dims = compute_intrinsic_dim(
-            X,
-            estimators=list(estimators),
-            device=device,
-            max_samples=max_samples,
-            seed=seed,
-        )
+        # Per-estimator isolation: compute_intrinsic_dim raises on the
+        # *first* non-finite dimension (by design — surfaces fp32 bugs).
+        # During a long sweep that aborts the whole task and we lose KNN
+        # /linear/profile rows too.  Run each estimator separately so a
+        # genuinely-degenerate feature manifold (e.g. terramind features
+        # with d1==d2 collapsing TwoNN's log-ratio) only loses *that*
+        # estimator's row, not the rest of the task.
+        dims: dict[str, float] = {}
+        for est_name in estimators:
+            try:
+                dims.update(
+                    compute_intrinsic_dim(
+                        X,
+                        estimators=[est_name],
+                        device=device,
+                        max_samples=max_samples,
+                        seed=seed,
+                    )
+                )
+            except ValueError as exc:
+                if "non-finite dimension" not in str(exc):
+                    raise
+                logger.warning(
+                    f"[intrinsic-dim] {est_name} split={split_name} model={common_meta.get('model')} "
+                    f"dataset={common_meta.get('dataset')} bands={common_meta.get('bands')} "
+                    f"norm={common_meta.get('normalization')}: degenerate features, writing NaN. "
+                    f"Diagnostic: {exc}"
+                )
+                dims[est_name] = float("nan")
         for est_name, dim in dims.items():
             rows.append(
                 EvaluationResult(
@@ -585,7 +607,11 @@ def _measure_cpu_throughput(
     soft-fail keyed on a specific named condition, not a generic swallow.
     """
     cpu_dev = torch.device("cpu")
-    orig_dev = next(model.parameters()).device
+    # rcf/imagestats baselines have no parameters; use the input sample's
+    # device as the restoration target since model.to() is a no-op anyway.
+    params_iter = iter(model.parameters())
+    first_param = next(params_iter, None)
+    orig_dev = first_param.device if first_param is not None else sample.device
     cpu_sample = sample[:cpu_batch_size].detach().to(cpu_dev)
     model.to(cpu_dev)
     try:
