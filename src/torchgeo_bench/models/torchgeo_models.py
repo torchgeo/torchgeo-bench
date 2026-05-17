@@ -32,7 +32,7 @@ from torchvision.transforms.v2 import Normalize as NormalizeV2
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._input_units import InputUnit, detect_input_unit
+from ._input_units import InputUnit, convert_unit, detect_input_unit
 from ._pooling import VALID_MODES, pool_tokens
 from .interface import BenchModel
 
@@ -237,6 +237,18 @@ class _TorchGeoBackboneBench(BenchModel):
             )
         _warn_unit_mismatch(type(self).__name__, self.weights_input_unit, bands, input_unit_check)
 
+        # Pre-compute the unit conversion needed to bring dataset inputs
+        # into the scale the weights' Normalize was calibrated for.  No-op
+        # when the wrapper doesn't declare a unit, or the dataset already
+        # delivers the expected scale.  Without this, e.g.,
+        # resnet50_s2rgb_moco × so2sat collapses to chance because the
+        # Normalize ``/10000`` is applied to already-reflectance ([0, 2.8])
+        # values, producing near-zero inputs.
+        self._dataset_input_unit = detect_input_unit(self.bands)
+        self._weights_target_unit: InputUnit | None = _UNIT_EXPECTED_SOURCE.get(
+            self.weights_input_unit or ""
+        )
+
     def _load_backbone(self, weights, factory: str) -> nn.Module:
         return _resolve_torchgeo_factory(factory)(weights=weights)
 
@@ -301,7 +313,16 @@ class _TorchGeoBackboneBench(BenchModel):
         and the normalize stay consistent.  Results on N != 3 channels
         should be marked as "adapted*" since both layers deviate from the
         canonical pretrain pipeline.
+
+        Before applying the weights' Normalize we *also* convert the input
+        to the scale the Normalize was calibrated for.  Without this, a
+        reflectance-scaled dataset (e.g. so2sat in [0, 2.8]) hitting a
+        weights' ``Normalize(mean=[0], std=[10000])`` becomes near-zero
+        and the features collapse.
         """
+        # Scale conversion: bring inputs into the weights' expected unit.
+        if self._weights_target_unit is not None:
+            images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
         weights_norm = self._weights_normalize
         if weights_norm is not None:
             expected_c = None
@@ -493,7 +514,15 @@ def _resolve_dofa_wavelengths(
     bands: list[BandSpec],
     wavelengths: list[float] | None,
 ) -> list[float]:
-    """Return one DOFA wavelength per selected input channel."""
+    """Return one DOFA wavelength per selected input channel.
+
+    Raises on any ``BandSpec`` lacking ``wavelength_um`` rather than silently
+    defaulting to ~green (0.6 µm).  DOFA's wavelength embedding is the only
+    way the model "knows" what spectral channel each tensor index represents;
+    a silent default would assign green-band weights to e.g. SAR backscatter
+    channels and quietly produce garbage features.  Callers that genuinely
+    want a default must pass an explicit ``wavelengths=`` list.
+    """
     if wavelengths is not None:
         if len(wavelengths) != len(bands):
             raise ValueError(
@@ -502,9 +531,14 @@ def _resolve_dofa_wavelengths(
             )
         return [float(w) for w in wavelengths]
 
-    from ._band_mapping import wavelengths_um
-
-    return wavelengths_um(bands, default_um=0.6)
+    missing = [b.name for b in bands if b.wavelength_um is None]
+    if missing:
+        raise ValueError(
+            f"DOFA wavelengths missing for {missing}: every BandSpec must have a "
+            f"`wavelength_um` set.  SAR / non-optical channels need either an "
+            f"explicit wavelength or to be filtered out of the input."
+        )
+    return [float(b.wavelength_um) for b in bands]
 
 
 class TorchGeoDOFABench(_TorchGeoBackboneBench):
