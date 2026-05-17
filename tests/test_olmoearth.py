@@ -142,25 +142,103 @@ def test_reflectance_input_is_rescaled_to_dn() -> None:
     assert out.std() > 1e-4
 
 
-def test_rejects_unsupported_channel_count() -> None:
-    """4-channel input must fail loudly — OlmoEarth only handles 3, 10, or 12."""
+def test_rejects_unknown_band_name() -> None:
+    """A BandSpec name we have no OlmoEarth-position mapping for must fail
+    loudly so we don't quietly zero-fill every channel."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
-    four_bands = _rgb_bands() + [_rgb_bands()[0]]
-    with pytest.raises(ValueError, match=r"3 \(RGB\), 10 \(S2 no-B01/B09\)"):
-        OlmoEarthBenchModel(bands=four_bands, model_size="nano", normalization="identity")
+    weird_bands = [
+        BandSpec(
+            sensor="s2", name="totally_made_up", source_name="MADE_UP",
+            mean=1500.0, std=600.0, min=0.0, max=10000.0, wavelength_um=0.5,
+        )
+    ]
+    with pytest.raises(ValueError, match="can't map BandSpec names"):
+        OlmoEarthBenchModel(bands=weird_bands, model_size="nano", normalization="identity")
+
+
+@requires_olmoearth
+def test_rejects_mixed_sensors() -> None:
+    """A bands list spanning multiple sensors needs to be split per-call —
+    the wrapper picks one modality from sensor[0]."""
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    s2_band = BandSpec(
+        sensor="s2", name="blue", source_name="B02",
+        mean=1500.0, std=600.0, min=0.0, max=10000.0, wavelength_um=0.49,
+    )
+    landsat_band = BandSpec(
+        sensor="landsat", name="red", source_name="B4",
+        mean=80.0, std=20.0, min=0.0, max=255.0, wavelength_um=0.655,
+    )
+    with pytest.raises(ValueError, match="single sensor"):
+        OlmoEarthBenchModel(bands=[s2_band, landsat_band], model_size="nano", normalization="identity")
+
+
+@requires_olmoearth
+def test_landsat_modality_routing() -> None:
+    """Landsat input picks Modality.LANDSAT, not SENTINEL2_L2A.  The mask
+    should have 2 band-sets, the sample field should be 'landsat'."""
+    from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    # m-forestnet ships 6 Landsat bands.
+    names = ("blue", "green", "red", "nir", "swir_1", "swir_2")
+    landsat_bands = [
+        BandSpec(
+            sensor="landsat", name=n, source_name=n.upper(),
+            mean=80.0, std=20.0, min=0.0, max=255.0,
+        )
+        for n in names
+    ]
+    model = OlmoEarthBenchModel(bands=landsat_bands, model_size="nano", normalization="identity")
+    assert model._modality == Modality.LANDSAT
+    assert model._sample_field == "landsat"
+    assert model._target_channels == 11
+    assert model._num_band_sets == 2
+    model.eval()
+    x = torch.rand(2, 6, 64, 64) * 200.0  # uint8-ish Landsat
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
+def test_aerial_falls_back_to_s2() -> None:
+    """olmoearth-pretrain-minimal's encoder doesn't ship a NAIP branch,
+    so aerial-RGB datasets (m-pv4ger, treesatai aerial) have to route
+    through the S2 modality with non-RGB S2 positions zero-filled.
+    """
+    from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    naip_bands = [
+        BandSpec(
+            sensor="aerial", name=n, source_name=n.capitalize(),
+            mean=120.0, std=40.0, min=0.0, max=255.0,
+        )
+        for n in ("red", "green", "blue")
+    ]
+    model = OlmoEarthBenchModel(bands=naip_bands, model_size="nano", normalization="identity")
+    assert model._modality == Modality.SENTINEL2_L2A
+    assert model._sample_field == "sentinel2_l2a"
+    assert model._target_channels == 12
+    # red -> B04 (idx 2), green -> B03 (idx 1), blue -> B02 (idx 0)
+    assert model._band_indices == [2, 1, 0]
+    model.eval()
+    x = torch.rand(2, 3, 64, 64) * 200.0
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
 
 
 @requires_olmoearth
 def test_partial_s2_10band_forward_pass() -> None:
-    """10-band S2 input (m-so2sat-style) is zero-padded to 12 channels.
-
-    Caller passes the first 10 OlmoEarth bands; the wrapper fills B01/B09.
-    """
+    """10-band S2 input (m-so2sat-style, no B01/B09) routes through the
+    S2 modality with B01/B09 positions zero-filled by name-based mapping."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
-    # B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12
-    names = ["b02","b03","b04","b08","b05","b06","b07","b8a","b11","b12"]
+    names = ["b02", "b03", "b04", "b08", "b05", "b06", "b07", "b8a", "b11", "b12"]
     bands = [
         BandSpec(
             sensor="s2", name=n, source_name=n.upper(),
@@ -170,7 +248,10 @@ def test_partial_s2_10band_forward_pass() -> None:
     ]
     model = OlmoEarthBenchModel(bands=bands, model_size="nano", normalization="identity")
     model.eval()
-    assert model._partial_s2_mode is True
+    assert model._target_channels == 12
+    assert model._num_band_sets == 3
+    # B02..B12 map to positions 0..9; B01/B09 (positions 10/11) get zero-filled.
+    assert set(model._band_indices) == set(range(10))
     x = torch.rand(2, 10, 64, 64) * 3000.0
     out = model.forward_patch_features(x)
     assert out.shape == (2, EXPECTED_DIM["nano"])

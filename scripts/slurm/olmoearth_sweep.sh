@@ -43,12 +43,25 @@ else
   BANDS_OVERRIDE="dataset.bands=[${BANDS}]"
 fi
 
+# Auto-pick batch size by model size so we don't OOM on the 668M-param
+# large variant.  Override either side with TGB_BATCH_SIZE if needed.
+if [[ -n "${TGB_BATCH_SIZE:-}" ]]; then
+  BATCH_SIZE="${TGB_BATCH_SIZE}"
+elif [[ "$MODEL" == *"_large" ]]; then
+  BATCH_SIZE=32
+elif [[ "$MODEL" == *"_base" ]]; then
+  BATCH_SIZE=64
+else
+  BATCH_SIZE=128
+fi
+echo "[$(date)] batch_size=$BATCH_SIZE (auto-picked from model size)"
+
 torchgeo-bench run \
   model="${MODEL}" \
   "dataset.names=[${DATASET}]" \
   "${BANDS_OVERRIDE}" \
   dataset.image_size="${IMAGE_SIZE}" \
-  dataset.batch_size="${TGB_BATCH_SIZE:-128}" \
+  dataset.batch_size="${BATCH_SIZE}" \
   dataset.num_workers="${TGB_NUM_WORKERS:-4}" \
   resume=true \
   output=results/all_results.csv \
