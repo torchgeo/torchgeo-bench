@@ -24,6 +24,7 @@ import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
 
+from ._input_units import detect_input_unit, to_s2_dn
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,13 @@ class OlmoEarthBenchModel(BenchModel):
         self.do_normalize = normalize
         self._rgb_mode = self.num_channels == 3
 
+        # OlmoEarth's internal Normalizer expects raw S2 DN (0..~10000).  The
+        # input tensor's scale varies per dataset — m-eurosat / benv2 deliver
+        # DN, m-so2sat / so2sat deliver reflectance in [0, 2.8], m-pv4ger
+        # delivers uint8 NAIP.  Detect once at construction and rescale per
+        # batch inside _forward_patch_features.
+        self._input_unit = detect_input_unit(self.bands)
+
         model_id = getattr(ModelID, f"OLMOEARTH_V1_{model_size.upper()}")
         self.encoder_model = load_model_from_id(model_id, load_weights=True)
         self.normalizer = Normalizer(std_multiplier=std_multiplier)
@@ -176,6 +184,11 @@ class OlmoEarthBenchModel(BenchModel):
         )
 
         device = images.device
+
+        # Convert to S2 DN scale before any further processing — OlmoEarth's
+        # Normalizer (called below) is fitted on raw DN.  No-op when the
+        # dataset already delivers DN.
+        images = to_s2_dn(images, self._input_unit)
 
         if self._rgb_mode:
             images = self._rgb_to_s2(images)

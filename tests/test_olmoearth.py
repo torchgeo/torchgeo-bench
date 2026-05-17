@@ -101,6 +101,41 @@ def test_all_four_variants_are_loadable() -> None:
     }
 
 
+@requires_olmoearth
+def test_reflectance_input_is_rescaled_to_dn() -> None:
+    """Datasets like m-so2sat / so2sat deliver S2 reflectance in [0, ~2.8],
+    not raw DN.  The wrapper must detect this and rescale to DN before
+    OlmoEarth's Normalizer sees the values — otherwise the normalizer's
+    DN-fitted mean/std produce near-zero normalized inputs and embeddings
+    collapse.
+
+    We verify the scale-detection path picks ``REFLECTANCE_0_1`` for
+    so2sat-style band stats and that the forward pass produces non-degenerate
+    embeddings.
+    """
+    from torchgeo_bench.models._input_units import InputUnit
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    # so2sat-style band stats: optical reflectance with max ~2.8
+    refl_bands = [
+        BandSpec(
+            sensor="s2", name=n, source_name=n.upper(),
+            mean=0.13, std=0.07, min=0.0001, max=2.8, wavelength_um=0.5,
+        )
+        for n in ("red", "green", "blue")
+    ]
+    model = OlmoEarthBenchModel(bands=refl_bands, model_size="nano", normalization="identity")
+    assert model._input_unit == InputUnit.REFLECTANCE_0_1
+    model.eval()
+    x = torch.rand(2, 3, 64, 64) * 2.5  # reflectance-like values
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+    # Embeddings should have non-trivial variance — collapsed-to-zero
+    # embeddings would have std ~ 0.
+    assert out.std() > 1e-4
+
+
 def test_rejects_unsupported_channel_count() -> None:
     """4-channel input must fail loudly — OlmoEarth only handles 3 or 12."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel

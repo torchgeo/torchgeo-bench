@@ -26,6 +26,9 @@ scripts/slurm/*
 !scripts/slurm/cleanlab_audit.jobs
 !scripts/slurm/eurosat_spatial_geofm.sh
 !scripts/slurm/eurosat_spatial_pool_ablation.sh
+!scripts/slurm/olmoearth_sweep.py
+!scripts/slurm/olmoearth_sweep.sh
+!scripts/slurm/olmoearth_sweep.jobs
 figures/
 
 # Python
