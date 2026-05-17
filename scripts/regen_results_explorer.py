@@ -183,18 +183,26 @@ def main() -> None:
 
     text = re.sub(
         r'<h1 class="headline" id="headline-text">[^<]*</h1>',
-        f'<h1 class="headline" id="headline-text">How {n_models} frozen backbones perform on GeoBench V1</h1>',
+        (
+            '<h1 class="headline" id="headline-text">'
+            "Three winners on GeoBench: Panopticon on KNN, DINOv3-SAT on linear, "
+            "Terramind on multispectral"
+            "</h1>"
+        ),
         text,
     )
     text = re.sub(
         r'<p class="standfirst" id="standfirst-text">[^<]*<em>[^<]*</em>[^<]*</p>',
         (
-            f'<p class="standfirst" id="standfirst-text">A snapshot of '
-            f"{len(latest_rows):,} measurements across {n_datasets} classification "
-            f"datasets (RGB and full multispectral) and {n_models} model variants. "
-            f"The best configuration in this run reaches "
-            f"{best['metric_value'] * 100:.1f}% on <em>{best['dataset']}</em> — "
-            f"explore the data below.</p>"
+            f'<p class="standfirst" id="standfirst-text">'
+            f"Across {len(latest_rows):,} measurements on {n_datasets} GeoBench "
+            f"classification datasets and {n_models} frozen-backbone variants, three "
+            f"distinct leaders emerge: <em>Panopticon</em> tops KNN-5 on most datasets, "
+            f"<em>DINOv3-SAT</em> (RGB-only) leads the linear-probe leaderboard on "
+            f"<em>{best['dataset']}</em> at {best['metric_value'] * 100:.1f}% and four "
+            f"other datasets, and <em>Terramind</em> wins the multispectral datasets "
+            f"when all MSI bands are available."
+            "</p>"
         ),
         text,
     )
