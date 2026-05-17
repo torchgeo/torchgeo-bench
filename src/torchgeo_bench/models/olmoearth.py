@@ -68,18 +68,30 @@ _MODALITY_INFO: dict[str, dict] = {
         # OlmoEarth band_order: B02, B03, B04, B08, B05, B06, B07, B8A,
         # B11, B12, B01, B09.
         "name_to_idx": {
-            "blue": 0, "b02": 0,
-            "green": 1, "b03": 1,
-            "red": 2, "b04": 2,
-            "nir": 3, "b08": 3,
-            "red_edge_1": 4, "b05": 4,
-            "red_edge_2": 5, "b06": 5,
-            "red_edge_3": 6, "b07": 6,
-            "red_edge_4": 7, "b8a": 7,
-            "swir_1": 8, "b11": 8,
-            "swir_2": 9, "b12": 9,
-            "coastal_aerosol": 10, "b01": 10,
-            "water_vapour": 11, "b09": 11,
+            "blue": 0,
+            "b02": 0,
+            "green": 1,
+            "b03": 1,
+            "red": 2,
+            "b04": 2,
+            "nir": 3,
+            "b08": 3,
+            "red_edge_1": 4,
+            "b05": 4,
+            "red_edge_2": 5,
+            "b06": 5,
+            "red_edge_3": 6,
+            "b07": 6,
+            "red_edge_4": 7,
+            "b8a": 7,
+            "swir_1": 8,
+            "b11": 8,
+            "swir_2": 9,
+            "b12": 9,
+            "coastal_aerosol": 10,
+            "b01": 10,
+            "water_vapour": 11,
+            "b09": 11,
         },
     },
     "landsat": {
@@ -91,17 +103,32 @@ _MODALITY_INFO: dict[str, dict] = {
         # B9, B10, B11.  GeoBench m-forestnet (Landsat-8) typically
         # ships only B2/B3/B4/B5/B6/B7 under semantic names.
         "name_to_idx": {
-            "panchromatic": 0, "pan": 0, "b8": 0,
-            "coastal_aerosol": 1, "coastal": 1, "b1": 1,
-            "blue": 2, "b2": 2,
-            "green": 3, "b3": 3,
-            "red": 4, "b4": 4,
-            "nir": 5, "b5": 5,
-            "swir_1": 6, "b6": 6,
-            "swir_2": 7, "b7": 7,
-            "cirrus": 8, "b9": 8,
-            "tirs_1": 9, "thermal_1": 9, "b10": 9,
-            "tirs_2": 10, "thermal_2": 10, "b11": 10,
+            "panchromatic": 0,
+            "pan": 0,
+            "b8": 0,
+            "coastal_aerosol": 1,
+            "coastal": 1,
+            "b1": 1,
+            "blue": 2,
+            "b2": 2,
+            "green": 3,
+            "b3": 3,
+            "red": 4,
+            "b4": 4,
+            "nir": 5,
+            "b5": 5,
+            "swir_1": 6,
+            "b6": 6,
+            "swir_2": 7,
+            "b7": 7,
+            "cirrus": 8,
+            "b9": 8,
+            "tirs_1": 9,
+            "thermal_1": 9,
+            "b10": 9,
+            "tirs_2": 10,
+            "thermal_2": 10,
+            "b11": 10,
         },
     },
     # NAIP is *not* in olmoearth-pretrain-minimal's supported modalities
@@ -117,10 +144,14 @@ _MODALITY_INFO: dict[str, dict] = {
         "num_band_sets": 3,
         # S2 positions for the RGB triplet; NIR/IR if present goes to B08.
         "name_to_idx": {
-            "red": 2, "r": 2,
-            "green": 1, "g": 1,
-            "blue": 0, "b": 0,
-            "nir": 3, "ir": 3,
+            "red": 2,
+            "r": 2,
+            "green": 1,
+            "g": 1,
+            "blue": 0,
+            "b": 0,
+            "nir": 3,
+            "ir": 3,
         },
     },
 }
@@ -137,8 +168,7 @@ def _resolve_modality(bands: list[BandSpec]) -> dict:
     if not all(b.sensor.lower() == sensor for b in bands):
         sensors = sorted({b.sensor.lower() for b in bands})
         raise ValueError(
-            f"OlmoEarth wrapper expects a single sensor per call; "
-            f"got mixed sensors {sensors}."
+            f"OlmoEarth wrapper expects a single sensor per call; got mixed sensors {sensors}."
         )
     if sensor not in _MODALITY_INFO:
         raise ValueError(
@@ -262,9 +292,7 @@ class OlmoEarthBenchModel(BenchModel):
         the input doesn't supply a band.  Operates on the GPU.
         """
         B, _, H, W = images.shape
-        out = torch.zeros(
-            B, self._target_channels, H, W, device=images.device, dtype=images.dtype
-        )
+        out = torch.zeros(B, self._target_channels, H, W, device=images.device, dtype=images.dtype)
         for src_idx, dst_idx in enumerate(self._band_indices):
             out[:, dst_idx] = images[:, src_idx]
         return out

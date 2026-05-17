@@ -149,8 +149,14 @@ def test_rejects_unknown_band_name() -> None:
 
     weird_bands = [
         BandSpec(
-            sensor="s2", name="totally_made_up", source_name="MADE_UP",
-            mean=1500.0, std=600.0, min=0.0, max=10000.0, wavelength_um=0.5,
+            sensor="s2",
+            name="totally_made_up",
+            source_name="MADE_UP",
+            mean=1500.0,
+            std=600.0,
+            min=0.0,
+            max=10000.0,
+            wavelength_um=0.5,
         )
     ]
     with pytest.raises(ValueError, match="can't map BandSpec names"):
@@ -164,15 +170,29 @@ def test_rejects_mixed_sensors() -> None:
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     s2_band = BandSpec(
-        sensor="s2", name="blue", source_name="B02",
-        mean=1500.0, std=600.0, min=0.0, max=10000.0, wavelength_um=0.49,
+        sensor="s2",
+        name="blue",
+        source_name="B02",
+        mean=1500.0,
+        std=600.0,
+        min=0.0,
+        max=10000.0,
+        wavelength_um=0.49,
     )
     landsat_band = BandSpec(
-        sensor="landsat", name="red", source_name="B4",
-        mean=80.0, std=20.0, min=0.0, max=255.0, wavelength_um=0.655,
+        sensor="landsat",
+        name="red",
+        source_name="B4",
+        mean=80.0,
+        std=20.0,
+        min=0.0,
+        max=255.0,
+        wavelength_um=0.655,
     )
     with pytest.raises(ValueError, match="single sensor"):
-        OlmoEarthBenchModel(bands=[s2_band, landsat_band], model_size="nano", normalization="identity")
+        OlmoEarthBenchModel(
+            bands=[s2_band, landsat_band], model_size="nano", normalization="identity"
+        )
 
 
 @requires_olmoearth
@@ -180,14 +200,20 @@ def test_landsat_modality_routing() -> None:
     """Landsat input picks Modality.LANDSAT, not SENTINEL2_L2A.  The mask
     should have 2 band-sets, the sample field should be 'landsat'."""
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     # m-forestnet ships 6 Landsat bands.
     names = ("blue", "green", "red", "nir", "swir_1", "swir_2")
     landsat_bands = [
         BandSpec(
-            sensor="landsat", name=n, source_name=n.upper(),
-            mean=80.0, std=20.0, min=0.0, max=255.0,
+            sensor="landsat",
+            name=n,
+            source_name=n.upper(),
+            mean=80.0,
+            std=20.0,
+            min=0.0,
+            max=255.0,
         )
         for n in names
     ]
@@ -210,12 +236,18 @@ def test_aerial_falls_back_to_s2() -> None:
     through the S2 modality with non-RGB S2 positions zero-filled.
     """
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     naip_bands = [
         BandSpec(
-            sensor="aerial", name=n, source_name=n.capitalize(),
-            mean=120.0, std=40.0, min=0.0, max=255.0,
+            sensor="aerial",
+            name=n,
+            source_name=n.capitalize(),
+            mean=120.0,
+            std=40.0,
+            min=0.0,
+            max=255.0,
         )
         for n in ("red", "green", "blue")
     ]
@@ -241,8 +273,13 @@ def test_partial_s2_10band_forward_pass() -> None:
     names = ["b02", "b03", "b04", "b08", "b05", "b06", "b07", "b8a", "b11", "b12"]
     bands = [
         BandSpec(
-            sensor="s2", name=n, source_name=n.upper(),
-            mean=1500.0, std=600.0, min=0.0, max=10000.0,
+            sensor="s2",
+            name=n,
+            source_name=n.upper(),
+            mean=1500.0,
+            std=600.0,
+            min=0.0,
+            max=10000.0,
         )
         for n in names
     ]
