@@ -119,8 +119,14 @@ def test_reflectance_input_is_rescaled_to_dn() -> None:
     # so2sat-style band stats: optical reflectance with max ~2.8
     refl_bands = [
         BandSpec(
-            sensor="s2", name=n, source_name=n.upper(),
-            mean=0.13, std=0.07, min=0.0001, max=2.8, wavelength_um=0.5,
+            sensor="s2",
+            name=n,
+            source_name=n.upper(),
+            mean=0.13,
+            std=0.07,
+            min=0.0001,
+            max=2.8,
+            wavelength_um=0.5,
         )
         for n in ("red", "green", "blue")
     ]
@@ -137,9 +143,35 @@ def test_reflectance_input_is_rescaled_to_dn() -> None:
 
 
 def test_rejects_unsupported_channel_count() -> None:
-    """4-channel input must fail loudly — OlmoEarth only handles 3 or 12."""
+    """4-channel input must fail loudly — OlmoEarth only handles 3, 10, or 12."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     four_bands = _rgb_bands() + [_rgb_bands()[0]]
-    with pytest.raises(ValueError, match="3 \\(RGB\\) or 12 \\(full S2\\)"):
+    with pytest.raises(ValueError, match=r"3 \(RGB\), 10 \(S2 no-B01/B09\)"):
         OlmoEarthBenchModel(bands=four_bands, model_size="nano", normalization="identity")
+
+
+@requires_olmoearth
+def test_partial_s2_10band_forward_pass() -> None:
+    """10-band S2 input (m-so2sat-style) is zero-padded to 12 channels.
+
+    Caller passes the first 10 OlmoEarth bands; the wrapper fills B01/B09.
+    """
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    # B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12
+    names = ["b02","b03","b04","b08","b05","b06","b07","b8a","b11","b12"]
+    bands = [
+        BandSpec(
+            sensor="s2", name=n, source_name=n.upper(),
+            mean=1500.0, std=600.0, min=0.0, max=10000.0,
+        )
+        for n in names
+    ]
+    model = OlmoEarthBenchModel(bands=bands, model_size="nano", normalization="identity")
+    model.eval()
+    assert model._partial_s2_mode is True
+    x = torch.rand(2, 10, 64, 64) * 3000.0
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()

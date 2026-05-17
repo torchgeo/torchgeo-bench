@@ -101,10 +101,17 @@ class OlmoEarthBenchModel(BenchModel):
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
 
-        if self.num_channels not in (3, 12):
+        # Accepted modes (driven by len(bands)):
+        #   3  -> RGB-only, zero-fill the other 9 S2 channels
+        #   10 -> "S2 minus B01/B09" (m-so2sat / so2sat ship without those);
+        #         caller must pass the first 10 OlmoEarth bands in order,
+        #         i.e. (B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12).
+        #         Wrapper zero-fills positions 10 (B01) and 11 (B09).
+        #   12 -> full S2 in OlmoEarth's expected order.
+        if self.num_channels not in (3, 10, 12):
             raise ValueError(
-                "OlmoEarth supports 3 (RGB) or 12 (full S2) input channels, "
-                f"got {self.num_channels}."
+                "OlmoEarth supports 3 (RGB), 10 (S2 no-B01/B09), or 12 (full S2) "
+                f"input channels, got {self.num_channels}."
             )
 
         # Lazy imports so the package is only needed when this model is used
@@ -126,6 +133,7 @@ class OlmoEarthBenchModel(BenchModel):
         self.time_steps = time_steps
         self.do_normalize = normalize
         self._rgb_mode = self.num_channels == 3
+        self._partial_s2_mode = self.num_channels == 10
 
         # OlmoEarth's internal Normalizer expects raw S2 DN (0..~10000).  The
         # input tensor's scale varies per dataset — m-eurosat / benv2 deliver
@@ -151,6 +159,19 @@ class OlmoEarthBenchModel(BenchModel):
         s2[:, 2] = images[:, 0]
         s2[:, 1] = images[:, 1]
         s2[:, 0] = images[:, 2]
+        return s2
+
+    def _partial_s2_to_s2(self, images: torch.Tensor) -> torch.Tensor:
+        """Pad 10-band input (S2 minus B01/B09) up to OlmoEarth's 12-channel layout.
+
+        m-so2sat and so2sat ship 10 S2 bands — every band except B01 (coastal
+        aerosol) and B09 (water vapour).  Caller must pass them in OlmoEarth's
+        first-10 order: (B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12).
+        Positions 10 (B01) and 11 (B09) are zero-filled.
+        """
+        B, _, H, W = images.shape
+        s2 = torch.zeros(B, _TOTAL_S2_CHANNELS, H, W, device=images.device, dtype=images.dtype)
+        s2[:, :10] = images
         return s2
 
     def _build_mask(self, B: int, H: int, W: int, device: torch.device) -> torch.Tensor:
@@ -192,6 +213,8 @@ class OlmoEarthBenchModel(BenchModel):
 
         if self._rgb_mode:
             images = self._rgb_to_s2(images)
+        elif self._partial_s2_mode:
+            images = self._partial_s2_to_s2(images)
 
         B, C, H, W = images.shape
 
