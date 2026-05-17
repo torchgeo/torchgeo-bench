@@ -142,6 +142,7 @@ def test_reflectance_input_is_rescaled_to_dn() -> None:
     assert out.std() > 1e-4
 
 
+@requires_olmoearth
 def test_rejects_unknown_band_name() -> None:
     """A BandSpec name we have no OlmoEarth-position mapping for must fail
     loudly so we don't quietly zero-fill every channel."""
