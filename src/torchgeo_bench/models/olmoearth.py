@@ -103,6 +103,15 @@ class OlmoEarthBenchModel(BenchModel):
         from olmoearth_pretrain_minimal import ModelID, Normalizer, load_model_from_id
         from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 
+        # The package logs full ModalitySpec dumps at INFO level on every
+        # encoder construction — useful when developing OlmoEarth itself,
+        # noisy for every torchgeo-bench task.  Demote to WARNING.
+        for logger_name in (
+            "olmoearth_pretrain_minimal",
+            "olmoearth_pretrain_minimal.olmoearth_pretrain_v1",
+        ):
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
+
         self.model_size = model_size
         self.patch_size = patch_size
         self.input_res = input_res

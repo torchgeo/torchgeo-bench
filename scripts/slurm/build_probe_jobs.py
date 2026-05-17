@@ -43,6 +43,8 @@ SINGLE_BAND_MODE_MODELS: dict[str, str] = {
     "sam3_encoder": "rgb",
     # OlmoEarth wrapper accepts 3-ch RGB or 12-ch S2 (no B10).  m-eurosat
     # all is 13-ch including cirrus; just sweep RGB for now.
+    "olmoearth_nano": "rgb",
+    "olmoearth_tiny": "rgb",
     "olmoearth_base": "rgb",
     "olmoearth_large": "rgb",
     # 3-channel pretrained backbones (DOFA hardcodes S2-RGB wavelengths;
@@ -84,10 +86,14 @@ DEFAULT_MODELS: list[str] = [
     "timm/vit/vit_large_patch16_dinov3sat",
     # DINOv3 ViT-Large web-pretrained (natural-image baseline, RGB-only)
     "timm/vit/vit_large_patch16_dinov3",
-    # OlmoEarth (direct olmoearth-pretrain-minimal path) — disabled: HF
-    # weight download hangs on the cluster; re-enable after caching weights
-    # locally.
-    # "olmoearth_base",
+    # OlmoEarth (AI2 GeoFM) — all four variants.  Requires the
+    # `[olmoearth]` extra (olmoearth-pretrain-minimal).  The original
+    # disable note was about a transient HF download hang + the extra
+    # not being installed in the cluster venv; both resolved.
+    "olmoearth_nano",
+    "olmoearth_tiny",
+    "olmoearth_base",
+    "olmoearth_large",
     # baselines
     "rcf",
     "imagestats",
