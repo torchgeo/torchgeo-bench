@@ -5,11 +5,13 @@ BenchModel interface. Supports both RGB (3-channel) and full multispectral
 (12-channel Sentinel-2) input.
 
 When given RGB input, the 3 channels are mapped to B02/B03/B04 in OlmoEarth's
-expected band order, the remaining 9 bands are zero-filled, and the
-corresponding band sets are marked as MISSING in the mask so the model
-treats them as absent data rather than real zero-valued observations.
+expected band order; the remaining 9 bands are zero-filled.  All band sets
+remain marked visible in the mask — the encoder learns to attend through
+zero-valued bands but the docstring's earlier claim of MISSING masking was
+never actually implemented (and breaks ``pool_spatially`` when applied).
 
-Reference implementation:
+Reference implementations (canonical first):
+    https://github.com/allenai/olmoearth_pretrain/blob/main/docs/Inference-Quickstart.md
     https://github.com/isaaccorley/geopool/blob/main/scripts/embed_olmoearth.py
 """
 
@@ -156,7 +158,9 @@ class OlmoEarthBenchModel(BenchModel):
         out of bounds.  ``ONLINE_ENCODER`` has value 0, so all-zeros == all
         visible.
         """
-        return torch.zeros(B, H, W, self.time_steps, _NUM_BAND_SETS, dtype=torch.float32, device=device)
+        return torch.zeros(
+            B, H, W, self.time_steps, _NUM_BAND_SETS, dtype=torch.float32, device=device
+        )
 
     @torch.no_grad()
     def _forward_patch_features(
