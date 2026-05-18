@@ -32,7 +32,7 @@ from torchvision.transforms.v2 import Normalize as NormalizeV2
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._input_units import InputUnit, detect_input_unit
+from ._input_units import InputUnit, convert_unit, detect_input_unit
 from ._pooling import VALID_MODES, pool_tokens
 from .interface import BenchModel
 
@@ -237,13 +237,110 @@ class _TorchGeoBackboneBench(BenchModel):
             )
         _warn_unit_mismatch(type(self).__name__, self.weights_input_unit, bands, input_unit_check)
 
+        # Pre-compute the unit conversion needed to bring dataset inputs
+        # into the scale the weights' Normalize was calibrated for.  No-op
+        # when the wrapper doesn't declare a unit, or the dataset already
+        # delivers the expected scale.  Without this, e.g.,
+        # resnet50_s2rgb_moco × so2sat collapses to chance because the
+        # Normalize ``/10000`` is applied to already-reflectance ([0, 2.8])
+        # values, producing near-zero inputs.
+        self._dataset_input_unit = detect_input_unit(self.bands)
+        self._weights_target_unit: InputUnit | None = _UNIT_EXPECTED_SOURCE.get(
+            self.weights_input_unit or ""
+        )
+
     def _load_backbone(self, weights, factory: str) -> nn.Module:
         return _resolve_torchgeo_factory(factory)(weights=weights)
 
+    def _tiled_normalize(self, in_chans: int) -> nn.Sequential | None:
+        """Build a Normalize whose mean/std are the pretrained RGB stats tiled to ``in_chans``.
+
+        Matches ``adapt_input_conv``'s tiling pattern: for ``in_chans=7``
+        with 3-channel pretrain stats ``[r, g, b]``, the result is
+        ``[r, g, b, r, g, b, r]``.  This keeps the input conv (which was
+        also tiled) and the normalize statistically consistent — both
+        layers "see" each input channel as belonging to the corresponding
+        RGB slot of the pretrained model.
+
+        Cached on ``self`` so we don't rebuild per batch.
+        """
+        cache_key = f"_tiled_norm_{in_chans}"
+        cached = getattr(self, cache_key, None)
+        if cached is not None:
+            return cached
+        if self._weights_normalize is None:
+            return None
+        # Find the inner Normalize that carries mean/std.
+        from torchvision.transforms import Normalize as _N1
+        from torchvision.transforms.v2 import Normalize as _N2
+
+        inner: NormalizeV1 | NormalizeV2 | None = None
+        for m in self._weights_normalize.modules():
+            if isinstance(m, (_N1, _N2)):
+                inner = m
+                break
+        if inner is None:
+            return None
+        mean = inner.mean
+        std = inner.std
+        if isinstance(mean, torch.Tensor):
+            mean = mean.tolist()
+        if isinstance(std, torch.Tensor):
+            std = std.tolist()
+        mean = list(mean)
+        std = list(std)
+        rgb_c = len(mean)
+        if rgb_c == 0:
+            return None
+        # Tile: e.g. rgb_c=3, in_chans=7 -> [r,g,b,r,g,b,r]
+        tiled_mean = [mean[i % rgb_c] for i in range(in_chans)]
+        tiled_std = [std[i % rgb_c] for i in range(in_chans)]
+        tiled = nn.Sequential(type(inner)(mean=tiled_mean, std=tiled_std))
+        # Cache on the same device the next forward will use; Normalize is
+        # parameter-less so no .to() needed for tensors-on-Tensor input.
+        object.__setattr__(self, cache_key, tiled)
+        return tiled
+
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Use the weights-bound ``Normalize`` transform if present; else the parent strategy."""
-        if self._weights_normalize is not None:
-            return self._weights_normalize(images)
+        """Use the weights-bound ``Normalize`` transform if present; else the parent strategy.
+
+        Pretrained weights ship a 3-channel RGB ``Normalize`` calibrated
+        for the pretrain dataset.  When the dataset delivers more or fewer
+        channels (multispectral adaptation via ``_adapt_first_conv``), we
+        tile the pretrained RGB mean/std to match — same pattern used by
+        ``adapt_input_conv`` on the first conv weights — so the input conv
+        and the normalize stay consistent.  Results on N != 3 channels
+        should be marked as "adapted*" since both layers deviate from the
+        canonical pretrain pipeline.
+
+        Before applying the weights' Normalize we *also* convert the input
+        to the scale the Normalize was calibrated for.  Without this, a
+        reflectance-scaled dataset (e.g. so2sat in [0, 2.8]) hitting a
+        weights' ``Normalize(mean=[0], std=[10000])`` becomes near-zero
+        and the features collapse.
+        """
+        # Scale conversion: bring inputs into the weights' expected unit.
+        if self._weights_target_unit is not None:
+            images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
+        weights_norm = self._weights_normalize
+        if weights_norm is not None:
+            expected_c = None
+            for m in weights_norm.modules():
+                mean = getattr(m, "mean", None)
+                if mean is None:
+                    continue
+                if isinstance(mean, torch.Tensor):
+                    expected_c = mean.shape[-1] if mean.ndim else mean.numel()
+                else:
+                    expected_c = len(mean)
+                break
+            in_chans = images.shape[1]
+            if expected_c is None or expected_c == in_chans:
+                return weights_norm(images)
+            # Channel count mismatch: build a tiled Normalize to match.
+            tiled = self._tiled_normalize(in_chans)
+            if tiled is not None:
+                return tiled(images)
         return super().normalize_inputs(images)
 
 
@@ -336,6 +433,11 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
             input_unit_check=input_unit_check,
         )
         self.backbone.head = nn.Identity()
+        # Adapt the patch-embed projection conv so RGB-pretrained Swin
+        # weights can run on N-channel input.  Result rows should be
+        # marked as "adapted" in any leaderboard since the input conv
+        # weights are no longer the pretrained RGB ones.
+        _adapt_first_conv(self.backbone, "features.0.0", len(bands))
 
     @torch.no_grad()
     def _forward_patch_features(
@@ -386,6 +488,10 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         if pool not in VALID_MODES:
             raise ValueError(f"pool={pool!r} not in {VALID_MODES}")
         self.pool = pool
+        # Adapt ScaleMAE's patch-embed projection to N-channel input.
+        # Pretrained on fMoW RGB; adapted weights mean these N-band results
+        # should be marked as "adapted" rather than vanilla pretrained.
+        _adapt_first_conv(self.backbone, "patch_embed.proj", len(bands))
 
     @torch.no_grad()
     def _forward_patch_features(
@@ -407,7 +513,15 @@ def _resolve_dofa_wavelengths(
     bands: list[BandSpec],
     wavelengths: list[float] | None,
 ) -> list[float]:
-    """Return one DOFA wavelength per selected input channel."""
+    """Return one DOFA wavelength per selected input channel.
+
+    Raises on any ``BandSpec`` lacking ``wavelength_um`` rather than silently
+    defaulting to ~green (0.6 µm).  DOFA's wavelength embedding is the only
+    way the model "knows" what spectral channel each tensor index represents;
+    a silent default would assign green-band weights to e.g. SAR backscatter
+    channels and quietly produce garbage features.  Callers that genuinely
+    want a default must pass an explicit ``wavelengths=`` list.
+    """
     if wavelengths is not None:
         if len(wavelengths) != len(bands):
             raise ValueError(
@@ -416,9 +530,14 @@ def _resolve_dofa_wavelengths(
             )
         return [float(w) for w in wavelengths]
 
-    from ._band_mapping import wavelengths_um
-
-    return wavelengths_um(bands, default_um=0.6)
+    missing = [b.name for b in bands if b.wavelength_um is None]
+    if missing:
+        raise ValueError(
+            f"DOFA wavelengths missing for {missing}: every BandSpec must have a "
+            f"`wavelength_um` set.  SAR / non-optical channels need either an "
+            f"explicit wavelength or to be filtered out of the input."
+        )
+    return [float(b.wavelength_um) for b in bands]
 
 
 class TorchGeoDOFABench(_TorchGeoBackboneBench):
@@ -500,6 +619,10 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
             target_size=target_size,
             input_unit_check=input_unit_check,
         )
+        # EarthLoc wraps a ResNet50; adapt its first conv for N-channel input.
+        # Results on N!=3 channels are "adapted*" (input-conv weights are
+        # timm-averaged, not the pretrained RGB ones).
+        _adapt_first_conv(self.backbone, "backbone.conv1", len(bands))
 
     @torch.no_grad()
     def _forward_patch_features(

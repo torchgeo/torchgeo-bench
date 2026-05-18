@@ -1,14 +1,17 @@
 """OlmoEarth model wrapper for torchgeo-bench.
 
 Wraps the OlmoEarth geospatial foundation model (AI2) for use with the
-BenchModel interface. Supports both RGB (3-channel) and full multispectral
-(12-channel Sentinel-2) input.
+BenchModel interface.  Multi-modal: the wrapper auto-selects OlmoEarth's
+``Modality.SENTINEL2_L2A`` / ``LANDSAT`` / ``NAIP`` based on the input
+``BandSpec.sensor`` field and builds the right channel layout, band-set
+mask, and ``MaskedOlmoEarthSample`` field for each.  This is essential
+because OlmoEarth was pretrained with per-modality wavelength
+embeddings and band-set structure; feeding Landsat or NAIP data through
+the S2 path zero-fills 9 wrong channels and collapses accuracy.
 
-When given RGB input, the 3 channels are mapped to B02/B03/B04 in OlmoEarth's
-expected band order; the remaining 9 bands are zero-filled.  All band sets
-remain marked visible in the mask — the encoder learns to attend through
-zero-valued bands but the docstring's earlier claim of MISSING masking was
-never actually implemented (and breaks ``pool_spatially`` when applied).
+When fewer bands than the target modality provides are available, the
+wrapper zero-fills the remaining positions (mask stays all-visible so
+``pool_spatially`` works).
 
 Reference implementations (canonical first):
     https://github.com/allenai/olmoearth_pretrain/blob/main/docs/Inference-Quickstart.md
@@ -24,14 +27,14 @@ import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
 
+from ._input_units import detect_input_unit, to_s2_dn
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
 
-# Sentinel-2 band order expected by OlmoEarth
-# Band set 0: B02, B03, B04, B08  (4 bands — includes RGB)
-# Band set 1: B05, B06, B07, B8A, B11, B12  (6 bands)
-# Band set 2: B01, B09  (2 bands)
+
+# Canonical S2 band order kept as a module constant for backward
+# compatibility with tests and external callers.
 OLMOEARTH_S2_BANDS = (
     "B02",
     "B03",
@@ -47,42 +50,166 @@ OLMOEARTH_S2_BANDS = (
     "B09",
 )
 
-# Number of channels per band set (B02/B03/B04/B08 — B05-B12 — B01/B09).
-_BAND_SET_SIZES = (4, 6, 2)
-_NUM_BAND_SETS = len(_BAND_SET_SIZES)  # 3
-_TOTAL_S2_CHANNELS = sum(_BAND_SET_SIZES)  # 12
+
+# Per-modality layout — kept as a single source of truth so the build
+# steps below (channel layout, mask shape, sample field) all agree.
+#
+# ``name_to_idx`` maps any ``BandSpec.name`` we expect to see in our
+# datasets (lower-cased) to the corresponding position in OlmoEarth's
+# expected band_order for the modality.  Both semantic names (``blue``,
+# ``red_edge_1``) and source-style names (``b02``, ``b04``) are
+# accepted so the wrapper works with either GeoBench V1 or V2 datasets.
+_MODALITY_INFO: dict[str, dict] = {
+    "s2": {
+        "modality_name": "SENTINEL2_L2A",
+        "sample_field": "sentinel2_l2a",
+        "channels": 12,
+        "num_band_sets": 3,
+        # OlmoEarth band_order: B02, B03, B04, B08, B05, B06, B07, B8A,
+        # B11, B12, B01, B09.
+        "name_to_idx": {
+            "blue": 0,
+            "b02": 0,
+            "green": 1,
+            "b03": 1,
+            "red": 2,
+            "b04": 2,
+            "nir": 3,
+            "b08": 3,
+            "red_edge_1": 4,
+            "b05": 4,
+            "red_edge_2": 5,
+            "b06": 5,
+            "red_edge_3": 6,
+            "b07": 6,
+            "red_edge_4": 7,
+            "b8a": 7,
+            "swir_1": 8,
+            "b11": 8,
+            "swir_2": 9,
+            "b12": 9,
+            "coastal_aerosol": 10,
+            "b01": 10,
+            "water_vapour": 11,
+            "b09": 11,
+        },
+    },
+    "landsat": {
+        "modality_name": "LANDSAT",
+        "sample_field": "landsat",
+        "channels": 11,
+        "num_band_sets": 2,
+        # OlmoEarth band_order: B8 (pan), B1, B2, B3, B4, B5, B6, B7,
+        # B9, B10, B11.  GeoBench m-forestnet (Landsat-8) typically
+        # ships only B2/B3/B4/B5/B6/B7 under semantic names.
+        "name_to_idx": {
+            "panchromatic": 0,
+            "pan": 0,
+            "b8": 0,
+            "coastal_aerosol": 1,
+            "coastal": 1,
+            "b1": 1,
+            "blue": 2,
+            "b2": 2,
+            "green": 3,
+            "b3": 3,
+            "red": 4,
+            "b4": 4,
+            "nir": 5,
+            "b5": 5,
+            "swir_1": 6,
+            "b6": 6,
+            "swir_2": 7,
+            "b7": 7,
+            "cirrus": 8,
+            "b9": 8,
+            "tirs_1": 9,
+            "thermal_1": 9,
+            "b10": 9,
+            "tirs_2": 10,
+            "thermal_2": 10,
+            "b11": 10,
+        },
+    },
+    # NAIP is *not* in olmoearth-pretrain-minimal's supported modalities
+    # list (the released encoders only cover S2 / S1 / Landsat / various
+    # raster auxiliaries — no NAIP/aerial branch).  So for NAIP / aerial /
+    # treesatai-aerial inputs we route the RGB channels through the S2
+    # path with the non-RGB S2 positions zero-filled.  This matches the
+    # original wrapper behaviour pre-refactor.
+    "aerial": {
+        "modality_name": "SENTINEL2_L2A",
+        "sample_field": "sentinel2_l2a",
+        "channels": 12,
+        "num_band_sets": 3,
+        # S2 positions for the RGB triplet; NIR/IR if present goes to B08.
+        "name_to_idx": {
+            "red": 2,
+            "r": 2,
+            "green": 1,
+            "g": 1,
+            "blue": 0,
+            "b": 0,
+            "nir": 3,
+            "ir": 3,
+        },
+    },
+}
+# Aliases.
+_MODALITY_INFO["naip"] = _MODALITY_INFO["aerial"]
+
+
+def _resolve_modality(bands: list[BandSpec]) -> dict:
+    """Pick the OlmoEarth modality from the input ``BandSpec.sensor`` field.
+
+    Raises if the sensor isn't one we have a layout for.
+    """
+    sensor = bands[0].sensor.lower()
+    if not all(b.sensor.lower() == sensor for b in bands):
+        sensors = sorted({b.sensor.lower() for b in bands})
+        raise ValueError(
+            f"OlmoEarth wrapper expects a single sensor per call; got mixed sensors {sensors}."
+        )
+    if sensor not in _MODALITY_INFO:
+        raise ValueError(
+            f"OlmoEarth wrapper has no layout for sensor '{sensor}'.  "
+            f"Supported: {sorted(set(_MODALITY_INFO))}."
+        )
+    return _MODALITY_INFO[sensor]
 
 
 class OlmoEarthBenchModel(BenchModel):
     """BenchModel wrapper for OlmoEarth geospatial foundation models.
 
-    OlmoEarth is a ViT-based multimodal foundation model trained on
-    Sentinel-1, Sentinel-2, and Landsat imagery by the Allen Institute for AI.
+    OlmoEarth is a multi-modal ViT trained on Sentinel-2, Sentinel-1,
+    Landsat, NAIP, and other Earth-observation streams by AI2.  The
+    wrapper picks the right modality from ``bands[0].sensor`` and
+    constructs a properly-shaped batch for OlmoEarth's encoder.
 
-    Supports two input modes (chosen by ``len(bands)``):
+    Supported modalities (auto-detected):
 
-    - **RGB mode** (``len(bands) == 3``): input is mapped to OlmoEarth's
-      B04, B03, B02 (band set 0 positions 2, 1, 0).  The 4th band in set 0
-      (B08/NIR) and all bands in sets 1–2 are zero-filled.  Performance will
-      be lower than full multispectral mode.
-    - **Full S2 mode** (``len(bands) == 12``): all 12 Sentinel-2 bands are
-      forwarded in OlmoEarth order (see :data:`OLMOEARTH_S2_BANDS`).
+    * ``"s2"`` -> ``Modality.SENTINEL2_L2A`` (12 channels, 3 band-sets)
+    * ``"landsat"`` -> ``Modality.LANDSAT`` (11 channels, 2 band-sets)
+    * ``"aerial"`` / ``"naip"`` -> ``Modality.NAIP`` (4 channels, 1 band-set)
 
-    The wrapper overrides :meth:`normalize_inputs` to identity — OlmoEarth's
-    internal :class:`Normalizer` consumes raw values directly.
+    Channels missing from the input are zero-filled at the corresponding
+    OlmoEarth position; the mask stays all-visible so ``pool_spatially``
+    can still produce embeddings.
+
+    The wrapper overrides ``normalize_inputs`` to identity — OlmoEarth's
+    internal ``Normalizer`` consumes raw values directly.  Input scale
+    (DN / reflectance / uint8) is auto-detected and rescaled to S2 DN
+    before normalisation.
 
     Args:
-        bands: Either a 3-band RGB list or a 12-band Sentinel-2 list.
+        bands: Ordered ``BandSpec`` list describing the input channels.
         model_size: One of ``"nano"``, ``"tiny"``, ``"base"``, ``"large"``.
-        patch_size: Patch size for the encoder (default 4 per the AI2 quickstart;
-            smaller patch sizes generally perform better but use more GPU memory).
-        input_res: Input resolution in meters (default 10 for Sentinel-2).
-        time_steps: Number of temporal slots in the input.  Default 1, matching the
-            official ``olmoearth_pretrain`` quickstart for single-image inference.
-            Replicating a single image across T>1 timesteps was historically used
-            here to satisfy a buggy 4-D mask shape, but the correct fix is a 5-D
-            mask and T=1 (see ``_build_mask`` below).
-        std_multiplier: Standard deviation multiplier for normalization.
+        patch_size: Patch size for the encoder (default 4 per the AI2
+            quickstart; smaller is usually better but uses more GPU memory).
+        input_res: Input resolution in meters (default 10, S2 GSD).
+        time_steps: Temporal slots in the input.  Default 1 — the AI2
+            quickstart's canonical single-image setting.
+        std_multiplier: Std multiplier passed to ``Normalizer``.
         normalize: If True, L2-normalize output embeddings.
     """
 
@@ -100,66 +227,85 @@ class OlmoEarthBenchModel(BenchModel):
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
 
-        if self.num_channels not in (3, 12):
-            raise ValueError(
-                "OlmoEarth supports 3 (RGB) or 12 (full S2) input channels, "
-                f"got {self.num_channels}."
-            )
-
-        # Lazy imports so the package is only needed when this model is used
+        # Lazy imports so the package is only needed when this model is used.
         from olmoearth_pretrain_minimal import ModelID, Normalizer, load_model_from_id
         from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 
-        # The package logs full ModalitySpec dumps at INFO level on every
-        # encoder construction — useful when developing OlmoEarth itself,
-        # noisy for every torchgeo-bench task.  Demote to WARNING.
+        # Quiet down the package's INFO-level ModalitySpec dumps.
         for logger_name in (
             "olmoearth_pretrain_minimal",
             "olmoearth_pretrain_minimal.olmoearth_pretrain_v1",
         ):
             logging.getLogger(logger_name).setLevel(logging.WARNING)
 
+        # Resolve the modality layout from the bands' sensor.
+        info = _resolve_modality(self.bands)
+        self._modality_info = info
+        self._modality = getattr(Modality, info["modality_name"])
+        self._sample_field = info["sample_field"]
+        self._target_channels = info["channels"]
+        self._num_band_sets = info["num_band_sets"]
+
+        # Map each input band position to its slot in OlmoEarth's modality
+        # band_order.  Unknown band names raise — quiet zero-fill on every
+        # channel would degrade silently.
+        name_to_idx = info["name_to_idx"]
+        self._band_indices: list[int] = []
+        unknown: list[str] = []
+        for b in self.bands:
+            key = b.name.lower()
+            if key not in name_to_idx:
+                unknown.append(b.name)
+            else:
+                self._band_indices.append(name_to_idx[key])
+        if unknown:
+            raise ValueError(
+                f"OlmoEarth wrapper can't map BandSpec names {unknown} for "
+                f"sensor '{self.bands[0].sensor}'.  Add them to "
+                f"_MODALITY_INFO['{self.bands[0].sensor.lower()}']['name_to_idx'] "
+                f"with the correct OlmoEarth band index."
+            )
+
         self.model_size = model_size
         self.patch_size = patch_size
         self.input_res = input_res
         self.time_steps = time_steps
         self.do_normalize = normalize
-        self._rgb_mode = self.num_channels == 3
+
+        # OlmoEarth's internal Normalizer expects raw S2 DN (0..~10000).
+        # Datasets vary: DN, reflectance [0, 2.8], uint8 [0, 255].  Detect
+        # once and rescale per batch in _forward_patch_features.
+        self._input_unit = detect_input_unit(self.bands)
 
         model_id = getattr(ModelID, f"OLMOEARTH_V1_{model_size.upper()}")
         self.encoder_model = load_model_from_id(model_id, load_weights=True)
         self.normalizer = Normalizer(std_multiplier=std_multiplier)
-        self._modality = Modality.SENTINEL2_L2A
 
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Identity — OlmoEarth's internal :class:`Normalizer` handles raw values."""
+        """Identity — OlmoEarth's internal Normalizer handles raw values."""
         return images
 
-    def _rgb_to_s2(self, images: torch.Tensor) -> torch.Tensor:
-        """Map (B, 3, H, W) RGB to (B, 12, H, W) in OlmoEarth S2 band order."""
+    def _pad_to_modality_layout(self, images: torch.Tensor) -> torch.Tensor:
+        """Place each input channel at its OlmoEarth modality position.
+
+        Returns a ``(B, target_channels, H, W)`` tensor with zeros wherever
+        the input doesn't supply a band.  Operates on the GPU.
+        """
         B, _, H, W = images.shape
-        s2 = torch.zeros(B, _TOTAL_S2_CHANNELS, H, W, device=images.device, dtype=images.dtype)
-        # red -> B04 (index 2), green -> B03 (index 1), blue -> B02 (index 0)
-        s2[:, 2] = images[:, 0]
-        s2[:, 1] = images[:, 1]
-        s2[:, 0] = images[:, 2]
-        return s2
+        out = torch.zeros(B, self._target_channels, H, W, device=images.device, dtype=images.dtype)
+        for src_idx, dst_idx in enumerate(self._band_indices):
+            out[:, dst_idx] = images[:, src_idx]
+        return out
 
     def _build_mask(self, B: int, H: int, W: int, device: torch.device) -> torch.Tensor:
-        """Build the per-band-set mask tensor — all visible.
+        """Per-band-set ``(B, H, W, T, num_band_sets)`` mask — all visible.
 
-        Shape is ``(B, H, W, T, num_band_sets)`` per AI2's Inference-Quickstart:
-        the encoder's ``apply_embedding_to_modality`` slices ``mask[..., idx]``
-        for each band-set index, so the last dimension MUST be ``num_band_sets``
-        (3 for Sentinel-2: (B02/B03/B04/B08), (B05-B12 minus B10), (B01/B09)).
-
-        The previous 4-D ``(B, H, W, T)`` mask only worked because ``T`` happened
-        to equal ``num_band_sets=3``; with the canonical ``T=1`` it would index
-        out of bounds.  ``ONLINE_ENCODER`` has value 0, so all-zeros == all
-        visible.
+        ``MaskValue.ONLINE_ENCODER`` is 0 so zeros == visible.  Shape must
+        be 5-D because the encoder's ``apply_embedding_to_modality`` does
+        ``mask[..., idx]`` for each band-set index.
         """
         return torch.zeros(
-            B, H, W, self.time_steps, _NUM_BAND_SETS, dtype=torch.float32, device=device
+            B, H, W, self.time_steps, self._num_band_sets, dtype=torch.float32, device=device
         )
 
     @torch.no_grad()
@@ -177,13 +323,17 @@ class OlmoEarthBenchModel(BenchModel):
 
         device = images.device
 
-        if self._rgb_mode:
-            images = self._rgb_to_s2(images)
+        # Rescale to S2 DN before any further processing.  No-op when the
+        # dataset already delivers DN.  (We use S2 DN as the canonical
+        # scale even for Landsat / NAIP — the modality-specific Normalizer
+        # then re-centres on per-band statistics.)
+        images = to_s2_dn(images, self._input_unit)
+
+        # Map input channels -> OlmoEarth modality layout.
+        images = self._pad_to_modality_layout(images)
 
         B, C, H, W = images.shape
 
-        # Layout: (B, H, W, C) -> (B, H, W, T, C).  np.repeat only when T>1 so
-        # the common T=1 path doesn't allocate a wasted copy.
         images_nhwc = images.permute(0, 2, 3, 1).cpu().numpy()
         images_nhwtc = images_nhwc[:, :, :, None, :]
         if self.time_steps > 1:
@@ -195,12 +345,14 @@ class OlmoEarthBenchModel(BenchModel):
         timestamps[:, :, 1] = 6
         timestamps[:, :, 2] = 2020
 
-        s2_mask = self._build_mask(B, H, W, device)
+        modality_mask = self._build_mask(B, H, W, device)
 
         sample = MaskedOlmoEarthSample(
             timestamps=timestamps,
-            sentinel2_l2a=torch.from_numpy(images_nhwtc).float().to(device),
-            sentinel2_l2a_mask=s2_mask,
+            **{
+                self._sample_field: torch.from_numpy(images_nhwtc).float().to(device),
+                f"{self._sample_field}_mask": modality_mask,
+            },
         )
 
         outputs = self.encoder_model.encoder(

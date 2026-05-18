@@ -56,3 +56,30 @@ def to_s2_dn(images: torch.Tensor, src: InputUnit) -> torch.Tensor:
         return images * 10000.0
     # UINT8 to DN: rescale [0, 255] -> [0, 10000].
     return images * (10000.0 / 255.0)
+
+
+def to_uint8(images: torch.Tensor, src: InputUnit) -> torch.Tensor:
+    """Bring values into uint8 scale (~``[0, 255]``).
+
+    Used to feed pretrained backbones whose ``Normalize`` was calibrated
+    for uint8-divided-by-255 inputs (fMoW / NAIP / Satlas).
+    """
+    if src == InputUnit.UINT8:
+        return images
+    if src == InputUnit.REFLECTANCE_0_1:
+        return images * 255.0
+    # S2 DN to uint8: rescale [0, 10000] -> [0, 255].
+    return images * (255.0 / 10000.0)
+
+
+def convert_unit(images: torch.Tensor, src: InputUnit, dst: InputUnit) -> torch.Tensor:
+    """Route to the right ``to_<dst>`` helper.  No-op if src == dst."""
+    if src == dst:
+        return images
+    if dst == InputUnit.S2_DN:
+        return to_s2_dn(images, src)
+    if dst == InputUnit.REFLECTANCE_0_1:
+        return to_reflectance(images, src)
+    if dst == InputUnit.UINT8:
+        return to_uint8(images, src)
+    raise ValueError(f"convert_unit: unknown target unit {dst}")

@@ -189,3 +189,46 @@ ID ≈ 365 on so2sat and m-so2sat, vs ≤ 100 for every other
 (model, dataset) cell.  Likely either a normalization mismatch
 inflating the manifold or genuine high-dim noise in that backbone's
 final features — follow-up diagnostic.
+
+## Adapting RGB-pretrained models to multispectral is a regression (2026-05-17)
+
+Wired `timm.adapt_input_conv` into the Swin / ScaleMAE / EarthLoc
+torchgeo wrappers (ResNet already had it), and matched the
+weights-bound `Normalize` by tiling its RGB mean/std cyclically to
+the target channel count — same tiling pattern the conv weights use.
+For `in_chans = 7` and 3-channel RGB pretrain stats, both layers
+end up treating channels as `[R, G, B, R, G, B, R]`.
+
+Result across 17 (model × dataset) cells where both RGB and adapted
+multispectral linear probes ran:
+
+| | Count |
+|---|---|
+| Improved with adapted multispec | **1** (scalemae × m-eurosat, +2.9pp) |
+| Regressed (>0.5pp) | **16** |
+| Mean Δ (all − rgb) | **−3.9pp** |
+| Worst regression | `scalemae_large_fmow × treesatai` at **−21.1pp** |
+
+Why it fails:
+
+- ImageNet / fMoW / NAIP RGB mean/std are calibrated for natural-image
+  reflectance distributions — applying the *red* stat to a Sentinel-2
+  SWIR band yields a normalized value that's wildly off-distribution.
+- The first-conv tiling has the same problem: each adapted "R-slot"
+  channel mostly produces activations as if it were the red band, so
+  any per-channel meaning of the extra bands is wiped out.
+- Frozen-feature linear probing can't recover from either; for
+  fine-tuning the adapter at least provides a working init.
+
+The wrapper still supports the adaptation path — it's gated by
+`SINGLE_BAND_MODE_MODELS` in the sweep generator.  These models'
+multispectral rows should be marked **"adapted\*"** in the explorer
+and `RGB-only` should remain their canonical leaderboard entry.
+
+Verdict-style summary of which models actually want multispectral:
+
+| Model class | Multispec helps? |
+|---|---|
+| Native multimodal (CROMA, Terramind, Prithvi, Clay, OlmoEarth, Panopticon) | ✓ uniformly |
+| Band-agnostic with wavelength embeddings (DOFA) | ✗ empirically RGB-better |
+| RGB-pretrained (ResNet/Swin/ScaleMAE/DINOv3 family) | ✗ adapter path hurts |

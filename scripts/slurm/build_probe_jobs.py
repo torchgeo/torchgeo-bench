@@ -27,38 +27,30 @@ from pathlib import Path
 # because the input conv shape is baked in.  Keys are model config names,
 # values are the only band modes that make sense for them.
 SINGLE_BAND_MODE_MODELS: dict[str, str] = {
-    "torchgeo/resnet50_s2rgb_moco": "rgb",
     "torchgeo/resnet50_s2_all_moco": "all",
-    # RGB-only checkpoints (3-channel pretrained weights; all-mode crashes on
-    # the weights' Normalize or the input conv).
-    "torchgeo/resnet18_s2rgb_seco": "rgb",
-    "torchgeo/resnet50_s2rgb_seco": "rgb",
-    "torchgeo/resnet50_fmow_gassl": "rgb",
-    "torchgeo/swinv2t_s2rgb_satlas_mi": "rgb",
-    "torchgeo/swinv2t_s2rgb_satlas_si": "rgb",
-    "torchgeo/swinv2b_s2rgb_satlas_mi": "rgb",
-    "torchgeo/swinv2b_s2rgb_satlas_si": "rgb",
-    "torchgeo/swinv2b_naip_satlas_mi": "rgb",
-    "torchgeo/swinv2b_naip_satlas_si": "rgb",
+    # ``sam3_encoder`` only ships an RGB-pretrained patch embedding and has no
+    # adapter path implemented yet — keep restricted.
     "sam3_encoder": "rgb",
-    # OlmoEarth wrapper accepts 3-ch RGB or 12-ch S2 (no B10).  m-eurosat
-    # all is 13-ch including cirrus; just sweep RGB for now.
+    # DOFA empirically performs WORSE on multispectral than RGB across 11 of
+    # 14 (variant, dataset) cells we tested (PR #85 comments), even though
+    # the wrapper supports arbitrary wavelengths.  Keep RGB-only.
+    "torchgeo/dofa_base": "rgb",
+    "torchgeo/dofa_large": "rgb",
+    # OlmoEarth has its own multi-modal sweep tooling
+    # (``scripts/slurm/olmoearth_sweep.{py,sh}``) that constructs the right
+    # 12-band / 10-band / RGB layout per dataset.  The build_probe_jobs.py
+    # path only emits RGB-only entries to avoid passing
+    # m-eurosat "all" (13 bands including swir_cirrus, which OlmoEarth's S2
+    # modality doesn't accept) through this generic driver.
     "olmoearth_nano": "rgb",
     "olmoearth_tiny": "rgb",
     "olmoearth_base": "rgb",
     "olmoearth_large": "rgb",
-    # 3-channel pretrained backbones (DOFA hardcodes S2-RGB wavelengths;
-    # ScaleMAE-fMoW / EarthLoc are RGB-only).  Multi-band runs would crash
-    # on the input conv shape mismatch.
-    "torchgeo/dofa_base": "rgb",
-    "torchgeo/dofa_large": "rgb",
-    "torchgeo/scalemae_large_fmow": "rgb",
-    "torchgeo/scalemae_large_fmow_cls": "rgb",
-    "torchgeo/earthloc_s2_resnet50": "rgb",
-    # DINOv3 ViT-Large pretrained on sat493m (RGB satellite imagery).
-    "timm/vit/vit_large_patch16_dinov3sat": "rgb",
-    # DINOv3 ViT-Large web-pretrained (RGB natural imagery baseline).
-    "timm/vit/vit_large_patch16_dinov3": "rgb",
+    # All the remaining "RGB-pretrained" backbones can run on N-channel
+    # input thanks to ``_adapt_first_conv`` (resnets / swins / scalemae) or
+    # timm's native ``in_chans`` handling (dinov3 / dinov3sat).  The adapted
+    # input conv is NOT the pretrained one — results on multispectral input
+    # should be marked as "adapted*" rather than vanilla pretrained.
 }
 
 
