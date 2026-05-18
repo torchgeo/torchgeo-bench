@@ -19,12 +19,19 @@ VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
-# When faiss-cuda is installed alongside faiss-cpu, _loader.py prefers the
-# CPU-only AVX2 bindings and hides StandardGpuResources.  Remove faiss-cpu so
-# faiss-cuda's GPU-enabled _swigfaiss.so is loaded instead.
-if python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+# faiss-cpu and faiss-cuda share the faiss/ Python namespace.  When both are
+# present, _loader.py prefers faiss-cpu's CPU-only AVX2 .abi3.so and hides
+# StandardGpuResources.  Fix: remove faiss-cpu, then reinstall faiss-cuda so
+# its Python files (shared with faiss-cpu) are restored.
+FAISS_CUDA_WHEEL="${SLURM_SUBMIT_DIR}/../faiss-cuda/wheelhouse/faiss_cuda-1.14.1.post3-cp313-cp313-manylinux_2_34_x86_64.whl"
+FAISS_CUDA_WHEEL_28="/tmp/faiss_cuda-1.14.1.post3-cp313-cp313-manylinux_2_28_x86_64.whl"
+if python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null \
+    && [[ -f "$FAISS_CUDA_WHEEL" ]]; then
   UV=${UV:-$(command -v uv || echo "$HOME/.local/bin/uv")}
+  cp "$FAISS_CUDA_WHEEL" "$FAISS_CUDA_WHEEL_28"
   "$UV" pip uninstall faiss-cpu --python "$VENV/bin/python3" 2>/dev/null || true
+  "$UV" pip install "$FAISS_CUDA_WHEEL_28" --no-deps --python "$VENV/bin/python3" 2>/dev/null
+  rm -f "$FAISS_CUDA_WHEEL_28"
 fi
 
 # Same torch.hub / weights-dir setup as the probe sweep.
