@@ -19,9 +19,12 @@ VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
-# Install GPU extras if CUDA is available (needed for faissknn KNN GPU tests).
+# When faiss-cuda is installed alongside faiss-cpu, _loader.py prefers the
+# CPU-only AVX2 bindings and hides StandardGpuResources.  Remove faiss-cpu so
+# faiss-cuda's GPU-enabled _swigfaiss.so is loaded instead.
 if python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
-  pip install -q -e ".[cuda]" --no-deps 2>/dev/null || true
+  UV=${UV:-$(command -v uv || echo "$HOME/.local/bin/uv")}
+  "$UV" pip uninstall faiss-cpu --python "$VENV/bin/python3" 2>/dev/null || true
 fi
 
 # Same torch.hub / weights-dir setup as the probe sweep.
