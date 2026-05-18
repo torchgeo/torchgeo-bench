@@ -253,8 +253,7 @@ class _TorchGeoBackboneBench(BenchModel):
         return _resolve_torchgeo_factory(factory)(weights=weights)
 
     def _tiled_normalize(self, in_chans: int) -> nn.Sequential | None:
-        """Build a Normalize whose mean/std are the pretrained RGB stats
-        tiled to ``in_chans``.
+        """Build a Normalize whose mean/std are the pretrained RGB stats tiled to ``in_chans``.
 
         Matches ``adapt_input_conv``'s tiling pattern: for ``in_chans=7``
         with 3-channel pretrain stats ``[r, g, b]``, the result is
