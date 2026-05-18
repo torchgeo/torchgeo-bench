@@ -1,0 +1,123 @@
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700;8..60,900&family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
+
+:root {
+  --ft-paper:  #fff1e5;
+  --ft-rule:   #b3a9a0;
+  --ft-soft:   #d9cfc6;
+  --ft-text:   #262a33;
+  --ft-muted:  #66605c;
+  --ft-teal:   #0d7680;
+  --ft-claret: #990f3d;
+  --ft-oxford: #0f5499;
+  --ft-wheat:  #b89b5e;
+}
+
+/* ── Base ── */
+.slidev-layout {
+  background: var(--ft-paper) !important;
+  color: var(--ft-text);
+  font-family: "Source Serif 4", Georgia, serif;
+}
+
+h1 {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-weight: 900;
+  font-size: 1.9em;
+  line-height: 1.1;
+  color: var(--ft-text);
+  margin-bottom: 0.1em;
+}
+
+h2 {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-weight: 700;
+  color: var(--ft-text);
+}
+
+p, li {
+  font-family: "Inter", sans-serif;
+}
+
+/* ── Hide nav / progress ── */
+.slidev-nav,
+.slidev-progress,
+nav.slidev-nav,
+.slidev-controls {
+  display: none !important;
+}
+
+/* ── Rule ── */
+.rule {
+  border: none;
+  border-top: 2.5px solid var(--ft-claret);
+  margin: 0.3em 0 0.8em;
+}
+
+/* ── Tags ── */
+.tag {
+  display: inline-block;
+  background: var(--ft-teal);
+  color: var(--ft-paper);
+  font-family: "Inter", sans-serif;
+  font-size: 0.6em;
+  font-weight: 700;
+  padding: 0.15em 0.55em;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  margin-right: 0.3em;
+}
+.tag-claret { background: var(--ft-claret); }
+.tag-oxford { background: var(--ft-oxford); }
+.tag-wheat  { background: var(--ft-wheat); color: var(--ft-text); }
+
+/* ── Color helpers ── */
+.accent { color: var(--ft-teal); }
+.muted  { color: var(--ft-muted); }
+.claret { color: var(--ft-claret); }
+
+/* ── Code blocks ── */
+.slidev-code, pre, code {
+  font-family: "Fira Code", monospace !important;
+  font-size: 0.72em !important;
+  line-height: 1.4 !important;
+}
+
+/* ── Tables ── */
+table {
+  font-family: "Inter", sans-serif;
+  font-size: 0.8em;
+  border-collapse: collapse;
+  width: 100%;
+}
+th {
+  background: var(--ft-text);
+  color: var(--ft-paper);
+  padding: 0.3rem 0.7rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.9em;
+}
+td {
+  padding: 0.22rem 0.7rem;
+  border-bottom: 1px solid var(--ft-soft);
+}
+tr:nth-child(even) td { background: rgba(0,0,0,0.025); }
+
+.gold   { color: #b8860b; font-weight: 700; }
+.silver { color: #708090; font-weight: 700; }
+.bronze { color: #8b5e3c; font-weight: 700; }
+
+/* ── Cover layout ── */
+.slidev-layout.cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3rem 4rem;
+}
+
+/* ── Shared layout padding ── */
+.slidev-layout.default {
+  padding: 1.2rem 2.5rem 1rem;
+}
