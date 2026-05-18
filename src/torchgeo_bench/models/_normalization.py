@@ -95,10 +95,14 @@ def build_normalizer(
             [(b.mean - b.min) / max(b.max - b.min, 1e-8) for b in bands],
             dtype=torch.float32,
         ).view(1, n, 1, 1)
-        pstd = torch.tensor(
-            [b.std / max(b.max - b.min, 1e-8) for b in bands],
-            dtype=torch.float32,
-        ).view(1, n, 1, 1).clamp_min(1e-8)
+        pstd = (
+            torch.tensor(
+                [b.std / max(b.max - b.min, 1e-8) for b in bands],
+                dtype=torch.float32,
+            )
+            .view(1, n, 1, 1)
+            .clamp_min(1e-8)
+        )
 
         def _f(x: torch.Tensor) -> torch.Tensor:
             x = (x - lo.to(x.device, x.dtype)) / span.to(x.device, x.dtype)

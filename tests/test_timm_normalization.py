@@ -206,9 +206,7 @@ def test_minmax_zscore_uses_actual_bandspec_stats():
     from torchgeo_bench.models._normalization import NormalizationStrategy, build_normalizer
 
     # band: min=0, max=10, mean=3, std=2  => post-minmax mean=0.3, std=0.2
-    band = BandSpec(
-        sensor="test", name="b", source_name="B", mean=3.0, std=2.0, min=0.0, max=10.0
-    )
+    band = BandSpec(sensor="test", name="b", source_name="B", mean=3.0, std=2.0, min=0.0, max=10.0)
     norm = build_normalizer(NormalizationStrategy.MINMAX_ZSCORE, [band])
 
     x = torch.tensor([[[[3.0]]]])  # raw value == bandspec mean
