@@ -195,7 +195,7 @@ def evaluate_knn(
 ) -> tuple[float, float, float]:
     """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
     multi_label = y_train.ndim == 2
-    clf = KNNClassifier(n_neighbors=5, device=device, use_fp16=device != "cpu")
+    clf = KNNClassifier(n_neighbors=5, device=device, use_fp16=False)
     clf.fit(x_train, y_train)
 
     if multi_label:
