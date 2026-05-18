@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "slidev slides.md",
+    "build": "slidev build slides.md --out dist",
+    "export": "slidev export slides.md --format pdf --output slides.pdf"
   },
   "keywords": [],
   "author": "",
