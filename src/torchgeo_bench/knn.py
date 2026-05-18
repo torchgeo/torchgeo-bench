@@ -10,23 +10,19 @@ produce identical predictions modulo float-precision noise.
 """
 
 import logging
-from typing import Self
+from typing import Literal, Self
 
 # Suppress noisy INFO messages from faiss loader (AVX512/AVX2 fallback probing)
 logging.getLogger("faiss.loader").setLevel(logging.WARNING)
 
 import faiss  # noqa: E402
 import numpy as np  # noqa: E402
+import torch  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
 def _is_cpu_device(device: str) -> bool:
-    """Return True for the CPU faiss-cpu path, False for the GPU faissknn path.
-
-    Anything other than ``"cpu"`` (e.g. ``"cuda"``, ``"cuda:0"``) routes
-    through ``faissknn``.
-    """
     return str(device).lower() == "cpu"
 
 
@@ -42,11 +38,24 @@ class KNNClassifier:
         device: ``"cpu"`` (default) → ``faiss-cpu``. Anything else
             (``"cuda"``, ``"cuda:0"``) requires the ``cuda`` extra
             (``faissknn``); raises :class:`ImportError` if not installed.
+        metric: Distance metric — ``"l2"`` (default), ``"ip"`` (inner
+            product), or ``"cosine"`` (cosine similarity; auto-normalizes
+            inputs). GPU path only; CPU path always uses L2.
+        use_fp16: Use fp16 for GPU index computation (~30 % speedup on
+            Ampere+). GPU path only; ignored on CPU.
     """
 
-    def __init__(self, n_neighbors: int = 5, device: str = "cpu") -> None:
+    def __init__(
+        self,
+        n_neighbors: int = 5,
+        device: str = "cpu",
+        metric: Literal["l2", "ip", "cosine"] = "l2",
+        use_fp16: bool = False,
+    ) -> None:
         self.n_neighbors = int(n_neighbors)
         self.device = device
+        self.metric = metric
+        self.use_fp16 = use_fp16
 
         # CPU path state
         self._index: faiss.Index | None = None
@@ -93,19 +102,21 @@ class KNNClassifier:
         _, indices = self._index.search(X, k_eff)
         return indices
 
+    def _neighbour_counts(self, indices: np.ndarray) -> np.ndarray:
+        """Vectorized per-row bincount: shape (n_test, n_classes)."""
+        n_test, k = indices.shape
+        labels = self._y[indices].astype(np.int64)  # (n_test, k)
+        offsets = (np.arange(n_test) * self._n_classes)[:, None]
+        flat = (labels + offsets).ravel()
+        return np.bincount(flat, minlength=n_test * self._n_classes).reshape(n_test, self._n_classes)
+
     def _predict_cpu(self, X: np.ndarray) -> np.ndarray:
         assert self._y is not None
         indices = self._search_cpu(X)
         if self._multi_label:
             scores = self._y[indices].mean(axis=1)
             return (scores > 0.5).astype(np.int32)
-        neighbour_labels = self._y[indices]
-        counts = np.apply_along_axis(
-            lambda x: np.bincount(x, minlength=self._n_classes),
-            axis=1,
-            arr=neighbour_labels.astype(np.int16),
-        )
-        return np.argmax(counts, axis=1)
+        return np.argmax(self._neighbour_counts(indices), axis=1)
 
     def _predict_proba_cpu(self, X: np.ndarray) -> np.ndarray:
         assert self._y is not None
@@ -113,13 +124,7 @@ class KNNClassifier:
         k_eff = indices.shape[1]
         if self._multi_label:
             return self._y[indices].mean(axis=1)
-        neighbour_labels = self._y[indices]
-        counts = np.apply_along_axis(
-            lambda x: np.bincount(x, minlength=self._n_classes),
-            axis=1,
-            arr=neighbour_labels.astype(np.int16),
-        )
-        return counts.astype(np.float32) / k_eff
+        return self._neighbour_counts(indices).astype(np.float32) / k_eff
 
     # ---- GPU path (faissknn delegate) -------------------------------------
 
@@ -137,20 +142,22 @@ class KNNClassifier:
             self._fit_cpu(X, y)
             return
 
+        kwargs = dict(
+            n_neighbors=self.n_neighbors,
+            device=self.device,
+            metric=self.metric,
+            use_fp16=self.use_fp16,
+        )
         if self._multi_label:
             self._n_classes = int(y.shape[1])
-            self._impl = FaissKNNMultilabelClassifier(
-                n_neighbors=self.n_neighbors, device=self.device
-            )
-            self._impl.fit(X, y.astype(np.int64))
+            self._impl = FaissKNNMultilabelClassifier(**kwargs)
         else:
-            self._n_classes = int(np.max(y)) + 1
-            self._impl = FaissKNNClassifier(
-                n_neighbors=self.n_neighbors,
-                n_classes=self._n_classes,
-                device=self.device,
-            )
-            self._impl.fit(X, y.astype(np.int64))
+            self._impl = FaissKNNClassifier(**kwargs)
+        self._impl.fit(X, y.astype(np.int64))
+
+    def _to_gpu_tensor(self, X: np.ndarray) -> torch.Tensor:
+        """Convert numpy array to a CUDA tensor for zero-copy faissknn input."""
+        return torch.from_numpy(np.ascontiguousarray(X.astype(np.float32))).to(self.device)
 
     # ---- Public API -------------------------------------------------------
 
@@ -168,11 +175,13 @@ class KNNClassifier:
         if _is_cpu_device(self.device):
             return self._predict_cpu(X)
         assert self._impl is not None, "Call fit() first."
-        return self._impl.predict(np.ascontiguousarray(X.astype(np.float32)))
+        result = self._impl.predict(self._to_gpu_tensor(X))
+        return result.cpu().numpy() if isinstance(result, torch.Tensor) else result
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Predict per-class probabilities ``(n_samples, n_classes)``."""
         if _is_cpu_device(self.device):
             return self._predict_proba_cpu(X)
         assert self._impl is not None, "Call fit() first."
-        return self._impl.predict_proba(np.ascontiguousarray(X.astype(np.float32)))
+        result = self._impl.predict_proba(self._to_gpu_tensor(X))
+        return result.cpu().numpy() if isinstance(result, torch.Tensor) else result

@@ -88,9 +88,17 @@ def build_normalizer(
 
     if strategy is NormalizationStrategy.MINMAX_ZSCORE:
         lo, span = _bandspec_min_max(bands)
-        # Pretend post-minmax stats are mean=0.5, std=0.25 for [0,1] uniform-ish data.
-        pmean = torch.full_like(lo, 0.5)
-        pstd = torch.full_like(lo, 0.25)
+        # Post-minmax mean_i = (raw_mean_i - min_i) / (max_i - min_i)
+        # Post-minmax std_i  = raw_std_i  / (max_i - min_i)
+        n = len(bands)
+        pmean = torch.tensor(
+            [(b.mean - b.min) / max(b.max - b.min, 1e-8) for b in bands],
+            dtype=torch.float32,
+        ).view(1, n, 1, 1)
+        pstd = torch.tensor(
+            [b.std / max(b.max - b.min, 1e-8) for b in bands],
+            dtype=torch.float32,
+        ).view(1, n, 1, 1).clamp_min(1e-8)
 
         def _f(x: torch.Tensor) -> torch.Tensor:
             x = (x - lo.to(x.device, x.dtype)) / span.to(x.device, x.dtype)

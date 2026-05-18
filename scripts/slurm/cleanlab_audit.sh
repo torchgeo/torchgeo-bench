@@ -48,7 +48,7 @@ TRUSTED_LIST="$TORCH_HUB_DIR/trusted_list"
 for repo in gastruc_anysat facebookresearch_dinov2; do
   grep -qxF "$repo" "$TRUSTED_LIST" 2>/dev/null || echo "$repo" >> "$TRUSTED_LIST"
 done
-export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-/projects/bgtj/isaaccorley/cache/geobreeze_weights}
+export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-$HOME/.cache/geobreeze_weights}
 mkdir -p "$MODEL_WEIGHTS_DIR"
 
 python scripts/cleanlab_extract_probs.py \

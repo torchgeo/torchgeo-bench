@@ -54,13 +54,13 @@ for repo in gastruc_anysat facebookresearch_dinov2; do
   grep -qxF "$repo" "$TRUSTED_LIST" 2>/dev/null || echo "$repo" >> "$TRUSTED_LIST"
 done
 # Geobreeze CROMA + similar load weights from this dir.
-export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-/projects/bgtj/isaaccorley/cache/geobreeze_weights}
+export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-$HOME/.cache/geobreeze_weights}
 mkdir -p "$MODEL_WEIGHTS_DIR"
 
 # Shared HuggingFace cache so big terratorch/torchgeo backbones don't
 # re-download per task.  HF_HOME is the umbrella var (covers hub, datasets,
 # transformers) and overrides the per-job $HOME/.cache/huggingface default.
-export HF_HOME=${HF_HOME:-/projects/bgtj/isaaccorley/cache/hf}
+export HF_HOME=${HF_HOME:-$HOME/.cache/huggingface}
 mkdir -p "$HF_HOME"
 
 torchgeo-bench run \

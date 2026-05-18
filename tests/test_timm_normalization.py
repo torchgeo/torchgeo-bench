@@ -200,6 +200,28 @@ def test_model_native_picks_up_variant_stats():
     assert model.pretrain_std == list(cfg.std)
 
 
+def test_minmax_zscore_uses_actual_bandspec_stats():
+    """MINMAX_ZSCORE must derive post-minmax mean/std from BandSpec, not assume 0.5/0.25."""
+    from torchgeo_bench.datasets.base import BandSpec
+    from torchgeo_bench.models._normalization import NormalizationStrategy, build_normalizer
+
+    # band: min=0, max=10, mean=3, std=2  => post-minmax mean=0.3, std=0.2
+    band = BandSpec(
+        sensor="test", name="b", source_name="B", mean=3.0, std=2.0, min=0.0, max=10.0
+    )
+    norm = build_normalizer(NormalizationStrategy.MINMAX_ZSCORE, [band])
+
+    x = torch.tensor([[[[3.0]]]])  # raw value == bandspec mean
+    out = norm(x)
+    # after minmax: (3-0)/10 = 0.3; after zscore: (0.3 - 0.3) / 0.2 = 0.0
+    assert abs(out.item()) < 1e-5, f"expected ~0 at band mean, got {out.item()}"
+
+    x_max = torch.tensor([[[[10.0]]]])
+    out_max = norm(x_max)
+    # after minmax: 1.0; after zscore: (1.0 - 0.3) / 0.2 = 3.5
+    assert abs(out_max.item() - 3.5) < 1e-4, f"expected 3.5 at band max, got {out_max.item()}"
+
+
 def test_unknown_timm_model_name_raises_clearly():
     """A typo in ``model_name`` must fail loudly at construction (we don't
     silently swallow the missing pretrained_cfg)."""

@@ -32,7 +32,7 @@ cd "$SLURM_SUBMIT_DIR"
 VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 source "$VENV/bin/activate"
 
-export HF_HOME=${HF_HOME:-/projects/bgtj/isaaccorley/cache/hf}
+export HF_HOME=${HF_HOME:-$HOME/.cache/huggingface}
 mkdir -p "$HF_HOME"
 
 # Hydra needs square-bracket form for list overrides; "rgb" passes as a

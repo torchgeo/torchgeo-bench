@@ -1,5 +1,3 @@
-"""Segmentation Probe Module."""
-
 import logging
 import math
 from collections.abc import Iterator

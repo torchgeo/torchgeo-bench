@@ -25,7 +25,7 @@ from torchgeo_bench.datasets import (
     get_datasets,
     list_datasets,
 )
-from torchgeo_bench.intrinsic_dim import compute_intrinsic_dim
+from torchgeo_bench.intrinsic_dim import DegenerateManifoldError, compute_intrinsic_dim
 from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import measure_profile
@@ -93,24 +93,11 @@ def bootstrap_accuracy(
     ci: float = 95.0,
     seed: int | None = None,
 ) -> tuple[float, float, float]:
-    """Compute accuracy with bootstrapped confidence interval.
-
-    Args:
-        y_true: Ground-truth labels.
-        y_pred: Predicted labels.
-        n_boot: Number of bootstrap resamples.
-        ci: Confidence interval width in percent.
-        seed: Random seed for reproducibility.
-
-    Returns:
-        Tuple of (mean_accuracy, ci_lower, ci_upper).
-    """
+    """Bootstrapped accuracy with confidence interval. Returns (mean, ci_lower, ci_upper)."""
     rng = np.random.default_rng(seed)
     n = len(y_true)
-    accs = np.empty(n_boot, dtype=np.float32)
-    for i in range(n_boot):
-        idx = rng.integers(0, n, size=n)
-        accs[i] = (y_true[idx] == y_pred[idx]).mean()
+    idx = rng.integers(0, n, size=(n_boot, n))
+    accs = (y_true[idx] == y_pred[idx]).mean(axis=1).astype(np.float32)
     acc_mean = float((y_true == y_pred).mean())
     lo = (100 - ci) / 2
     hi = 100 - lo
@@ -192,17 +179,6 @@ class EvaluationResult:
 def embed_split(
     model: BenchModel, dataloader: DataLoader, device: torch.device, verbose: bool
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Extract feature embeddings and labels from a data split.
-
-    Args:
-        model: The benchmark model to extract features with.
-        dataloader: DataLoader for the split.
-        device: Torch device to run inference on.
-        verbose: Whether to show a progress bar.
-
-    Returns:
-        Tuple of (features, labels) as NumPy arrays.
-    """
     return extract_features(model, dataloader, device, transforms=None, verbose=verbose)
 
 
@@ -218,7 +194,7 @@ def evaluate_knn(
 ) -> tuple[float, float, float]:
     """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
     multi_label = y_train.ndim == 2
-    clf = KNNClassifier(n_neighbors=5, device=device)
+    clf = KNNClassifier(n_neighbors=5, device=device, use_fp16=device != "cpu")
     clf.fit(x_train, y_train)
 
     if multi_label:
@@ -308,7 +284,6 @@ def evaluate_logistic(
     if verbose:
         logger.info(f"[{label_tag}] Best C={best_c:.4g} val_score={best_val_score:.4f}")
 
-    # Prepare final training tensors
     if merge_val:
         x_final_np = np.concatenate([x_train, x_val], axis=0)
         y_final_np = np.concatenate([y_train, y_val], axis=0)
@@ -353,17 +328,6 @@ def _make_seg_dataloaders(
     test_loader: DataLoader,
     batch_size: int,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Build train, val, and train+val DataLoaders for a given batch size.
-
-    Args:
-        train_dataset: Training split dataset.
-        val_dataset: Validation split dataset.
-        test_loader: Pre-built test loader (reused as-is).
-        batch_size: Batch size for the new loaders.
-
-    Returns:
-        Tuple of (train_loader, val_loader, train_val_loader).
-    """
     loader_kwargs = {
         "batch_size": batch_size,
         "num_workers": test_loader.num_workers,
@@ -384,18 +348,6 @@ def _build_seg_probe_and_solver(
     device: torch.device,
     lr: float,
 ) -> tuple[SegmentationProbe, SegmentationSolver]:
-    """Instantiate a fresh SegmentationProbe and SegmentationSolver.
-
-    Args:
-        model: Frozen backbone (shared across calls; only the head is re-created).
-        num_classes: Number of segmentation classes.
-        eval_cfg: Merged evaluation config with segmentation sub-config.
-        device: Target device.
-        lr: Learning rate for the solver optimizer.
-
-    Returns:
-        Tuple of (probe, solver).
-    """
     layer_names = list(eval_cfg.segmentation.layers)
     if not layer_names:
         raise ValueError(
@@ -485,9 +437,7 @@ def evaluate_intrinsic_dim(
                         seed=seed,
                     )
                 )
-            except ValueError as exc:
-                if "non-finite dimension" not in str(exc):
-                    raise
+            except DegenerateManifoldError as exc:
                 logger.warning(
                     f"[intrinsic-dim] {est_name} split={split_name} model={common_meta.get('model')} "
                     f"dataset={common_meta.get('dataset')} bands={common_meta.get('bands')} "
@@ -797,7 +747,6 @@ def main(cfg: DictConfig) -> None:
     dataset_names = _expand_dataset_list(cfg.dataset.names)
     device = torch.device(cfg.device)
 
-    # Output file path
     output_path = cfg.output
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
@@ -810,7 +759,6 @@ def main(cfg: DictConfig) -> None:
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
 
-    # Load existing results if resume mode is enabled
     completed_runs: set[tuple[str, ...]] = set()
     if cfg.resume and os.path.exists(output_path):
         existing_df = pd.read_csv(cfg.output)
@@ -840,15 +788,12 @@ def main(cfg: DictConfig) -> None:
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
-        # Resolve metadata via the BenchDataset registry (no I/O).
         try:
             ds_cls = get_bench_dataset_class(ds_name)
         except KeyError:
             logger.warning(f"Skipping dataset {ds_name} (not in registry)")
             continue
 
-        # Check if we can skip this dataset entirely
-        # Include dataset config params to ensure we only skip with matching settings
         config_tuple = (
             normalization,
             str(getattr(cfg.dataset, "image_size", None)),
@@ -864,7 +809,6 @@ def main(cfg: DictConfig) -> None:
             cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
         )
 
-        # Check resume for standard methods
         knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name, *config_tuple)
         linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
 
@@ -892,7 +836,6 @@ def main(cfg: DictConfig) -> None:
             continue
         train_dataset, train_loader, val_loader, test_loader = result
 
-        # Use metadata from the BenchDataset class
         num_channels = train_dataset[0]["image"].shape[0]
         is_segmentation = ds_cls.task == "segmentation"
         is_multilabel = ds_cls.multilabel
@@ -937,7 +880,6 @@ def main(cfg: DictConfig) -> None:
         model: BenchModel = instantiate(cfg.model, **instantiate_kwargs)
         model.to(device).eval()
 
-        # Shared Result metadata
         common_meta = {
             "dataset": ds_name,
             "seed": cfg.seed,

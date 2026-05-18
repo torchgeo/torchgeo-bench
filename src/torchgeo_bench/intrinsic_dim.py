@@ -16,6 +16,11 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+
+class DegenerateManifoldError(ValueError):
+    """Feature manifold is degenerate; the estimator returned a non-finite dimension."""
+
+
 SUPPORTED_ESTIMATORS: tuple[str, ...] = (
     "lPCA",
     "TwoNN",
@@ -163,7 +168,7 @@ def compute_intrinsic_dim(
         if not np.isfinite(value):
             d = _two_nearest_distances(X_tensor)
             d1, d2 = d[:, 0], d[:, 1]
-            raise ValueError(
+            raise DegenerateManifoldError(
                 f"[intrinsic-dim] {name} returned non-finite dimension ({value}) on "
                 f"X{tuple(X_tensor.shape)} after dedup. "
                 f"d1[min={d1.min():.3e} median={d1.median():.3e} zeros={(d1 == 0).sum().item()}] "
