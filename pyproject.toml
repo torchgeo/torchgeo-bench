@@ -42,12 +42,12 @@ dependencies = [
   "numpy>=1.24",
   "omegaconf>=2.3",
   "pandas>=2",
+  "rich>=13",
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
   "torchgeo @ git+https://github.com/microsoft/torchgeo.git@e585e2c07f7a",
   "torchvision>=0.15",
-  "rich>=13",
   "typer>=0.9",
 ]
 optional-dependencies.all = [
