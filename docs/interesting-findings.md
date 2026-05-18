@@ -232,3 +232,61 @@ Verdict-style summary of which models actually want multispectral:
 | Native multimodal (CROMA, Terramind, Prithvi, Clay, OlmoEarth, Panopticon) | ✓ uniformly |
 | Band-agnostic with wavelength embeddings (DOFA) | ✗ empirically RGB-better |
 | RGB-pretrained (ResNet/Swin/ScaleMAE/DINOv3 family) | ✗ adapter path hurts |
+
+## Input-scale mismatch silently broke 105 (model, dataset) cells (2026-05-18)
+
+Several torchgeo wrappers ship a weights-bound ``Normalize`` calibrated
+for a specific input scale (S2 DN, uint8/255, reflectance), but the
+wrapper applied that Normalize regardless of what scale the dataset
+actually delivered.  The two extremes:
+
+| Pretrained scale | Dataset scale | Effect of mismatched Normalize |
+|---|---|---|
+| ``s2_dn_div10000`` | reflectance [0, 2.8] (so2sat) | inputs become ~0.0003; features collapse, linear probe = chance |
+| ``uint8_div255`` | S2 DN [0, 10000] | inputs become ~40; first conv saturates; features near-constant |
+
+Worst observed: ``resnet50_s2rgb_moco × m-so2sat`` linear = **0.059** =
+1/17 = exact chance level.  An audit (helper: ``convert_unit`` in
+``models/_input_units.py``) found **105 affected cells** across:
+
+* ResNet S2-MoCo / SeCo / Satlas variants on uint8 datasets
+  (m-forestnet Landsat, m-pv4ger NAIP, forestnet V2 rgb)
+* ScaleMAE / EarthLoc / Swin-Satlas on S2 DN datasets
+  (m-eurosat, m-bigearthnet, eurosat-spatial, benv2, treesatai)
+* CROMA / Panopticon on so2sat reflectance datasets
+
+Fix (PR #85): ``_TorchGeoBackboneBench.normalize_inputs`` now calls
+``convert_unit(images, detected_dataset_unit, weights_target_unit)``
+before the Normalize layer.  All ResNet/ScaleMAE/EarthLoc/Swin
+variants on previously-mismatched datasets jumped 30-53 percentage
+points after the rerun.
+
+Example fix-deltas:
+
+| Cell | Before | After | Δ |
+|---|---|---|---|
+| ``resnet50_s2rgb_moco × m-so2sat`` | 0.059 | **0.595** | +0.536 |
+| ``resnet50_s2rgb_moco × so2sat`` | 0.059 | **0.595** | +0.536 |
+| ``resnet50_s2_all_moco × so2sat`` | 0.059 | **0.357** | +0.298 |
+
+The previous "intrinsic dim ≈ 365" outlier on
+``resnet50_s2rgb_moco × so2sat`` (vs typical 6-12) also resolved — it
+was symptomatic of the same collapsed-feature pathology.
+
+## DOFA wavelength fallback is now an error, not a silent default (2026-05-18)
+
+``_resolve_dofa_wavelengths`` used to fall back to 0.6 µm (~green band)
+for any ``BandSpec.wavelength_um is None``.  DOFA's wavelength
+embedding is the only signal the model gets about each spectral
+channel — silently routing a SAR backscatter channel through the
+green-band embedding would produce garbage features without any
+error.
+
+Audit confirmed the published 14-cell DOFA sweep (all S2 RGB-only)
+was unaffected because every S2 optical band has wavelength_um set.
+But m-forestnet's Landsat NIR/SWIR_1/SWIR_2 bands lack wavelengths,
+and so2sat / benv2 / treesatai SAR bands also have ``None``.  Any
+future DOFA probe on those would have silently mapped to ~green.
+
+Now raises a ``ValueError`` listing the offending band names.  No
+behavioural change on existing data; future-proofing only.
