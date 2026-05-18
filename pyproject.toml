@@ -47,7 +47,8 @@ dependencies = [
   "torch>=2",
   "torchgeo @ git+https://github.com/microsoft/torchgeo.git@e585e2c07f7a",
   "torchvision>=0.15",
-  "tqdm>=4.65",
+  "rich>=13",
+  "typer>=0.9",
 ]
 optional-dependencies.all = [
   "torchgeo-bench[cleanlab]",

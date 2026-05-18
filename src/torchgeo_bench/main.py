@@ -15,10 +15,10 @@ import pandas as pd
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
+from rich.progress import track
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
 from torchgeo.datasets.errors import DatasetNotFoundError
-from tqdm import tqdm
 
 from torchgeo_bench.datasets import (
     get_bench_dataset_class,
@@ -253,7 +253,7 @@ def evaluate_logistic(
             f"[{label_tag}] C sweep start over {len(c_values)} values "
             f"(train={len(x_train)}, val={len(x_val)})"
         )
-        c_value_iterator = tqdm(c_values, desc="C values", leave=False)
+        c_value_iterator = track(c_values, description="C values")
     else:
         c_value_iterator = c_values
 
@@ -788,7 +788,7 @@ def main(cfg: DictConfig) -> None:
     normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
-    for ds_name in tqdm(dataset_names, desc="Datasets"):
+    for ds_name in track(dataset_names, description="Datasets"):
         try:
             ds_cls = get_bench_dataset_class(ds_name)
         except KeyError:

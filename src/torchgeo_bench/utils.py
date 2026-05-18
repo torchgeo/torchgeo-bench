@@ -2,8 +2,8 @@
 
 import numpy as np
 import torch
+from rich.progress import track
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 
 def extract_features(
@@ -28,7 +28,11 @@ def extract_features(
     x_all = []
     y_all = []
 
-    iterator = tqdm(dataloader, total=len(dataloader)) if verbose else dataloader
+    iterator = (
+        track(dataloader, total=len(dataloader), description="Extracting")
+        if verbose
+        else dataloader
+    )
 
     for batch in iterator:
         images = batch["image"].to(device)

@@ -16,8 +16,8 @@ import zipfile
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
+from rich.progress import track
 from torchgeo.datasets import EuroSAT
-from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +47,8 @@ DEFAULT_V2_DATASETS: tuple[str, ...] = (
 def _decompress_zip_with_progress(zip_path: Path, extract_to: Path) -> None:
     """Extract ``zip_path`` into ``extract_to`` with a progress bar; delete the zip."""
     with zipfile.ZipFile(zip_path, "r") as zf:
-        names = zf.namelist()
-        with tqdm(total=len(names), unit="file", desc=f"Extracting {zip_path.name}") as pbar:
-            for name in names:
-                zf.extract(name, extract_to)
-                pbar.update(1)
+        for name in track(zf.namelist(), description=f"Extracting {zip_path.name}"):
+            zf.extract(name, extract_to)
     zip_path.unlink()
     logger.info("Removed zip file: %s", zip_path)
 
