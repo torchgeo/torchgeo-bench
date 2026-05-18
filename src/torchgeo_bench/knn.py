@@ -154,7 +154,11 @@ class KNNClassifier:
             self._n_classes = int(y.shape[1])
             self._impl = FaissKNNMultilabelClassifier(**kwargs)
         else:
-            self._impl = FaissKNNClassifier(**kwargs)
+            # faissknn uses len(unique(y)) as n_classes, which breaks when labels
+            # have gaps (e.g. a small partition missing class 4 but containing class 11).
+            # Pass n_classes=max(y)+1 to guarantee the counts array is large enough.
+            self._n_classes = int(np.max(y)) + 1
+            self._impl = FaissKNNClassifier(n_classes=self._n_classes, **kwargs)
         self._impl.fit(X, y.astype(np.int64))
 
     def _to_gpu_tensor(self, X: np.ndarray) -> torch.Tensor:
