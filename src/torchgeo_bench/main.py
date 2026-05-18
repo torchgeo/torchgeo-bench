@@ -179,6 +179,7 @@ class EvaluationResult:
 def embed_split(
     model: BenchModel, dataloader: DataLoader, device: torch.device, verbose: bool
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Extract feature embeddings and labels from a data split."""
     return extract_features(model, dataloader, device, transforms=None, verbose=verbose)
 
 

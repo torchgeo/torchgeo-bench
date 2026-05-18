@@ -1,3 +1,5 @@
+"""Segmentation probe: multi-scale frozen-backbone feature extraction and head training."""
+
 import logging
 import math
 from collections.abc import Iterator

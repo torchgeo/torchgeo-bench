@@ -256,9 +256,7 @@ class TestKNNMetricParam:
         clf_l2.fit(X_train, d["y_train"])
         clf_cos.fit(X_train, d["y_train"])
         # Both operate on unit-norm inputs; predictions should agree
-        np.testing.assert_array_equal(
-            clf_l2.predict(X_test), clf_cos.predict(X_test)
-        )
+        np.testing.assert_array_equal(clf_l2.predict(X_test), clf_cos.predict(X_test))
 
 
 class TestKNNGPUPath:

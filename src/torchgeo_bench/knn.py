@@ -108,7 +108,9 @@ class KNNClassifier:
         labels = self._y[indices].astype(np.int64)  # (n_test, k)
         offsets = (np.arange(n_test) * self._n_classes)[:, None]
         flat = (labels + offsets).ravel()
-        return np.bincount(flat, minlength=n_test * self._n_classes).reshape(n_test, self._n_classes)
+        return np.bincount(flat, minlength=n_test * self._n_classes).reshape(
+            n_test, self._n_classes
+        )
 
     def _predict_cpu(self, X: np.ndarray) -> np.ndarray:
         assert self._y is not None
@@ -142,12 +144,12 @@ class KNNClassifier:
             self._fit_cpu(X, y)
             return
 
-        kwargs = dict(
-            n_neighbors=self.n_neighbors,
-            device=self.device,
-            metric=self.metric,
-            use_fp16=self.use_fp16,
-        )
+        kwargs = {
+            "n_neighbors": self.n_neighbors,
+            "device": self.device,
+            "metric": self.metric,
+            "use_fp16": self.use_fp16,
+        }
         if self._multi_label:
             self._n_classes = int(y.shape[1])
             self._impl = FaissKNNMultilabelClassifier(**kwargs)
