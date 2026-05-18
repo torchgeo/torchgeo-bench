@@ -86,6 +86,33 @@ def _normalize_bands_value(bands: object) -> str:
     return ",".join(items)
 
 
+def _completed_run_keys(
+    existing_df: pd.DataFrame,
+    key_cols: Sequence[str],
+    metric_name: str | None = None,
+) -> set[tuple[str, ...]]:
+    """Build resume keys from existing rows, optionally requiring a metric."""
+    df = existing_df
+    if metric_name is not None:
+        if "metric_name" not in df.columns:
+            return set()
+        df = df[df["metric_name"].fillna("").astype(str) == metric_name]
+    return set(map(tuple, df[list(key_cols)].fillna("").astype(str).to_numpy()))
+
+
+def _profile_metric_names(profile_cfg: DictConfig | None) -> list[str]:
+    """Return the required profile metrics for resume completeness checks."""
+    names = [
+        "throughput_samples_per_sec",
+        "latency_ms_per_batch_p50",
+        "params_m",
+    ]
+    cpu_cfg = profile_cfg.get("cpu_throughput", {}) if profile_cfg else {}
+    if bool(cpu_cfg.get("enabled", False)):
+        names.extend(["throughput_samples_per_sec_cpu", "latency_ms_per_batch_p50_cpu"])
+    return names
+
+
 def bootstrap_accuracy(
     y_true: np.ndarray,
     y_pred: np.ndarray,
@@ -761,6 +788,7 @@ def main(cfg: DictConfig) -> None:
     c_values_list = [float(v) for v in c_values.tolist()]
 
     completed_runs: set[tuple[str, ...]] = set()
+    completed_metrics: dict[str, set[tuple[str, ...]]] = {}
     if cfg.resume and os.path.exists(output_path):
         existing_df = pd.read_csv(cfg.output)
         key_cols = (
@@ -777,9 +805,12 @@ def main(cfg: DictConfig) -> None:
         for col in key_cols:
             if col not in existing_df.columns:
                 existing_df[col] = ""
-        completed_runs = set(
-            map(tuple, existing_df[list(key_cols)].fillna("").astype(str).to_numpy())
-        )
+        completed_runs = _completed_run_keys(existing_df, key_cols)
+        if "metric_name" in existing_df.columns:
+            completed_metrics = {
+                str(metric): _completed_run_keys(existing_df, key_cols, str(metric))
+                for metric in existing_df["metric_name"].dropna().unique()
+            }
         logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
@@ -798,7 +829,7 @@ def main(cfg: DictConfig) -> None:
         config_tuple = (
             normalization,
             str(getattr(cfg.dataset, "image_size", None)),
-            getattr(cfg.dataset, "interpolation", "bicubic"),
+            getattr(cfg.dataset, "interpolation", "bilinear"),
             cfg.dataset.partition,
             bands_value,
         )
@@ -826,7 +857,7 @@ def main(cfg: DictConfig) -> None:
                 num_workers=int(cfg.dataset.get("num_workers", 8)),
                 return_val=True,
                 image_size=getattr(cfg.dataset, "image_size", None),
-                interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+                interpolation=getattr(cfg.dataset, "interpolation", "bilinear"),
                 bands=getattr(cfg.dataset, "bands", "rgb"),
             )
         except (FileNotFoundError, DatasetNotFoundError) as exc:
@@ -888,7 +919,7 @@ def main(cfg: DictConfig) -> None:
             "name": cfg.model.name,
             "normalization": normalization,
             "image_size": getattr(cfg.dataset, "image_size", None),
-            "interpolation": getattr(cfg.dataset, "interpolation", "bicubic"),
+            "interpolation": getattr(cfg.dataset, "interpolation", "bilinear"),
             "partition": cfg.dataset.partition,
             "bands": bands_value,
             "c_range_start": c_start,
@@ -978,10 +1009,29 @@ def main(cfg: DictConfig) -> None:
             )
             id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
             id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
-            skip_id = (not id_enabled) or (cfg.resume and id_key in completed_runs)
+            id_metric_names = (
+                [f"id_{est}_{split}" for split in id_cfg.splits for est in id_cfg.estimators]
+                if id_enabled
+                else []
+            )
+            skip_id = (not id_enabled) or (
+                cfg.resume
+                and id_metric_names
+                and all(
+                    id_key in completed_metrics.get(metric, set()) for metric in id_metric_names
+                )
+            )
             profile_cfg = getattr(cfg.eval, "profile", None)
             profile_enabled = bool(profile_cfg and profile_cfg.get("enabled", False))
-            skip_profile = (not profile_enabled) or (cfg.resume and profile_key in completed_runs)
+            profile_metric_names = _profile_metric_names(profile_cfg) if profile_enabled else []
+            skip_profile = (not profile_enabled) or (
+                cfg.resume
+                and profile_metric_names
+                and all(
+                    profile_key in completed_metrics.get(metric, set())
+                    for metric in profile_metric_names
+                )
+            )
 
             if skip_knn and skip_linear and skip_id and skip_profile:
                 continue

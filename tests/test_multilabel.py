@@ -1,5 +1,7 @@
 """Tests for multi-label support and KNNClassifier."""
 
+import builtins
+
 import numpy as np
 import pytest
 import torch
@@ -331,6 +333,22 @@ class TestKNNGPUPath:
         clf.fit(d["x_train"], d["y_train"])
         assert isinstance(clf.predict(d["x_test"]), np.ndarray)
         assert isinstance(clf.predict_proba(d["x_test"]), np.ndarray)
+
+    def test_gpu_missing_faissknn_raises_instead_of_cpu_fallback(
+        self, singlelabel_data, monkeypatch
+    ):
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "faissknn":
+                raise ImportError("blocked for test")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        d = singlelabel_data
+        clf = KNNClassifier(n_neighbors=5, device="cuda")
+        with pytest.raises(ImportError, match='request device="cpu"'):
+            clf.fit(d["x_train"], d["y_train"])
 
 
 # ---- Unified evaluate_knn / evaluate_logistic tests ----

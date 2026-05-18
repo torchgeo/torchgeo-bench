@@ -57,7 +57,9 @@ def extract_features(
                 elif "global_pool" in features:
                     features = features["global_pool"].cpu().numpy()
                 elif "head.global_pool" in features:
-                    features = features["head.global_pool"].cpu().numpy().squeeze()
+                    features = features["head.global_pool"].cpu().numpy()
+                    if features.ndim == 3 and features.shape[1] == 1:
+                        features = features[:, 0, :]
                 else:
                     raise ValueError(f"Unexpected features format: {features.keys()}")
 

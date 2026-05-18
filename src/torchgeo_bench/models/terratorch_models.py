@@ -35,7 +35,7 @@ def _maybe_resize(images: torch.Tensor, size: int | None) -> torch.Tensor:
     h, w = images.shape[-2:]
     if h == size and w == size:
         return images
-    return F.interpolate(images, size=(size, size), mode="bicubic", align_corners=False)
+    return F.interpolate(images, size=(size, size), mode="bilinear", align_corners=False)
 
 
 def _reduce_to_vec(out: torch.Tensor | list | tuple, pool: str) -> torch.Tensor:

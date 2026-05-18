@@ -30,11 +30,32 @@ def detect_input_unit(bands: list[BandSpec]) -> InputUnit:
     * else any optical band with ``max > 10`` -> :attr:`UINT8`
     * otherwise -> :attr:`REFLECTANCE_0_1`
     """
-    optical = [b for b in bands if b.wavelength_um is not None] or bands
-    max_max = max(b.max for b in optical)
-    if max_max > 1000:
+    by_sensor: dict[str, list[BandSpec]] = {}
+    for band in bands:
+        by_sensor.setdefault(band.sensor, []).append(band)
+
+    units = {_detect_band_group_unit(sensor_bands) for sensor_bands in by_sensor.values()}
+    if len(units) != 1:
+        details = [
+            (
+                sensor,
+                [(b.name, b.max) for b in sensor_bands],
+                _detect_band_group_unit(sensor_bands).value,
+            )
+            for sensor, sensor_bands in by_sensor.items()
+        ]
+        raise ValueError(
+            "Cannot infer one input unit for mixed-scale bands: "
+            f"{details}. Select a single-scale band set or use bandspec_zscore/identity."
+        )
+    return units.pop()
+
+
+def _detect_band_group_unit(bands: list[BandSpec]) -> InputUnit:
+    max_value = max(b.max for b in bands)
+    if max_value > 1000:
         return InputUnit.S2_DN
-    if max_max > 10:
+    if max_value > 10:
         return InputUnit.UINT8
     return InputUnit.REFLECTANCE_0_1
 

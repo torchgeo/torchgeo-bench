@@ -202,7 +202,7 @@ class TimmPatchBenchModel(BenchModel):
                 images = F.interpolate(
                     images,
                     size=(self.target_size, self.target_size),
-                    mode="bicubic",
+                    mode="bilinear",
                     align_corners=False,
                 )
         x = self.backbone(images)

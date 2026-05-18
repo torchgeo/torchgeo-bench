@@ -112,7 +112,7 @@ def _auto_resize(images: torch.Tensor, target_size: int) -> torch.Tensor:
         images = F.interpolate(
             images,
             size=(target_size, target_size),
-            mode="bicubic",
+            mode="bilinear",
             align_corners=False,
         )
     return images
@@ -653,7 +653,7 @@ _CROMA_S2_12 = [
 class TorchGeoCromaBench(_TorchGeoBackboneBench):
     """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``."""
 
-    weights_input_unit = "s2_dn_div10000"
+    weights_input_unit = "reflectance_0_1"
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
     def __init__(
@@ -697,7 +697,7 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
 class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
     """Panopticon ViT-B/14 — per-channel wavelength tokens (nm) from BandSpec."""
 
-    weights_input_unit = "s2_dn_div10000"
+    weights_input_unit = "reflectance_0_1"
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
     def __init__(
@@ -723,7 +723,7 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
         )
         from ._band_mapping import wavelengths_um
 
-        wls_nm = [w * 1000.0 for w in wavelengths_um(bands, default_um=0.6)]
+        wls_nm = [w * 1000.0 for w in wavelengths_um(bands)]
         self.register_buffer("_chn_ids", torch.tensor(wls_nm, dtype=torch.float32))
 
     @torch.no_grad()
