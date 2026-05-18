@@ -38,7 +38,7 @@ echo "[$(date)] task=$SLURM_ARRAY_TASK_ID dataset=$DATASET"
 
 cd "$SLURM_SUBMIT_DIR"
 
-VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv-3.12}
+VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 source "$VENV/bin/activate"
 
 # Same torch.hub / weights-dir setup as probe_sweep_h100.sh.
