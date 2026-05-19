@@ -22,7 +22,7 @@ variables).  The bundled downloader fetches each family by name:
 
    $ torchgeo-bench download geobench_v1                       # all V1 classification datasets
    $ torchgeo-bench download geobench_v2                       # default V2 set (cls + seg)
-   $ torchgeo-bench download geobench_v2 --datasets m_eurosat,burn_scars
+   $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars
    $ torchgeo-bench download eurosat                           # torchgeo's EuroSAT mirror
 
 See :doc:`datasets` for the full list of supported names and the
