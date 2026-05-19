@@ -356,6 +356,10 @@ class OlmoEarthBenchModel(BenchModel):
         sensor_remap: Optional dict mapping sensor names to alternate
             routing keys, e.g. ``{"landsat": "landsat_as_s2"}`` to route
             Landsat bands through the S2 normalizer (+6.6 pp on m-forestnet).
+        min_image_size: If set, upsample inputs smaller than this value
+            to ``min_image_size × min_image_size`` via bilinear interpolation.
+            Useful for datasets with small native images (e.g. m-so2sat at
+            32 px) where the patch grid would otherwise be too sparse.
     """
 
     def __init__(
@@ -371,6 +375,7 @@ class OlmoEarthBenchModel(BenchModel):
         sar_log_scale: bool = False,
         landsat_scale_factor: float | None = None,
         sensor_remap: dict[str, str] | None = None,
+        min_image_size: int | None = None,
         **_kwargs,
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
@@ -415,6 +420,7 @@ class OlmoEarthBenchModel(BenchModel):
         self.do_normalize = normalize
         self.sar_log_scale = sar_log_scale
         self.landsat_scale_factor = landsat_scale_factor
+        self.min_image_size = min_image_size
 
         model_id = getattr(ModelID, f"OLMOEARTH_V1_{model_size.upper()}")
         self.encoder_model = load_model_from_id(model_id, load_weights=True)
@@ -473,6 +479,12 @@ class OlmoEarthBenchModel(BenchModel):
 
         device = images.device
         B, _, H, W = images.shape
+
+        if self.min_image_size is not None and (H < self.min_image_size or W < self.min_image_size):
+            new_h = max(H, self.min_image_size)
+            new_w = max(W, self.min_image_size)
+            images = F.interpolate(images, size=(new_h, new_w), mode="bilinear", align_corners=False)
+            B, _, H, W = images.shape
 
         timestamps = torch.zeros(B, self.time_steps, 3, dtype=torch.long, device=device)
         timestamps[:, :, 0] = 15
