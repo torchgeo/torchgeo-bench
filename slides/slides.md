@@ -636,26 +636,26 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 <div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
 <div>
 
-**id_TwoNN (avg across datasets)**
+**id_TwoNN avg · norm. acc = rank-normalized within each dataset**
 
-| Model | id_TwoNN | Feat dim | Avg acc |
-|-------|:--------:|:--------:|:-------:|
-| EarthLoc ResNet-50 | **44** | 4 096 | .59 |
-| OlmoEarth Large | 22 | 1 024 | **.74** |
-| DOFA Large | 18 | 1 024 | .73 |
-| DINOv3-SAT ViT-L | 16 | 1 024 | .74 |
-| ResNet-50 MoCo | 15 | 2 048 | .76 |
-| OlmoEarth Nano | 14 | **128** | .67 |
-| Panopticon | 13 | 768 | .66 |
-| Terramind Base | 10 | 768 | .68 |
-| CROMA Base | 8 | 768 | .59 |
-| Prithvi v1/v2 | 7–8 | 768–1280 | .56–.60 |
-| imagestats | 6 | 12 | .57 |
+| Model | id_TwoNN | norm. acc | Feat dim |
+|-------|:--------:|:---------:|:--------:|
+| EarthLoc ResNet-50 | **44** | 27% | 4 096 |
+| OlmoEarth Large | 22 | 85% | 1 024 |
+| Prithvi v2 100M CLS | 18 | 53% | 768 |
+| DOFA Large | 17 | 85% | 1 024 |
+| DINOv3 ViT-L | 17 | 72% | 1 024 |
+| DINOv3-SAT ViT-L | 16 | 77% | 1 024 |
+| ResNet50-RGB MoCo | 15 | 74% | 2 048 |
+| DOFA Base | 15 | 78% | 768 |
+| OlmoEarth Nano | 14 | 75% | **128** |
+| Panopticon | 13 | 60% | 768 |
+| OlmoEarth Tiny | 11 | 79% | 384 |
 
 </div>
 <div style="font-family:'Inter',sans-serif; font-size:0.82em;">
 
-**Pattern:** High intrinsic dim ↔ high accuracy. Top models (OlmoEarth, DOFA, DINOv3-SAT, ResNet-50 MoCo) all ID > 14.
+**Pattern:** High intrinsic dim ↔ high norm. accuracy. Models with id > 14 consistently score 72–85% norm. acc. Norm. acc = per-dataset rank-normalized, then averaged — removes scale differences between datasets.
 
 <br>
 
