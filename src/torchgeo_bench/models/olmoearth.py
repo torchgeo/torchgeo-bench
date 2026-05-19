@@ -157,6 +157,29 @@ _MODALITY_INFO: dict[str, dict] = {
             "vh_lee_imag": 1,
         },
     },
+    # Landsat routed through the S2 normalizer.  Wavelengths align well:
+    # B-G-R-NIR-SWIR1-SWIR2 ↔ B02-B03-B04-B08-B11-B12.  Use via
+    # sensor_remap={"landsat": "landsat_as_s2"}.
+    "landsat_as_s2": {
+        "modality_name": "SENTINEL2_L2A",
+        "sample_field": "sentinel2_l2a",
+        "channels": 12,
+        "num_band_sets": 3,
+        "name_to_idx": {
+            "blue": 0,
+            "b2": 0,
+            "green": 1,
+            "b3": 1,
+            "red": 2,
+            "b4": 2,
+            "nir": 3,
+            "b5": 5,
+            "swir_1": 8,
+            "b6": 8,
+            "swir_2": 9,
+            "b7": 9,
+        },
+    },
     # NAIP / aerial: no dedicated OlmoEarth modality, route RGB through
     # the S2 path with non-RGB positions zero-filled.
     "aerial": {
@@ -323,6 +346,16 @@ class OlmoEarthBenchModel(BenchModel):
         time_steps: Temporal slots in the input.  Default 3.
         std_multiplier: Std multiplier passed to ``Normalizer``.
         normalize: If True, L2-normalize output embeddings.
+        sar_log_scale: If True, convert SAR values to dB via
+            ``10·log10(max(v, 1e-6))`` before feeding OlmoEarth's S1
+            normalizer, which was trained on σ⁰ dB values.
+        landsat_scale_factor: Optional multiplier applied to Landsat
+            values *after* the standard uint8→DN conversion.  Use to
+            compensate for mis-matched scales between GeoBench's uint8
+            composites and OlmoEarth's pretraining DN range (~10 000).
+        sensor_remap: Optional dict mapping sensor names to alternate
+            routing keys, e.g. ``{"landsat": "landsat_as_s2"}`` to route
+            Landsat bands through the S2 normalizer (+6.6 pp on m-forestnet).
     """
 
     def __init__(
@@ -335,6 +368,9 @@ class OlmoEarthBenchModel(BenchModel):
         time_steps: int = 1,
         std_multiplier: float = 2.0,
         normalize: bool = False,
+        sar_log_scale: bool = False,
+        landsat_scale_factor: float | None = None,
+        sensor_remap: dict[str, str] | None = None,
         **_kwargs,
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
@@ -350,8 +386,17 @@ class OlmoEarthBenchModel(BenchModel):
         ):
             logging.getLogger(logger_name).setLevel(logging.WARNING)
 
+        # Optionally remap sensor names before routing.
+        bands_for_routing = self.bands
+        if sensor_remap:
+            from dataclasses import replace as dc_replace
+            bands_for_routing = [
+                dc_replace(b, sensor=sensor_remap.get(b.sensor, b.sensor))
+                for b in self.bands
+            ]
+
         # Build per-sensor groups (handles both single and mixed sensors).
-        sensor_groups = _build_sensor_groups(self.bands)
+        sensor_groups = _build_sensor_groups(bands_for_routing)
         for g in sensor_groups:
             g["modality"] = getattr(Modality, g["modality_name"])
         self._sensor_groups = sensor_groups
@@ -368,6 +413,8 @@ class OlmoEarthBenchModel(BenchModel):
         self.input_res = input_res
         self.time_steps = time_steps
         self.do_normalize = normalize
+        self.sar_log_scale = sar_log_scale
+        self.landsat_scale_factor = landsat_scale_factor
 
         model_id = getattr(ModelID, f"OLMOEARTH_V1_{model_size.upper()}")
         self.encoder_model = load_model_from_id(model_id, load_weights=True)
@@ -441,6 +488,11 @@ class OlmoEarthBenchModel(BenchModel):
             input_unit = group["input_unit"]
             if input_unit is not None:
                 g_images = to_s2_dn(g_images, input_unit)
+                if group["sensor"] == "landsat" and self.landsat_scale_factor is not None:
+                    g_images = g_images * self.landsat_scale_factor
+
+            if group["sensor"] == "sar" and self.sar_log_scale:
+                g_images = 10.0 * torch.log10(g_images.clamp(min=1e-6))
 
             # Map input channels -> OlmoEarth modality layout.
             g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])

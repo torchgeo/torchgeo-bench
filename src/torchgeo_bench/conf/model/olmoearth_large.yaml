@@ -11,4 +11,6 @@ input_res: null
 time_steps: 3
 std_multiplier: 2.0
 normalize: false
+sensor_remap:
+  landsat: landsat_as_s2  # route Landsat through S2 normalizer (+6.6pp on m-forestnet)
 name: olmoearth_v1_large
