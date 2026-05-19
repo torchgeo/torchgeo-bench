@@ -8,6 +8,7 @@ import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
 
+from ._normalization import InputUnit
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,34 @@ class TimmPatchBenchModel(BenchModel):
         input_normalization: str = "bands_zscore",
         **_kwargs,
     ) -> None:
+        # Populate the BenchModel-level pretrain stats from timm's pretrained
+        # cfg *before* super().__init__ so the ``model_native`` normalisation
+        # strategy has mean/std to work with.  Without this, model_native
+        # raises ``requires expected_input_unit`` because timm wrappers don't
+        # subclass-declare those attrs (unlike terratorch / torchgeo
+        # wrappers that hard-code them).
+        #
+        # Only meaningful when num_channels == 3 — timm cfgs ship RGB stats.
+        # For multispectral inputs we leave the attrs at the class-level
+        # ``None`` defaults so build_normalizer raises a clear error if the
+        # caller asked for model_native (we have no per-channel stats).
+        if len(bands) == 3:
+            # timm.get_pretrained_cfg returns None for unknown model names.
+            # A typo should fail loudly at construction, not silently lose
+            # model_native — but only insist on a cfg existing when the
+            # caller is actually 3-band (the multispectral branch below
+            # already has no path to use it).
+            cfg = timm.get_pretrained_cfg(model_name)
+            if cfg is None:
+                raise RuntimeError(
+                    f"timm has no pretrained cfg for {model_name!r}; check the "
+                    f"model name (was the wrapper called with a fake/scratch model?)."
+                )
+            if cfg.mean is not None and cfg.std is not None:
+                self.expected_input_unit = InputUnit.REFLECTANCE_0_1
+                self.pretrain_mean = list(cfg.mean)
+                self.pretrain_std = list(cfg.std)
+
         super().__init__(bands=bands, **_kwargs)
 
         if input_normalization not in _VALID_INPUT_NORMALIZATIONS:
@@ -173,7 +202,7 @@ class TimmPatchBenchModel(BenchModel):
                 images = F.interpolate(
                     images,
                     size=(self.target_size, self.target_size),
-                    mode="bicubic",
+                    mode="bilinear",
                     align_corners=False,
                 )
         x = self.backbone(images)

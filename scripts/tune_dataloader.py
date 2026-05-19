@@ -23,6 +23,8 @@ from pathlib import Path
 import torch
 from hydra import compose, initialize_config_module
 from hydra.utils import instantiate
+from rich.console import Console
+from rich.table import Table
 from torch.utils.data import DataLoader
 
 from torchgeo_bench.datasets import get_bench_dataset_class
@@ -117,23 +119,34 @@ def main() -> None:
     bands_list = bench_cls.select_band_specs(sel)
     model = _build_model(args.model, bands_list).to(device).eval()
 
-    print(f"\nTuning {args.model} × {args.dataset}/{args.bands} on {device}")
-    print(f"{'bs':>5} {'nw':>4} {'samples/sec':>14} {'peak GB':>10} {'wall':>8}")
+    console = Console()
+    console.rule(f"Tuning [bold]{args.model}[/] × {args.dataset}/{args.bands} on {device}")
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("bs", justify="right")
+    table.add_column("nw", justify="right")
+    table.add_column("samples/sec", justify="right")
+    table.add_column("peak GB", justify="right")
+    table.add_column("wall", justify="right")
+
     results = []
     for bs in bs_list:
         for nw in nw_list:
             try:
                 sps, peak, dt = _bench(model, dataset, bs, nw, device, args.max_batches)
                 results.append((sps, bs, nw, peak, dt))
-                print(f"{bs:>5} {nw:>4} {sps:>14.1f} {peak:>10.2f} {dt:>7.2f}s")
+                table.add_row(str(bs), str(nw), f"{sps:.1f}", f"{peak:.2f}", f"{dt:.2f}s")
             except Exception as e:
-                print(f"{bs:>5} {nw:>4} FAIL  {type(e).__name__}: {str(e)[:60]}")
+                table.add_row(
+                    str(bs), str(nw), "[red]FAIL[/]", "", f"{type(e).__name__}: {str(e)[:40]}"
+                )
 
+    console.print(table)
     if results:
         best = max(results, key=lambda r: r[0])
-        print(
-            f"\nBEST: batch_size={best[1]} num_workers={best[2]} "
-            f"-> {best[0]:.1f} samples/sec ({best[3]:.2f} GB peak)"
+        console.print(
+            f"\n[bold green]BEST:[/] batch_size={best[1]} num_workers={best[2]} "
+            f"→ [bold]{best[0]:.1f}[/] samples/sec ({best[3]:.2f} GB peak)"
         )
 
 

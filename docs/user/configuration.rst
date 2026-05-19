@@ -74,7 +74,7 @@ selection semantics.
 
    eval:
      bootstrap: 200                # bootstrap resamples for KNN/linear CIs
-     c_range: [-7, 2, 20]          # log10 sweep start, stop, num samples for linear probe
+     c_range: [-6, 4, 40]          # log10 sweep start, stop, num samples for linear probe
      merge_val: true               # merge train+val before training the final logistic head
      skip_linear: false            # skip the (slower) linear probe entirely
 

@@ -1,0 +1,66 @@
+# Grid carbon intensity (gCO2eq/kWh) by cloud region.
+#
+# Sources (snapshot 2026-05-15):
+#   - codecarbon's bundled global_grid_intensity table (electricityMaps + EIA)
+#   - Cloud provider sustainability dashboards (where published)
+#
+# Numbers are averaged annual; instantaneous intensity varies 2-4x by hour
+# (electricityMaps API gives live values).  Replace with live lookup if you
+# need anything more precise than order-of-magnitude.
+#
+# `provider` matches the entries in gpu_prices.yaml.
+
+regions:
+  # ---------- AWS ----------
+  - provider: aws
+    region: us-east-1            # Virginia
+    gco2_per_kwh: 367
+  - provider: aws
+    region: us-east-2            # Ohio
+    gco2_per_kwh: 526
+  - provider: aws
+    region: us-west-2            # Oregon
+    gco2_per_kwh: 124
+  - provider: aws
+    region: eu-west-1            # Ireland
+    gco2_per_kwh: 290
+  - provider: aws
+    region: eu-north-1           # Stockholm
+    gco2_per_kwh: 22
+  - provider: aws
+    region: ap-northeast-1       # Tokyo
+    gco2_per_kwh: 484
+  - provider: aws
+    region: ap-south-1           # Mumbai
+    gco2_per_kwh: 708
+
+  # ---------- GCP ----------
+  - provider: gcp
+    region: us-central1          # Iowa
+    gco2_per_kwh: 481
+  - provider: gcp
+    region: us-west1             # Oregon
+    gco2_per_kwh: 78
+  - provider: gcp
+    region: europe-west1         # Belgium
+    gco2_per_kwh: 165
+  - provider: gcp
+    region: europe-north1        # Finland
+    gco2_per_kwh: 86
+  - provider: gcp
+    region: asia-southeast1      # Singapore
+    gco2_per_kwh: 408
+
+  # ---------- Azure ----------
+  - provider: azure
+    region: eastus
+    gco2_per_kwh: 367
+  - provider: azure
+    region: westus2
+    gco2_per_kwh: 124
+  - provider: azure
+    region: northeurope          # Ireland
+    gco2_per_kwh: 290
+  - provider: azure
+    region: swedencentral
+    gco2_per_kwh: 22

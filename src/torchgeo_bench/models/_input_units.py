@@ -30,11 +30,32 @@ def detect_input_unit(bands: list[BandSpec]) -> InputUnit:
     * else any optical band with ``max > 10`` -> :attr:`UINT8`
     * otherwise -> :attr:`REFLECTANCE_0_1`
     """
-    optical = [b for b in bands if b.wavelength_um is not None] or bands
-    max_max = max(b.max for b in optical)
-    if max_max > 1000:
+    by_sensor: dict[str, list[BandSpec]] = {}
+    for band in bands:
+        by_sensor.setdefault(band.sensor, []).append(band)
+
+    units = {_detect_band_group_unit(sensor_bands) for sensor_bands in by_sensor.values()}
+    if len(units) != 1:
+        details = [
+            (
+                sensor,
+                [(b.name, b.max) for b in sensor_bands],
+                _detect_band_group_unit(sensor_bands).value,
+            )
+            for sensor, sensor_bands in by_sensor.items()
+        ]
+        raise ValueError(
+            "Cannot infer one input unit for mixed-scale bands: "
+            f"{details}. Select a single-scale band set or use bandspec_zscore/identity."
+        )
+    return units.pop()
+
+
+def _detect_band_group_unit(bands: list[BandSpec]) -> InputUnit:
+    max_value = max(b.max for b in bands)
+    if max_value > 1000:
         return InputUnit.S2_DN
-    if max_max > 10:
+    if max_value > 10:
         return InputUnit.UINT8
     return InputUnit.REFLECTANCE_0_1
 
@@ -56,3 +77,30 @@ def to_s2_dn(images: torch.Tensor, src: InputUnit) -> torch.Tensor:
         return images * 10000.0
     # UINT8 to DN: rescale [0, 255] -> [0, 10000].
     return images * (10000.0 / 255.0)
+
+
+def to_uint8(images: torch.Tensor, src: InputUnit) -> torch.Tensor:
+    """Bring values into uint8 scale (~``[0, 255]``).
+
+    Used to feed pretrained backbones whose ``Normalize`` was calibrated
+    for uint8-divided-by-255 inputs (fMoW / NAIP / Satlas).
+    """
+    if src == InputUnit.UINT8:
+        return images
+    if src == InputUnit.REFLECTANCE_0_1:
+        return images * 255.0
+    # S2 DN to uint8: rescale [0, 10000] -> [0, 255].
+    return images * (255.0 / 10000.0)
+
+
+def convert_unit(images: torch.Tensor, src: InputUnit, dst: InputUnit) -> torch.Tensor:
+    """Route to the right ``to_<dst>`` helper.  No-op if src == dst."""
+    if src == dst:
+        return images
+    if dst == InputUnit.S2_DN:
+        return to_s2_dn(images, src)
+    if dst == InputUnit.REFLECTANCE_0_1:
+        return to_reflectance(images, src)
+    if dst == InputUnit.UINT8:
+        return to_uint8(images, src)
+    raise ValueError(f"convert_unit: unknown target unit {dst}")

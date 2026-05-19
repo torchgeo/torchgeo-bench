@@ -38,7 +38,7 @@ echo "[$(date)] task=$SLURM_ARRAY_TASK_ID dataset=$DATASET"
 
 cd "$SLURM_SUBMIT_DIR"
 
-VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv-3.12}
+VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 source "$VENV/bin/activate"
 
 # Same torch.hub / weights-dir setup as probe_sweep_h100.sh.
@@ -48,7 +48,7 @@ TRUSTED_LIST="$TORCH_HUB_DIR/trusted_list"
 for repo in gastruc_anysat facebookresearch_dinov2; do
   grep -qxF "$repo" "$TRUSTED_LIST" 2>/dev/null || echo "$repo" >> "$TRUSTED_LIST"
 done
-export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-/projects/bgtj/isaaccorley/cache/geobreeze_weights}
+export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-$HOME/.cache/geobreeze_weights}
 mkdir -p "$MODEL_WEIGHTS_DIR"
 
 python scripts/cleanlab_extract_probs.py \
