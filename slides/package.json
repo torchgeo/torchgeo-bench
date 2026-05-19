@@ -1,19 +1,19 @@
 {
-  "name": "slides",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "dev": "slidev slides.md",
-    "build": "slidev build slides.md --out dist",
-    "export": "slidev export slides.md --format pdf --output slides.pdf"
-  },
-  "keywords": [],
   "author": "",
-  "license": "ISC",
+  "description": "",
   "devDependencies": {
     "@slidev/cli": "^52.15.2",
     "@slidev/theme-default": "^0.25.0",
     "playwright-chromium": "^1.60.0"
-  }
+  },
+  "keywords": [],
+  "license": "ISC",
+  "main": "index.js",
+  "name": "slides",
+  "scripts": {
+    "build": "slidev build slides.md --out dist",
+    "dev": "slidev slides.md",
+    "export": "slidev export slides.md --format pdf --output slides.pdf"
+  },
+  "version": "1.0.0"
 }
