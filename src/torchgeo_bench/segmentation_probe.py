@@ -14,6 +14,7 @@ from torchgeo_bench.models.segmentation_heads import (
     DPTHead,
     FPNHead,
     LinearHead,
+    UperNetHead,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,9 +147,11 @@ class SegmentationProbe(nn.Module):
         freeze_backbone: If ``True`` (default), backbone parameters are frozen
             and the backbone runs in eval mode during inference.
         head_type: Decoder architecture — one of ``"linear"``, ``"conv_block"``,
-            ``"fpn"``, ``"dpt"``.
-        hidden_dim: Hidden channel dimension for ``conv_block``, ``fpn``, and
-            ``dpt`` heads (default 256).
+            ``"fpn"``, ``"dpt"``, ``"upernet"``.
+        hidden_dim: Hidden channel dimension for ``conv_block``, ``fpn``, ``dpt``,
+            and ``upernet`` heads (default 256).
+        use_layer_norm: Use ``ChannelLayerNorm`` instead of ``BatchNorm2d`` in the
+            head. Set ``True`` for ViT/Swin backbones.
     """
 
     def __init__(
@@ -159,6 +162,7 @@ class SegmentationProbe(nn.Module):
         freeze_backbone: bool = True,
         head_type: str = "linear",
         hidden_dim: int | None = None,
+        use_layer_norm: bool = False,
     ) -> None:
         super().__init__()
         self.backbone = backbone
@@ -198,9 +202,14 @@ class SegmentationProbe(nn.Module):
             self.head = FPNHead(self.channels_list, num_classes, hidden_dim=hdim)
         elif head_type == "dpt":
             self.head = DPTHead(self.channels_list, num_classes, hidden_dim=hdim)
+        elif head_type == "upernet":
+            self.head = UperNetHead(
+                self.channels_list, num_classes, hidden_dim=hdim, use_layer_norm=use_layer_norm
+            )
         else:
             raise ValueError(
-                f"Unknown head_type: {head_type!r}. Choose from: linear, conv_block, fpn, dpt"
+                f"Unknown head_type: {head_type!r}. "
+                "Choose from: linear, conv_block, fpn, dpt, upernet"
             )
 
     # ------------------------------------------------------------------

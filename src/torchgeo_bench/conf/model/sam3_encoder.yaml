@@ -33,6 +33,7 @@ eval:
       - "neck.fpn_layers.1"
       - "neck.fpn_layers.0"
     head_type: fpn
+    use_layer_norm: true
     # Cache in float16 to save RAM
     cache_dtype: float16
     cache_features: true

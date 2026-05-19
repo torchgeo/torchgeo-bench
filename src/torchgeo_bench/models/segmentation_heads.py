@@ -170,7 +170,7 @@ class FPNHead(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# DPT helper modules (adapted from probe3d — mbanani/probe3d)
+# Shared norm helper (used by UperNet and DPT)
 # ---------------------------------------------------------------------------
 
 
@@ -192,6 +192,159 @@ class ChannelLayerNorm(nn.Module):
         """Apply layer norm over channels."""
         # x: (B, C, H, W) → permute to (B, H, W, C) → LN → back
         return self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2).contiguous()
+
+
+def _make_norm(num_channels: int, use_layer_norm: bool) -> nn.Module:
+    return ChannelLayerNorm(num_channels) if use_layer_norm else nn.BatchNorm2d(num_channels)
+
+
+# ---------------------------------------------------------------------------
+# UperNet (FPN + Pyramid Pooling Module)
+# ---------------------------------------------------------------------------
+
+
+class PPM(nn.Module):
+    """Pyramid Pooling Module from PSPNet, used as the coarsest stage in UperNet.
+
+    Args:
+        in_channels: Input channel count (coarsest feature map).
+        out_channels: Output channel count (= hidden_dim).
+        scales: Pooling output sizes for each branch.
+        use_layer_norm: Use ChannelLayerNorm instead of BatchNorm2d.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        scales: tuple[int, ...] = (1, 2, 3, 6),
+        use_layer_norm: bool = False,
+    ) -> None:
+        super().__init__()
+        self.branches = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.AdaptiveAvgPool2d(s),
+                    nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
+                    _make_norm(out_channels, use_layer_norm),
+                    nn.ReLU(inplace=True),
+                )
+                for s in scales
+            ]
+        )
+        bottleneck_in = in_channels + out_channels * len(scales)
+        self.bottleneck = nn.Sequential(
+            nn.Conv2d(bottleneck_in, out_channels, kernel_size=3, padding=1, bias=False),
+            _make_norm(out_channels, use_layer_norm),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Pool at multiple scales, upsample, concat with input, and fuse."""
+        h, w = x.shape[-2:]
+        pooled = [
+            F.interpolate(branch(x), size=(h, w), mode="bilinear", align_corners=False)
+            for branch in self.branches
+        ]
+        return self.bottleneck(torch.cat([x, *pooled], dim=1))
+
+
+class UperNetHead(nn.Module):
+    """UperNet decoder head: Pyramid Pooling Module + FPN merge + fusion classifier.
+
+    Expects feature maps in **coarse-to-fine order** (index 0 = coarsest /
+    deepest layer), consistent with FPNHead and DPTHead conventions.
+
+    Args:
+        channels_list: Channel count per hooked layer (coarse-to-fine). Must have >= 2 entries.
+        num_classes: Number of segmentation output classes.
+        hidden_dim: Feature dimension throughout the head (default 256).
+        use_layer_norm: Use ChannelLayerNorm (ViT/Swin) instead of BatchNorm2d (CNN).
+    """
+
+    def __init__(
+        self,
+        channels_list: list[int],
+        num_classes: int,
+        hidden_dim: int = 256,
+        use_layer_norm: bool = False,
+    ) -> None:
+        super().__init__()
+        if len(channels_list) < 2:
+            raise ValueError(
+                f"UperNetHead requires at least 2 feature layers, got {len(channels_list)}."
+            )
+        self.input_norms = nn.ModuleList(
+            [_make_norm(c, use_layer_norm) for c in channels_list]
+        )
+        self.ppm = PPM(channels_list[0], hidden_dim, use_layer_norm=use_layer_norm)
+        self.laterals = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv2d(c, hidden_dim, kernel_size=1, bias=False),
+                    _make_norm(hidden_dim, use_layer_norm),
+                    nn.ReLU(inplace=True),
+                )
+                for c in channels_list[1:]
+            ]
+        )
+        self.fpn_convs = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, padding=1, bias=False),
+                    _make_norm(hidden_dim, use_layer_norm),
+                    nn.ReLU(inplace=True),
+                )
+                for _ in channels_list[1:]
+            ]
+        )
+        n_levels = len(channels_list)  # PPM output + one per finer level
+        self.fusion = nn.Sequential(
+            nn.Conv2d(hidden_dim * n_levels, hidden_dim, kernel_size=3, padding=1, bias=False),
+            _make_norm(hidden_dim, use_layer_norm),
+            nn.ReLU(inplace=True),
+        )
+        self.seg_head = nn.Conv2d(hidden_dim, num_classes, kernel_size=1)
+
+    def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
+        """UperNet forward pass.
+
+        Args:
+            features: Feature maps in coarse-to-fine order (index 0 = coarsest).
+            input_h: Target output height (input image height).
+            input_w: Target output width (input image width).
+        """
+        normed = [norm(f) for norm, f in zip(self.input_norms, features)]
+
+        # PPM on coarsest level
+        fpn_outs = [self.ppm(normed[0])]
+
+        # Top-down FPN pathway for finer levels
+        prev = fpn_outs[0]
+        for i, (lateral, fpn_conv) in enumerate(zip(self.laterals, self.fpn_convs)):
+            lat = lateral(normed[i + 1])
+            prev = lat + F.interpolate(prev, size=lat.shape[-2:], mode="bilinear", align_corners=False)
+            fpn_outs.append(fpn_conv(prev))
+
+        # Upsample all levels to finest spatial size, concat, fuse, classify
+        finest_size = fpn_outs[-1].shape[-2:]
+        aligned = [
+            F.interpolate(f, size=finest_size, mode="bilinear", align_corners=False)
+            if f.shape[-2:] != finest_size
+            else f
+            for f in fpn_outs
+        ]
+        logits = self.seg_head(self.fusion(torch.cat(aligned, dim=1)))
+        if logits.shape[-2:] != (input_h, input_w):
+            logits = F.interpolate(
+                logits, size=(input_h, input_w), mode="bilinear", align_corners=False
+            )
+        return logits
+
+
+# ---------------------------------------------------------------------------
+# DPT helper modules (adapted from probe3d — mbanani/probe3d)
+# ---------------------------------------------------------------------------
 
 
 class ResidualConvUnit(nn.Module):

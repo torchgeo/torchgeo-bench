@@ -13,3 +13,4 @@ eval:
     # ViT-Large (24 blocks, 1024ch). Coarse-to-fine: deepest block first.
     # backbone.* prefix is stripped by SegmentationProbe automatically.
     layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+    use_layer_norm: true

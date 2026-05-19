@@ -63,7 +63,8 @@ eval:
       time_budget_s: 300.0           # hard cap per (model, dataset)
 
   segmentation:
-    head_type: "fpn"
+    head_type: "fpn"           # linear | conv_block | fpn | dpt | upernet
+    use_layer_norm: false      # true for ViT/Swin backbones; override per model
     layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10
