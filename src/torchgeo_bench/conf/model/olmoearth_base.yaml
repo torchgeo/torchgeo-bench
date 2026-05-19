@@ -12,3 +12,7 @@ time_steps: 3
 std_multiplier: 2.0
 normalize: false
 name: olmoearth_v1_base
+eval:
+  segmentation:
+    layers: ["encoder_model.encoder.blocks.11", "encoder_model.encoder.blocks.8", "encoder_model.encoder.blocks.5", "encoder_model.encoder.blocks.2"]
+    use_layer_norm: true

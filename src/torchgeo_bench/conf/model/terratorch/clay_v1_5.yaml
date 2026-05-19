@@ -4,3 +4,7 @@ pretrained: true
 target_size: 256  # Clay's pretrained pos_embed is fixed to 32x32 patches @ patch_size=8
 modality: sentinel-2-l2a
 name: tt_clay_v1_5_base
+eval:
+  segmentation:
+    layers: ["clay_encoder.transformer.layers.11.0", "clay_encoder.transformer.layers.8.0", "clay_encoder.transformer.layers.5.0", "clay_encoder.transformer.layers.2.0"]
+    use_layer_norm: true

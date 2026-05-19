@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._band_mapping import map_to_model_bands
+from ._band_mapping import map_to_model_bands, wavelengths_um
 from ._input_units import InputUnit
 from ._pooling import VALID_MODES, pool_tokens
 from .interface import BenchModel
@@ -129,12 +129,11 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         return mapped
 
 
-CLAY_BANDS: list[str] = ["blue", "green", "red", "nir", "swir1", "swir2"]
-_CLAY_WAVELENGTHS_UM: list[float] = [0.493, 0.560, 0.665, 0.842, 1.610, 2.190]
-
-
 class TerraTorchClayBench(_TerraTorchBench):
-    """Clay v1.5 — 6 S2 bands @ 256, conditioned on per-band ``waves`` (µm) and ``gsd``."""
+    """Clay v1.5 — any-band model @ 256, conditioned on per-band ``waves`` (µm) and ``gsd``.
+
+    Clay accepts any number of bands; wavelengths are derived from the dataset's BandSpec list.
+    """
 
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
@@ -157,18 +156,15 @@ class TerraTorchClayBench(_TerraTorchBench):
             **kwargs,
         )
         self.gsd = gsd
-        self.register_buffer("_clay_waves", torch.tensor(_CLAY_WAVELENGTHS_UM, dtype=torch.float32))
-
-    def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
-        mapped, _ = map_to_model_bands(images, self.bands, CLAY_BANDS)
-        return mapped
+        waves = wavelengths_um(bands, default_um=0.665)
+        self.register_buffer("_clay_waves", torch.tensor(waves, dtype=torch.float32))
 
     @torch.no_grad()
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
         del bboxes
-        x = _maybe_resize(self._prepare_input(images), self.target_size)
+        x = _maybe_resize(images, self.target_size)
         return _reduce_to_vec(
             self.backbone(x, waves=self._clay_waves.to(x.device), gsd=self.gsd),
             pool=self.pool,
@@ -220,6 +216,6 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
         del bboxes
-        x, _ = map_to_model_bands(images, self.bands, TERRAMIND_S2L2A_BANDS)
+        x, _ = map_to_model_bands(images, self.bands, TERRAMIND_S2L2A_BANDS, allow_missing=True)
         x = _maybe_resize(x, self.target_size)
         return _reduce_to_vec(self.backbone({self.modality: x}), pool=self.pool)

@@ -5,3 +5,6 @@ target_size: 224
 name: tt_prithvi_eo_v2_300
 eval:
   c_range: [-6, 5, 60]
+  segmentation:
+    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+    use_layer_norm: true

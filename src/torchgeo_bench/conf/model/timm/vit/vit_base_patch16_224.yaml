@@ -9,3 +9,7 @@ global_pool: avg
 seed: null
 name: vit_base_patch16_224
 use_cls_token: false
+eval:
+  segmentation:
+    layers: ["blocks.11", "blocks.8", "blocks.5", "blocks.2"]
+    use_layer_norm: true
