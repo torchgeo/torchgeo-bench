@@ -6,7 +6,7 @@
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
 model_size: tiny
 patch_size: 8
-input_res: 10
+input_res: null
 time_steps: 3
 std_multiplier: 2.0
 normalize: false

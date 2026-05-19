@@ -58,6 +58,10 @@ COLUMNS = [
     "c_range_num",
     "merge_val",
     "bootstrap",
+    "fw_iou",
+    "precision",
+    "recall",
+    "f1",
     "snapshot",
 ]
 NUMERIC = {
@@ -185,8 +189,8 @@ def main() -> None:
         r'<h1 class="headline" id="headline-text">[^<]*</h1>',
         (
             '<h1 class="headline" id="headline-text">'
-            "Three winners on GeoBench: Panopticon on KNN, DINOv3-SAT on linear, "
-            "Terramind on multispectral"
+            "Four winners on GeoBench: Panopticon on KNN, DINOv3-SAT and "
+            "OlmoEarth on linear, Terramind on multispectral"
             "</h1>"
         ),
         text,
@@ -196,12 +200,12 @@ def main() -> None:
         (
             f'<p class="standfirst" id="standfirst-text">'
             f"Across {len(latest_rows):,} measurements on {n_datasets} GeoBench "
-            f"classification datasets and {n_models} frozen-backbone variants, three "
+            f"classification datasets and {n_models} frozen-backbone variants, four "
             f"distinct leaders emerge: <em>Panopticon</em> tops KNN-5 on most datasets, "
-            f"<em>DINOv3-SAT</em> (RGB-only) leads the linear-probe leaderboard on "
-            f"<em>{best['dataset']}</em> at {best['metric_value'] * 100:.1f}% and four "
-            f"other datasets, and <em>Terramind</em> wins the multispectral datasets "
-            f"when all MSI bands are available."
+            f"<em>DINOv3-SAT</em> remains the strongest RGB-only linear probe, "
+            f"<em>OlmoEarth</em> reaches 97.8% on <em>eurosat-spatial</em> and "
+            f"97.6% on <em>m-eurosat</em>, and <em>Terramind</em> wins the "
+            f"multispectral datasets when all MSI bands are available."
             "</p>"
         ),
         text,
@@ -214,6 +218,15 @@ def main() -> None:
     text = re.sub(
         r"Source: <b>[^<]*</b>",
         "Source: <b>results/all_results.csv</b>",
+        text,
+    )
+    text = re.sub(
+        r"documented in <code>[^<]*</code>\. Confidence intervals are 95%\s+bootstrap on test predictions \(default \d+ resamples\)\.",
+        (
+            "documented in <code>docs/user/methodology.rst</code>. "
+            "Confidence intervals are 95% bootstrap on test predictions "
+            "(default 200 resamples)."
+        ),
         text,
     )
 

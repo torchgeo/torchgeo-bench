@@ -26,11 +26,11 @@ Glossary
    GeoBench V1
        The original GeoBench benchmark released as a set of HDF5 files.
        Datasets in V1 use the ``m-`` prefix in the CLI
-       (e.g. ``m-eurosat``) and live under ``data/geobench-1.0/``.
+       (e.g. ``m-eurosat``) and live under ``data/classification_v1.0/``.
 
    GeoBench V2
        The second-generation GeoBench distribution, packaged as one
-       directory per dataset under ``data/geobench-v2/``.  V2 datasets
+       directory per dataset under ``data/geobenchv2/``.  V2 datasets
        use no prefix (``benv2``, ``treesatai``, ``pastis``, ...).
 
    Hydra
