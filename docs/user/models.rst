@@ -100,11 +100,11 @@ optional ``olmoearth`` extra:
 
 .. note::
 
-   Each model wrapper owns its own normalization policy by overriding
-   :meth:`~torchgeo_bench.models.BenchModel.normalize_inputs`.  There is
-   no ``dataset.normalization`` key — backbones that do their own
-   normalization (OlmoEarth, some torchgeo wrappers) override
-   ``normalize_inputs`` to identity.
+   Input normalization is selected globally with ``dataset.normalization``
+   (default ``bandspec_zscore``).  Each model receives that strategy through
+   :class:`~torchgeo_bench.models.BenchModel`; use ``model_native`` for
+   wrappers that declare pretrained input units / statistics, or ``identity``
+   when a backbone owns all normalization internally.
 
 SAM 3 vision encoder
 ^^^^^^^^^^^^^^^^^^^^
