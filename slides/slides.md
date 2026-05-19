@@ -592,6 +592,89 @@ Lin leader: DINOv3-SAT .682
 </div>
 
 ---
+
+# Efficiency — Throughput vs Accuracy
+<span class="tag tag-oxford">PR #60–#80</span>
+
+<div class="rule"></div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
+<div>
+
+**GPU throughput (img/s) — m-eurosat**
+
+| Model | img/s | GFLOPs | Acc |
+|-------|------:|-------:|----:|
+| ResNet-50 MoCo | 3 193 | 8 | .76 |
+| DOFA Base | 1 747 | 36 | .71 |
+| Terramind Base | 1 680 | 36 | .68 |
+| OlmoEarth Tiny | 780 | 9 | .73 |
+| OlmoEarth Nano | 789 | 2 | .67 |
+| DOFA Large | 581 | 124 | .73 |
+| DINOv3-SAT ViT-L | 346 | 165 | .74 |
+| OlmoEarth Large | 151 | 381 | .74 |
+
+</div>
+<div style="font-family:'Inter',sans-serif; font-size:0.82em;">
+
+**Pareto surprises:**
+
+<p><span class="tag tag-claret">WINNER</span> <strong>ResNet-50 MoCo</strong> — 3 193 img/s, 8 GFLOPs, 23M params, yet <strong>.76 avg acc</strong>. Matches or beats every ViT-scale model while running 5–10× faster.</p>
+
+<p><span class="tag">EFFICIENT</span> <strong>OlmoEarth Nano</strong> — 3.6M params, 0.6 GB peak VRAM, 1.6 GFLOPs. Matches Panopticon accuracy at 5× lower cost.</p>
+
+<p><span class="tag">EFFICIENT</span> <strong>OlmoEarth Tiny</strong> (14M) ties DOFA Large (337M) and DINOv3-SAT (304M) at 2× the throughput.</p>
+
+**Worst value:** Prithvi v1/v2 — 1 700 img/s, 35 GFLOPs, only .56–.60 acc. Same throughput tier as DOFA Base but far lower accuracy.
+
+</div>
+</div>
+
+---
+
+# Intrinsic Dimensionality Analysis
+<span class="tag tag-oxford">method: intrinsic_dim</span>
+
+<div class="rule"></div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
+<div>
+
+**id_TwoNN (avg across datasets)**
+
+| Model | id_TwoNN | Feat dim | Avg acc |
+|-------|:--------:|:--------:|:-------:|
+| EarthLoc ResNet-50 | **44** | 4 096 | .59 |
+| OlmoEarth Large | 22 | 1 024 | **.74** |
+| DOFA Large | 18 | 1 024 | .73 |
+| DINOv3-SAT ViT-L | 16 | 1 024 | .74 |
+| ResNet-50 MoCo | 15 | 2 048 | .76 |
+| OlmoEarth Nano | 14 | **128** | .67 |
+| Panopticon | 13 | 768 | .66 |
+| Terramind Base | 10 | 768 | .68 |
+| CROMA Base | 8 | 768 | .59 |
+| Prithvi v1/v2 | 7–8 | 768–1280 | .56–.60 |
+| imagestats | 6 | 12 | .57 |
+
+</div>
+<div style="font-family:'Inter',sans-serif; font-size:0.82em;">
+
+**Pattern:** High intrinsic dim ↔ high accuracy. Top models (OlmoEarth, DOFA, DINOv3-SAT, ResNet-50 MoCo) all ID > 14.
+
+<br>
+
+**Outliers:**
+
+<p><span class="tag tag-claret">TASK GAP</span> <strong>EarthLoc ResNet-50</strong> — id = 44 (highest), but only .59 acc. Trained for geo-localization, not classification. High dimensionality without discriminative structure.</p>
+
+<p><span class="tag">SURPRISE</span> <strong>OlmoEarth Nano</strong> — 128-d output yet id_TwoNN = 14, matching DINOv3-SAT ViT-L (1024-d). Packs equivalent intrinsic complexity into 8× fewer dimensions.</p>
+
+<p><span class="tag tag-wheat">FLAT</span> <strong>Prithvi cluster</strong> — id ≈ 7, just above imagestats (6) and RCF (5). Geometrically flat despite 768–1280-d features — explains consistently low accuracy.</p>
+
+</div>
+</div>
+
+---
 layout: cover
 ---
 
