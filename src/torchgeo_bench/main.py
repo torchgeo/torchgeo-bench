@@ -219,10 +219,11 @@ def evaluate_knn(
     n_bootstrap: int,
     verbose: bool = False,
     device: str = "cpu",
+    n_neighbors: int = 5,
 ) -> tuple[float, float, float]:
     """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
     multi_label = y_train.ndim == 2
-    clf = KNNClassifier(n_neighbors=5, device=device, use_fp16=False)
+    clf = KNNClassifier(n_neighbors=n_neighbors, device=device, use_fp16=False)
     clf.fit(x_train, y_train)
 
     if multi_label:
@@ -841,7 +842,8 @@ def main(cfg: DictConfig) -> None:
             cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
         )
 
-        knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name, *config_tuple)
+        knn_k = int(getattr(eval_cfg_merged, "knn_k", 5))
+        knn_key = (ds_name, f"knn{knn_k}", cfg.model._target_, cfg.model.name, *config_tuple)
         linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
 
         seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
@@ -1051,11 +1053,12 @@ def main(cfg: DictConfig) -> None:
                     cfg.eval.bootstrap,
                     verbose=cfg.verbose,
                     device=cfg.device,
+                    n_neighbors=knn_k,
                 )
                 all_rows.append(
                     EvaluationResult(
                         **common_meta,
-                        method="knn5",
+                        method=f"knn{knn_k}",
                         metric_name=metric_name,
                         metric_value=knn_score,
                         ci_lower=knn_lo,
