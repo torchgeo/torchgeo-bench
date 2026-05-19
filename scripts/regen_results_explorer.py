@@ -221,6 +221,11 @@ def main() -> None:
         text,
     )
     text = re.sub(
+        r"Published <b>[^<]*</b>",
+        f"Published <b>{date.today().strftime('%-d %B %Y')}</b>",
+        text,
+    )
+    text = re.sub(
         r"documented in <code>[^<]*</code>\. Confidence intervals are 95%\s+bootstrap on test predictions \(default \d+ resamples\)\.",
         (
             "documented in <code>docs/user/methodology.rst</code>. "

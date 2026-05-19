@@ -395,9 +395,9 @@ class OlmoEarthBenchModel(BenchModel):
         bands_for_routing = self.bands
         if sensor_remap:
             from dataclasses import replace as dc_replace
+
             bands_for_routing = [
-                dc_replace(b, sensor=sensor_remap.get(b.sensor, b.sensor))
-                for b in self.bands
+                dc_replace(b, sensor=sensor_remap.get(b.sensor, b.sensor)) for b in self.bands
             ]
 
         # Build per-sensor groups (handles both single and mixed sensors).
@@ -480,10 +480,12 @@ class OlmoEarthBenchModel(BenchModel):
         device = images.device
         B, _, H, W = images.shape
 
-        if self.min_image_size is not None and (H < self.min_image_size or W < self.min_image_size):
+        if self.min_image_size is not None and (self.min_image_size > H or self.min_image_size > W):
             new_h = max(H, self.min_image_size)
             new_w = max(W, self.min_image_size)
-            images = F.interpolate(images, size=(new_h, new_w), mode="bilinear", align_corners=False)
+            images = F.interpolate(
+                images, size=(new_h, new_w), mode="bilinear", align_corners=False
+            )
             B, _, H, W = images.shape
 
         timestamps = torch.zeros(B, self.time_steps, 3, dtype=torch.long, device=device)
