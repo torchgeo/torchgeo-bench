@@ -2,9 +2,10 @@
 
 import csv
 
+import pandas as pd
 import pytest
 
-from torchgeo_bench.main import append_rows_atomic
+from torchgeo_bench.main import _completed_run_keys, _profile_metric_names, append_rows_atomic
 
 
 def _read_csv(path: str) -> list[list[str]]:
@@ -72,3 +73,28 @@ def test_empty_rows_is_noop(tmp_path):
     # File should not be created when there's nothing to write.
     with pytest.raises(FileNotFoundError):
         open(path).close()
+
+
+def test_resume_keys_can_require_metric_name():
+    key_cols = ("dataset", "method", "model", "name")
+    df = pd.DataFrame(
+        [
+            {
+                "dataset": "m-eurosat",
+                "method": "intrinsic_dim",
+                "model": "M",
+                "name": "n",
+                "metric_name": "id_twonn_train",
+            }
+        ]
+    )
+    key = ("m-eurosat", "intrinsic_dim", "M", "n")
+    assert key in _completed_run_keys(df, key_cols, "id_twonn_train")
+    assert key not in _completed_run_keys(df, key_cols, "id_mle_train")
+
+
+def test_profile_resume_requires_multiple_metrics():
+    metrics = _profile_metric_names(None)
+    assert "throughput_samples_per_sec" in metrics
+    assert "latency_ms_per_batch_p50" in metrics
+    assert "params_m" in metrics

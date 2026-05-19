@@ -1,4 +1,4 @@
-"""Segmentation Probe Module."""
+"""Segmentation probe: multi-scale frozen-backbone feature extraction and head training."""
 
 import logging
 import math

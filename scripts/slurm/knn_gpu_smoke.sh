@@ -27,7 +27,7 @@ ldd --version || true
 # Use the prebuilt 3.12 venv with `faissknn` (and `faiss-gpu-cu12`)
 # preinstalled. faiss-cpu and faiss-gpu-cu12 both install into the same
 # `faiss/` namespace, so for the GPU smoke we keep faiss-gpu-cu12 only.
-VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv-3.12}
+VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 nvidia-smi | head -3 || true

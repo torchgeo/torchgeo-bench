@@ -98,6 +98,8 @@ def map_to_model_bands(
     images: torch.Tensor,
     src_bands: list[BandSpec],
     target_band_names: list[str],
+    *,
+    allow_missing: bool = False,
 ) -> tuple[torch.Tensor, list[bool]]:
     """Rearrange ``images`` from src band order to ``target_band_names``, zero-filling gaps.
 
@@ -119,6 +121,12 @@ def map_to_model_bands(
     for j, name in enumerate(target_band_names):
         idx = src_index.get(canonical_band_name(name))
         if idx is None:
+            if not allow_missing:
+                available = [canonical_band_name(b.name) for b in src_bands]
+                raise ValueError(
+                    f"Missing required model band {name!r}. Available canonical bands: "
+                    f"{available}. Pass allow_missing=True only for an explicit zero-fill ablation."
+                )
             missing.append(True)
             continue
         out[:, j] = images[:, idx]
@@ -126,6 +134,18 @@ def map_to_model_bands(
     return out, missing
 
 
-def wavelengths_um(bands: list[BandSpec], default_um: float = 0.6) -> list[float]:
-    """Return per-band centre wavelengths in micrometres, filling ``None`` with ``default_um``."""
-    return [float(b.wavelength_um) if b.wavelength_um is not None else default_um for b in bands]
+def wavelengths_um(bands: list[BandSpec], default_um: float | None = None) -> list[float]:
+    """Return per-band centre wavelengths in micrometres.
+
+    Missing wavelengths raise by default. Passing ``default_um`` is an explicit
+    opt-in for callers running a known fallback ablation.
+    """
+    missing = [b.name for b in bands if b.wavelength_um is None]
+    if missing and default_um is None:
+        raise ValueError(
+            f"Missing wavelengths for {missing}. Pass explicit wavelengths or default_um "
+            "only for a deliberate fallback ablation."
+        )
+    return [
+        float(b.wavelength_um) if b.wavelength_um is not None else float(default_um) for b in bands
+    ]

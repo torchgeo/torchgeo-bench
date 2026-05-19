@@ -12,6 +12,11 @@ scripts/*
 !scripts/eurosat_family_dedup.py
 !scripts/cleanlab_per_class_multilabel.py
 !scripts/cleanlab_per_class_singlelabel.py
+!scripts/analyze_compute_cost.py
+!scripts/cost/
+scripts/cost/*
+!scripts/cost/gpu_prices.yaml
+!scripts/cost/carbon_intensity.yaml
 !scripts/slurm/
 scripts/slurm/*
 !scripts/slurm/build_probe_jobs.py
@@ -19,6 +24,13 @@ scripts/slurm/*
 !scripts/slurm/knn_gpu_smoke.sh
 !scripts/slurm/cleanlab_audit.sh
 !scripts/slurm/cleanlab_audit.jobs
+!scripts/slurm/eurosat_spatial_geofm.sh
+!scripts/slurm/eurosat_spatial_pool_ablation.sh
+!scripts/slurm/olmoearth_sweep.py
+!scripts/slurm/olmoearth_sweep.sh
+!scripts/slurm/olmoearth_sweep.jobs
+!scripts/slurm/slow_tests.sh
+!scripts/slurm/smoke_imports.sh
 figures/
 
 # Python

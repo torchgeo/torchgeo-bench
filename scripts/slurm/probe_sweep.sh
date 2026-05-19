@@ -41,7 +41,7 @@ echo "[$(date)] task=$SLURM_ARRAY_TASK_ID model=$MODEL dataset=$DATASET bands=$B
 
 cd "$SLURM_SUBMIT_DIR"
 
-VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv-3.12}
+VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 source "$VENV/bin/activate"
 
 # Auto-trust torch.hub repos so AnySat etc. don't block on an interactive
@@ -54,15 +54,24 @@ for repo in gastruc_anysat facebookresearch_dinov2; do
   grep -qxF "$repo" "$TRUSTED_LIST" 2>/dev/null || echo "$repo" >> "$TRUSTED_LIST"
 done
 # Geobreeze CROMA + similar load weights from this dir.
-export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-/projects/bgtj/isaaccorley/cache/geobreeze_weights}
+export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-$HOME/.cache/geobreeze_weights}
 mkdir -p "$MODEL_WEIGHTS_DIR"
+
+# Shared HuggingFace cache so big terratorch/torchgeo backbones don't
+# re-download per task.  HF_HOME is the umbrella var (covers hub, datasets,
+# transformers) and overrides the per-job $HOME/.cache/huggingface default.
+export HF_HOME=${HF_HOME:-$HOME/.cache/huggingface}
+mkdir -p "$HF_HOME"
 
 torchgeo-bench run \
   model="${MODEL}" \
   dataset.names="[${DATASET}]" \
   dataset.bands="${BANDS}" \
+  dataset.batch_size="${TGB_BATCH_SIZE:-256}" \
   dataset.num_workers="${TGB_NUM_WORKERS:-4}" \
   dataset.normalization="${NORM}" \
   resume=true \
   output=results/all_results.csv \
-  eval.intrinsic_dim.enabled=true
+  eval.intrinsic_dim.enabled=true \
+  eval.profile.enabled=true \
+  eval.profile.cpu_throughput.enabled=true

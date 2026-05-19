@@ -1,5 +1,6 @@
 """Tests for the BandSpec -> model-band mapping helper."""
 
+import pytest
 import torch
 
 from torchgeo_bench.datasets.base import BandSpec
@@ -55,11 +56,18 @@ class TestCanonicalBandName:
 
 
 class TestMapToModelBands:
-    def test_rgb_to_six_band_zerofills(self) -> None:
+    def test_rgb_to_six_band_missing_raises_by_default(self) -> None:
         src = [_band("red"), _band("green"), _band("blue")]
         x = torch.arange(3 * 4 * 4, dtype=torch.float32).reshape(1, 3, 4, 4)
         target = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
-        out, missing = map_to_model_bands(x, src, target)
+        with pytest.raises(ValueError, match="Missing required model band"):
+            map_to_model_bands(x, src, target)
+
+    def test_rgb_to_six_band_zerofills_when_explicitly_allowed(self) -> None:
+        src = [_band("red"), _band("green"), _band("blue")]
+        x = torch.arange(3 * 4 * 4, dtype=torch.float32).reshape(1, 3, 4, 4)
+        target = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
+        out, missing = map_to_model_bands(x, src, target, allow_missing=True)
         assert out.shape == (1, 6, 4, 4)
         # red came from src[0], green from src[1], blue from src[2]
         assert torch.equal(out[:, 0], x[:, 2])  # blue
@@ -89,7 +97,12 @@ class TestMapToModelBands:
 
 
 class TestWavelengthsUm:
-    def test_default_fill(self) -> None:
+    def test_missing_raises_by_default(self) -> None:
+        bands = [_band("red", 0.665), _band("vv", None)]
+        with pytest.raises(ValueError, match="Missing wavelengths"):
+            wavelengths_um(bands)
+
+    def test_default_fill_when_explicitly_provided(self) -> None:
         bands = [_band("red", 0.665), _band("vv", None)]
         wls = wavelengths_um(bands, default_um=1.5)
         assert wls == [0.665, 1.5]

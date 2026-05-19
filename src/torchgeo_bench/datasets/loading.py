@@ -105,9 +105,10 @@ def _make_resize_transform(
     if image_size is None:
         return None
 
-    interp_mode = (
-        interpolation if interpolation in ("bicubic", "bilinear", "nearest") else "bicubic"
-    )
+    valid_modes = ("bicubic", "bilinear", "nearest")
+    if interpolation not in valid_modes:
+        raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
+    interp_mode = interpolation
     align_corners = False if interp_mode in ("bicubic", "bilinear") else None
 
     def _resize(sample: dict) -> dict:
@@ -158,7 +159,7 @@ def get_datasets(
     return_val: bool = False,
     num_workers: int = 8,
     image_size: int | None = None,
-    interpolation: str = "bicubic",
+    interpolation: str = "bilinear",
     bands: str | Iterable[str] | None = "rgb",
 ) -> tuple:
     """Load benchmark dataset splits and dataloaders.

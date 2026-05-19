@@ -1,5 +1,7 @@
 """Tests for multi-label support and KNNClassifier."""
 
+import builtins
+
 import numpy as np
 import pytest
 import torch
@@ -208,6 +210,145 @@ class TestBootstrapMAP:
 
         mean, lo, hi = bootstrap_map(y_true, y_scores, n_boot=50, seed=0)
         assert mean == pytest.approx(1.0)
+
+
+# ---- KNNClassifier metric / use_fp16 / GPU path tests ----
+
+_cuda_available = pytest.mark.skipif(
+    not __import__("torch").cuda.is_available(), reason="CUDA not available"
+)
+_faissknn_available = pytest.mark.skipif(
+    __import__("importlib").util.find_spec("faissknn") is None,
+    reason="faissknn not installed (pip install torchgeo-bench[cuda])",
+)
+
+
+class TestKNNMetricParam:
+    """CPU path: metric param is accepted; output shapes / value ranges hold."""
+
+    @pytest.mark.parametrize("metric", ["l2", "ip", "cosine"])
+    def test_metric_singlelabel_shapes(self, singlelabel_data, metric):
+        d = singlelabel_data
+        clf = KNNClassifier(n_neighbors=3, device="cpu", metric=metric)
+        clf.fit(d["x_train"], d["y_train"])
+        preds = clf.predict(d["x_test"])
+        probs = clf.predict_proba(d["x_test"])
+        assert preds.shape == (len(d["x_test"]),)
+        assert probs.shape == (len(d["x_test"]), d["n_classes"])
+        np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+
+    @pytest.mark.parametrize("metric", ["l2", "ip", "cosine"])
+    def test_metric_multilabel_shapes(self, multilabel_data, metric):
+        d = multilabel_data
+        clf = KNNClassifier(n_neighbors=3, device="cpu", metric=metric)
+        clf.fit(d["x_train"], d["y_train"])
+        preds = clf.predict(d["x_test"])
+        probs = clf.predict_proba(d["x_test"])
+        assert preds.shape == (len(d["x_test"]), d["n_classes"])
+        assert probs.shape == (len(d["x_test"]), d["n_classes"])
+        assert np.all((probs >= 0) & (probs <= 1))
+
+    def test_cosine_uses_normalized_distance(self, singlelabel_data):
+        """Cosine metric should give the same answer on L2-normalised inputs as l2."""
+        d = singlelabel_data
+        X_train = d["x_train"] / (np.linalg.norm(d["x_train"], axis=1, keepdims=True) + 1e-8)
+        X_test = d["x_test"] / (np.linalg.norm(d["x_test"], axis=1, keepdims=True) + 1e-8)
+        clf_l2 = KNNClassifier(n_neighbors=3, device="cpu", metric="l2")
+        clf_cos = KNNClassifier(n_neighbors=3, device="cpu", metric="cosine")
+        clf_l2.fit(X_train, d["y_train"])
+        clf_cos.fit(X_train, d["y_train"])
+        # Both operate on unit-norm inputs; predictions should agree
+        np.testing.assert_array_equal(clf_l2.predict(X_test), clf_cos.predict(X_test))
+
+
+class TestKNNGPUPath:
+    """GPU / faissknn path: requires CUDA + faissknn."""
+
+    @_cuda_available
+    @_faissknn_available
+    @pytest.mark.slow
+    def test_gpu_singlelabel_matches_cpu(self, singlelabel_data):
+        d = singlelabel_data
+        cpu = KNNClassifier(n_neighbors=5, device="cpu")
+        gpu = KNNClassifier(n_neighbors=5, device="cuda")
+        cpu.fit(d["x_train"], d["y_train"])
+        gpu.fit(d["x_train"], d["y_train"])
+        np.testing.assert_array_equal(cpu.predict(d["x_test"]), gpu.predict(d["x_test"]))
+        np.testing.assert_allclose(
+            cpu.predict_proba(d["x_test"]),
+            gpu.predict_proba(d["x_test"]),
+            atol=1e-5,
+        )
+
+    @_cuda_available
+    @_faissknn_available
+    @pytest.mark.slow
+    def test_gpu_multilabel_matches_cpu(self, multilabel_data):
+        d = multilabel_data
+        cpu = KNNClassifier(n_neighbors=5, device="cpu")
+        gpu = KNNClassifier(n_neighbors=5, device="cuda")
+        cpu.fit(d["x_train"], d["y_train"])
+        gpu.fit(d["x_train"], d["y_train"])
+        np.testing.assert_array_equal(cpu.predict(d["x_test"]), gpu.predict(d["x_test"]))
+        np.testing.assert_allclose(
+            cpu.predict_proba(d["x_test"]),
+            gpu.predict_proba(d["x_test"]),
+            atol=1e-5,
+        )
+
+    @_cuda_available
+    @_faissknn_available
+    @pytest.mark.slow
+    def test_gpu_fp16_output_shapes(self, singlelabel_data):
+        """use_fp16=True should not change output shapes or value ranges."""
+        d = singlelabel_data
+        clf = KNNClassifier(n_neighbors=5, device="cuda", use_fp16=True)
+        clf.fit(d["x_train"], d["y_train"])
+        preds = clf.predict(d["x_test"])
+        probs = clf.predict_proba(d["x_test"])
+        assert preds.shape == (len(d["x_test"]),)
+        assert probs.shape == (len(d["x_test"]), d["n_classes"])
+        np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-3)
+
+    @_cuda_available
+    @_faissknn_available
+    @pytest.mark.slow
+    @pytest.mark.parametrize("metric", ["l2", "ip", "cosine"])
+    def test_gpu_metric_output_shapes(self, singlelabel_data, metric):
+        d = singlelabel_data
+        clf = KNNClassifier(n_neighbors=3, device="cuda", metric=metric)
+        clf.fit(d["x_train"], d["y_train"])
+        preds = clf.predict(d["x_test"])
+        probs = clf.predict_proba(d["x_test"])
+        assert preds.shape == (len(d["x_test"]),)
+        assert probs.shape == (len(d["x_test"]), d["n_classes"])
+
+    @_cuda_available
+    @_faissknn_available
+    @pytest.mark.slow
+    def test_gpu_predict_returns_numpy(self, singlelabel_data):
+        """predict() and predict_proba() must always return np.ndarray, not torch.Tensor."""
+        d = singlelabel_data
+        clf = KNNClassifier(n_neighbors=5, device="cuda")
+        clf.fit(d["x_train"], d["y_train"])
+        assert isinstance(clf.predict(d["x_test"]), np.ndarray)
+        assert isinstance(clf.predict_proba(d["x_test"]), np.ndarray)
+
+    def test_gpu_missing_faissknn_raises_instead_of_cpu_fallback(
+        self, singlelabel_data, monkeypatch
+    ):
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "faissknn":
+                raise ImportError("blocked for test")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        d = singlelabel_data
+        clf = KNNClassifier(n_neighbors=5, device="cuda")
+        with pytest.raises(ImportError, match='request device="cpu"'):
+            clf.fit(d["x_train"], d["y_train"])
 
 
 # ---- Unified evaluate_knn / evaluate_logistic tests ----
