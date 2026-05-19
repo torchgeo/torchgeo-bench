@@ -493,6 +493,14 @@ class OlmoEarthBenchModel(BenchModel):
             )
             B, _, H, W = images.shape
 
+        # v1.1 uses linear patch embed which requires H,W divisible by patch_size.
+        # Pad to the next multiple if needed (zero-padding is mask-safe).
+        pad_h = (self.patch_size - H % self.patch_size) % self.patch_size
+        pad_w = (self.patch_size - W % self.patch_size) % self.patch_size
+        if pad_h > 0 or pad_w > 0:
+            images = F.pad(images, (0, pad_w, 0, pad_h))
+            B, _, H, W = images.shape
+
         timestamps = torch.zeros(B, self.time_steps, 3, dtype=torch.long, device=device)
         timestamps[:, :, 0] = 15
         timestamps[:, :, 1] = 6
