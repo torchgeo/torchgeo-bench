@@ -727,8 +727,8 @@ name = "faiss-cpu"
 version = "1.13.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
-    { name = "packaging" },
+    { name = "numpy", marker = "python_full_version >= '3.13'" },
+    { name = "packaging", marker = "python_full_version >= '3.13'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/07/c9/671f66f6b31ec48e5825d36435f0cb91189fa8bb6b50724029dbff4ca83c/faiss_cpu-1.13.2-cp310-abi3-macosx_14_0_arm64.whl", hash = "sha256:a9064eb34f8f64438dd5b95c8f03a780b1a3f0b99c46eeacb1f0b5d15fc02dc1", size = 3452776, upload-time = "2025-12-24T10:27:01.419Z" },
@@ -747,7 +747,7 @@ wheels = [
 
 [[package]]
 name = "faiss-cuda-cu128"
-version = "1.14.1.post1"
+version = "1.14.1.post3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
@@ -756,9 +756,9 @@ dependencies = [
     { name = "packaging" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/89/5749839df08a6a919d5f74d85d9ce69635a7043c9835bdafbc22670213e8/faiss_cuda_cu128-1.14.1.post1-cp312-cp312-manylinux_2_34_x86_64.whl", hash = "sha256:a535f971df9bd2ecf0f2d9bb3d3229d5a86cda5abed0d8738873e2ca7e4ac96b", size = 99752739, upload-time = "2026-05-10T01:05:00.341Z" },
-    { url = "https://files.pythonhosted.org/packages/aa/fb/cb3ddc48a34900a19768cc36804aedea349d4807226fee33aee8dbe5c65b/faiss_cuda_cu128-1.14.1.post1-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:54020a462d6daf33c8f7fa7f48e3838a4d38213a31b229057859517e627c4095", size = 99751626, upload-time = "2026-05-10T01:05:07.329Z" },
-    { url = "https://files.pythonhosted.org/packages/7f/82/1959fb1fa29c05919207128d534fa8dc024d0a8a602d61dc6679bd1fee27/faiss_cuda_cu128-1.14.1.post1-cp314-cp314-manylinux_2_34_x86_64.whl", hash = "sha256:065c7268ab0a8c111a05ca39e1e8699d9f9dec1f5c2ac97fab96630b64dfc71f", size = 99752896, upload-time = "2026-05-10T01:05:14.853Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/d4/e9fd2fcdeb7dc4aea8fba69d4a63b37b88cdc9820c1d44afcba9580d8e6f/faiss_cuda_cu128-1.14.1.post3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4a9f6bcb7d6a7faeb4b09b0859d28681edf658e66d4eddacc0fe8c9613f2d18a", size = 88839581, upload-time = "2026-05-20T02:24:14.159Z" },
+    { url = "https://files.pythonhosted.org/packages/08/72/b558461d476731c8e3c95de303e5e3b8848d7fef515678844c83cf11c946/faiss_cuda_cu128-1.14.1.post3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5debb2f2cb97787d76eadd4f8cdbd8067bfc680daf49a30becc854e4994c1060", size = 88839500, upload-time = "2026-05-20T02:24:20.42Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/73/0d000d3e56d493110d75dccf307e7439f42de0578509c57396a5f3c90415/faiss_cuda_cu128-1.14.1.post3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7b723df18622242bb993f9c004e32f2fbed2a8070ccc0b0f67761f34331eb34b", size = 88840308, upload-time = "2026-05-20T02:24:26.099Z" },
 ]
 
 [[package]]
@@ -3921,7 +3921,7 @@ name = "torchgeo-bench"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
-    { name = "faiss-cpu" },
+    { name = "faiss-cuda-cu128" },
     { name = "geobenchv2" },
     { name = "h5py" },
     { name = "huggingface-hub" },
@@ -4010,7 +4010,7 @@ viz = [
 [package.metadata]
 requires-dist = [
     { name = "cleanlab", marker = "extra == 'cleanlab'", specifier = ">=2.7" },
-    { name = "faiss-cpu", specifier = ">=1.7" },
+    { name = "faiss-cuda-cu128", specifier = ">=1.14.1.post3" },
     { name = "faissknn", marker = "extra == 'cuda'", specifier = ">=0.0.3" },
     { name = "geobenchv2", specifier = ">=0.9" },
     { name = "h5py", specifier = ">=3.8" },
