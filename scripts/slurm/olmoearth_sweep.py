@@ -1,14 +1,16 @@
 """Generate the OlmoEarth-specific GeoBench sweep job list.
 
-OlmoEarth was pretrained on 12-channel Sentinel-2 (no B10/cirrus) at native
-resolution.  Datasets vary in what's available:
+OlmoEarth was pretrained on 12-channel Sentinel-2, Sentinel-1 (2 SAR), and
+Landsat-8 (11 channels) at native resolution.  Datasets vary in what's
+available:
 
 * 12 S2 bands ready -> use them in OlmoEarth's expected order.
-* Fewer S2 bands or non-S2 sensor -> RGB-only zero-fill fallback.
+* Mixed S2 + SAR (m-so2sat) -> pass all bands; wrapper routes each sensor.
+* Landsat (m-forestnet) -> pass all 6 Landsat bands; wrapper maps to 11-ch.
+* Fewer S2 bands or unsupported sensor -> RGB-only zero-fill fallback.
 
-The wrapper auto-detects the input scale (DN vs reflectance vs uint8) and
-rescales to S2 DN before calling OlmoEarth's internal Normalizer, so we
-don't need to set ``dataset.normalization`` per task.
+The wrapper auto-detects the input scale (DN vs reflectance vs uint8) per
+sensor group and rescales accordingly, so dataset.normalization isn't needed.
 """
 
 from pathlib import Path
@@ -77,10 +79,17 @@ TWELVE_BAND_S2: dict[str, list[str]] = {
     ],
 }
 
-# 10-band S2 mode (no B01/B09) for datasets missing those bands.  The wrapper
-# zero-fills positions 10 (B01) and 11 (B09) internally.  Caller passes
-# bands in OlmoEarth's first-10 order.
+# 10-band S2 (no B01/B09).  Wrapper zero-fills positions 10–11 internally.
 TEN_BAND_S2: dict[str, list[str]] = {
+    "so2sat": ["b02", "b03", "b04", "b08", "b05", "b06", "b07", "b8a", "b11", "b12"],
+}
+
+# Mixed S2 + SAR datasets.  Pass all bands; the wrapper routes S2 bands to
+# SENTINEL2_L2A and SAR bands to SENTINEL1, populating both fields of
+# MaskedOlmoEarthSample simultaneously.
+MIXED_S2_SAR: dict[str, list[str]] = {
+    # m-so2sat: 10 S2 + 8 SAR bands (interleaved in dataset order).
+    # Wrapper groups by sensor automatically.
     "m-so2sat": [
         "blue",
         "green",
@@ -92,33 +101,69 @@ TEN_BAND_S2: dict[str, list[str]] = {
         "red_edge_4",
         "swir_1",
         "swir_2",
+        "vh_real",
+        "vh_imag",
+        "vv_real",
+        "vv_imag",
+        "vh_lee",
+        "vv_lee",
+        "vh_lee_real",
+        "vv_lee_imag",
     ],
-    "so2sat": ["b02", "b03", "b04", "b08", "b05", "b06", "b07", "b8a", "b11", "b12"],
 }
 
-# RGB-only fallback for non-S2 sensors and S2 datasets with <10 bands.
+# Landsat datasets.  Wrapper uses LANDSAT modality (11-ch layout, input_res=30).
+LANDSAT_BANDS: dict[str, list[str]] = {
+    # m-forestnet: Landsat-8, 6 bands (blue/green/red/nir/swir_1/swir_2), uint8.
+    "m-forestnet": ["blue", "green", "red", "nir", "swir_1", "swir_2"],
+}
+
+# RGB-only fallback for NAIP/aerial and S2 datasets with <10 usable bands.
 RGB_ONLY = [
-    "m-forestnet",  # Landsat (6 bands, uint8)
     "m-pv4ger",  # NAIP aerial RGB
     "forestnet",  # S2 6 bands (V2), uint8 — fewer than 10 in OlmoEarth's order
 ]
 
 MODELS = ["olmoearth_nano", "olmoearth_tiny", "olmoearth_base", "olmoearth_large"]
+MODELS_V1_1 = ["olmoearth_v1_1_nano", "olmoearth_v1_1_tiny", "olmoearth_v1_1_base"]
 
 
-def main() -> None:
+def _build_lines(models: list[str]) -> list[str]:
     lines: list[str] = []
-    for model in MODELS:
+    for model in models:
         for ds, band_list in TWELVE_BAND_S2.items():
             lines.append(f"{model} {ds} {','.join(band_list)} null")
         for ds, band_list in TEN_BAND_S2.items():
             lines.append(f"{model} {ds} {','.join(band_list)} null")
+        for ds, band_list in MIXED_S2_SAR.items():
+            lines.append(f"{model} {ds} {','.join(band_list)} null")
+        for ds, band_list in LANDSAT_BANDS.items():
+            lines.append(f"{model} {ds} {','.join(band_list)} null")
         for ds in RGB_ONLY:
             lines.append(f"{model} {ds} rgb null")
+    return lines
+
+
+def main() -> None:
+    total_ds = (
+        len(TWELVE_BAND_S2)
+        + len(TEN_BAND_S2)
+        + len(MIXED_S2_SAR)
+        + len(LANDSAT_BANDS)
+        + len(RGB_ONLY)
+    )
+
+    lines = _build_lines(MODELS)
     out = Path("scripts/slurm/olmoearth_sweep.jobs")
     out.write_text("\n".join(lines) + "\n")
     print(f"Wrote {len(lines)} jobs to {out}")
-    print(f"  models: {len(MODELS)} · datasets: {len(TWELVE_BAND_S2) + len(RGB_ONLY)}")
+    print(f"  models: {len(MODELS)} · datasets: {total_ds}")
+
+    lines_v1_1 = _build_lines(MODELS_V1_1)
+    out_v1_1 = Path("scripts/slurm/olmoearth_v1_1_sweep.jobs")
+    out_v1_1.write_text("\n".join(lines_v1_1) + "\n")
+    print(f"Wrote {len(lines_v1_1)} jobs to {out_v1_1}")
+    print(f"  models: {len(MODELS_V1_1)} · datasets: {total_ds}")
 
 
 if __name__ == "__main__":

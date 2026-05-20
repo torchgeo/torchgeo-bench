@@ -1,0 +1,10 @@
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
+model_size: nano
+patch_size: 8
+input_res: 30
+time_steps: 3
+std_multiplier: 2.0
+normalize: false
+sensor_remap:
+  landsat: landsat_as_s2  # route through S2 normalizer; wavelengths align well
+name: olmoearth_v1_nano_lsat_as_s2

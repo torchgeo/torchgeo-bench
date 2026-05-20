@@ -165,7 +165,6 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "sklearn": ("https://scikit-learn.org/stable/", None),
     "torch": ("https://docs.pytorch.org/docs/stable/", None),
-    "torchgeo": ("https://torchgeo.readthedocs.io/en/stable/", None),
     "torchvision": ("https://docs.pytorch.org/vision/stable/", None),
 }
 
@@ -177,7 +176,12 @@ myst_enable_extensions = [
     "smartquotes",
 ]
 myst_heading_anchors = 3
-suppress_warnings = ["myst.header", "myst.xref_missing", "misc.highlighting_failure"]
+suppress_warnings = [
+    "myst.header",
+    "myst.xref_missing",
+    "misc.highlighting_failure",
+    "intersphinx.fetch_inventory",
+]
 
 # sphinx-copybutton
 copybutton_prompt_text = r">>> |\.\.\. |\$ "
