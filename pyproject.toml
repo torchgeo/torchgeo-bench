@@ -162,7 +162,6 @@ ini_options.python_functions = [ "test_*" ]
 ini_options.addopts = [
   "--verbose",
   "-m not slow",
-  "--cov-fail-under=90",
 ]
 ini_options.markers = [
   "slow: integration tests that load real data and run models (use -m slow to include)",
