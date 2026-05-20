@@ -85,8 +85,8 @@ def test_s2_forward_pass_shape() -> None:
 
 
 @requires_olmoearth
-def test_all_four_variants_are_loadable() -> None:
-    """ModelID enum exposes the four advertised variants.
+def test_all_variants_are_loadable() -> None:
+    """ModelID enum exposes all variants used by this benchmark.
 
     Prevents the regression where the wrapper silently lost a variant
     after an upstream rename.
@@ -99,6 +99,9 @@ def test_all_four_variants_are_loadable() -> None:
         "OLMOEARTH_V1_TINY",
         "OLMOEARTH_V1_BASE",
         "OLMOEARTH_V1_LARGE",
+        "OLMOEARTH_V1_1_NANO",
+        "OLMOEARTH_V1_1_TINY",
+        "OLMOEARTH_V1_1_BASE",
     }
 
 
