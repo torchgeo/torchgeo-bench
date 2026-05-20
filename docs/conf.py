@@ -175,7 +175,7 @@ myst_enable_extensions = [
     "smartquotes",
 ]
 myst_heading_anchors = 3
-suppress_warnings = ["myst.header", "myst.xref_missing", "misc.highlighting_failure"]
+suppress_warnings = ["myst.header", "myst.xref_missing", "misc.highlighting_failure", "intersphinx.fetch_inventory"]
 
 # sphinx-copybutton
 copybutton_prompt_text = r">>> |\.\.\. |\$ "
