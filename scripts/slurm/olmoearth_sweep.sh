@@ -65,7 +65,6 @@ torchgeo-bench run \
   dataset.num_workers="${TGB_NUM_WORKERS:-4}" \
   resume=true \
   output=results/all_results.csv \
-  eval.knn_device=cpu \
   eval.intrinsic_dim.enabled=true \
   eval.profile.enabled=true \
   eval.profile.cpu_throughput.enabled=true
