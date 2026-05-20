@@ -30,6 +30,8 @@ eval:
   merge_val: true          # merge train+val for final logistic training
   skip_knn: false          # if true, skip KNN-5 evaluation
   skip_linear: false       # if true, skip LogisticRegression evaluation
+  knn_k: 5                 # number of neighbours for KNN evaluation
+  knn_device: null         # null = inherit cfg.device; set "cpu" to force faiss-cpu KNN
 
   # Optional intrinsic dimension (ID) metrics on extracted embeddings.
   # Computed alongside KNN/linear probing when enabled. Adds rows with
