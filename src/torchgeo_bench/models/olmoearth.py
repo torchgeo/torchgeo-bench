@@ -340,6 +340,10 @@ class OlmoEarthBenchModel(BenchModel):
     Args:
         bands: Ordered ``BandSpec`` list describing the input channels.
         model_size: One of ``"nano"``, ``"tiny"``, ``"base"``, ``"large"``.
+            ``"large"`` is only available for ``version="v1"``.
+        version: Model version — ``"v1"`` (default) or ``"v1_1"``.  v1.1
+            ships Nano/Tiny/Base with improved accuracy and ~25% more
+            parameters; no Large variant yet.
         patch_size: Patch size for the encoder (default 8).
         input_res: Input resolution in meters.  ``None`` (default) lets
             the wrapper auto-detect from the primary sensor GSD.
@@ -367,6 +371,7 @@ class OlmoEarthBenchModel(BenchModel):
         bands: list[BandSpec],
         *,
         model_size: Literal["nano", "tiny", "base", "large"] = "base",
+        version: Literal["v1", "v1_1"] = "v1",
         patch_size: int = 4,
         input_res: int | None = None,
         time_steps: int = 1,
@@ -422,7 +427,7 @@ class OlmoEarthBenchModel(BenchModel):
         self.landsat_scale_factor = landsat_scale_factor
         self.min_image_size = min_image_size
 
-        model_id = getattr(ModelID, f"OLMOEARTH_V1_{model_size.upper()}")
+        model_id = getattr(ModelID, f"OLMOEARTH_{version.upper()}_{model_size.upper()}")
         self.encoder_model = load_model_from_id(model_id, load_weights=True)
         self.normalizer = Normalizer(std_multiplier=std_multiplier)
 
@@ -486,6 +491,14 @@ class OlmoEarthBenchModel(BenchModel):
             images = F.interpolate(
                 images, size=(new_h, new_w), mode="bilinear", align_corners=False
             )
+            B, _, H, W = images.shape
+
+        # v1.1 uses linear patch embed which requires H,W divisible by patch_size.
+        # Pad to the next multiple if needed (zero-padding is mask-safe).
+        pad_h = (self.patch_size - H % self.patch_size) % self.patch_size
+        pad_w = (self.patch_size - W % self.patch_size) % self.patch_size
+        if pad_h > 0 or pad_w > 0:
+            images = F.pad(images, (0, pad_w, 0, pad_h))
             B, _, H, W = images.shape
 
         timestamps = torch.zeros(B, self.time_steps, 3, dtype=torch.long, device=device)

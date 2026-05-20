@@ -125,11 +125,12 @@ RGB_ONLY = [
 ]
 
 MODELS = ["olmoearth_nano", "olmoearth_tiny", "olmoearth_base", "olmoearth_large"]
+MODELS_V1_1 = ["olmoearth_v1_1_nano", "olmoearth_v1_1_tiny", "olmoearth_v1_1_base"]
 
 
-def main() -> None:
+def _build_lines(models: list[str]) -> list[str]:
     lines: list[str] = []
-    for model in MODELS:
+    for model in models:
         for ds, band_list in TWELVE_BAND_S2.items():
             lines.append(f"{model} {ds} {','.join(band_list)} null")
         for ds, band_list in TEN_BAND_S2.items():
@@ -140,6 +141,10 @@ def main() -> None:
             lines.append(f"{model} {ds} {','.join(band_list)} null")
         for ds in RGB_ONLY:
             lines.append(f"{model} {ds} rgb null")
+    return lines
+
+
+def main() -> None:
     total_ds = (
         len(TWELVE_BAND_S2)
         + len(TEN_BAND_S2)
@@ -147,10 +152,18 @@ def main() -> None:
         + len(LANDSAT_BANDS)
         + len(RGB_ONLY)
     )
+
+    lines = _build_lines(MODELS)
     out = Path("scripts/slurm/olmoearth_sweep.jobs")
     out.write_text("\n".join(lines) + "\n")
     print(f"Wrote {len(lines)} jobs to {out}")
     print(f"  models: {len(MODELS)} · datasets: {total_ds}")
+
+    lines_v1_1 = _build_lines(MODELS_V1_1)
+    out_v1_1 = Path("scripts/slurm/olmoearth_v1_1_sweep.jobs")
+    out_v1_1.write_text("\n".join(lines_v1_1) + "\n")
+    print(f"Wrote {len(lines_v1_1)} jobs to {out_v1_1}")
+    print(f"  models: {len(MODELS_V1_1)} · datasets: {total_ds}")
 
 
 if __name__ == "__main__":

@@ -1044,6 +1044,7 @@ def main(cfg: DictConfig) -> None:
             feature_dim = x_train.shape[1]
 
             if not skip_knn:
+                knn_device = cfg.eval.get("knn_device") or cfg.device
                 knn_score, knn_lo, knn_hi = evaluate_knn(
                     x_train,
                     y_train,
@@ -1052,7 +1053,7 @@ def main(cfg: DictConfig) -> None:
                     cfg.seed,
                     cfg.eval.bootstrap,
                     verbose=cfg.verbose,
-                    device=cfg.device,
+                    device=knn_device,
                     n_neighbors=knn_k,
                 )
                 all_rows.append(
