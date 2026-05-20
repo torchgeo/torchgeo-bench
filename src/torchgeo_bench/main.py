@@ -105,6 +105,27 @@ def _completed_run_keys(
     return set(map(tuple, df[list(key_cols)].fillna("").astype(str).to_numpy()))
 
 
+def _row_key(row: dict, key_cols: Sequence[str]) -> tuple[str, ...]:
+    """Build a normalized resume key tuple from a result row dict."""
+    return tuple(str(row.get(col, "")) for col in key_cols)
+
+
+def _filter_completed_metric_rows(
+    rows: list[dict],
+    completed_metrics: dict[str, set[tuple[str, ...]]],
+    key_cols: Sequence[str],
+) -> list[dict]:
+    """Drop rows whose (metric_name, resume-key) already exists in the output CSV."""
+    filtered: list[dict] = []
+    for row in rows:
+        metric_name = str(row.get("metric_name", ""))
+        key = _row_key(row, key_cols)
+        if key in completed_metrics.get(metric_name, set()):
+            continue
+        filtered.append(row)
+    return filtered
+
+
 def _profile_metric_names(profile_cfg: DictConfig | None) -> list[str]:
     """Return the required profile metrics for resume completeness checks."""
     names = [
@@ -870,21 +891,21 @@ def main(cfg: DictConfig) -> None:
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
 
+    key_cols = (
+        "dataset",
+        "method",
+        "model",
+        "name",
+        "normalization",
+        "image_size",
+        "interpolation",
+        "partition",
+        "bands",
+    )
     completed_runs: set[tuple[str, ...]] = set()
     completed_metrics: dict[str, set[tuple[str, ...]]] = {}
     if cfg.resume and os.path.exists(output_path):
         existing_df = pd.read_csv(cfg.output)
-        key_cols = (
-            "dataset",
-            "method",
-            "model",
-            "name",
-            "normalization",
-            "image_size",
-            "interpolation",
-            "partition",
-            "bands",
-        )
         for col in key_cols:
             if col not in existing_df.columns:
                 existing_df[col] = ""
@@ -1226,6 +1247,8 @@ def main(cfg: DictConfig) -> None:
                     },
                     verbose=cfg.verbose,
                 )
+                if cfg.resume:
+                    id_rows = _filter_completed_metric_rows(id_rows, completed_metrics, key_cols)
                 all_rows.extend(id_rows)
 
             if not skip_profile:
@@ -1249,6 +1272,10 @@ def main(cfg: DictConfig) -> None:
                     cpu_n_measure=int(cpu_cfg.get("n_measure", 5)),
                     cpu_time_budget_s=float(cpu_cfg.get("time_budget_s", 300.0)),
                 )
+                if cfg.resume:
+                    profile_rows = _filter_completed_metric_rows(
+                        profile_rows, completed_metrics, key_cols
+                    )
                 all_rows.extend(profile_rows)
 
         append_rows_atomic(output_path, all_rows)

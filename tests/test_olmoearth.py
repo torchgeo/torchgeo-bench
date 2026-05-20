@@ -7,6 +7,7 @@ loads) and validate the wrapper actually produces sensible embeddings.
 """
 
 from importlib.util import find_spec
+from unittest import mock
 
 import pytest
 import torch
@@ -368,3 +369,30 @@ def test_mixed_s2_sar_forward_pass() -> None:
     out = model.forward_patch_features(x)
     assert out.shape == (2, EXPECTED_DIM["nano"])
     assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
+def test_invalid_model_size_raises() -> None:
+    """Unknown model_size values must fail during constructor model-id resolution."""
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    with pytest.raises(AttributeError, match="OLMOEARTH_V1_XLARGE"):
+        OlmoEarthBenchModel(bands=_rgb_bands(), model_size="xlarge", normalization="identity")
+
+
+@requires_olmoearth
+def test_invalid_model_size_at_construction_not_forward() -> None:
+    """Invalid model_size must fail in __init__ before any model loading call."""
+    import olmoearth_pretrain_minimal as oepm
+
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    with (
+        mock.patch.object(
+            oepm,
+            "load_model_from_id",
+            side_effect=AssertionError("load_model_from_id should not be called"),
+        ),
+        pytest.raises(AttributeError, match="OLMOEARTH_V1_XLARGE"),
+    ):
+        OlmoEarthBenchModel(bands=_rgb_bands(), model_size="xlarge", normalization="identity")

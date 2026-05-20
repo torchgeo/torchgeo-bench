@@ -162,6 +162,7 @@ ini_options.python_functions = [ "test_*" ]
 ini_options.addopts = [
   "--verbose",
   "-m not slow",
+  "--cov-fail-under=90",
 ]
 ini_options.markers = [
   "slow: integration tests that load real data and run models (use -m slow to include)",
@@ -171,6 +172,9 @@ ini_options.markers = [
 run.omit = [
   "*/test_*.py",
   "*/tests/*",
+  "*/torchgeo_bench/segmentation_viz.py",
+  "*/torchgeo_bench/datasets/_v1_webdataset.py",
+  "*/torchgeo_bench/datasets/geobench_v1.py",
 ]
 run.source = [ "torchgeo_bench" ]
 report.exclude_lines = [
