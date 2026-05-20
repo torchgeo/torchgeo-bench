@@ -163,7 +163,7 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "sklearn": ("https://scikit-learn.org/stable/", None),
     "torch": ("https://docs.pytorch.org/docs/stable/", None),
-    "torchgeo": ("https://torchgeo.readthedocs.io/en/stable/", None),
+
     "torchvision": ("https://docs.pytorch.org/vision/stable/", None),
 }
 
