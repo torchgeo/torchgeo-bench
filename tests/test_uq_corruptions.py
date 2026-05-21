@@ -433,6 +433,57 @@ def test_poisson_gaussian_so2sat_bounds():
     assert float(y.max()) <= max_val + 1e-6
 
 
+def test_motion_blur_output_shape():
+    x = torch.rand((2, 3, 32, 32), dtype=torch.float32) * 255.0
+    tfm = CorruptionTransform("motion_blur", severity=1, seed=0, band_specs=_bands())
+    y = tfm(x)
+    assert y.shape == x.shape
+
+
+def test_motion_blur_dtype_preserved():
+    x = torch.rand((2, 3, 32, 32), dtype=torch.float32) * 255.0
+    tfm = CorruptionTransform("motion_blur", severity=3, seed=0, band_specs=_bands())
+    assert tfm(x).dtype == x.dtype
+
+
+def test_motion_blur_values_clamped():
+    x = torch.rand((2, 3, 32, 32), dtype=torch.float32) * 255.0
+    tfm = CorruptionTransform("motion_blur", severity=5, seed=0, band_specs=_bands())
+    y = tfm(x)
+    assert float(y.min()) >= 0.0
+    assert float(y.max()) <= 255.0
+
+
+def test_motion_blur_is_deterministic():
+    x = torch.rand((4, 3, 64, 64), dtype=torch.float32) * 255.0
+    tfm_a = CorruptionTransform("motion_blur", severity=3, seed=0, band_specs=_bands())
+    tfm_b = CorruptionTransform("motion_blur", severity=3, seed=0, band_specs=_bands())
+    assert torch.allclose(tfm_a(x), tfm_b(x))
+
+
+def test_motion_blur_severity_progression():
+    x = torch.rand((4, 3, 224, 224), dtype=torch.float32) * 255.0
+    deltas: list[float] = []
+    for severity in [1, 2, 3, 4, 5]:
+        tfm = CorruptionTransform("motion_blur", severity=severity, seed=0, band_specs=_bands())
+        deltas.append(float(torch.mean(torch.abs(tfm(x) - x))))
+    assert all(b >= a for a, b in zip(deltas, deltas[1:]))
+    assert deltas[-1] > deltas[0]
+
+
+def test_motion_blur_blurs_horizontally_not_vertically():
+    # Step edge in the horizontal direction — blur must smooth it
+    x = torch.zeros((1, 3, 32, 32), dtype=torch.float32)
+    x[:, :, :, 16:] = 255.0  # right half is white
+    tfm = CorruptionTransform("motion_blur", severity=3, seed=0, band_specs=_bands())
+    y = tfm(x)
+    # Columns near the step edge should be smoothed (neither 0 nor 255)
+    assert float(y[:, :, :, 12:20].min()) > 0.0
+    assert float(y[:, :, :, 12:20].max()) < 255.0
+    # Rows should be unchanged — no vertical blur (all rows identical)
+    assert torch.allclose(y[0, 0, 0, :], y[0, 0, 1, :])
+
+
 def test_viz_corruptions_runs(tmp_path):
     _require_cloud_dependency()
     _ = __import__("matplotlib")

@@ -3,8 +3,11 @@
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
+
+MOTION_BLUR_KERNEL_SIZES: dict[int, int] = {1: 3, 2: 5, 3: 9, 4: 15, 5: 21}
 
 SKIP_POISSON_GAUSSIAN: frozenset[str] = frozenset()
 
@@ -331,10 +334,10 @@ def _resolve_cloud_calibration(
 
 
 class CorruptionTransform:
-    """Apply cloud or Poisson-Gaussian corruptions to image batches.
+    """Apply cloud, Poisson-Gaussian, or motion-blur corruptions to image batches.
 
     Args:
-        corruption_type: One of ``"cloud"`` or ``"poisson_gaussian"``.
+        corruption_type: One of ``"cloud"``, ``"poisson_gaussian"``, or ``"motion_blur"``.
         severity: Corruption severity in ``[1, 5]``.
         seed: Base seed used for deterministic per-image corruption.
         band_specs: Per-channel statistics and sensor metadata.
@@ -353,9 +356,10 @@ class CorruptionTransform:
         dataset_name: str | None = None,
         cloud_pattern_mode: str = "fixed",
     ) -> None:
-        if corruption_type not in {"cloud", "poisson_gaussian"}:
+        if corruption_type not in {"cloud", "poisson_gaussian", "motion_blur"}:
             raise ValueError(
-                f"Unknown corruption_type={corruption_type!r}; expected cloud or poisson_gaussian"
+                f"Unknown corruption_type={corruption_type!r}; "
+                f"expected cloud, poisson_gaussian, or motion_blur"
             )
         if severity < 1 or severity > 5:
             raise ValueError(f"severity must be in [1, 5], got {severity}")
@@ -420,18 +424,21 @@ class CorruptionTransform:
             _, _, height, width = out.shape
             cloud_masks = torch.zeros((bsz, height, width), device=out.device, dtype=torch.float32)
 
-        for i in range(bsz):
-            global_idx = self._n_images_seen + i
-            if self.corruption_type == "cloud":
-                out[i], cloud_mask = self._apply_cloud(
-                    out[i],
-                    global_idx,
-                    return_cloud_mask=return_cloud_masks,
-                )
-                if cloud_masks is not None and cloud_mask is not None:
-                    cloud_masks[i] = cloud_mask
-            else:
-                out[i] = self._apply_poisson_gaussian(out[i], global_idx)
+        if self.corruption_type == "motion_blur":
+            out = self._apply_motion_blur(out)
+        else:
+            for i in range(bsz):
+                global_idx = self._n_images_seen + i
+                if self.corruption_type == "cloud":
+                    out[i], cloud_mask = self._apply_cloud(
+                        out[i],
+                        global_idx,
+                        return_cloud_mask=return_cloud_masks,
+                    )
+                    if cloud_masks is not None and cloud_mask is not None:
+                        cloud_masks[i] = cloud_mask
+                else:
+                    out[i] = self._apply_poisson_gaussian(out[i], global_idx)
 
         self._n_images_seen += bsz
         return out.to(dtype=in_dtype), cloud_masks
@@ -553,3 +560,27 @@ class CorruptionTransform:
         out = torch.maximum(out, min_vals)
         out = torch.minimum(out, max_vals)
         return out
+
+    def _apply_motion_blur(self, images: torch.Tensor) -> torch.Tensor:
+        """Apply horizontal motion blur to a batch.
+
+        Args:
+            images: Float batch with shape ``(B, C, H, W)``.
+
+        Returns:
+            Blurred batch with the same shape as input.
+        """
+        b, c, h, w = images.shape
+        k = MOTION_BLUR_KERNEL_SIZES[self.severity]
+        device = images.device
+
+        # 1×k depthwise kernel — one uniform row, normalised
+        kernel = torch.zeros(c, 1, 1, k, device=device, dtype=torch.float32)
+        kernel[:, 0, 0, :] = 1.0 / k
+
+        # Reflect-pad left/right only; kernel height is 1 so no vertical padding needed
+        padded = F.pad(images, (k // 2, k // 2, 0, 0), mode="reflect")
+        out = F.conv2d(padded, kernel, groups=c)
+
+        min_vals, max_vals = _tensor_range(self.band_specs, device=device, dtype=images.dtype)
+        return out.clamp(min_vals, max_vals)
