@@ -249,21 +249,23 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
         name_to_idx = info["name_to_idx"]
         src_indices: list[int] = []
         dst_indices: list[int] = []
-        unknown: list[str] = []
+        dropped: list[str] = []
         for src_idx, b in grouped[sensor]:
             key_name = b.name.lower()
             if key_name not in name_to_idx:
-                unknown.append(b.name)
+                dropped.append(b.name)
             else:
                 src_indices.append(src_idx)
                 dst_indices.append(name_to_idx[key_name])
-        if unknown:
-            raise ValueError(
-                f"OlmoEarth wrapper can't map BandSpec names {unknown} for "
-                f"sensor '{sensor}'.  Add them to "
-                f"_MODALITY_INFO['{sensor}']['name_to_idx'] "
-                f"with the correct OlmoEarth band index."
+        if dropped:
+            logging.warning(
+                "OlmoEarth wrapper has no slot for band(s) %s (sensor=%r) — "
+                "dropping them.  Their positions will be zero-filled.",
+                dropped,
+                sensor,
             )
+        if not src_indices:
+            continue
         group_bands = [bands[i] for i in src_indices]
         input_unit: InputUnit | None = (
             None if sensor in _PASSTHROUGH_SENSORS else _detect_band_group_unit(group_bands)

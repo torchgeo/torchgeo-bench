@@ -2,6 +2,7 @@
 
 import logging
 import os
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ import pandas as pd
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from rasterio.errors import NotGeoreferencedWarning
 from torchgeo.datasets.errors import DatasetNotFoundError
 
 from torchgeo_bench.cka.hooks import HookCollector
@@ -303,6 +305,7 @@ def _build_row(
 
 def run_cka(cfg: DictConfig) -> None:
     """Run the Hydra-configured CKA pipeline."""
+    warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
     torch.manual_seed(int(cfg.seed))
     np.random.seed(int(cfg.seed))
 
@@ -438,7 +441,7 @@ def run_cka(cfg: DictConfig) -> None:
         )
 
         with HookCollector(model, hook_paths) as collector:
-            X_test_clean, y_test = extract_features(
+            X_test_head, y_test = extract_features(
                 model,
                 test_loader,
                 device,
@@ -495,7 +498,7 @@ def run_cka(cfg: DictConfig) -> None:
                 clean_rows.append(row)
             append_rows_atomic(output_path, clean_rows)
 
-        X_clean_final = clean_acts[hook_paths[-1]]
+        X_clean_final = X_test_head
         for corruption_type in cfg.cka.corruptions:
             corruption_name = str(corruption_type)
             if corruption_name == "poisson_gaussian" and dataset_name in SKIP_POISSON_GAUSSIAN:
@@ -528,7 +531,7 @@ def run_cka(cfg: DictConfig) -> None:
                     cloud_pattern_mode=cloud_pattern_mode,
                 )
                 with HookCollector(model, hook_paths) as collector:
-                    _, y_test_corr = extract_features(
+                    X_test_corr, y_test_corr = extract_features(
                         model,
                         test_loader,
                         device,
@@ -563,7 +566,7 @@ def run_cka(cfg: DictConfig) -> None:
                     if layer_index == len(hook_paths) - 1:
                         summary = track_b_summary(
                             X_clean=X_clean_final,
-                            X_corrupted=corr_acts[path],
+                            X_corrupted=X_test_corr,
                             probe=probe,
                             y_true=y_test_corr,
                             confidence_threshold=float(cfg.cka.confidence_threshold),
@@ -577,7 +580,7 @@ def run_cka(cfg: DictConfig) -> None:
                                 corruption_type=corruption_name,
                                 severity=severity_int,
                                 X_clean_final=X_clean_final,
-                                X_corr_final=corr_acts[path],
+                                X_corr_final=X_test_corr,
                                 probe=probe,
                                 y_true=y_test_corr,
                             )

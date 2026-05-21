@@ -48,9 +48,9 @@ class RESISC45(BenchDataset):
 
     # Train-set RGB statistics from torchgeo RESISC45DataModule.
     bands = [
-        BandSpec("aerial", "red", "red", mean=93.89391792, std=51.84919672, min=0, max=255),
-        BandSpec("aerial", "green", "green", mean=97.11226906, std=47.2365918, min=0, max=255),
-        BandSpec("aerial", "blue", "blue", mean=87.56775284, std=47.06308786, min=0, max=255),
+        BandSpec("aerial", "red", "red", mean=93.89391792, std=51.84919672, min=0, max=255, wavelength_um=0.66),
+        BandSpec("aerial", "green", "green", mean=97.11226906, std=47.2365918, min=0, max=255, wavelength_um=0.55),
+        BandSpec("aerial", "blue", "blue", mean=87.56775284, std=47.06308786, min=0, max=255, wavelength_um=0.48),
     ]
 
     @classmethod

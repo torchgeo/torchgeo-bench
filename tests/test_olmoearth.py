@@ -84,8 +84,8 @@ def test_s2_forward_pass_shape() -> None:
 
 
 @requires_olmoearth
-def test_all_four_variants_are_loadable() -> None:
-    """ModelID enum exposes the four advertised variants.
+def test_all_variants_are_loadable() -> None:
+    """ModelID enum exposes the expected v1 and v1.1 variants.
 
     Prevents the regression where the wrapper silently lost a variant
     after an upstream rename.
@@ -93,11 +93,14 @@ def test_all_four_variants_are_loadable() -> None:
     from olmoearth_pretrain_minimal import ModelID
 
     names = {attr for attr in dir(ModelID) if attr.startswith("OLMOEARTH_V1_")}
-    assert names == {
+    assert names >= {
         "OLMOEARTH_V1_NANO",
         "OLMOEARTH_V1_TINY",
         "OLMOEARTH_V1_BASE",
         "OLMOEARTH_V1_LARGE",
+        "OLMOEARTH_V1_1_NANO",
+        "OLMOEARTH_V1_1_TINY",
+        "OLMOEARTH_V1_1_BASE",
     }
 
 
@@ -164,25 +167,30 @@ def test_rejects_unknown_sensor() -> None:
 
 
 @requires_olmoearth
-def test_rejects_unknown_band_name() -> None:
-    """A BandSpec name we have no OlmoEarth-position mapping for must fail
-    loudly so we don't quietly zero-fill every channel."""
-    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+def test_warns_on_unknown_band_name(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A BandSpec name with no OlmoEarth slot is dropped with a warning instead
+    of raising — mirrors m-eurosat which has swir_cirrus (B10) not in OlmoEarth."""
+    import logging
+    import unittest.mock as mock
 
-    weird_bands = [
-        BandSpec(
-            sensor="s2",
-            name="totally_made_up",
-            source_name="MADE_UP",
-            mean=1500.0,
-            std=600.0,
-            min=0.0,
-            max=10000.0,
-            wavelength_um=0.5,
-        )
-    ]
-    with pytest.raises(ValueError, match="can't map BandSpec names"):
-        OlmoEarthBenchModel(bands=weird_bands, model_size="nano", normalization="identity")
+    import torchgeo_bench.models.olmoearth as olmoearth_mod
+
+    # Stub out the weight download so this stays a fast unit test.
+    monkeypatch.setattr(olmoearth_mod, "_load_model_from_id", mock.MagicMock(), raising=False)
+    with monkeypatch.context() as m:
+        m.setattr("olmoearth_pretrain_minimal.load_model_from_id", mock.MagicMock())
+        from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+        # Mix of valid S2 bands + one unmappable band (like m-eurosat's B10).
+        bands = [
+            BandSpec(sensor="s2", name=n, source_name=n.upper(), mean=1500.0, std=600.0, min=0.0, max=10000.0)
+            for n in ("red", "green", "blue")
+        ] + [
+            BandSpec(sensor="s2", name="swir_cirrus", source_name="B10", mean=100.0, std=50.0, min=0.0, max=5000.0)
+        ]
+        with caplog.at_level(logging.WARNING):
+            OlmoEarthBenchModel(bands=bands, model_size="nano", normalization="identity")
+    assert "swir_cirrus" in caplog.text
 
 
 @requires_olmoearth

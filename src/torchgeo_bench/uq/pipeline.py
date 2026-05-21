@@ -2,6 +2,7 @@
 
 import logging
 import os
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ from torchgeo_bench.uq.metrics import (
     predictive_entropy,
     raw_aurc,
     selective_accuracy,
+    signed_ece,
 )
 from torchgeo_bench.uq.splits import stratified_cal_split
 from torchgeo_bench.uq.traces import (
@@ -58,6 +60,8 @@ from torchgeo_bench.uq.traces import (
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
+
+warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
 _RESUME_KEY_COLS: tuple[str, ...] = (
     "model",
@@ -165,6 +169,7 @@ def _expected_metrics(uq_method: str) -> set[str]:
     return {
         "accuracy",
         "ece",
+        "signed_ece",
         "nll",
         "brier",
         "predictive_entropy",
@@ -438,6 +443,7 @@ def _run_uq_block(
         metrics = {
             "accuracy": float((y_pred == y_test).mean()),
             "ece": ece(probs, y_test, n_bins=ece_bins, binning=ece_binning),
+            "signed_ece": signed_ece(probs, y_test, n_bins=ece_bins, binning=ece_binning),
             "nll": nll(probs, y_test),
             "brier": brier_score(probs, y_test),
             "predictive_entropy": predictive_entropy(probs),
@@ -572,9 +578,9 @@ def main(cfg: DictConfig) -> None:
             trace_ctx["trace_dataset_root"],
         )
 
-    prior_results = pd.read_csv(str(cfg.uq.prior_results)) if os.path.exists(str(cfg.uq.prior_results)) else None
+    prior_results = pd.read_csv(str(cfg.prior_results)) if os.path.exists(str(cfg.prior_results)) else None
     if prior_results is None:
-        logger.warning("Prior results file missing at %s; skipping all datasets.", cfg.uq.prior_results)
+        logger.warning("Prior results file missing at %s; skipping all datasets.", cfg.prior_results)
         return
 
     for dataset_name in dataset_names:
@@ -700,7 +706,7 @@ def main(cfg: DictConfig) -> None:
             methods["deep_ensemble"] = de
         if "laplace" in cfg.uq.methods:
             try:
-                la = LaplaceProbe(probe, batch_size=int(cfg.uq.laplace_batch_size))
+                la = LaplaceProbe(probe, batch_size=int(cfg.uq.laplace_batch_size), pred_batch_size=int(cfg.uq.laplace_pred_batch_size))
                 la.fit(X_final_train, y_final_train)
                 methods["laplace"] = la
             except ModuleNotFoundError as exc:
@@ -710,7 +716,7 @@ def main(cfg: DictConfig) -> None:
                 conf = ConformalPredictor(probe)
                 conf.fit(X_cal, y_cal, alpha=float(cfg.uq.conformal_alpha))
                 methods["conformal"] = conf
-            except ModuleNotFoundError as exc:
+            except (ModuleNotFoundError, ValueError) as exc:
                 logger.warning("Skipping conformal for dataset %s: %s", dataset_name, exc)
 
         common_meta = {
