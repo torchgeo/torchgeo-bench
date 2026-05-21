@@ -84,8 +84,8 @@ def test_s2_forward_pass_shape() -> None:
 
 
 @requires_olmoearth
-def test_all_four_variants_are_loadable() -> None:
-    """ModelID enum exposes the four advertised variants.
+def test_all_variants_are_loadable() -> None:
+    """ModelID enum exposes the expected v1 and v1.1 variants.
 
     Prevents the regression where the wrapper silently lost a variant
     after an upstream rename.
@@ -93,11 +93,14 @@ def test_all_four_variants_are_loadable() -> None:
     from olmoearth_pretrain_minimal import ModelID
 
     names = {attr for attr in dir(ModelID) if attr.startswith("OLMOEARTH_V1_")}
-    assert names == {
+    assert names >= {
         "OLMOEARTH_V1_NANO",
         "OLMOEARTH_V1_TINY",
         "OLMOEARTH_V1_BASE",
         "OLMOEARTH_V1_LARGE",
+        "OLMOEARTH_V1_1_NANO",
+        "OLMOEARTH_V1_1_TINY",
+        "OLMOEARTH_V1_1_BASE",
     }
 
 
@@ -131,7 +134,7 @@ def test_reflectance_input_is_rescaled_to_dn() -> None:
         for n in ("red", "green", "blue")
     ]
     model = OlmoEarthBenchModel(bands=refl_bands, model_size="nano", normalization="identity")
-    assert model._input_unit == InputUnit.REFLECTANCE_0_1
+    assert model._sensor_groups[0]["input_unit"] == InputUnit.REFLECTANCE_0_1
     model.eval()
     x = torch.rand(2, 3, 64, 64) * 2.5  # reflectance-like values
     out = model.forward_patch_features(x)
@@ -143,68 +146,62 @@ def test_reflectance_input_is_rescaled_to_dn() -> None:
 
 
 @requires_olmoearth
-def test_rejects_unknown_band_name() -> None:
-    """A BandSpec name we have no OlmoEarth-position mapping for must fail
-    loudly so we don't quietly zero-fill every channel."""
+def test_rejects_unknown_sensor() -> None:
+    """A BandSpec with a sensor name we have no OlmoEarth layout for must
+    fail loudly."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     weird_bands = [
         BandSpec(
-            sensor="s2",
-            name="totally_made_up",
-            source_name="MADE_UP",
+            sensor="totally_unknown_sensor",
+            name="band1",
+            source_name="BAND1",
             mean=1500.0,
             std=600.0,
             min=0.0,
             max=10000.0,
-            wavelength_um=0.5,
         )
     ]
-    with pytest.raises(ValueError, match="can't map BandSpec names"):
+    with pytest.raises(ValueError, match="no layout for sensor"):
         OlmoEarthBenchModel(bands=weird_bands, model_size="nano", normalization="identity")
 
 
 @requires_olmoearth
-def test_rejects_mixed_sensors() -> None:
-    """A bands list spanning multiple sensors needs to be split per-call —
-    the wrapper picks one modality from sensor[0]."""
-    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+def test_warns_on_unknown_band_name(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A BandSpec name with no OlmoEarth slot is dropped with a warning instead
+    of raising — mirrors m-eurosat which has swir_cirrus (B10) not in OlmoEarth."""
+    import logging
+    import unittest.mock as mock
 
-    s2_band = BandSpec(
-        sensor="s2",
-        name="blue",
-        source_name="B02",
-        mean=1500.0,
-        std=600.0,
-        min=0.0,
-        max=10000.0,
-        wavelength_um=0.49,
-    )
-    landsat_band = BandSpec(
-        sensor="landsat",
-        name="red",
-        source_name="B4",
-        mean=80.0,
-        std=20.0,
-        min=0.0,
-        max=255.0,
-        wavelength_um=0.655,
-    )
-    with pytest.raises(ValueError, match="single sensor"):
-        OlmoEarthBenchModel(
-            bands=[s2_band, landsat_band], model_size="nano", normalization="identity"
-        )
+    import torchgeo_bench.models.olmoearth as olmoearth_mod
+
+    # Stub out the weight download so this stays a fast unit test.
+    monkeypatch.setattr(olmoearth_mod, "_load_model_from_id", mock.MagicMock(), raising=False)
+    with monkeypatch.context() as m:
+        m.setattr("olmoearth_pretrain_minimal.load_model_from_id", mock.MagicMock())
+        from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+        # Mix of valid S2 bands + one unmappable band (like m-eurosat's B10).
+        bands = [
+            BandSpec(sensor="s2", name=n, source_name=n.upper(), mean=1500.0, std=600.0, min=0.0, max=10000.0)
+            for n in ("red", "green", "blue")
+        ] + [
+            BandSpec(sensor="s2", name="swir_cirrus", source_name="B10", mean=100.0, std=50.0, min=0.0, max=5000.0)
+        ]
+        with caplog.at_level(logging.WARNING):
+            OlmoEarthBenchModel(bands=bands, model_size="nano", normalization="identity")
+    assert "swir_cirrus" in caplog.text
 
 
 @requires_olmoearth
 def test_landsat_modality_routing() -> None:
     """Landsat input picks Modality.LANDSAT, not SENTINEL2_L2A.  The mask
-    should have 2 band-sets, the sample field should be 'landsat'."""
+    should have 2 band-sets, the sample field should be 'landsat'.
+    input_res must auto-detect to 30 m."""
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
-    # m-forestnet ships 6 Landsat bands.
     names = ("blue", "green", "red", "nir", "swir_1", "swir_2")
     landsat_bands = [
         BandSpec(
@@ -219,10 +216,12 @@ def test_landsat_modality_routing() -> None:
         for n in names
     ]
     model = OlmoEarthBenchModel(bands=landsat_bands, model_size="nano", normalization="identity")
-    assert model._modality == Modality.LANDSAT
-    assert model._sample_field == "landsat"
-    assert model._target_channels == 11
-    assert model._num_band_sets == 2
+    g = model._sensor_groups[0]
+    assert g["modality"] == Modality.LANDSAT
+    assert g["sample_field"] == "landsat"
+    assert g["channels"] == 11
+    assert g["num_band_sets"] == 2
+    assert model.input_res == 30
     model.eval()
     x = torch.rand(2, 6, 64, 64) * 200.0  # uint8-ish Landsat
     out = model.forward_patch_features(x)
@@ -253,11 +252,12 @@ def test_aerial_falls_back_to_s2() -> None:
         for n in ("red", "green", "blue")
     ]
     model = OlmoEarthBenchModel(bands=naip_bands, model_size="nano", normalization="identity")
-    assert model._modality == Modality.SENTINEL2_L2A
-    assert model._sample_field == "sentinel2_l2a"
-    assert model._target_channels == 12
+    g = model._sensor_groups[0]
+    assert g["modality"] == Modality.SENTINEL2_L2A
+    assert g["sample_field"] == "sentinel2_l2a"
+    assert g["channels"] == 12
     # red -> B04 (idx 2), green -> B03 (idx 1), blue -> B02 (idx 0)
-    assert model._band_indices == [2, 1, 0]
+    assert g["dst_indices"] == [2, 1, 0]
     model.eval()
     x = torch.rand(2, 3, 64, 64) * 200.0
     out = model.forward_patch_features(x)
@@ -285,12 +285,94 @@ def test_partial_s2_10band_forward_pass() -> None:
         for n in names
     ]
     model = OlmoEarthBenchModel(bands=bands, model_size="nano", normalization="identity")
+    g = model._sensor_groups[0]
     model.eval()
-    assert model._target_channels == 12
-    assert model._num_band_sets == 3
+    assert g["channels"] == 12
+    assert g["num_band_sets"] == 3
     # B02..B12 map to positions 0..9; B01/B09 (positions 10/11) get zero-filled.
-    assert set(model._band_indices) == set(range(10))
+    assert set(g["dst_indices"]) == set(range(10))
     x = torch.rand(2, 10, 64, 64) * 3000.0
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
+def test_mixed_s2_sar_forward_pass() -> None:
+    """Mixed S2 + SAR input (m-so2sat) routes to two separate modalities:
+    SENTINEL2_L2A and SENTINEL1.  Both sample fields are populated in
+    MaskedOlmoEarthSample simultaneously."""
+    from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    # Minimal m-so2sat-style: 3 S2 (reflectance) + 2 SAR (Lee-filtered).
+    mixed_bands = [
+        BandSpec(
+            sensor="s2",
+            name="blue",
+            source_name="B02",
+            mean=0.13,
+            std=0.05,
+            min=0.0001,
+            max=2.8,
+            wavelength_um=0.49,
+        ),
+        BandSpec(
+            sensor="s2",
+            name="green",
+            source_name="B03",
+            mean=0.12,
+            std=0.05,
+            min=0.0001,
+            max=2.8,
+            wavelength_um=0.56,
+        ),
+        BandSpec(
+            sensor="s2",
+            name="red",
+            source_name="B04",
+            mean=0.11,
+            std=0.07,
+            min=0.0001,
+            max=2.8,
+            wavelength_um=0.665,
+        ),
+        BandSpec(
+            sensor="sar",
+            name="vv_lee",
+            source_name="VV_LEE",
+            mean=0.34,
+            std=11.8,
+            min=0.0,
+            max=9950.0,
+        ),
+        BandSpec(
+            sensor="sar",
+            name="vh_lee",
+            source_name="VH_LEE",
+            mean=0.06,
+            std=5.4,
+            min=0.0,
+            max=10867.0,
+        ),
+    ]
+    model = OlmoEarthBenchModel(bands=mixed_bands, model_size="nano", normalization="identity")
+    assert len(model._sensor_groups) == 2
+    s2_group = next(g for g in model._sensor_groups if g["sensor"] == "s2")
+    sar_group = next(g for g in model._sensor_groups if g["sensor"] == "sar")
+    assert s2_group["modality"] == Modality.SENTINEL2_L2A
+    assert sar_group["modality"] == Modality.SENTINEL1
+    assert sar_group["sample_field"] == "sentinel1"
+    assert sar_group["channels"] == 2
+    # SAR bands are passthrough — no s2-DN rescaling.
+    assert sar_group["input_unit"] is None
+    # S2/SAR coregistered to 10 m grid.
+    assert model.input_res == 10
+    model.eval()
+    x = torch.rand(2, 5, 64, 64)
+    x[:, :3] *= 2.5  # S2 reflectance scale
+    x[:, 3:] *= 5000  # SAR Lee-filtered scale
     out = model.forward_patch_features(x)
     assert out.shape == (2, EXPECTED_DIM["nano"])
     assert torch.isfinite(out).all()

@@ -60,7 +60,7 @@ layers:
     - backbone.blocks.5
     - backbone.blocks.8
     - backbone.blocks.11
-  olmoearth_v1_base:
+  olmoearth_v1_1_base:
     - encoder_model.blocks.2
     - encoder_model.blocks.5
     - encoder_model.blocks.8

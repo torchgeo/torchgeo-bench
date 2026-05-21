@@ -1,6 +1,8 @@
 """SEN12MS and SEN12MS-CR dataset wrappers."""
 
+import logging
 import pickle
+import random
 from collections.abc import Callable
 from pathlib import Path
 
@@ -10,6 +12,8 @@ from torch.utils.data import Dataset
 from torchgeo.datasets.errors import DatasetNotFoundError
 
 from .base import BandSpec, BenchDataset
+
+logger = logging.getLogger(__name__)
 
 _IGBP17_TO_10: dict[int, int] = {
     0: 0,
@@ -73,6 +77,7 @@ class _SEN12MSBase(BenchDataset):
     split_sizes: dict[str, int] = {}
     prior_results_alias: str | None = None
     _cloud_bin: tuple[float, float] | None = None
+    train_subset: int | None = 50_000
 
     # fmt: off
     bands = [
@@ -96,12 +101,21 @@ class _SEN12MSBase(BenchDataset):
         root = self.data_root()
         self._check_data_present(root, require_cloud=self._cloud_bin is not None)
 
-        self._train_samples = self._load_split(root / "train_list.pkl")
-        self._val_samples = self._load_split(root / "val_list.pkl")
+        self._train_samples = self._filter_present(
+            self._load_split(root / "train_list.pkl"), root, "s2", "train"
+        )
+        if self.train_subset is not None and self.train_subset < len(self._train_samples):
+            rng = random.Random(0)
+            self._train_samples = rng.sample(self._train_samples, self.train_subset)
+        self._val_samples = self._filter_present(
+            self._load_split(root / "val_list.pkl"), root, "s2", "val"
+        )
         self._labels = self._load_labels(root / "IGBP_probability_labels.pkl")
 
         if self._cloud_bin is None:
-            self._test_samples = self._load_split(root / "test_list.pkl")
+            self._test_samples = self._filter_present(
+                self._load_split(root / "test_list.pkl"), root, "s2", "test"
+            )
         else:
             coverage = self._load_coverage(root / "cloud_coverage.pkl")
             all_cloudy = self._load_split(root / "test_list_cloudy.pkl")
@@ -121,6 +135,26 @@ class _SEN12MSBase(BenchDataset):
     @classmethod
     def data_root(cls) -> Path:
         return Path("data/sen12ms_cr")
+
+    @classmethod
+    def _filter_present(
+        cls,
+        samples: list[dict[str, object]],
+        root: Path,
+        image_key: str,
+        split: str,
+    ) -> list[dict[str, object]]:
+        present = [s for s in samples if (root / str(s[image_key])).exists()]
+        n_missing = len(samples) - len(present)
+        if n_missing:
+            logger.warning(
+                "%s split=%s: %d/%d samples missing on disk and will be skipped.",
+                cls.name,
+                split,
+                n_missing,
+                len(samples),
+            )
+        return present
 
     @classmethod
     def _check_data_present(cls, root: Path, *, require_cloud: bool) -> None:
@@ -168,7 +202,7 @@ class _SEN12MSBase(BenchDataset):
                 raise ValueError(
                     f"Unexpected label probability length={probs.size} for sample_id={key!r}."
                 )
-            labels[str(key)] = cls_idx
+            labels[str(key).removesuffix(".tif")] = cls_idx
         return labels
 
     @staticmethod

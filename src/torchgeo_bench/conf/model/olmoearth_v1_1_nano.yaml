@@ -1,0 +1,16 @@
+# OlmoEarth-v1.1-Nano (AI2 geospatial foundation model)
+# Feature dimension: 128
+# v1.1 improves accuracy with ~1.7M params (up from 1.4M in v1).
+
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
+model_size: nano
+version: v1_1
+patch_size: 8
+input_res: null
+time_steps: 3
+std_multiplier: 2.0
+normalize: false
+sensor_remap:
+  landsat: landsat_as_s2
+min_image_size: 64
+name: olmoearth_v1_1_nano

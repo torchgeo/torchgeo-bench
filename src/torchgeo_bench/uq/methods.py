@@ -237,9 +237,11 @@ class LaplaceProbe:
         self,
         probe: LogisticRegression,
         batch_size: int = 512,
+        pred_batch_size: int = 64,
     ) -> None:
         self._probe = probe
         self._batch_size = int(batch_size)
+        self._pred_batch_size = int(pred_batch_size)
         self._la = None
 
     def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
@@ -291,11 +293,16 @@ class LaplaceProbe:
         if self._la is None:
             raise RuntimeError("LaplaceProbe has not been fit yet.")
         device = next(self._la.model.parameters()).device
-        x_t = torch.from_numpy(X.astype(np.float32, copy=False)).to(device)
-        probs = self._la(x_t, pred_type="glm", link_approx="probit")
-        if isinstance(probs, tuple):
-            probs = probs[0]
-        return probs.detach().cpu().numpy()
+        chunks = []
+        for start in range(0, len(X), self._pred_batch_size):
+            x_chunk = torch.from_numpy(
+                X[start : start + self._pred_batch_size].astype(np.float32, copy=False)
+            ).to(device)
+            p = self._la(x_chunk, pred_type="glm", link_approx="probit")
+            if isinstance(p, tuple):
+                p = p[0]
+            chunks.append(p.detach().cpu())
+        return torch.cat(chunks, dim=0).numpy()
 
 
 @dataclass
@@ -358,9 +365,19 @@ class ConformalPredictor:
             y_cal: Calibration labels with shape ``(N,)``.
 
         Returns:
-            ``"lac"`` for binary targets, otherwise ``"raps"``.
+            ``"raps"`` for multiclass targets with enough calibration samples,
+            ``"lac"`` otherwise (binary or too few cal samples for RAPS split).
         """
-        return "lac" if np.unique(y_cal).size == 2 else "raps"
+        n_classes = np.unique(y_cal).size
+        if n_classes == 2:
+            return "lac"
+        # MAPIE's set_external_attributes resets size_raps to None, so sklearn uses
+        # its default of 0.1 for StratifiedShuffleSplit regardless of RAPSConformityScore's
+        # __init__ default of 0.2.  Guard against the actual effective split size.
+        raps_internal_size = int(len(y_cal) * 0.1)
+        if raps_internal_size < n_classes:
+            return "lac"
+        return "raps"
 
     def fit(self, X_cal: np.ndarray, y_cal: np.ndarray, alpha: float = 0.1) -> None:
         """Fit conformal calibration in prefit mode on calibration embeddings.

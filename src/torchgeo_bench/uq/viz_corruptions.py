@@ -763,6 +763,173 @@ def generate_grid(
     return out_path
 
 
+def generate_histograms(
+    dataset_name: str,
+    samples: torch.Tensor,
+    band_specs: list[BandSpec],
+    out_dir: str | Path,
+    n_samples: int = 4,
+    rgb_indices: list[int] | None = None,
+    seed: int = 0,
+    cloud_pattern_mode: str = "fixed",
+    n_bins: int = 60,
+) -> Path:
+    """Render pixel-value distribution histograms across corruption severities.
+
+    Produces one figure per corruption type (cloud, noise), each showing
+    overlaid per-channel histograms for clean + severities 1–5 in
+    z-score-normalized space. Channels are plotted in separate rows.
+
+    Args:
+        dataset_name: Benchmark dataset name.
+        samples: Input samples tensor with shape ``(N, C, H, W)``.
+        band_specs: Per-channel band metadata.
+        out_dir: Output directory for the PNG files.
+        n_samples: Number of samples to use from ``samples``.
+        rgb_indices: Optional RGB channel indices to plot (defaults to [0,1,2]).
+        seed: Base random seed for corruption generation.
+        cloud_pattern_mode: Cloud RNG mode.
+        n_bins: Number of histogram bins.
+
+    Returns:
+        Path to the cloud histogram PNG (noise histogram written alongside it).
+    """
+    plt = _import_plotting()
+
+    if rgb_indices is None:
+        rgb_indices = [0, 1, 2]
+
+    samples = samples[:n_samples].detach().clone()
+    display_indices = _resolve_display_indices(samples[0], rgb_indices)
+    channel_names = [band_specs[i].name for i in display_indices]
+
+    normalizer = build_normalizer(NormalizationStrategy.BANDSPEC_ZSCORE, bands=band_specs)
+
+    # Collect normalized pixels per severity for each corruption type.
+    # Shape: list of (N*H*W,) arrays, indexed by severity 0=clean,1..5=corrupted.
+    def _collect_pixels(batches: dict[int, torch.Tensor | None]) -> dict[int, list[np.ndarray]]:
+        """Return {severity: [ch0_pixels, ch1_pixels, ch2_pixels]}."""
+        result: dict[int, list[np.ndarray]] = {}
+        clean_norm = normalizer(samples)
+        result[0] = [
+            clean_norm[:, display_indices[c]].detach().cpu().numpy().ravel()
+            for c in range(3)
+        ]
+        for sev, batch in batches.items():
+            if batch is None:
+                continue
+            normed = normalizer(batch)
+            result[sev] = [
+                normed[:, display_indices[c]].detach().cpu().numpy().ravel()
+                for c in range(3)
+            ]
+        return result
+
+    # --- Cloud ---
+    cloud_batches: dict[int, torch.Tensor] = {}
+    for severity in [1, 2, 3, 4, 5]:
+        cloud_t = CorruptionTransform(
+            "cloud", severity, seed, band_specs,
+            dataset_name=dataset_name, cloud_pattern_mode=cloud_pattern_mode,
+        )
+        cloud_batches[severity] = cloud_t(samples)
+
+    # --- Noise ---
+    noise_skipped = dataset_name in SKIP_POISSON_GAUSSIAN
+    noise_batches: dict[int, torch.Tensor | None] = {}
+    for severity in [1, 2, 3, 4, 5]:
+        if noise_skipped:
+            noise_batches[severity] = None
+            continue
+        noise_t = CorruptionTransform(
+            "poisson_gaussian", severity, seed, band_specs, dataset_name=dataset_name,
+        )
+        noise_batches[severity] = noise_t(samples)
+
+    cloud_pixels = _collect_pixels(cloud_batches)
+    noise_pixels = _collect_pixels(noise_batches)
+
+    severity_colors = {
+        0: "#333333",  # clean
+        1: "#2196F3",
+        2: "#4CAF50",
+        3: "#FF9800",
+        4: "#F44336",
+        5: "#9C27B0",
+    }
+    severity_labels = {0: "clean", 1: "sev 1", 2: "sev 2", 3: "sev 3", 4: "sev 4", 5: "sev 5"}
+
+    def _render_histogram_figure(
+        pixels_by_severity: dict[int, list[np.ndarray]],
+        corruption_label: str,
+        out_path: Path,
+    ) -> None:
+        n_channels = 3
+        fig, axes = plt.subplots(
+            n_channels, 1, figsize=(9, 3 * n_channels), sharex=False, sharey=False
+        )
+        if n_channels == 1:
+            axes = [axes]
+
+        # Determine per-channel x-range from clean pixels.
+        clean_ch = pixels_by_severity[0]
+
+        for ch in range(n_channels):
+            ax = axes[ch]
+            # Bin range: cover clean + all severities' range.
+            all_vals = np.concatenate(
+                [pxs[ch] for pxs in pixels_by_severity.values() if pxs is not None]
+            )
+            all_vals = all_vals[np.isfinite(all_vals)]
+            lo = float(np.percentile(all_vals, 0.5))
+            hi = float(np.percentile(all_vals, 99.5))
+            if hi <= lo:
+                hi = lo + 1.0
+            bins = np.linspace(lo, hi, n_bins + 1)
+
+            for sev in sorted(pixels_by_severity.keys()):
+                pxs = pixels_by_severity[sev]
+                if pxs is None:
+                    continue
+                vals = pxs[ch]
+                vals = vals[np.isfinite(vals)]
+                counts, edges = np.histogram(vals, bins=bins)
+                centers = 0.5 * (edges[:-1] + edges[1:])
+                density = counts / max(counts.max(), 1)
+                lw = 2.0 if sev == 0 else 1.4
+                alpha = 0.9 if sev == 0 else 0.75
+                ax.plot(
+                    centers, density,
+                    color=severity_colors[sev],
+                    label=severity_labels[sev],
+                    linewidth=lw,
+                    alpha=alpha,
+                )
+
+            ax.set_ylabel("rel. freq.")
+            ax.set_xlabel(f"{channel_names[ch]} (z-score)")
+            ax.set_title(f"{channel_names[ch]} — {corruption_label}")
+            ax.legend(fontsize=8, ncol=3, loc="upper right")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+
+        fig.suptitle(f"{dataset_name} · {corruption_label} · pixel distributions (z-score)", fontsize=11)
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cloud_hist_path = out_dir / f"{dataset_name}_hist_cloud.png"
+    _render_histogram_figure(cloud_pixels, "cloud", cloud_hist_path)
+
+    if not noise_skipped:
+        noise_hist_path = out_dir / f"{dataset_name}_hist_noise.png"
+        _render_histogram_figure(noise_pixels, "noise", noise_hist_path)
+
+    return cloud_hist_path
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build CLI argument parser for the corruption visualizer.
 
@@ -805,6 +972,17 @@ def main() -> int:
         cloud_pattern_mode=args.cloud_pattern_mode,
     )
     logger.info("Saved corruption grid to %s", out_path)
+    hist_path = generate_histograms(
+        dataset_name=args.dataset,
+        samples=samples,
+        band_specs=band_specs,
+        out_dir=args.out,
+        n_samples=args.n_samples,
+        rgb_indices=rgb_indices,
+        seed=args.seed,
+        cloud_pattern_mode=args.cloud_pattern_mode,
+    )
+    logger.info("Saved corruption histograms to %s", hist_path)
     return 0
 
 

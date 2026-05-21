@@ -61,6 +61,70 @@ def ece(
     return float(total)
 
 
+def signed_ece(
+    probs: np.ndarray,
+    y_true: np.ndarray,
+    n_bins: int = 15,
+    binning: str = "equal_width",
+) -> float:
+    """Compute signed ECE: overconfidence-weighted calibration gap.
+
+    Positive values mean the model is overconfident on average (confidence >
+    accuracy). Only bins where ``avg_conf > acc`` contribute; underconfident
+    bins are zeroed. This makes the sign meaningful: positive = overconfident.
+
+    Args:
+        probs: Class probabilities with shape ``(N, C)``.
+        y_true: True labels with shape ``(N,)``.
+        n_bins: Number of confidence bins.
+        binning: ``"equal_width"`` or ``"equal_mass"``.
+
+    Returns:
+        Signed ECE in ``[-1, 1]``. Positive means overconfident.
+    """
+    if probs.ndim != 2:
+        raise ValueError(f"probs must be 2D, got shape {probs.shape}")
+    if y_true.ndim != 1:
+        raise ValueError(f"y_true must be 1D, got shape {y_true.shape}")
+    if probs.shape[0] != y_true.shape[0]:
+        raise ValueError("probs and y_true must have matching first dimension")
+    if n_bins <= 0:
+        raise ValueError(f"n_bins must be positive, got {n_bins}")
+
+    conf = probs.max(axis=1)
+    pred = probs.argmax(axis=1)
+    correct = (pred == y_true).astype(np.float64)
+    n = conf.shape[0]
+    if n == 0:
+        return 0.0
+
+    if binning == "equal_width":
+        bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    elif binning == "equal_mass":
+        quantiles = np.linspace(0.0, 1.0, n_bins + 1)
+        bin_edges = np.quantile(conf, quantiles)
+        bin_edges[0] = 0.0
+        bin_edges[-1] = 1.0
+    else:
+        raise ValueError(
+            f"Unknown ECE binning mode '{binning}'. Expected 'equal_width' or 'equal_mass'."
+        )
+
+    total = 0.0
+    for i in range(n_bins):
+        lo = bin_edges[i]
+        hi = bin_edges[i + 1]
+        mask = (conf >= lo) & (conf <= hi) if i == n_bins - 1 else (conf >= lo) & (conf < hi)
+        if not np.any(mask):
+            continue
+        acc = correct[mask].mean()
+        avg_conf = conf[mask].mean()
+        gap = avg_conf - acc
+        if gap > 0:
+            total += (mask.sum() / n) * gap
+    return float(total)
+
+
 def nll(probs: np.ndarray, y_true: np.ndarray) -> float:
     """Return mean negative log-likelihood.
 

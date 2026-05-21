@@ -7,6 +7,7 @@ seed: 42
 device: cuda
 verbose: false
 resume: true
+prior_results: results/all_results.csv
 
 dataset:
   names: all

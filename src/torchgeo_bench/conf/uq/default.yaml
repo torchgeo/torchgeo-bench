@@ -1,6 +1,7 @@
 cal_size: 400
 n_ensemble: 5
 laplace_batch_size: 512
+laplace_pred_batch_size: 64
 
 methods:
   - uncalibrated
@@ -23,7 +24,6 @@ conformal_alpha: 0.1
 ece_bins: 15
 ece_binning: equal_width
 output: results/uq_results.csv
-prior_results: results/all_results.csv
 
 trace:
   enabled: false

@@ -33,6 +33,7 @@ scripts/slurm/*
 !scripts/slurm/olmoearth_sweep.py
 !scripts/slurm/olmoearth_sweep.sh
 !scripts/slurm/olmoearth_sweep.jobs
+!scripts/slurm/olmoearth_v1_1_sweep.jobs
 !scripts/slurm/slow_tests.sh
 !scripts/slurm/smoke_imports.sh
 figures/

@@ -20,6 +20,7 @@ PROBABILISTIC_METHODS: tuple[str, ...] = (
     "temp_scaling",
     "laplace",
     "deep_ensemble",
+    "bootstrap_ensemble",
 )
 CONFORMAL_METHOD = "conformal"
 ALL_METHODS: tuple[str, ...] = PROBABILISTIC_METHODS + (CONFORMAL_METHOD,)
@@ -44,10 +45,18 @@ CONFORMAL_METRICS: tuple[str, ...] = (
 )
 
 PROB_METHOD_COLORS: dict[str, str] = {
-    "uncalibrated": "#2b2d42",
-    "temp_scaling": "#2a9d8f",
-    "laplace": "#e76f51",
-    "deep_ensemble": "#1d3557",
+    "uncalibrated": "#1f77b4",
+    "temp_scaling": "#ff7f0e",
+    "laplace": "#2ca02c",
+    "deep_ensemble": "#d62728",
+    "bootstrap_ensemble": "#9467bd",
+}
+PROB_METHOD_MARKERS: dict[str, str] = {
+    "uncalibrated": "o",
+    "temp_scaling": "s",
+    "laplace": "^",
+    "deep_ensemble": "D",
+    "bootstrap_ensemble": "P",
 }
 CONFORMAL_COLOR = "#6c757d"
 
@@ -157,6 +166,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Optional output directory for reliability plots.",
+    )
+    parser.add_argument(
+        "--no-confidence-trends",
+        action="store_true",
+        default=False,
+        help="Disable the accuracy-vs-confidence overlay trend plots.",
     )
     return parser
 
@@ -339,7 +354,7 @@ def _run_range_checks(df: pd.DataFrame, alerts: list[dict[str, object]]) -> None
         "ece": (0.0, None),
         "brier": (0.0, None),
         "empirical_coverage": (0.0, 1.0),
-        "mean_set_size": (1.0, None),
+        "mean_set_size": (0.0, None),
     }
     for metric, (min_value, max_value) in checks.items():
         mask = finite & (df["metric_name"] == metric)
@@ -561,6 +576,7 @@ def _plot_method_trends(
     corruption_types: list[str],
     methods: tuple[str, ...],
     colors: dict[str, str],
+    markers: dict[str, str] | None,
     title_prefix: str,
     outdir: Path,
     fmt: str,
@@ -614,7 +630,7 @@ def _plot_method_trends(
                             ax.plot(
                                 agg["severity_int"].to_numpy(dtype=int),
                                 agg["metric_value_num"].to_numpy(dtype=float),
-                                marker="o",
+                                marker=markers.get(method, "o") if markers else "o",
                                 markersize=3.5,
                                 linewidth=1.6,
                                 label=method,
@@ -962,6 +978,164 @@ def _plot_calibration_by_severity(
     return generated, skipped
 
 
+def _plot_confidence_trends(
+    plt,
+    df: pd.DataFrame,
+    *,
+    datasets: list[str],
+    backbones: list[str],
+    corruption_types: list[str],
+    methods: tuple[str, ...],
+    colors: dict[str, str],
+    markers: dict[str, str] | None,
+    outdir: Path,
+    fmt: str,
+    dpi: int,
+) -> tuple[list[Path], list[str]]:
+    """Overlay accuracy and max_probability per method to reveal overconfidence under corruption.
+
+    A growing gap between the solid accuracy line and the dashed confidence line indicates
+    the model is becoming overconfident as corruption severity increases.
+    """
+    generated: list[Path] = []
+    skipped: list[str] = []
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    finite_mask = df["metric_value_num"].replace([np.inf, -np.inf], np.nan).notna()
+    base_df = df[finite_mask & df["severity_int"].notna()].copy()
+    base_df["severity_int"] = base_df["severity_int"].astype(int)
+    base_df = base_df[base_df["metric_name"].isin(["accuracy", "max_probability"])]
+    base_df = base_df[base_df["uq_method"].isin(methods)]
+
+    if base_df.empty:
+        skipped.append("confidence trends: no accuracy or max_probability rows")
+        return generated, skipped
+
+    group_cols = ["dataset", "backbone", "uq_method", "corruption_type", "severity_int"]
+    pivoted = (
+        base_df.groupby(group_cols + ["metric_name"], as_index=False)["metric_value_num"]
+        .mean()
+        .pivot_table(index=group_cols, columns="metric_name", values="metric_value_num")
+        .reset_index()
+    )
+    pivoted.columns.name = None
+
+    for corruption in corruption_types:
+        if corruption == "clean":
+            corr_df = pivoted[pivoted["corruption_type"] == "clean"]
+        else:
+            corr_df = pivoted[pivoted["corruption_type"].isin(["clean", corruption])]
+        if corr_df.empty or ("accuracy" not in corr_df.columns and "max_probability" not in corr_df.columns):
+            skipped.append(f"confidence trends / {corruption}: no rows after pivot")
+            continue
+
+        fig, axes = _facet_figure(plt, len(datasets), len(backbones), width=4.0, height=3.0)
+        has_any_line = False
+        all_severities = sorted(corr_df["severity_int"].dropna().astype(int).unique().tolist())
+
+        for i, dataset in enumerate(datasets):
+            for j, backbone in enumerate(backbones):
+                ax = axes[i, j]
+                panel = corr_df[(corr_df["dataset"] == dataset) & (corr_df["backbone"] == backbone)]
+                if panel.empty:
+                    ax.text(0.5, 0.5, "no data", transform=ax.transAxes, ha="center", va="center", fontsize=8)
+                else:
+                    for method in methods:
+                        method_rows = panel[panel["uq_method"] == method].sort_values("severity_int")
+                        if method_rows.empty:
+                            continue
+                        sevs = method_rows["severity_int"].to_numpy(dtype=int)
+                        color = colors[method]
+                        marker = markers.get(method, "o") if markers else "o"
+
+                        if "accuracy" in method_rows.columns:
+                            acc = method_rows["accuracy"].to_numpy(dtype=float)
+                            valid = np.isfinite(acc)
+                            if valid.any():
+                                ax.plot(
+                                    sevs[valid], acc[valid],
+                                    linestyle="-", marker=marker, markersize=3.5,
+                                    linewidth=1.6, color=color, label=method,
+                                )
+                                has_any_line = True
+
+                        if "max_probability" in method_rows.columns:
+                            conf = method_rows["max_probability"].to_numpy(dtype=float)
+                            valid_c = np.isfinite(conf)
+                            if valid_c.any():
+                                ax.plot(
+                                    sevs[valid_c], conf[valid_c],
+                                    linestyle="--", marker=marker, markersize=3.5,
+                                    linewidth=1.4, color=color,
+                                )
+                                has_any_line = True
+
+                        # shade the overconfidence gap between confidence and accuracy
+                        if "accuracy" in method_rows.columns and "max_probability" in method_rows.columns:
+                            acc = method_rows["accuracy"].to_numpy(dtype=float)
+                            conf = method_rows["max_probability"].to_numpy(dtype=float)
+                            valid_both = np.isfinite(acc) & np.isfinite(conf)
+                            if valid_both.any():
+                                ax.fill_between(
+                                    sevs[valid_both], acc[valid_both], conf[valid_both],
+                                    alpha=0.07, color=color,
+                                )
+
+                ax.set_ylim(0.0, 1.05)
+                ax.grid(alpha=0.25)
+                if all_severities:
+                    ax.set_xticks(all_severities)
+                ax.set_xlabel("severity")
+                if i == 0:
+                    ax.set_title(backbone, fontsize=10)
+                if j == 0:
+                    ax.set_ylabel(f"{dataset}\nacc / confidence")
+                else:
+                    ax.set_ylabel("")
+
+        if not has_any_line:
+            plt.close(fig)
+            skipped.append(f"confidence trends / {corruption}: all panels empty")
+            continue
+
+        # Build legend: method colors + linestyle explanation
+        handles: list[object] = []
+        labels: list[str] = []
+        for ax in axes.ravel():
+            panel_handles, panel_labels = ax.get_legend_handles_labels()
+            if panel_handles:
+                handles = panel_handles
+                labels = panel_labels
+                break
+
+        import matplotlib.lines as mlines
+        handles = list(handles)
+        labels = list(labels)
+        handles.append(mlines.Line2D([], [], color="gray", linestyle="-", linewidth=1.4))
+        labels.append("accuracy (solid)")
+        handles.append(mlines.Line2D([], [], color="gray", linestyle="--", linewidth=1.4))
+        labels.append("max confidence (dashed)")
+
+        layout_top = 0.93
+        fig.legend(
+            handles, labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.955),
+            ncol=min(len(handles), 4),
+            frameon=False,
+            fontsize=8,
+        )
+        layout_top = 0.87
+        fig.suptitle(f"Confidence vs accuracy ({corruption})", fontsize=12, y=0.99)
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, layout_top))
+        out_path = outdir / f"{_slugify(corruption)}.{fmt}"
+        fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        generated.append(out_path)
+
+    return generated, skipped
+
+
 def _load_reliability_cache(trace_dir: Path) -> pd.DataFrame:
     parquet_path = trace_dir / "reliability_cache.parquet"
     csv_path = trace_dir / "reliability_cache.csv"
@@ -1193,7 +1367,7 @@ def _run(args: argparse.Namespace) -> int:
     prob_metrics = [metric for metric in requested_metrics if metric in set(PROBABILISTIC_ALL_METRICS)]
     conformal_metrics = [metric for metric in requested_metrics if metric in set(CONFORMAL_METRICS)]
     if metrics_filter is None:
-        prob_metrics = list(PROBABILISTIC_CORE_METRICS)
+        prob_metrics = list(PROBABILISTIC_CORE_METRICS) + ["max_probability", "normalized_predictive_entropy"]
         conformal_metrics = list(CONFORMAL_METRICS)
 
     available_corruptions = sorted(
@@ -1242,6 +1416,7 @@ def _run(args: argparse.Namespace) -> int:
             corruption_types=trend_corruptions,
             methods=PROBABILISTIC_METHODS,
             colors=PROB_METHOD_COLORS,
+            markers=PROB_METHOD_MARKERS,
             title_prefix="Probabilistic trends",
             outdir=prob_trends_dir,
             fmt=args.format.lower(),
@@ -1272,6 +1447,26 @@ def _run(args: argparse.Namespace) -> int:
     else:
         logger.info("Skipping probabilistic calibration summary plots (metric disabled).")
 
+    confidence_trends_dir = args.outdir / "probabilistic" / "confidence_trends"
+    if not args.no_confidence_trends and trend_corruptions:
+        ct_generated, ct_skipped = _plot_confidence_trends(
+            plt,
+            prob_df,
+            datasets=datasets,
+            backbones=backbones,
+            corruption_types=trend_corruptions,
+            methods=PROBABILISTIC_METHODS,
+            colors=PROB_METHOD_COLORS,
+            markers=PROB_METHOD_MARKERS,
+            outdir=confidence_trends_dir,
+            fmt=args.format.lower(),
+            dpi=args.dpi,
+        )
+        generated_files.extend(ct_generated)
+        skipped_messages.extend(ct_skipped)
+    else:
+        logger.info("Skipping confidence trend plots (disabled or no corruptions).")
+
     conformal_trends_dir = args.outdir / "conformal" / "trends"
     if conformal_metrics and trend_corruptions:
         conf_generated, conf_skipped = _plot_method_trends(
@@ -1283,6 +1478,7 @@ def _run(args: argparse.Namespace) -> int:
             corruption_types=trend_corruptions,
             methods=(CONFORMAL_METHOD,),
             colors={CONFORMAL_METHOD: CONFORMAL_COLOR},
+            markers=None,
             title_prefix="Conformal trends",
             outdir=conformal_trends_dir,
             fmt=args.format.lower(),

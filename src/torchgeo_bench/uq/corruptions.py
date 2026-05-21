@@ -180,8 +180,11 @@ CLOUD_DATASET_CALIBRATIONS: dict[str, CloudDatasetCalibration] = {
     "m-eurosat": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
-        upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.42, 0.50, 0.58, 0.66, 0.90)),
+        # S2 bands have max=28000 but typical pixels cluster around mean~1000 DN.
+        # upper_fracs narrowed so norm_mean≈0.30, matching aerial datasets and giving
+        # realistic cloud contrast (~0.5–3.5×) rather than the 20–27× contrast from 0.98.
+        upper_fracs=(0.0673, 0.0789, 0.0873),
+        severity_presets=_build_cloud_severity_presets((0.45, 0.60, 0.75, 0.96, 1.35)),
     ),
     "m-forestnet": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
@@ -192,8 +195,9 @@ CLOUD_DATASET_CALIBRATIONS: dict[str, CloudDatasetCalibration] = {
     "m-so2sat": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
-        upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.40, 0.48, 0.56, 0.64, 0.90)),
+        # S2 bands max=2.8 but typical pixels at mean≈0.11–0.13; same calibration logic as so2sat.
+        upper_fracs=(0.0887, 0.0927, 0.1074),
+        severity_presets=_build_cloud_severity_presets((0.45, 0.60, 0.75, 0.96, 1.35)),
     ),
     "m-pv4ger": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
@@ -216,20 +220,23 @@ CLOUD_DATASET_CALIBRATIONS: dict[str, CloudDatasetCalibration] = {
     "so2sat": CloudDatasetCalibration(
         optical_band_names=("b04", "b03", "b02"),
         lower_fracs=(0.02, 0.02, 0.02),
-        upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.40, 0.48, 0.56, 0.64, 0.90)),
+        # S2 bands max=2.8 but typical pixels at mean≈0.11–0.13 (b04/b03/b02 order).
+        # upper_fracs narrowed so norm_mean≈0.30, giving realistic cloud contrast.
+        upper_fracs=(0.0887, 0.0927, 0.1074),
+        severity_presets=_build_cloud_severity_presets((0.45, 0.60, 0.75, 0.96, 1.35)),
     ),
     "eurosat": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
-        upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.44, 0.52, 0.60, 0.68, 0.90)),
+        # Same S2 scale as m-eurosat (max=28000, mean~950–1120 DN); apply same recalibration.
+        upper_fracs=(0.0673, 0.0789, 0.0873),
+        severity_presets=_build_cloud_severity_presets((0.45, 0.60, 0.75, 0.96, 1.35)),
     ),
     "eurosat-spatial": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),
         lower_fracs=(0.02, 0.02, 0.02),
-        upper_fracs=(0.98, 0.98, 0.98),
-        severity_presets=_build_cloud_severity_presets((0.44, 0.52, 0.60, 0.68, 0.90)),
+        upper_fracs=(0.0673, 0.0789, 0.0873),
+        severity_presets=_build_cloud_severity_presets((0.45, 0.60, 0.75, 0.96, 1.35)),
     ),
     "advance": CloudDatasetCalibration(
         optical_band_names=("red", "green", "blue"),

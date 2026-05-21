@@ -159,18 +159,17 @@ class TerraTorchClayBench(_TerraTorchBench):
         self.gsd = gsd
         self.register_buffer("_clay_waves", torch.tensor(_CLAY_WAVELENGTHS_UM, dtype=torch.float32))
 
-    def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
-        mapped, _ = map_to_model_bands(images, self.bands, CLAY_BANDS)
-        return mapped
-
     @torch.no_grad()
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
         del bboxes
-        x = _maybe_resize(self._prepare_input(images), self.target_size)
+        mapped, missing = map_to_model_bands(images, self.bands, CLAY_BANDS, allow_missing=True)
+        present = [i for i, m in enumerate(missing) if not m]
+        x = _maybe_resize(mapped[:, present], self.target_size)
+        waves = self._clay_waves[present].to(x.device)
         return _reduce_to_vec(
-            self.backbone(x, waves=self._clay_waves.to(x.device), gsd=self.gsd),
+            self.backbone(x, waves=waves, gsd=self.gsd),
             pool=self.pool,
         )
 
