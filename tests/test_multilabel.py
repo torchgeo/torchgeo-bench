@@ -359,7 +359,7 @@ class TestUnifiedEvaluateKNN:
         from torchgeo_bench import evaluate_knn
 
         d = singlelabel_data
-        score, lo, hi = evaluate_knn(
+        score, lo, hi, cal = evaluate_knn(
             d["x_train"],
             d["y_train"],
             d["x_test"],
@@ -368,12 +368,15 @@ class TestUnifiedEvaluateKNN:
             n_bootstrap=50,
         )
         assert 0 <= lo <= score <= hi <= 1.0
+        assert set(cal) == {"ece", "rms_ce", "mce"}
+        for v in cal.values():
+            assert 0.0 <= v <= 1.0
 
     def test_multi_label(self, multilabel_data):
         from torchgeo_bench import evaluate_knn
 
         d = multilabel_data
-        score, lo, hi = evaluate_knn(
+        score, lo, hi, cal = evaluate_knn(
             d["x_train"],
             d["y_train"],
             d["x_test"],
@@ -382,6 +385,7 @@ class TestUnifiedEvaluateKNN:
             n_bootstrap=50,
         )
         assert 0 <= lo <= score <= hi <= 1.0
+        assert set(cal) == {"ece", "rms_ce", "mce"}
 
 
 class TestUnifiedEvaluateLogistic:
@@ -389,7 +393,7 @@ class TestUnifiedEvaluateLogistic:
         from torchgeo_bench import evaluate_logistic
 
         d = singlelabel_data
-        score, lo, hi, best_c = evaluate_logistic(
+        score, lo, hi, best_c, cal = evaluate_logistic(
             d["x_train"],
             d["y_train"],
             d["x_test"][:15],
@@ -404,12 +408,13 @@ class TestUnifiedEvaluateLogistic:
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert best_c in [0.1, 1.0]
+        assert set(cal) == {"ece", "rms_ce", "mce"}
 
     def test_multi_label(self, multilabel_data):
         from torchgeo_bench import evaluate_logistic
 
         d = multilabel_data
-        score, lo, hi, best_c = evaluate_logistic(
+        score, lo, hi, best_c, cal = evaluate_logistic(
             d["x_train"],
             d["y_train"],
             d["x_val"],
@@ -424,3 +429,4 @@ class TestUnifiedEvaluateLogistic:
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert best_c in [0.01, 0.1, 1.0]
+        assert set(cal) == {"ece", "rms_ce", "mce"}
