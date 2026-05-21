@@ -47,6 +47,7 @@ dependencies = [
   "timm>=0.9",
   "torch>=2",
   "torchgeo @ git+https://github.com/microsoft/torchgeo.git@e585e2c07f7a",
+  "torchmetrics>=1.4",
   "torchvision>=0.15",
   "typer>=0.9",
 ]

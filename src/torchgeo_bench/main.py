@@ -20,6 +20,7 @@ from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
 from torchgeo.datasets.errors import DatasetNotFoundError
 
+from torchgeo_bench.calibration import compute_calibration_metrics
 from torchgeo_bench.datasets import (
     get_bench_dataset_class,
     get_datasets,
@@ -197,6 +198,10 @@ class EvaluationResult:
     precision: float | None = None
     recall: float | None = None
     f1: float | None = None
+    # Calibration metrics for KNN / Linear Probing (None for segmentation rows)
+    ece: float | None = None
+    rms_ce: float | None = None
+    mce: float | None = None
 
     def to_row(self) -> dict:
         """Convert to a flat dictionary suitable for CSV/DataFrame export."""
@@ -220,8 +225,12 @@ def evaluate_knn(
     verbose: bool = False,
     device: str = "cpu",
     n_neighbors: int = 5,
-) -> tuple[float, float, float]:
-    """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
+) -> tuple[float, float, float, dict[str, float]]:
+    """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape.
+
+    Returns the primary metric with bootstrap CI plus a calibration dict
+    (``ece``/``rms_ce``/``mce``) computed from ``predict_proba``.
+    """
     multi_label = y_train.ndim == 2
     clf = KNNClassifier(n_neighbors=n_neighbors, device=device, use_fp16=False)
     clf.fit(x_train, y_train)
@@ -239,11 +248,20 @@ def evaluate_knn(
                 f"[KNN] Fit KNN5 (train={len(x_train)}, test={len(x_test)}, boot={n_bootstrap})"
             )
         preds = clf.predict(x_test)
+        y_scores = clf.predict_proba(x_test)
         metric, lo, hi = bootstrap_accuracy(y_test, preds, n_boot=n_bootstrap, seed=seed)
         if verbose:
             logger.info(f"[KNN] Test accuracy={metric:.4f} (CI {lo:.4f}-{hi:.4f})")
 
-    return metric, lo, hi
+    calibration = compute_calibration_metrics(y_test, y_scores, multi_label=multi_label)
+
+    if verbose:
+        logger.info(
+            f"[KNN] Calibration ECE={calibration['ece']:.4f} "
+            f"RMS-CE={calibration['rms_ce']:.4f} MCE={calibration['mce']:.4f}"
+        )
+
+    return metric, lo, hi, calibration
 
 
 def evaluate_logistic(
@@ -259,8 +277,13 @@ def evaluate_logistic(
     merge_val: bool,
     device: str,
     verbose: bool = False,
-) -> tuple[float, float, float, float]:
-    """Sweep C values, retrain, and evaluate. Auto-detects single/multi-label from y shape."""
+) -> tuple[float, float, float, float, dict[str, float]]:
+    """Sweep C values, retrain, and evaluate. Auto-detects single/multi-label from y shape.
+
+    Returns the primary metric with bootstrap CI, the selected ``C``, and
+    a calibration dict (``ece``/``rms_ce``/``mce``) from the final
+    model's ``predict_proba`` on the test split.
+    """
     multi_label = y_train.ndim == 2
     best_c: float | None = None
     best_val_score = -1.0
@@ -341,14 +364,21 @@ def evaluate_logistic(
         metric, lo, hi = bootstrap_map(y_test, test_scores, n_boot=n_bootstrap, seed=seed)
     else:
         test_preds = final_model.predict(x_test_tensor)
+        test_scores = final_model.predict_proba(x_test_tensor)
         metric, lo, hi = bootstrap_accuracy(y_test, test_preds, n_boot=n_bootstrap, seed=seed)
+
+    calibration = compute_calibration_metrics(y_test, test_scores, multi_label=multi_label)
 
     if verbose:
         logger.info(
             f"[{label_tag}] Test score={metric:.4f} (CI {lo:.4f}-{hi:.4f}) "
             f"using C={best_c:.4g}; train_final={len(x_final)} test={len(x_test)}"
         )
-    return metric, lo, hi, float(best_c)
+        logger.info(
+            f"[{label_tag}] Calibration ECE={calibration['ece']:.4f} "
+            f"RMS-CE={calibration['rms_ce']:.4f} MCE={calibration['mce']:.4f}"
+        )
+    return metric, lo, hi, float(best_c), calibration
 
 
 def _make_seg_dataloaders(
@@ -1045,7 +1075,7 @@ def main(cfg: DictConfig) -> None:
 
             if not skip_knn:
                 knn_device = cfg.eval.get("knn_device") or cfg.device
-                knn_score, knn_lo, knn_hi = evaluate_knn(
+                knn_score, knn_lo, knn_hi, knn_cal = evaluate_knn(
                     x_train,
                     y_train,
                     x_test,
@@ -1071,11 +1101,14 @@ def main(cfg: DictConfig) -> None:
                         n_train=len(x_train),
                         n_val=len(x_val),
                         n_test=len(x_test),
+                        ece=knn_cal["ece"],
+                        rms_ce=knn_cal["rms_ce"],
+                        mce=knn_cal["mce"],
                     ).to_row()
                 )
 
             if not skip_linear:
-                lin_score, lin_lo, lin_hi, best_c = evaluate_logistic(
+                lin_score, lin_lo, lin_hi, best_c, lin_cal = evaluate_logistic(
                     x_train,
                     y_train,
                     x_val,
@@ -1104,6 +1137,9 @@ def main(cfg: DictConfig) -> None:
                         n_train=len(x_train),
                         n_val=len(x_val),
                         n_test=len(x_test),
+                        ece=lin_cal["ece"],
+                        rms_ce=lin_cal["rms_ce"],
+                        mce=lin_cal["mce"],
                     ).to_row()
                 )
 
