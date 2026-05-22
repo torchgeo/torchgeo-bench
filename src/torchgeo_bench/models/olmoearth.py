@@ -90,6 +90,9 @@ _MODALITY_INFO: dict[str, dict] = {
             "b01": 10,
             "water_vapour": 11,
             "b09": 11,
+            # B10 (cirrus) — OlmoEarth has no cirrus slot; skip gracefully.
+            "swir_cirrus": None,
+            "b10": None,
         },
     },
     "landsat": {
@@ -250,19 +253,21 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
         src_indices: list[int] = []
         dst_indices: list[int] = []
         dropped: list[str] = []
+        unknown: list[str] = []
         for src_idx, b in grouped[sensor]:
             key_name = b.name.lower()
             if key_name not in name_to_idx:
-                dropped.append(b.name)
-            else:
+                unknown.append(b.name)
+            elif name_to_idx[key_name] is not None:
                 src_indices.append(src_idx)
                 dst_indices.append(name_to_idx[key_name])
-        if dropped:
-            logging.warning(
-                "OlmoEarth wrapper has no slot for band(s) %s (sensor=%r) — "
-                "dropping them.  Their positions will be zero-filled.",
-                dropped,
-                sensor,
+            # else: known-but-skippable band (e.g. swir_cirrus / B10 for S2) — zero-filled
+        if unknown:
+            raise ValueError(
+                f"OlmoEarth wrapper can't map BandSpec names {unknown} for "
+                f"sensor '{sensor}'.  Add them to "
+                f"_MODALITY_INFO['{sensor}']['name_to_idx'] "
+                f"with the correct OlmoEarth band index."
             )
         if not src_indices:
             continue
