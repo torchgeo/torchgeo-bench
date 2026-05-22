@@ -39,7 +39,7 @@ jobs:
         with:
           files: ./coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   pre-commit:
     runs-on: ubuntu-latest
