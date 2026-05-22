@@ -8,6 +8,8 @@ import torch.nn as nn
 from torchvision.transforms import Normalize
 
 from torchgeo_bench.datasets.base import BandSpec
+import warnings
+
 from torchgeo_bench.models.torchgeo_models import (
     TorchGeoCromaBench,
     TorchGeoDOFABench,
@@ -20,6 +22,7 @@ from torchgeo_bench.models.torchgeo_models import (
     _extract_normalize_transforms,
     _resolve_torchgeo_factory,
     _resolve_torchgeo_weights,
+    _warn_unit_mismatch,
 )
 
 
@@ -403,3 +406,116 @@ def test_channel_mismatch_uses_tiled_normalize(monkeypatch: pytest.MonkeyPatch) 
         1, 3, 1, 1
     )
     assert torch.allclose(normalized[:, :3], expected.expand(1, 3, 8, 8))
+
+
+# ---------------------------------------------------------------------------
+# _warn_unit_mismatch
+# ---------------------------------------------------------------------------
+
+
+def _dn_bands() -> list[BandSpec]:
+    return [
+        BandSpec(sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=1200.0, std=400.0, min=0.0, max=10000.0)
+        for i in range(3)
+    ]
+
+
+def _reflectance_bands() -> list[BandSpec]:
+    return [
+        BandSpec(sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=0.15, std=0.05, min=0.0, max=1.0)
+        for i in range(3)
+    ]
+
+
+def test_warn_unit_mismatch_ignore_mode():
+    # Should produce no warning and no error
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_unit_mismatch("TestModel", "reflectance_0_1", _dn_bands(), "ignore")
+
+
+def test_warn_unit_mismatch_warn_mode_emits_warning():
+    with pytest.warns(UserWarning, match="look like"):
+        _warn_unit_mismatch("TestModel", "reflectance_0_1", _dn_bands(), "warn")
+
+
+def test_warn_unit_mismatch_error_mode_raises():
+    with pytest.raises(RuntimeError, match="look like"):
+        _warn_unit_mismatch("TestModel", "reflectance_0_1", _dn_bands(), "error")
+
+
+def test_warn_unit_mismatch_none_unit_skips():
+    # weights_input_unit=None → no check at all
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_unit_mismatch("TestModel", None, _dn_bands(), "warn")
+
+
+def test_warn_unit_mismatch_matching_unit_no_warning():
+    # DN bands with s2_dn_div10000 → units match, but means are high → might warn on mean range
+    # Use reflectance bands with reflectance unit → no mismatch
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_unit_mismatch("TestModel", "reflectance_0_1", _reflectance_bands(), "warn")
+
+
+def test_warn_unit_mismatch_mean_range_warn():
+    # DN bands paired with s2_dn_div10000 unit → unit matches but mean exceeds hi*1.5
+    dn_high = [
+        BandSpec(sensor="s2", name="b", source_name="B", mean=20000.0, std=1000.0, min=0.0, max=30000.0)
+    ]
+    with pytest.warns(UserWarning, match="mean outside"):
+        _warn_unit_mismatch("TestModel", "s2_dn_div10000", dn_high, "warn")
+
+
+# ---------------------------------------------------------------------------
+# _adapt_first_conv fallback path (NotImplementedError from timm)
+# ---------------------------------------------------------------------------
+
+
+def test_adapt_first_conv_fallback_on_timm_not_implemented(monkeypatch):
+    """When timm.adapt_input_conv raises NotImplementedError, fallback average replication."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+    from timm.models import _manipulate
+
+    monkeypatch.setattr(_manipulate, "adapt_input_conv", lambda *a, **kw: (_ for _ in ()).throw(NotImplementedError()))
+    model = nn.Sequential(nn.Conv2d(13, 16, 3))
+    _adapt_first_conv(model, "0", in_chans=3)
+    assert model[0].in_channels == 3
+
+
+def test_adapt_first_conv_noop_same_channels():
+    model = nn.Sequential(nn.Conv2d(3, 16, 3))
+    original_weight = model[0].weight.data.clone()
+    _adapt_first_conv(model, "0", in_chans=3)
+    assert torch.equal(model[0].weight.data, original_weight)
+
+
+# ---------------------------------------------------------------------------
+# normalize_inputs: unit conversion only fires for model_native + weights_norm
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_inputs_bandspec_zscore_no_unit_conversion(monkeypatch):
+    """bandspec_zscore should NOT apply unit conversion — raw DN values z-scored directly."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 4, 1)
+            self.pool = nn.AdaptiveAvgPool2d(1)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.pool(self.conv1(x)).flatten(1)
+
+    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _: lambda weights: _TinyResNet())
+    monkeypatch.setattr(tg_models, "_resolve_torchgeo_weights", lambda *_: SimpleNamespace(transforms=nn.Identity()))
+
+    bands = _dn_bands()  # mean=1200, max=10000
+    model = TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore", input_unit_check="ignore")
+
+    # A tensor at exactly the band mean should z-score to ≈0
+    x = torch.full((1, 3, 8, 8), 1200.0)
+    normed = model.normalize_inputs(x)
+    assert torch.allclose(normed, torch.zeros_like(normed), atol=1e-4)
