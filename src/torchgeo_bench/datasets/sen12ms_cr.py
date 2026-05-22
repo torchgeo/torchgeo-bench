@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+import rasterio
 import torch
 from torch.utils.data import Dataset
 from torchgeo.datasets.errors import DatasetNotFoundError
@@ -54,12 +55,10 @@ class _SEN12MSView(Dataset):
 
     def __getitem__(self, index: int) -> dict:
         path, label = self.items[index]
-
-        import rasterio
-
+        indexes = [i + 1 for i in self.channel_indices]
         with rasterio.open(path) as src:
-            image = src.read().astype(np.float32)
-        image_t = torch.from_numpy(image)[self.channel_indices]
+            image = src.read(indexes=indexes).astype(np.float32)
+        image_t = torch.from_numpy(image)
         out = {"image": image_t, "label": int(label)}
         if self.transform is not None:
             out = self.transform(out)
@@ -134,7 +133,7 @@ class _SEN12MSBase(BenchDataset):
 
     @classmethod
     def data_root(cls) -> Path:
-        return Path("data/sen12ms_cr")
+        return Path(__file__).resolve().parents[3] / "data/sen12ms_cr"
 
     @classmethod
     def _filter_present(
@@ -144,17 +143,7 @@ class _SEN12MSBase(BenchDataset):
         image_key: str,
         split: str,
     ) -> list[dict[str, object]]:
-        present = [s for s in samples if (root / str(s[image_key])).exists()]
-        n_missing = len(samples) - len(present)
-        if n_missing:
-            logger.warning(
-                "%s split=%s: %d/%d samples missing on disk and will be skipped.",
-                cls.name,
-                split,
-                n_missing,
-                len(samples),
-            )
-        return present
+        return samples
 
     @classmethod
     def _check_data_present(cls, root: Path, *, require_cloud: bool) -> None:
@@ -170,7 +159,8 @@ class _SEN12MSBase(BenchDataset):
         if missing or not root.exists() or not any(root.glob("ROIs*")):
             raise DatasetNotFoundError(
                 f"SEN12MS-CR data not found at {root}. Missing: {missing}. "
-                "Run scripts/download_sen12ms_cr.sh to download metadata and follow its ROI setup steps."
+                "Run scripts/download_sen12ms_cr.sh to download the data, then run "
+                "scripts/compute_sen12ms_cloud_coverage.py to generate cloud_coverage.pkl."
             )
 
     @staticmethod
@@ -233,18 +223,6 @@ class _SEN12MSBase(BenchDataset):
             return lo <= value <= hi
         return lo <= value < hi
 
-    def _resolve_relative_path(self, root: Path, rel_path: str, *, sample_id: str) -> Path:
-        candidate = Path(rel_path)
-        if candidate.is_absolute():
-            raise ValueError(f"Split entry has absolute path for sample_id={sample_id}: {rel_path}")
-        root_resolved = root.resolve()
-        full = (root / candidate).resolve()
-        if not full.is_relative_to(root_resolved):
-            raise ValueError(
-                f"Split entry escapes dataset root for sample_id={sample_id}: {rel_path}"
-            )
-        return full
-
     def _label_for_sample(self, sample_id: str) -> int:
         if sample_id not in self._labels:
             raise ValueError(f"Missing label for sample_id={sample_id}.")
@@ -279,14 +257,8 @@ class _SEN12MSBase(BenchDataset):
         items: list[tuple[Path, int]] = []
         for sample in samples:
             sample_id = self._sample_id(sample)
-            if image_key not in sample:
-                raise ValueError(f"Missing image key {image_key!r} for sample_id={sample_id}.")
-            raw_path = sample[image_key]
-            if not isinstance(raw_path, str):
-                raise ValueError(f"Image path for sample_id={sample_id} must be a string.")
-            image_path = self._resolve_relative_path(root, raw_path, sample_id=sample_id)
             label = self._label_for_sample(sample_id)
-            items.append((image_path, label))
+            items.append((root / sample[image_key], label))
 
         return _SEN12MSView(items, channel_indices, transform)
 
@@ -330,9 +302,3 @@ class SEN12MSCRC4(_SEN12MSBase):
     _cloud_bin = (60.0, 80.0)
 
 
-class SEN12MSCRC5(_SEN12MSBase):
-    """SEN12MS-CR split with 80-100% cloud coverage."""
-
-    name = "sen12ms_cr_c5"
-    prior_results_alias = "sen12ms"
-    _cloud_bin = (80.0, 100.0)

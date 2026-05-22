@@ -35,7 +35,7 @@ from .m_pv4ger import MPv4ger
 from .m_so2sat import MSo2Sat
 from .pastis import PASTIS
 from .resisc45 import RESISC45
-from .sen12ms_cr import SEN12MS, SEN12MSCRC1, SEN12MSCRC2, SEN12MSCRC3, SEN12MSCRC4, SEN12MSCRC5
+from .sen12ms_cr import SEN12MS, SEN12MSCRC1, SEN12MSCRC2, SEN12MSCRC3, SEN12MSCRC4
 from .so2sat import So2Sat
 from .spacenet2 import SpaceNet2
 from .spacenet7 import SpaceNet7
@@ -80,7 +80,6 @@ _REGISTRY: dict[str, type[BenchDataset]] = {
         SEN12MSCRC2,
         SEN12MSCRC3,
         SEN12MSCRC4,
-        SEN12MSCRC5,
     ]
 }
 

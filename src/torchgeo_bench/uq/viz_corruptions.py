@@ -32,6 +32,11 @@ DISPLAY_PERCENTILES_BY_DATASET: dict[str, tuple[float, float]] = {
     "eurosat": (0.5, 99.0),
     "m-eurosat": (0.5, 99.0),
     "eurosat-spatial": (0.5, 99.0),
+    "sen12ms": (0.5, 99.0),
+    "sen12ms_cr_c1": (0.5, 99.0),
+    "sen12ms_cr_c2": (0.5, 99.0),
+    "sen12ms_cr_c3": (0.5, 99.0),
+    "sen12ms_cr_c4": (0.5, 99.0),
 }
 
 TONE_MAPPED_DATASETS: frozenset[str] = frozenset(
@@ -41,6 +46,11 @@ TONE_MAPPED_DATASETS: frozenset[str] = frozenset(
         "eurosat",
         "m-eurosat",
         "eurosat-spatial",
+        "sen12ms",
+        "sen12ms_cr_c1",
+        "sen12ms_cr_c2",
+        "sen12ms_cr_c3",
+        "sen12ms_cr_c4",
     }
 )
 
@@ -534,13 +544,16 @@ def generate_grid(
     seed: int = 0,
     cloud_pattern_mode: str = "fixed",
 ) -> Path:
-    """Render and save an 11-column corruption grid for a dataset.
+    """Render and save per-corruption-type grids (6 columns each) for a dataset.
+
+    Produces one set of PNGs per corruption type (cloud, noise, motion_blur),
+    each with columns: clean | severity 1 | ... | severity 5.
 
     Args:
         dataset_name: Benchmark dataset name.
         samples: Input samples tensor with shape ``(N, C, H, W)``.
         band_specs: Per-channel band metadata for corruption synthesis.
-        out_dir: Output directory for the PNG image.
+        out_dir: Output directory for the PNG images.
         n_samples: Number of rows to render from ``samples``.
         rgb_indices: Optional RGB channel indices for display.
         seed: Base random seed for deterministic corruption generation.
@@ -549,7 +562,7 @@ def generate_grid(
             ``independent`` for different patterns per severity.
 
     Returns:
-        Path to the generated PNG file.
+        Path to the cloud raw PNG (first output file).
     """
     plt = _import_plotting()
 
@@ -622,10 +635,22 @@ def generate_grid(
         )
         noise_batches[severity] = noise_t(samples)
 
+    blur_batches: dict[int, torch.Tensor] = {}
+    for severity in [1, 2, 3, 4, 5]:
+        blur_t = CorruptionTransform("motion_blur", severity, seed, band_specs)
+        blur_batches[severity] = blur_t(samples)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stats_path = out_dir / f"{dataset_name}_corruptions_stats.json"
+
+    col_headers = ["clean", "s1", "s2", "s3", "s4", "s5"]
+
     def _render_grid(
-        variants_by_row: list[list[torch.Tensor | None]],
+        variants_by_row: list[list[np.ndarray | None]],
         *,
         out_path: Path,
+        row_headers: list[str],
         cmap: str | None = None,
         vmin: float | None = None,
         vmax: float | None = None,
@@ -636,7 +661,7 @@ def generate_grid(
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.4 * n_cols, 2.4 * n_rows))
         if n_rows == 1:
             axes = np.expand_dims(axes, axis=0)
-        for col, header in enumerate(headers):
+        for col, header in enumerate(row_headers):
             axes[0, col].set_title(header)
         for row in range(n_rows):
             for col, img in enumerate(variants_by_row[row]):
@@ -654,103 +679,101 @@ def generate_grid(
         fig.savefig(out_path, dpi=150)
         plt.close(fig)
 
-    headers = [
-        "clean",
-        "cloud s1",
-        "cloud s2",
-        "cloud s3",
-        "cloud s4",
-        "cloud s5",
-        "noise s1",
-        "noise s2",
-        "noise s3",
-        "noise s4",
-        "noise s5",
-    ]
+    def _build_corruption_rows(
+        batches: dict[int, torch.Tensor | None],
+    ) -> tuple[
+        list[list[np.ndarray | None]],
+        list[list[np.ndarray | None]],
+        list[list[np.ndarray | None]],
+    ]:
+        """Build raw/norm/delta row lists for one corruption type."""
+        raw_rows: list[list[np.ndarray | None]] = []
+        norm_rows: list[list[np.ndarray | None]] = []
+        delta_rows: list[list[np.ndarray | None]] = []
+        for row in range(n_rows):
+            clean = samples[row]
+            clean_norm = normalizer(clean.unsqueeze(0)).squeeze(0)
+            row_raw: list[np.ndarray | None] = [_render_rgb(clean, low=raw_low, high=raw_high)]
+            row_norm: list[np.ndarray | None] = [_render_rgb(clean_norm, low=norm_low, high=norm_high)]
+            row_delta: list[np.ndarray | None] = [np.zeros((clean.shape[1], clean.shape[2]), dtype=np.float32)]
+            for severity in [1, 2, 3, 4, 5]:
+                corrupted = batches[severity]
+                if corrupted is None:
+                    row_raw.append(None)
+                    row_norm.append(None)
+                    row_delta.append(None)
+                    continue
+                img = corrupted[row]
+                img_norm = normalizer(img.unsqueeze(0)).squeeze(0)
+                row_raw.append(_render_rgb(img, low=raw_low, high=raw_high))
+                row_norm.append(_render_rgb(img_norm, low=norm_low, high=norm_high))
+                row_delta.append(
+                    (img_norm - clean_norm).mean(dim=0).detach().cpu().numpy().astype(np.float32)
+                )
+            raw_rows.append(row_raw)
+            norm_rows.append(row_norm)
+            delta_rows.append(row_delta)
+        return raw_rows, norm_rows, delta_rows
 
-    raw_variants: list[list[np.ndarray | None]] = []
-    norm_variants: list[list[np.ndarray | None]] = []
-    delta_variants: list[list[np.ndarray | None]] = []
-    alpha_variants: list[list[np.ndarray | None]] = []
-
+    # --- Cloud ---
+    cloud_raw, cloud_norm, cloud_delta = _build_corruption_rows(cloud_batches)
+    alpha_rows: list[list[np.ndarray | None]] = []
     for row in range(n_rows):
-        clean = samples[row]
-        clean_norm = normalizer(clean.unsqueeze(0)).squeeze(0)
+        alpha_rows.append([None] + [
+            cloud_masks[sev][row].detach().cpu().numpy().astype(np.float32)
+            for sev in [1, 2, 3, 4, 5]
+        ])
 
-        row_raw: list[np.ndarray | None] = [
-            _render_rgb(clean, low=raw_low, high=raw_high)
-        ]
-        row_norm: list[np.ndarray | None] = [
-            _render_rgb(clean_norm, low=norm_low, high=norm_high)
-        ]
-        row_delta: list[np.ndarray | None] = [
-            np.zeros((clean.shape[1], clean.shape[2]), dtype=np.float32)
-        ]
-        row_alpha: list[np.ndarray | None] = [None]
-
-        for severity in [1, 2, 3, 4, 5]:
-            clouded = cloud_batches[severity][row]
-            clouded_norm = normalizer(clouded.unsqueeze(0)).squeeze(0)
-            row_raw.append(
-                _render_rgb(clouded, low=raw_low, high=raw_high)
-            )
-            row_norm.append(
-                _render_rgb(clouded_norm, low=norm_low, high=norm_high)
-            )
-            delta_luma = (clouded_norm - clean_norm).mean(dim=0).detach().cpu().numpy().astype(np.float32)
-            row_delta.append(delta_luma)
-            row_alpha.append(cloud_masks[severity][row].detach().cpu().numpy().astype(np.float32))
-
-        for severity in [1, 2, 3, 4, 5]:
-            noised = None if noise_batches[severity] is None else noise_batches[severity][row]
-            if noised is None:
-                row_raw.append(None)
-                row_norm.append(None)
-                row_delta.append(None)
-                row_alpha.append(None)
-                continue
-            noised_norm = normalizer(noised.unsqueeze(0)).squeeze(0)
-            row_raw.append(
-                _render_rgb(noised, low=raw_low, high=raw_high)
-            )
-            row_norm.append(
-                _render_rgb(noised_norm, low=norm_low, high=norm_high)
-            )
-            delta_luma = (noised_norm - clean_norm).mean(dim=0).detach().cpu().numpy().astype(np.float32)
-            row_delta.append(delta_luma)
-            row_alpha.append(None)
-
-        raw_variants.append(row_raw)
-        norm_variants.append(row_norm)
-        delta_variants.append(row_delta)
-        alpha_variants.append(row_alpha)
-
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{dataset_name}_corruptions_raw.png"
-    norm_path = out_dir / f"{dataset_name}_corruptions_norm.png"
-    delta_path = out_dir / f"{dataset_name}_corruptions_delta.png"
-    alpha_path = out_dir / f"{dataset_name}_corruptions_alpha.png"
-    stats_path = out_dir / f"{dataset_name}_corruptions_stats.json"
-
-    _render_grid(raw_variants, out_path=out_path, is_rgb=True)
-    _render_grid(norm_variants, out_path=norm_path, is_rgb=True)
+    cloud_raw_path = out_dir / f"{dataset_name}_cloud_raw.png"
+    _render_grid(cloud_raw, out_path=cloud_raw_path, row_headers=col_headers, is_rgb=True)
+    _render_grid(cloud_norm, out_path=out_dir / f"{dataset_name}_cloud_norm.png", row_headers=col_headers, is_rgb=True)
     _render_grid(
-        delta_variants,
-        out_path=delta_path,
+        cloud_delta,
+        out_path=out_dir / f"{dataset_name}_cloud_delta.png",
+        row_headers=col_headers,
         cmap="coolwarm",
         vmin=-delta_bound,
         vmax=delta_bound,
         is_rgb=False,
     )
     _render_grid(
-        alpha_variants,
-        out_path=alpha_path,
+        alpha_rows,
+        out_path=out_dir / f"{dataset_name}_cloud_alpha.png",
+        row_headers=col_headers,
         cmap="gray",
         vmin=0.0,
         vmax=1.0,
         is_rgb=False,
     )
+
+    # --- Noise ---
+    noise_raw, noise_norm, noise_delta = _build_corruption_rows(noise_batches)
+    _render_grid(noise_raw, out_path=out_dir / f"{dataset_name}_noise_raw.png", row_headers=col_headers, is_rgb=True)
+    _render_grid(noise_norm, out_path=out_dir / f"{dataset_name}_noise_norm.png", row_headers=col_headers, is_rgb=True)
+    _render_grid(
+        noise_delta,
+        out_path=out_dir / f"{dataset_name}_noise_delta.png",
+        row_headers=col_headers,
+        cmap="coolwarm",
+        vmin=-delta_bound,
+        vmax=delta_bound,
+        is_rgb=False,
+    )
+
+    # --- Motion blur ---
+    blur_raw, blur_norm, blur_delta = _build_corruption_rows(blur_batches)
+    _render_grid(blur_raw, out_path=out_dir / f"{dataset_name}_motion_blur_raw.png", row_headers=col_headers, is_rgb=True)
+    _render_grid(blur_norm, out_path=out_dir / f"{dataset_name}_motion_blur_norm.png", row_headers=col_headers, is_rgb=True)
+    _render_grid(
+        blur_delta,
+        out_path=out_dir / f"{dataset_name}_motion_blur_delta.png",
+        row_headers=col_headers,
+        cmap="coolwarm",
+        vmin=-delta_bound,
+        vmax=delta_bound,
+        is_rgb=False,
+    )
+
     stats = _summarize_cloud_batches(
         dataset_name=dataset_name,
         clean_samples=samples,
@@ -760,7 +783,7 @@ def generate_grid(
     )
     with stats_path.open("w", encoding="utf-8") as file:
         json.dump(stats, file, indent=2, sort_keys=True)
-    return out_path
+    return cloud_raw_path
 
 
 def generate_histograms(
@@ -846,8 +869,15 @@ def generate_histograms(
         )
         noise_batches[severity] = noise_t(samples)
 
+    # --- Motion blur ---
+    blur_batches: dict[int, torch.Tensor] = {}
+    for severity in [1, 2, 3, 4, 5]:
+        blur_t = CorruptionTransform("motion_blur", severity, seed, band_specs)
+        blur_batches[severity] = blur_t(samples)
+
     cloud_pixels = _collect_pixels(cloud_batches)
     noise_pixels = _collect_pixels(noise_batches)
+    blur_pixels = _collect_pixels(blur_batches)
 
     severity_colors = {
         0: "#333333",  # clean
@@ -927,6 +957,9 @@ def generate_histograms(
         noise_hist_path = out_dir / f"{dataset_name}_hist_noise.png"
         _render_histogram_figure(noise_pixels, "noise", noise_hist_path)
 
+    blur_hist_path = out_dir / f"{dataset_name}_hist_motion_blur.png"
+    _render_histogram_figure(blur_pixels, "motion blur", blur_hist_path)
+
     return cloud_hist_path
 
 
@@ -951,6 +984,100 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_SEN12MS_CR_BINS: list[tuple[str, str]] = [
+    ("sen12ms", "clean"),
+    ("sen12ms_cr_c1", "C1 0–20%"),
+    ("sen12ms_cr_c2", "C2 20–40%"),
+    ("sen12ms_cr_c3", "C3 40–60%"),
+    ("sen12ms_cr_c4", "C4 60–80%"),
+]
+
+
+def generate_sen12ms_cr_grid(
+    out_dir: str | Path,
+    n_samples: int = 4,
+    seed: int = 0,
+) -> Path:
+    """Render a grid showing natural cloud levels across SEN12MS-CR bins.
+
+    Each column corresponds to a cloud coverage bin (clean, C1–C4).
+    Samples are drawn independently from each bin's test split.
+    Tone mapping and percentile clipping are calibrated on the clean split.
+
+    Args:
+        out_dir: Directory where the PNG will be saved.
+        n_samples: Number of rows (samples per bin) to render.
+        seed: Random seed (currently unused but kept for API consistency).
+
+    Returns:
+        Path to the saved PNG file.
+    """
+    plt = _import_plotting()
+
+    # Load samples from each bin independently
+    all_samples: list[torch.Tensor] = []
+    band_specs: list[BandSpec] | None = None
+    rgb_indices: list[int] | None = None
+
+    for ds_name, _ in _SEN12MS_CR_BINS:
+        samples_i, specs_i, rgb_i = _load_test_samples(ds_name, n_samples)
+        all_samples.append(samples_i[:n_samples])
+        if band_specs is None:
+            band_specs = specs_i
+            rgb_indices = rgb_i
+
+    assert band_specs is not None and rgb_indices is not None
+
+    clean_samples = all_samples[0]
+    display_indices = _resolve_display_indices(clean_samples[0], rgb_indices)
+    low_pct, high_pct = _dataset_display_percentiles("sen12ms")
+
+    # Compute display bounds from a global percentile across all bins so that
+    # cloudy columns share the same contrast range as the clean column.
+    rng = np.random.default_rng(seed)
+    all_pixels: list[np.ndarray] = []
+    for col_samples in all_samples:
+        for i in range(col_samples.shape[0]):
+            all_pixels.append(
+                _sample_rgb_pixels(col_samples[i], display_indices, max_pixels=512, rng=rng)
+            )
+    stacked_pixels = np.concatenate(all_pixels, axis=0)
+    raw_low = np.percentile(stacked_pixels, low_pct, axis=0).astype(np.float32)
+    raw_high = np.percentile(stacked_pixels, high_pct, axis=0).astype(np.float32)
+
+    headers = [label for _, label in _SEN12MS_CR_BINS]
+    n_cols = len(_SEN12MS_CR_BINS)
+
+    raw_variants: list[list[np.ndarray]] = []
+    for row in range(n_samples):
+        row_raw: list[np.ndarray] = []
+        for col_samples in all_samples:
+            img = col_samples[row]
+            row_raw.append(
+                _to_rgb_display(img, display_indices, low=raw_low, high=raw_high, compress=6.0, gamma=2.2)
+            )
+        raw_variants.append(row_raw)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "sen12ms_cr_natural_bins.png"
+
+    fig, axes = plt.subplots(n_samples, n_cols, figsize=(2.4 * n_cols, 2.4 * n_samples))
+    if n_samples == 1:
+        axes = np.expand_dims(axes, axis=0)
+    for col, header in enumerate(headers):
+        axes[0, col].set_title(header, fontsize=9)
+    for row in range(n_samples):
+        for col in range(n_cols):
+            ax = axes[row, col]
+            ax.axis("off")
+            ax.imshow(raw_variants[row][col])
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return out_path
+
+
 def main() -> int:
     """Run the corruption-visualization CLI.
 
@@ -960,6 +1087,16 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     parser = _build_parser()
     args = parser.parse_args()
+
+    if args.dataset.startswith("sen12ms"):
+        out_path = generate_sen12ms_cr_grid(
+            out_dir=args.out,
+            n_samples=args.n_samples,
+            seed=args.seed,
+        )
+        logger.info("Saved SEN12MS-CR natural bins grid to %s", out_path)
+        return 0
+
     samples, band_specs, rgb_indices = _load_test_samples(args.dataset, args.n_samples)
     out_path = generate_grid(
         dataset_name=args.dataset,

@@ -827,6 +827,103 @@ def _plot_dataset_trend_grids(
     return generated, skipped
 
 
+def _plot_dataset_backbone_trends(
+    plt,
+    df: pd.DataFrame,
+    *,
+    datasets: list[str],
+    backbones: list[str],
+    metrics: list[str],
+    corruption_types: list[str],
+    outdir: Path,
+    fmt: str,
+    dpi: int,
+) -> tuple[list[Path], list[str]]:
+    """One figure per (dataset, metric, corruption): lines = backbones, uncalibrated only."""
+    generated: list[Path] = []
+    skipped: list[str] = []
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    finite_mask = df["metric_value_num"].replace([np.inf, -np.inf], np.nan).notna()
+    base_df = df[
+        finite_mask
+        & df["severity_int"].notna()
+        & (df["uq_method"] == "uncalibrated")
+    ].copy()
+    base_df["severity_int"] = base_df["severity_int"].astype(int)
+
+    backbone_colors = {bb: plt.get_cmap("tab10")(idx % 10) for idx, bb in enumerate(backbones)}
+    backbone_markers = ["o", "s", "^", "D", "P", "v", "X", "<", ">", "h"]
+
+    for dataset in datasets:
+        dataset_df = base_df[base_df["dataset"] == dataset]
+        for metric in metrics:
+            metric_df = dataset_df[dataset_df["metric_name"] == metric]
+            if metric_df.empty:
+                skipped.append(f"backbone-trends {dataset} / {metric}: no rows")
+                continue
+            for corruption in corruption_types:
+                if corruption == "clean":
+                    corr_df = metric_df[metric_df["corruption_type"] == "clean"]
+                else:
+                    corr_df = metric_df[metric_df["corruption_type"].isin(["clean", corruption])]
+                if corr_df.empty:
+                    skipped.append(f"backbone-trends {dataset} / {metric} / {corruption}: no rows")
+                    continue
+
+                fig, ax = plt.subplots(figsize=(7, 4))
+                all_severities = sorted(corr_df["severity_int"].unique().tolist())
+                has_any_line = False
+
+                for idx, backbone in enumerate(backbones):
+                    bb_rows = corr_df[corr_df["backbone"] == backbone]
+                    if bb_rows.empty:
+                        continue
+                    agg = (
+                        bb_rows.groupby("severity_int", as_index=False)["metric_value_num"]
+                        .mean()
+                        .sort_values("severity_int")
+                    )
+                    if agg.empty:
+                        continue
+                    ax.plot(
+                        agg["severity_int"].to_numpy(dtype=int),
+                        agg["metric_value_num"].to_numpy(dtype=float),
+                        marker=backbone_markers[idx % len(backbone_markers)],
+                        markersize=4,
+                        linewidth=1.6,
+                        label=backbone,
+                        color=backbone_colors[backbone],
+                    )
+                    has_any_line = True
+
+                if not has_any_line:
+                    plt.close(fig)
+                    skipped.append(f"backbone-trends {dataset} / {metric} / {corruption}: all backbones empty")
+                    continue
+
+                if all_severities:
+                    ax.set_xticks(all_severities)
+                ax.set_xlabel("severity")
+                ax.set_ylabel(metric)
+                ax.set_title(f"{dataset} — {metric} vs severity ({corruption}), uncalibrated", fontsize=11)
+                ax.grid(alpha=0.25)
+                ax.legend(
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, -0.18),
+                    ncol=min(4, len(backbones)),
+                    frameon=False,
+                    fontsize=8,
+                )
+                fig.tight_layout()
+                out_path = outdir / f"{_slugify(dataset)}__{_slugify(metric)}__{_slugify(corruption)}.{fmt}"
+                fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+                plt.close(fig)
+                generated.append(out_path)
+
+    return generated, skipped
+
+
 def _plot_calibration_by_severity(
     plt,
     df: pd.DataFrame,
@@ -1508,6 +1605,27 @@ def _run(args: argparse.Namespace) -> int:
         skipped_messages.extend(dataset_skipped)
     else:
         logger.info("Skipping dataset trend grids (no metrics and/or no non-clean corruptions).")
+
+    backbone_trends_dir = args.outdir / "by_dataset_backbone_trends"
+    backbone_trend_metrics = [
+        metric for metric in prob_metrics if metric in set(filtered_df["metric_name"].astype(str).tolist())
+    ]
+    if backbone_trend_metrics and dataset_grid_corruptions:
+        bb_generated, bb_skipped = _plot_dataset_backbone_trends(
+            plt,
+            filtered_df,
+            datasets=datasets,
+            backbones=backbones,
+            metrics=backbone_trend_metrics,
+            corruption_types=dataset_grid_corruptions,
+            outdir=backbone_trends_dir,
+            fmt=args.format.lower(),
+            dpi=args.dpi,
+        )
+        generated_files.extend(bb_generated)
+        skipped_messages.extend(bb_skipped)
+    else:
+        logger.info("Skipping backbone trend plots (no metrics and/or no non-clean corruptions).")
 
     trace_root = _resolve_trace_dataset_root(filtered_df, args.trace_dir)
     if trace_root is not None:
