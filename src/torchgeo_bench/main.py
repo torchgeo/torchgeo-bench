@@ -20,7 +20,11 @@ from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
 from torchgeo.datasets.errors import DatasetNotFoundError
 
-from torchgeo_bench.calibration import compute_calibration_metrics
+from torchgeo_bench.calibration import (
+    apply_temperature,
+    compute_calibration_metrics,
+    fit_temperature,
+)
 from torchgeo_bench.datasets import (
     get_bench_dataset_class,
     get_datasets,
@@ -202,6 +206,12 @@ class EvaluationResult:
     ece: float | None = None
     rms_ce: float | None = None
     mce: float | None = None
+    # Post temperature-scaling calibration (Linear Probing only; None for KNN/seg)
+    ece_ts: float | None = None
+    rms_ce_ts: float | None = None
+    mce_ts: float | None = None
+    temperature: float | None = None
+    calibration_n_bins: int | None = None
 
     def to_row(self) -> dict:
         """Convert to a flat dictionary suitable for CSV/DataFrame export."""
@@ -225,12 +235,15 @@ def evaluate_knn(
     verbose: bool = False,
     device: str = "cpu",
     n_neighbors: int = 5,
-) -> tuple[float, float, float, dict[str, float]]:
+    calibration_n_bins: int | None = None,
+) -> tuple[float, float, float, dict[str, float], int]:
     """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape.
 
-    Returns the primary metric with bootstrap CI plus a calibration dict
-    (``ece``/``rms_ce``/``mce``) computed from ``predict_proba``.
+    Returns the primary metric with bootstrap CI, a calibration dict
+    (``ece``/``rms_ce``/``mce``) computed from ``predict_proba``, and the
+    ``n_bins`` actually used (defaults to ``n_neighbors + 1``).
     """
+    n_bins = calibration_n_bins if calibration_n_bins is not None else n_neighbors + 1
     multi_label = y_train.ndim == 2
     clf = KNNClassifier(n_neighbors=n_neighbors, device=device, use_fp16=False)
     clf.fit(x_train, y_train)
@@ -253,15 +266,17 @@ def evaluate_knn(
         if verbose:
             logger.info(f"[KNN] Test accuracy={metric:.4f} (CI {lo:.4f}-{hi:.4f})")
 
-    calibration = compute_calibration_metrics(y_test, y_scores, multi_label=multi_label)
+    calibration = compute_calibration_metrics(
+        y_test, y_scores, multi_label=multi_label, n_bins=n_bins
+    )
 
     if verbose:
         logger.info(
-            f"[KNN] Calibration ECE={calibration['ece']:.4f} "
+            f"[KNN] Calibration (n_bins={n_bins}) ECE={calibration['ece']:.4f} "
             f"RMS-CE={calibration['rms_ce']:.4f} MCE={calibration['mce']:.4f}"
         )
 
-    return metric, lo, hi, calibration
+    return metric, lo, hi, calibration, n_bins
 
 
 def evaluate_logistic(
@@ -277,12 +292,15 @@ def evaluate_logistic(
     merge_val: bool,
     device: str,
     verbose: bool = False,
-) -> tuple[float, float, float, float, dict[str, float]]:
+    calibration_n_bins: int = 15,
+    temp_scale: bool = True,
+) -> tuple[float, float, float, float, dict[str, float], dict[str, float | None]]:
     """Sweep C values, retrain, and evaluate. Auto-detects single/multi-label from y shape.
 
-    Returns the primary metric with bootstrap CI, the selected ``C``, and
-    a calibration dict (``ece``/``rms_ce``/``mce``) from the final
-    model's ``predict_proba`` on the test split.
+    Returns the primary metric with bootstrap CI, the selected ``C``, a
+    calibration dict from raw ``predict_proba`` on the test split, and a
+    second dict with temperature-scaled calibration plus the fitted
+    ``temperature`` (all ``None`` when ``temp_scale=False``).
     """
     multi_label = y_train.ndim == 2
     best_c: float | None = None
@@ -367,7 +385,33 @@ def evaluate_logistic(
         test_scores = final_model.predict_proba(x_test_tensor)
         metric, lo, hi = bootstrap_accuracy(y_test, test_preds, n_boot=n_bootstrap, seed=seed)
 
-    calibration = compute_calibration_metrics(y_test, test_scores, multi_label=multi_label)
+    calibration = compute_calibration_metrics(
+        y_test, test_scores, multi_label=multi_label, n_bins=calibration_n_bins
+    )
+
+    calibration_ts: dict[str, float | None] = {
+        "ece_ts": None,
+        "rms_ce_ts": None,
+        "mce_ts": None,
+        "temperature": None,
+    }
+    if temp_scale:
+        # Fit T on val logits, apply to test logits, recompute calibration.
+        # When merge_val=True the final model has seen val during training, but
+        # T is a single scalar so the resulting leakage is minimal.
+        val_logits = final_model.decision_function(x_val_tensor)
+        test_logits = final_model.decision_function(x_test_tensor)
+        temperature = fit_temperature(val_logits, y_val, multi_label=multi_label)
+        test_scores_ts = apply_temperature(test_logits, temperature, multi_label=multi_label)
+        cal_ts = compute_calibration_metrics(
+            y_test, test_scores_ts, multi_label=multi_label, n_bins=calibration_n_bins
+        )
+        calibration_ts = {
+            "ece_ts": cal_ts["ece"],
+            "rms_ce_ts": cal_ts["rms_ce"],
+            "mce_ts": cal_ts["mce"],
+            "temperature": temperature,
+        }
 
     if verbose:
         logger.info(
@@ -375,10 +419,18 @@ def evaluate_logistic(
             f"using C={best_c:.4g}; train_final={len(x_final)} test={len(x_test)}"
         )
         logger.info(
-            f"[{label_tag}] Calibration ECE={calibration['ece']:.4f} "
+            f"[{label_tag}] Calibration (n_bins={calibration_n_bins}) "
+            f"ECE={calibration['ece']:.4f} "
             f"RMS-CE={calibration['rms_ce']:.4f} MCE={calibration['mce']:.4f}"
         )
-    return metric, lo, hi, float(best_c), calibration
+        if temp_scale:
+            logger.info(
+                f"[{label_tag}] Post-TS T={calibration_ts['temperature']:.3f} "
+                f"ECE={calibration_ts['ece_ts']:.4f} "
+                f"RMS-CE={calibration_ts['rms_ce_ts']:.4f} "
+                f"MCE={calibration_ts['mce_ts']:.4f}"
+            )
+    return metric, lo, hi, float(best_c), calibration, calibration_ts
 
 
 def _make_seg_dataloaders(
@@ -1073,9 +1125,14 @@ def main(cfg: DictConfig) -> None:
             x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
             feature_dim = x_train.shape[1]
 
+            cal_cfg = cfg.eval.get("calibration", {}) or {}
+            cal_n_bins_knn = cal_cfg.get("n_bins_knn", None)
+            cal_n_bins_linear = int(cal_cfg.get("n_bins_linear", 15))
+            cal_temp_scale = bool(cal_cfg.get("temp_scale", True))
+
             if not skip_knn:
                 knn_device = cfg.eval.get("knn_device") or cfg.device
-                knn_score, knn_lo, knn_hi, knn_cal = evaluate_knn(
+                knn_score, knn_lo, knn_hi, knn_cal, knn_n_bins = evaluate_knn(
                     x_train,
                     y_train,
                     x_test,
@@ -1085,6 +1142,7 @@ def main(cfg: DictConfig) -> None:
                     verbose=cfg.verbose,
                     device=knn_device,
                     n_neighbors=knn_k,
+                    calibration_n_bins=cal_n_bins_knn,
                 )
                 all_rows.append(
                     EvaluationResult(
@@ -1104,11 +1162,12 @@ def main(cfg: DictConfig) -> None:
                         ece=knn_cal["ece"],
                         rms_ce=knn_cal["rms_ce"],
                         mce=knn_cal["mce"],
+                        calibration_n_bins=knn_n_bins,
                     ).to_row()
                 )
 
             if not skip_linear:
-                lin_score, lin_lo, lin_hi, best_c, lin_cal = evaluate_logistic(
+                lin_score, lin_lo, lin_hi, best_c, lin_cal, lin_cal_ts = evaluate_logistic(
                     x_train,
                     y_train,
                     x_val,
@@ -1121,6 +1180,8 @@ def main(cfg: DictConfig) -> None:
                     cfg.eval.merge_val,
                     cfg.device,
                     cfg.verbose,
+                    calibration_n_bins=cal_n_bins_linear,
+                    temp_scale=cal_temp_scale,
                 )
                 all_rows.append(
                     EvaluationResult(
@@ -1140,6 +1201,11 @@ def main(cfg: DictConfig) -> None:
                         ece=lin_cal["ece"],
                         rms_ce=lin_cal["rms_ce"],
                         mce=lin_cal["mce"],
+                        ece_ts=lin_cal_ts["ece_ts"],
+                        rms_ce_ts=lin_cal_ts["rms_ce_ts"],
+                        mce_ts=lin_cal_ts["mce_ts"],
+                        temperature=lin_cal_ts["temperature"],
+                        calibration_n_bins=cal_n_bins_linear,
                     ).to_row()
                 )
 
