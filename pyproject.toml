@@ -171,6 +171,9 @@ ini_options.markers = [
 run.omit = [
   "*/test_*.py",
   "*/tests/*",
+  "*/torchgeo_bench/datasets/_v1_webdataset.py",
+  "*/torchgeo_bench/datasets/geobench_v1.py",
+  "*/torchgeo_bench/segmentation_viz.py",
 ]
 run.source = [ "torchgeo_bench" ]
 report.exclude_lines = [

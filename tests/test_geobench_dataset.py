@@ -20,6 +20,7 @@ from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
 EUROSAT_RGB_SOURCE_BANDS = ("04 - Red", "03 - Green", "02 - Blue")
 
 
+@pytest.mark.slow
 class TestGeoBenchDatasetBasics:
     """Basic functionality tests for GeoBenchv1."""
 
@@ -58,6 +59,7 @@ class TestGeoBenchDatasetBasics:
         assert sample["label"].dim() == 0
 
 
+@pytest.mark.slow
 class TestAllDatasets:
     """Test all available datasets with small partition (via the wrapper)."""
 
@@ -103,6 +105,7 @@ class TestAllDatasets:
         _ = dataset[len(dataset) - 1]
 
 
+@pytest.mark.slow
 class TestRawEmission:
     """Datasets always emit raw float32 values; normalization moved to BenchModel."""
 
@@ -140,6 +143,7 @@ class TestRawEmission:
             )
 
 
+@pytest.mark.slow
 class TestDataLoader:
     """Test integration with PyTorch DataLoader."""
 
@@ -181,6 +185,7 @@ class TestDataLoader:
         assert total_samples == len(dataset)
 
 
+@pytest.mark.slow
 class TestBandSelection:
     """Test different band selections."""
 
@@ -199,6 +204,7 @@ class TestBandSelection:
         assert dataset[0]["image"].shape[0] > 3
 
 
+@pytest.mark.slow
 class TestPartitions:
     """Test different partition sizes."""
 
@@ -227,6 +233,7 @@ class TestPartitions:
             )
 
 
+@pytest.mark.slow
 class TestErrorHandling:
     """Test error handling for invalid inputs."""
 
