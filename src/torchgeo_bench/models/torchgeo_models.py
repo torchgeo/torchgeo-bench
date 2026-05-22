@@ -333,9 +333,8 @@ class _TorchGeoBackboneBench(BenchModel):
         # DN-scale mean/std — dividing raw DN by 10 000 before z-scoring
         # produces values ≈ 0 - 1000/500 ≈ -2, i.e. garbage).
         weights_norm = self._weights_normalize
-        _need_unit_conv = (
-            self._weights_target_unit is not None
-            and (weights_norm is not None or self.normalization is NormalizationStrategy.MODEL_NATIVE)
+        _need_unit_conv = self._weights_target_unit is not None and (
+            weights_norm is not None or self.normalization is NormalizationStrategy.MODEL_NATIVE
         )
         if _need_unit_conv:
             images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
