@@ -15,7 +15,15 @@ from torchgeo_bench.models._input_units import (
 
 
 def _band(max_val: float, sensor: str = "s2") -> BandSpec:
-    return BandSpec(sensor=sensor, name="b", source_name="B", mean=max_val / 2, std=max_val / 4, min=0.0, max=max_val)
+    return BandSpec(
+        sensor=sensor,
+        name="b",
+        source_name="B",
+        mean=max_val / 2,
+        std=max_val / 4,
+        min=0.0,
+        max=max_val,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,17 +127,23 @@ def test_convert_unit_noop_same_src_dst():
 
 def test_convert_unit_s2dn_to_reflectance():
     x = torch.tensor([10000.0])
-    assert torch.allclose(convert_unit(x, InputUnit.S2_DN, InputUnit.REFLECTANCE_0_1), torch.tensor([1.0]))
+    assert torch.allclose(
+        convert_unit(x, InputUnit.S2_DN, InputUnit.REFLECTANCE_0_1), torch.tensor([1.0])
+    )
 
 
 def test_convert_unit_reflectance_to_s2dn():
     x = torch.tensor([0.5])
-    assert torch.allclose(convert_unit(x, InputUnit.REFLECTANCE_0_1, InputUnit.S2_DN), torch.tensor([5000.0]))
+    assert torch.allclose(
+        convert_unit(x, InputUnit.REFLECTANCE_0_1, InputUnit.S2_DN), torch.tensor([5000.0])
+    )
 
 
 def test_convert_unit_reflectance_to_uint8():
     x = torch.tensor([0.5])
-    assert torch.allclose(convert_unit(x, InputUnit.REFLECTANCE_0_1, InputUnit.UINT8), torch.tensor([127.5]))
+    assert torch.allclose(
+        convert_unit(x, InputUnit.REFLECTANCE_0_1, InputUnit.UINT8), torch.tensor([127.5])
+    )
 
 
 def test_convert_unit_s2dn_to_uint8():

@@ -116,7 +116,10 @@ def test_knn_row_emitted(tmp_path: Path):
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch("torchgeo_bench.main.evaluate_knn", return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6)),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
     ):
         main.__wrapped__(cfg)
 
@@ -134,8 +137,21 @@ def test_linear_row_emitted(tmp_path: Path):
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch("torchgeo_bench.main.evaluate_knn", return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6)),
-        mock.patch("torchgeo_bench.main.evaluate_logistic", return_value=(0.6, 0.52, 0.66, 0.1, {"ece": 0.04, "rms_ce": 0.06, "mce": 0.09}, {"ece_ts": 0.04, "rms_ce_ts": 0.06, "mce_ts": 0.09, "temperature": 0.8})),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_logistic",
+            return_value=(
+                0.6,
+                0.52,
+                0.66,
+                0.1,
+                {"ece": 0.04, "rms_ce": 0.06, "mce": 0.09},
+                {"ece_ts": 0.04, "rms_ce_ts": 0.06, "mce_ts": 0.09, "temperature": 0.8},
+            ),
+        ),
     ):
         main.__wrapped__(cfg)
 
@@ -148,9 +164,7 @@ def test_linear_row_emitted(tmp_path: Path):
 def test_resume_skips_completed_knn_row(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
-    pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(
-        out, index=False
-    )
+    pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
@@ -182,7 +196,10 @@ def test_csv_row_has_required_columns(tmp_path: Path):
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch("torchgeo_bench.main.evaluate_knn", return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6)),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
     ):
         main.__wrapped__(cfg)
 

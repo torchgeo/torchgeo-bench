@@ -1,5 +1,6 @@
 """Unit tests for torchgeo wrapper helpers and construction contracts."""
 
+import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -8,8 +9,6 @@ import torch.nn as nn
 from torchvision.transforms import Normalize
 
 from torchgeo_bench.datasets.base import BandSpec
-import warnings
-
 from torchgeo_bench.models.torchgeo_models import (
     TorchGeoCromaBench,
     TorchGeoDOFABench,
@@ -144,7 +143,9 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
             patches = torch.ones(batch, 4, 8, device=images.device)
             return torch.cat([cls, patches], dim=1)
 
-    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyScaleMAE())
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyScaleMAE()
+    )
     monkeypatch.setattr(
         tg_models,
         "_resolve_torchgeo_weights",
@@ -187,14 +188,18 @@ def test_torchgeo_resnet_forward_shape(monkeypatch):
             feats = self.pool(self.conv1(images))
             return feats.flatten(1)
 
-    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet())
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
     monkeypatch.setattr(
         tg_models,
         "_resolve_torchgeo_weights",
         lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
     )
 
-    model = TorchGeoResNetBench(bands=_rgb_bands(), normalization="identity", input_unit_check="ignore")
+    model = TorchGeoResNetBench(
+        bands=_rgb_bands(), normalization="identity", input_unit_check="ignore"
+    )
     out = model.forward_patch_features(torch.rand(2, 3, 64, 64))
     assert out.ndim == 2
     assert out.shape[0] == 2
@@ -215,7 +220,9 @@ def test_torchgeo_swin_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
             feats = self.pool(self.features[0][0](images)).flatten(1)
             return feats
 
-    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySwin())
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySwin()
+    )
     monkeypatch.setattr(
         tg_models,
         "_resolve_torchgeo_weights",
@@ -241,7 +248,9 @@ def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
             assert len(wavelengths) == images.shape[1]
             return torch.ones(images.shape[0], 8, device=images.device)
 
-    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyDOFA())
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyDOFA()
+    )
     monkeypatch.setattr(
         tg_models,
         "_resolve_torchgeo_weights",
@@ -377,7 +386,9 @@ def test_channel_mismatch_uses_tiled_normalize(monkeypatch: pytest.MonkeyPatch) 
         def transforms() -> nn.Sequential:
             return nn.Sequential(Normalize(mean=[1.0, 2.0, 3.0], std=[4.0, 5.0, 6.0]))
 
-    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet())
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
     monkeypatch.setattr(
         tg_models,
         "_resolve_torchgeo_weights",
@@ -415,14 +426,24 @@ def test_channel_mismatch_uses_tiled_normalize(monkeypatch: pytest.MonkeyPatch) 
 
 def _dn_bands() -> list[BandSpec]:
     return [
-        BandSpec(sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=1200.0, std=400.0, min=0.0, max=10000.0)
+        BandSpec(
+            sensor="s2",
+            name=f"b{i}",
+            source_name=f"B{i}",
+            mean=1200.0,
+            std=400.0,
+            min=0.0,
+            max=10000.0,
+        )
         for i in range(3)
     ]
 
 
 def _reflectance_bands() -> list[BandSpec]:
     return [
-        BandSpec(sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=0.15, std=0.05, min=0.0, max=1.0)
+        BandSpec(
+            sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=0.15, std=0.05, min=0.0, max=1.0
+        )
         for i in range(3)
     ]
 
@@ -462,7 +483,9 @@ def test_warn_unit_mismatch_matching_unit_no_warning():
 def test_warn_unit_mismatch_mean_range_warn():
     # DN bands paired with s2_dn_div10000 unit → unit matches but mean exceeds hi*1.5
     dn_high = [
-        BandSpec(sensor="s2", name="b", source_name="B", mean=20000.0, std=1000.0, min=0.0, max=30000.0)
+        BandSpec(
+            sensor="s2", name="b", source_name="B", mean=20000.0, std=1000.0, min=0.0, max=30000.0
+        )
     ]
     with pytest.warns(UserWarning, match="mean outside"):
         _warn_unit_mismatch("TestModel", "s2_dn_div10000", dn_high, "warn")
@@ -475,10 +498,13 @@ def test_warn_unit_mismatch_mean_range_warn():
 
 def test_adapt_first_conv_fallback_on_timm_not_implemented(monkeypatch):
     """When timm.adapt_input_conv raises NotImplementedError, fallback average replication."""
-    import torchgeo_bench.models.torchgeo_models as tg_models
     from timm.models import _manipulate
 
-    monkeypatch.setattr(_manipulate, "adapt_input_conv", lambda *a, **kw: (_ for _ in ()).throw(NotImplementedError()))
+    monkeypatch.setattr(
+        _manipulate,
+        "adapt_input_conv",
+        lambda *a, **kw: (_ for _ in ()).throw(NotImplementedError()),
+    )
     model = nn.Sequential(nn.Conv2d(13, 16, 3))
     _adapt_first_conv(model, "0", in_chans=3)
     assert model[0].in_channels == 3
@@ -509,11 +535,17 @@ def test_normalize_inputs_bandspec_zscore_no_unit_conversion(monkeypatch):
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.pool(self.conv1(x)).flatten(1)
 
-    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _: lambda weights: _TinyResNet())
-    monkeypatch.setattr(tg_models, "_resolve_torchgeo_weights", lambda *_: SimpleNamespace(transforms=nn.Identity()))
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_weights", lambda *_: SimpleNamespace(transforms=nn.Identity())
+    )
 
     bands = _dn_bands()  # mean=1200, max=10000
-    model = TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore", input_unit_check="ignore")
+    model = TorchGeoResNetBench(
+        bands=bands, normalization="bandspec_zscore", input_unit_check="ignore"
+    )
 
     # A tensor at exactly the band mean should z-score to ≈0
     x = torch.full((1, 3, 8, 8), 1200.0)

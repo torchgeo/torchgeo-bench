@@ -1,7 +1,5 @@
 """Tests for ImageStatsBench model."""
 
-import numpy as np
-import pytest
 import torch
 
 from torchgeo_bench.datasets.base import BandSpec
@@ -10,7 +8,15 @@ from torchgeo_bench.models.image_stats import ImageStatsBench
 
 def _bands(n: int = 4) -> list[BandSpec]:
     return [
-        BandSpec(sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=500.0, std=200.0, min=0.0, max=10000.0)
+        BandSpec(
+            sensor="s2",
+            name=f"b{i}",
+            source_name=f"B{i}",
+            mean=500.0,
+            std=200.0,
+            min=0.0,
+            max=10000.0,
+        )
         for i in range(n)
     ]
 

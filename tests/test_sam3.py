@@ -54,7 +54,9 @@ def _mock_sam3_pretrained(monkeypatch):
             h_tokens = max(1, h // 14)
             w_tokens = max(1, w // 14)
             return types.SimpleNamespace(
-                fpn_hidden_states=[torch.zeros(b, 256, h_tokens, w_tokens, device=pixel_values.device)]
+                fpn_hidden_states=[
+                    torch.zeros(b, 256, h_tokens, w_tokens, device=pixel_values.device)
+                ]
             )
 
     class _FakeSam3(nn.Module):
@@ -68,9 +70,13 @@ def _mock_sam3_pretrained(monkeypatch):
         return _FakeSam3()
 
     fake_transformers = types.ModuleType("transformers")
-    fake_transformers.Sam3Model = type("Sam3Model", (), {"from_pretrained": staticmethod(_from_pretrained)})
+    fake_transformers.Sam3Model = type(
+        "Sam3Model", (), {"from_pretrained": staticmethod(_from_pretrained)}
+    )
     monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
-    monkeypatch.setattr("torchgeo_bench.models.sam3._reset_sam3_rope", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "torchgeo_bench.models.sam3._reset_sam3_rope", lambda *_args, **_kwargs: None
+    )
 
 
 def test_rgb_only_enforcement():

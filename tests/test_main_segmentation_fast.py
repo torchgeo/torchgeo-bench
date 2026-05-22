@@ -102,7 +102,9 @@ def test_segmentation_row_emitted(tmp_path: Path):
     cfg = _cfg_for_segmentation(out)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()),
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
+        ),
         mock.patch(
             "torchgeo_bench.main._build_seg_probe_and_solver",
             return_value=_mock_probe_and_solver(),
@@ -120,7 +122,9 @@ def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):
     cfg = _cfg_for_segmentation(out, overrides=["eval.segmentation.save_viz=false"])
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()),
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
+        ),
         mock.patch(
             "torchgeo_bench.main._build_seg_probe_and_solver",
             return_value=_mock_probe_and_solver(),
@@ -138,7 +142,9 @@ def test_segmentation_resume_skips_complete_run(tmp_path: Path):
     pd.DataFrame([_seg_resume_row(cfg)]).to_csv(out, index=False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()),
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
+        ),
         mock.patch("torchgeo_bench.main._build_seg_probe_and_solver") as build_mock,
     ):
         main.__wrapped__(cfg)
@@ -168,7 +174,9 @@ def test_segmentation_viz_called_when_enabled(tmp_path: Path):
     )
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()),
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
+        ),
         mock.patch("torchgeo_bench.main._build_seg_probe_and_solver", return_value=(probe, solver)),
         mock.patch("torchgeo_bench.main.save_segmentation_viz") as viz_mock,
     ):

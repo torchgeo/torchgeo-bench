@@ -1,11 +1,9 @@
 """Unit tests for dataset classes that don't require real data on disk."""
 
-import pytest
 import torch
 
-from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
 from torchgeo_bench.datasets.eurosat import EuroSAT, EuroSATSpatial
-
+from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
 
 # ---------------------------------------------------------------------------
 # FOTW.canonicalize_sample
@@ -64,8 +62,8 @@ class TestEuroSATMeta:
 
     def test_get_dataset_mocked(self, monkeypatch):
         """get_dataset calls TGEuroSAT with correct band codes — test without disk."""
+
         import torchgeo_bench.datasets.eurosat as mod
-        from unittest import mock
 
         captured = {}
 
@@ -94,8 +92,8 @@ class TestEuroSATSpatialMeta:
         assert EuroSAT.data_root() == EuroSATSpatial.data_root()
 
     def test_get_dataset_mocked(self, monkeypatch):
+
         import torchgeo_bench.datasets.eurosat as mod
-        from unittest import mock
 
         captured = {}
 

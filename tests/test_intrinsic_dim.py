@@ -176,9 +176,11 @@ class TestLoadEstimator:
                 raise ImportError("mocked")
             return real_import(name, *a, **kw)
 
-        with mock.patch.object(builtins, "__import__", side_effect=_mock):
-            with pytest.raises(ImportError, match="torchid is required"):
-                _load_estimator("TwoNN")
+        with (
+            mock.patch.object(builtins, "__import__", side_effect=_mock),
+            pytest.raises(ImportError, match="torchid is required"),
+        ):
+            _load_estimator("TwoNN")
 
 
 # ---- _drop_zero_distance_rows ------------------------------------------------

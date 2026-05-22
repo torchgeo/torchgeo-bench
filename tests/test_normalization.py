@@ -5,15 +5,25 @@ import torch
 
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models._input_units import InputUnit
-from torchgeo_bench.models._normalization import NormalizationStrategy, build_normalizer
+from torchgeo_bench.models._normalization import build_normalizer
 
 
-def _bands(maxvals: list[float], means: list[float] | None = None, stds: list[float] | None = None) -> list[BandSpec]:
+def _bands(
+    maxvals: list[float], means: list[float] | None = None, stds: list[float] | None = None
+) -> list[BandSpec]:
     n = len(maxvals)
     means = means or [m / 2 for m in maxvals]
     stds = stds or [m / 4 for m in maxvals]
     return [
-        BandSpec(sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=means[i], std=stds[i], min=0.0, max=maxvals[i])
+        BandSpec(
+            sensor="s2",
+            name=f"b{i}",
+            source_name=f"B{i}",
+            mean=means[i],
+            std=stds[i],
+            min=0.0,
+            max=maxvals[i],
+        )
         for i in range(n)
     ]
 
@@ -54,8 +64,6 @@ def test_minmax_range():
     """MINMAX should map [min, max] → [0, 1]."""
     bands = [BandSpec(sensor="s2", name="b", source_name="B", mean=5.0, std=2.0, min=2.0, max=12.0)]
     fn = build_normalizer("minmax", bands)
-    x = torch.tensor([[[[2.0]], [[12.0]]]])  # (1,2,1,1) but only 1 band
-    x = torch.tensor([[[[2.0, 12.0]]]])  # shape (1,1,1,2)
     x_min = torch.tensor([[[[2.0]]]])
     x_max = torch.tensor([[[[12.0]]]])
     assert torch.allclose(fn(x_min), torch.zeros(1, 1, 1, 1), atol=1e-6)

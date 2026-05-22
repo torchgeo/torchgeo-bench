@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 
 from torchgeo_bench.utils import extract_features
 

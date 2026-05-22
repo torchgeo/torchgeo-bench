@@ -2,10 +2,8 @@
 
 import pytest
 import torch
-import torch.nn.functional as F
 
 from torchgeo_bench.models.terratorch_models import _maybe_resize, _reduce_to_vec
-
 
 # ---------------------------------------------------------------------------
 # _maybe_resize
@@ -87,6 +85,7 @@ def test_reduce_to_vec_2d_passthrough():
 
 def test_build_backbone_missing_terratorch(monkeypatch):
     import builtins
+
     from torchgeo_bench.models.terratorch_models import _build_backbone
 
     real_import = builtins.__import__

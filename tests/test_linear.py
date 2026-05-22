@@ -7,7 +7,9 @@ import torch
 from torchgeo_bench.linear import LogisticRegression
 
 
-def _xy(n: int = 50, d: int = 8, n_classes: int = 3, seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+def _xy(
+    n: int = 50, d: int = 8, n_classes: int = 3, seed: int = 0
+) -> tuple[torch.Tensor, torch.Tensor]:
     rng = torch.Generator()
     rng.manual_seed(seed)
     X = torch.randn(n, d, generator=rng)
@@ -15,7 +17,9 @@ def _xy(n: int = 50, d: int = 8, n_classes: int = 3, seed: int = 0) -> tuple[tor
     return X, y
 
 
-def _xy_ml(n: int = 50, d: int = 8, n_classes: int = 4, seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+def _xy_ml(
+    n: int = 50, d: int = 8, n_classes: int = 4, seed: int = 0
+) -> tuple[torch.Tensor, torch.Tensor]:
     rng = torch.Generator()
     rng.manual_seed(seed)
     X = torch.randn(n, d, generator=rng)

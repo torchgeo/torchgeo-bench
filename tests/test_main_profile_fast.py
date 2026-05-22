@@ -30,7 +30,10 @@ def test_profile_rows_emitted(tmp_path: Path):
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch("torchgeo_bench.main.evaluate_knn", return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6)),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
         mock.patch("torchgeo_bench.main.measure_profile", return_value=metrics),
     ):
         main.__wrapped__(cfg)
@@ -69,7 +72,10 @@ def test_profile_resume_partial_does_not_skip(tmp_path: Path):
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch("torchgeo_bench.main.evaluate_knn", return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6)),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
         mock.patch("torchgeo_bench.main.measure_profile", return_value=metrics),
     ):
         main.__wrapped__(cfg)

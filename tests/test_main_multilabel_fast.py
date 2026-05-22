@@ -26,7 +26,9 @@ def _synthetic_multilabel_loaders(
     val_images = torch.rand(n_val, channels, 64, 64, generator=rng) * 3000.0
     test_images = torch.rand(n_test, channels, 64, 64, generator=rng) * 3000.0
 
-    train_labels = torch.randint(0, 2, (n_train, n_classes), generator=rng, dtype=torch.int64).float()
+    train_labels = torch.randint(
+        0, 2, (n_train, n_classes), generator=rng, dtype=torch.int64
+    ).float()
     val_labels = torch.randint(0, 2, (n_val, n_classes), generator=rng, dtype=torch.int64).float()
     test_labels = torch.randint(0, 2, (n_test, n_classes), generator=rng, dtype=torch.int64).float()
 
@@ -83,9 +85,16 @@ def test_multilabel_knn_emits_micro_map(tmp_path: Path):
     cfg = _cfg_for_multilabel(out, overrides=["eval.skip_linear=true"])
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_multilabel_embeddings()),
-        mock.patch("torchgeo_bench.main.evaluate_knn", return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6)),
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()
+        ),
+        mock.patch(
+            "torchgeo_bench.main.embed_split", side_effect=_synthetic_multilabel_embeddings()
+        ),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
     ):
         main.__wrapped__(cfg)
 
@@ -99,10 +108,27 @@ def test_multilabel_linear_emits_micro_map(tmp_path: Path):
     cfg = _cfg_for_multilabel(out)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_multilabel_embeddings()),
-        mock.patch("torchgeo_bench.main.evaluate_knn", return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6)),
-        mock.patch("torchgeo_bench.main.evaluate_logistic", return_value=(0.6, 0.52, 0.66, 0.1, {"ece": 0.04, "rms_ce": 0.06, "mce": 0.09}, {"ece_ts": 0.04, "rms_ce_ts": 0.06, "mce_ts": 0.09, "temperature": 0.8})),
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()
+        ),
+        mock.patch(
+            "torchgeo_bench.main.embed_split", side_effect=_synthetic_multilabel_embeddings()
+        ),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_logistic",
+            return_value=(
+                0.6,
+                0.52,
+                0.66,
+                0.1,
+                {"ece": 0.04, "rms_ce": 0.06, "mce": 0.09},
+                {"ece_ts": 0.04, "rms_ce_ts": 0.06, "mce_ts": 0.09, "temperature": 0.8},
+            ),
+        ),
     ):
         main.__wrapped__(cfg)
 
@@ -117,7 +143,9 @@ def test_multilabel_resume_key_stable(tmp_path: Path):
     pd.DataFrame([_multilabel_resume_row(cfg)]).to_csv(out, index=False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()),
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()
+        ),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
     ):
         main.__wrapped__(cfg)
