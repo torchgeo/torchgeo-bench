@@ -260,6 +260,7 @@ def evaluate_logistic(
     merge_val: bool,
     device: str,
     verbose: bool = False,
+    head: str = "linear",
 ) -> tuple[float, float, float, float]:
     """Sweep C values, retrain, and evaluate. Auto-detects single/multi-label from y shape."""
     multi_label = y_train.ndim == 2
@@ -294,6 +295,7 @@ def evaluate_logistic(
             random_state=seed,
             device=device,
             multi_label=multi_label,
+            head=head,
         )
         model.fit(x_train_tensor, y_train_tensor)
 
@@ -334,6 +336,7 @@ def evaluate_logistic(
         random_state=seed,
         device=device,
         multi_label=multi_label,
+        head=head,
     )
     final_model.fit(x_final, y_final)
 
@@ -1084,6 +1087,7 @@ def main(cfg: DictConfig) -> None:
                 )
 
             if not skip_linear:
+                linear_head = str(cfg.eval.get("linear_head", "linear"))
                 lin_score, lin_lo, lin_hi, best_c = evaluate_logistic(
                     x_train,
                     y_train,
@@ -1097,11 +1101,13 @@ def main(cfg: DictConfig) -> None:
                     cfg.eval.merge_val,
                     cfg.device,
                     cfg.verbose,
+                    head=linear_head,
                 )
+                linear_method = "linear" if linear_head == "linear" else "linear_mlp"
                 all_rows.append(
                     EvaluationResult(
                         **common_meta,
-                        method="linear",
+                        method=linear_method,
                         metric_name=metric_name,
                         metric_value=lin_score,
                         ci_lower=lin_lo,

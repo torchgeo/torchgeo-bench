@@ -55,6 +55,7 @@ class LogisticRegression:
         verbose: bool = False,
         use_tf32: bool = True,  # enable TF32 on CUDA for speed
         multi_label: bool = False,
+        head: str = "linear",  # "linear" | "mlp" (Linear→BN→SiLU→Linear)
     ) -> None:
         if C <= 0:
             raise ValueError("C must be > 0.")
@@ -78,10 +79,14 @@ class LogisticRegression:
         self.verbose = verbose
         self.use_tf32 = use_tf32
         self.multi_label = multi_label
+        head = head.lower()
+        if head not in {"linear", "mlp"}:
+            raise ValueError("head must be one of {'linear', 'mlp'}")
+        self.head = head
 
         # Will be set during fit
         self._fitted = False
-        self._model: torch.nn.Linear | None = None
+        self._model: torch.nn.Linear | torch.nn.Sequential | None = None
         self.classes_: np.ndarray | None = None
         self.n_iter_ = 0
         self._train_stats: _TrainStats | None = None
@@ -96,12 +101,26 @@ class LogisticRegression:
                 torch.set_float32_matmul_precision("high")
 
     def _build_model(self, n_features: int, n_classes: int) -> None:
-        model = torch.nn.Linear(n_features, n_classes, bias=True)
-        if self.random_init:
-            torch.nn.init.kaiming_uniform_(model.weight)
+        if self.head == "mlp":
+            proj = torch.nn.Linear(n_features, n_features, bias=False)
+            torch.nn.init.kaiming_uniform_(proj.weight)
+            cls = torch.nn.Linear(n_features, n_classes, bias=True)
+            torch.nn.init.zeros_(cls.weight)
+            torch.nn.init.zeros_(cls.bias)
+            model: torch.nn.Linear | torch.nn.Sequential = torch.nn.Sequential(
+                proj,
+                torch.nn.BatchNorm1d(n_features),
+                torch.nn.SiLU(inplace=True),
+                cls,
+            )
         else:
-            torch.nn.init.zeros_(model.weight)
-        torch.nn.init.zeros_(model.bias)
+            linear = torch.nn.Linear(n_features, n_classes, bias=True)
+            if self.random_init:
+                torch.nn.init.kaiming_uniform_(linear.weight)
+            else:
+                torch.nn.init.zeros_(linear.weight)
+            torch.nn.init.zeros_(linear.bias)
+            model = linear
         model.to(self.device)
         self._model = model
 
@@ -190,8 +209,9 @@ class LogisticRegression:
                 optimizer.zero_grad(set_to_none=True)
                 logits = model(X_tensor)
                 loss = criterion(logits, y_tensor)
-                W = model.weight
-                loss = loss + reg * W.mul(W).sum()
+                loss = loss + reg * sum(
+                    p.mul(p).sum() for p in model.parameters() if p.ndim >= 2
+                )
                 loss.backward()
                 return loss
 
@@ -223,8 +243,9 @@ class LogisticRegression:
                     optimizer.zero_grad(set_to_none=True)
                     logits = model(xb)
                     loss = criterion(logits, yb)
-                    W = model.weight
-                    loss = loss + reg * W.mul(W).sum()
+                    loss = loss + reg * sum(
+                        p.mul(p).sum() for p in model.parameters() if p.ndim >= 2
+                    )
                     loss.backward()
                     optimizer.step()
                     # accumulate loss (on device) then pull scalar once
@@ -256,6 +277,9 @@ class LogisticRegression:
         """Return learned weight matrix as a NumPy array of shape ``(n_classes, n_features)``."""
         if not self._fitted or self._model is None:
             raise AttributeError("Model not fitted; call fit() before accessing coef_.")
+        if self.head != "linear":
+            raise AttributeError("coef_ is only available for head='linear'.")
+        assert isinstance(self._model, torch.nn.Linear)
         with torch.inference_mode():
             return self._model.weight.detach().cpu().numpy()
 
@@ -264,19 +288,15 @@ class LogisticRegression:
         """Return learned bias vector as a NumPy array of shape ``(n_classes,)``."""
         if not self._fitted or self._model is None:
             raise AttributeError("Model not fitted; call fit() before accessing intercept_.")
+        if self.head != "linear":
+            raise AttributeError("intercept_ is only available for head='linear'.")
+        assert isinstance(self._model, torch.nn.Linear)
         with torch.inference_mode():
             return self._model.bias.detach().cpu().numpy()
 
     @property
-    def module(self) -> torch.nn.Linear:
-        """Return the fitted linear module used by this probe.
-
-        Returns:
-            Fitted ``torch.nn.Linear`` classification head.
-
-        Raises:
-            AttributeError: If called before ``fit``.
-        """
+    def module(self) -> torch.nn.Linear | torch.nn.Sequential:
+        """Return the fitted module used by this probe."""
         if not self._fitted or self._model is None:
             raise AttributeError("Model not fitted; call fit() before accessing module.")
         return self._model
@@ -349,6 +369,6 @@ class LogisticRegression:
             f"C={self.C}, max_iter={self.max_iter}, lr={self.lr}, "
             f"batch_size={self.batch_size}, tol={self.tol}, patience={self.patience}, "
             f"random_state={self.random_state}, device='{self.device}', fitted={self._fitted}, "
-            f"use_tf32={self.use_tf32}, multi_label={self.multi_label}"
+            f"use_tf32={self.use_tf32}, multi_label={self.multi_label}, head='{self.head}'"
             ")"
         )

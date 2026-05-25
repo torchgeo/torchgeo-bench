@@ -30,6 +30,7 @@ eval:
   merge_val: true          # merge train+val for final logistic training
   skip_knn: false          # if true, skip KNN-5 evaluation
   skip_linear: false       # if true, skip LogisticRegression evaluation
+  linear_head: "linear"    # "linear" | "mlp" (Linear→BN→SiLU→Linear)
   knn_k: 5                 # number of neighbours for KNN evaluation
   knn_device: null         # null = inherit cfg.device; set "cpu" to force faiss-cpu KNN
 

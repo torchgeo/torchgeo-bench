@@ -231,7 +231,7 @@ def _do_lookup(prior_results: pd.DataFrame, row_filter: dict[str, Any]) -> float
                 continue
             subset = subset[subset[col].fillna("").astype(str) == str(val)]
 
-        subset = subset[subset["method"].fillna("").astype(str) == "linear"]
+        subset = subset[subset["method"].fillna("").astype(str).str.startswith("linear")]
         if subset.empty:
             return None
         if len(subset) > 1:
