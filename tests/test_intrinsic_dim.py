@@ -10,6 +10,9 @@ import torch
 
 from torchgeo_bench.intrinsic_dim import (
     SUPPORTED_ESTIMATORS,
+    DegenerateManifoldError,
+    _drop_zero_distance_rows,
+    _load_estimator,
     _resolve_device,
     _subsample,
     compute_intrinsic_dim,
@@ -147,6 +150,98 @@ class TestErrorHandling:
             pytest.raises(ImportError, match="forced"),
         ):
             compute_intrinsic_dim(X, estimators=["TwoNN"], device="cpu", max_samples=None)
+
+
+# ---- _load_estimator ---------------------------------------------------------
+
+
+class TestLoadEstimator:
+    @requires_torchid
+    def test_known_estimator_returns_class(self) -> None:
+        cls = _load_estimator("TwoNN")
+        assert callable(cls)
+
+    @requires_torchid
+    def test_unknown_estimator_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown torchid estimator"):
+            _load_estimator("NotReal")
+
+    def test_missing_torchid_raises_import_error(self) -> None:
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _mock(name, *a, **kw):
+            if name == "torchid":
+                raise ImportError("mocked")
+            return real_import(name, *a, **kw)
+
+        with (
+            mock.patch.object(builtins, "__import__", side_effect=_mock),
+            pytest.raises(ImportError, match="torchid is required"),
+        ):
+            _load_estimator("TwoNN")
+
+
+# ---- _drop_zero_distance_rows ------------------------------------------------
+
+
+class TestDropZeroDistanceRows:
+    def test_no_duplicates_all_rows_kept(self) -> None:
+        torch.manual_seed(0)
+        X = torch.randn(20, 4)
+        out = _drop_zero_distance_rows(X)
+        assert out.shape[0] == 20
+
+    def test_exact_duplicates_rows_dropped(self) -> None:
+        torch.manual_seed(1)
+        X = torch.randn(10, 4)
+        X[3] = X[1].clone()  # inject duplicate
+        out = _drop_zero_distance_rows(X)
+        assert out.shape[0] < 10
+
+    def test_output_has_no_zero_distance(self) -> None:
+        torch.manual_seed(2)
+        X = torch.randn(15, 4)
+        X[5] = X[2].clone()
+        out = _drop_zero_distance_rows(X)
+        # After dropping, no two rows should share zero d1
+        if out.shape[0] >= 2:
+            from torchgeo_bench.intrinsic_dim import _two_nearest_distances
+
+            d = _two_nearest_distances(out)
+            assert (d[:, 0] > 0).all()
+
+    def test_logging_on_drop(self, caplog: pytest.LogCaptureFixture) -> None:
+        torch.manual_seed(3)
+        X = torch.randn(10, 4)
+        X[0] = X[1].clone()
+        with caplog.at_level(logging.INFO):
+            _drop_zero_distance_rows(X)
+        assert any("dropped" in r.message for r in caplog.records)
+
+
+# ---- DegenerateManifoldError --------------------------------------------------
+
+
+class TestDegenerateManifoldError:
+    @requires_torchid
+    def test_raised_on_non_finite_dimension(self) -> None:
+        """Mock a torchid estimator that returns NaN to trigger the error."""
+        import torchid.estimators as real_estimators
+
+        class _NaNEstimator:
+            dimension_: float = float("nan")
+
+            def fit(self, X: torch.Tensor) -> "_NaNEstimator":  # noqa: ARG002
+                return self
+
+        X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
+        with (
+            mock.patch.object(real_estimators, "NaNEst", _NaNEstimator, create=True),
+            pytest.raises(DegenerateManifoldError, match="non-finite"),
+        ):
+            compute_intrinsic_dim(X, estimators=["NaNEst"], device="cpu", max_samples=None)
 
 
 # ---- real torchid integration (requires py>=3.13) ------------------------

@@ -26,7 +26,6 @@ from torchgeo.datasets.errors import DatasetNotFoundError
 
 from torchgeo_bench.datasets import (
     get_bench_dataset_class,
-    list_datasets,
 )
 
 _EXTERNAL_DATASETS: set[str] = {
@@ -86,6 +85,7 @@ def test_expected_sizes_cover_registry():
 
 
 @pytest.mark.parametrize("dataset_name", sorted(set(EXPECTED_SIZES) - _EXTERNAL_DATASETS))
+@pytest.mark.slow
 def test_split_sizes(dataset_name):
     """Each split's ``len(get_dataset(split))`` matches the reference value."""
     actual: dict[str, int] = {}

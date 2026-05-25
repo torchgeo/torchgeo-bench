@@ -3911,6 +3911,7 @@ dependencies = [
     { name = "timm" },
     { name = "torch" },
     { name = "torchgeo" },
+    { name = "torchmetrics" },
     { name = "torchvision" },
     { name = "typer" },
 ]
@@ -4031,6 +4032,7 @@ requires-dist = [
     { name = "torchgeo-bench", extras = ["terratorch"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["viz"], marker = "extra == 'all'" },
     { name = "torchid", marker = "python_full_version >= '3.13' and extra == 'id'", specifier = ">=0.3" },
+    { name = "torchmetrics", specifier = ">=1.4" },
     { name = "torchvision", specifier = ">=0.15" },
     { name = "transformers", marker = "extra == 'sam3'", specifier = ">=4.50" },
     { name = "typer", specifier = ">=0.9" },
