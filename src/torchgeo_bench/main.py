@@ -16,30 +16,8 @@ import pandas as pd
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from rich.progress import trackMay 22, 2026
-··
-Improve test coverage and CI (#100)
-* test coverage and ci
+from rich.progress import track
 
-* olmo test
-
-* drop cov under
-
-* test: expand coverage from 88% to 91%
-
-New test files:
-- test_image_stats.py: ImageStatsBench identity norm + feature shape/values
-- test_input_units.py: detect_input_unit, convert_unit, all to_* helpers
-- test_normalization.py: all build_normalizer strategies incl. model_native
-- test_linear.py: LogisticRegression validation, fit, inference, LBFGS
-- test_utils.py: extract_features dict outputs, missing key, 3D pooling
-- test_dataset_units.py: FOTW.canonicalize_sample, EuroSAT/EuroSATSpatial mock
-- test_terratorch_units.py: _maybe_resize, _reduce_to_vec, import error
-
-Extended:
-- test_intrinsic_dim.py: _load_estimator, _drop_zero_distance_rows, DegenerateManifoldError
-- test_torchgeo_models.py: _warn_unit_mismatch (warn/error/ignore/mean-range),
-  _adapt_first_conv fal
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
 from torchgeo.datasets.errors import DatasetNotFoundError

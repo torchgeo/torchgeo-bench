@@ -219,6 +219,6 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
         del bboxes
-        x, _ = map_to_model_bands(images, self.bands, TERRAMIND_S2L2A_BANDS)
+        x, _ = map_to_model_bands(images, self.bands, TERRAMIND_S2L2A_BANDS, allow_missing=True)
         x = _maybe_resize(x, self.target_size)
         return _reduce_to_vec(self.backbone({self.modality: x}), pool=self.pool)
