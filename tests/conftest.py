@@ -20,7 +20,7 @@ os.environ.setdefault("GEOBENCH_V2_NO_DOWNLOAD", "1")
 @pytest.fixture
 def geobench_root():
     """Fixture providing GeoBench V1 data root path."""
-    if not GEOBENCH_ROOT.exists():
+    if not (GEOBENCH_ROOT / "m-eurosat").exists():
         pytest.skip(f"GeoBench V1 data not found at {GEOBENCH_ROOT}")
     return str(GEOBENCH_ROOT)
 
