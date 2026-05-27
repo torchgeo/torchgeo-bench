@@ -189,6 +189,8 @@ TERRAMIND_S2L2A_BANDS: list[str] = [
     "swir2",
 ]
 
+TERRAMIND_RGB_BANDS: list[str] = ["red", "green", "blue"]
+
 
 class TerraTorchTerraMindBench(_TerraTorchBench):
     """TerraMind v1 — takes ``{modality: (B, 12, H, W)}`` for fixed-channel S2L2A tokenizer."""
@@ -219,6 +221,7 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
         del bboxes
-        x, _ = map_to_model_bands(images, self.bands, TERRAMIND_S2L2A_BANDS)
+        model_bands = TERRAMIND_RGB_BANDS if "rgb" in self.modality.lower() else TERRAMIND_S2L2A_BANDS
+        x, _ = map_to_model_bands(images, self.bands, model_bands)
         x = _maybe_resize(x, self.target_size)
         return _reduce_to_vec(self.backbone({self.modality: x}), pool=self.pool)

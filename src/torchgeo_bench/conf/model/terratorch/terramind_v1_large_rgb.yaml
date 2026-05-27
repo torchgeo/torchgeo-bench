@@ -1,0 +1,8 @@
+_target_: torchgeo_bench.models.TerraTorchTerraMindBench
+backbone_name: terramind_v1_large
+pretrained: true
+target_size: 224
+modality: S2RGB
+name: tt_terramind_v1_large_rgb
+eval:
+  c_range: [-6, 5, 60]
