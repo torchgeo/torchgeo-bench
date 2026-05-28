@@ -1,0 +1,8 @@
+# RCF benchmark model configuration — empirical (data-driven) filter mode
+_target_: torchgeo_bench.models.RCFBench
+features: 512
+kernel_size: 3
+mode: empirical
+stats_mode: mean
+seed: ${seed}
+name: rcf_empirical

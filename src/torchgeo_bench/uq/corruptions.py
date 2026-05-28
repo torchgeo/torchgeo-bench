@@ -250,6 +250,14 @@ CLOUD_DATASET_CALIBRATIONS: dict[str, CloudDatasetCalibration] = {
         upper_fracs=(0.98, 0.98, 0.98),
         severity_presets=_build_cloud_severity_presets((0.8, 1.0, 1.0, 1.25, 2.0)),
     ),
+    "sen12ms": CloudDatasetCalibration(
+        optical_band_names=("red", "green", "blue"),
+        lower_fracs=(0.02, 0.02, 0.02),
+        # S2 DN scale max=10000 (vs EuroSAT's 28000); upper_fracs scaled proportionally
+        # so norm_mean ≈ 0.30, matching other S2 datasets.
+        upper_fracs=(0.188, 0.221, 0.244),
+        severity_presets=_build_cloud_severity_presets((0.45, 0.60, 0.75, 0.96, 1.35)),
+    ),
 }
 
 

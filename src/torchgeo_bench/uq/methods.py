@@ -64,6 +64,15 @@ class TemperatureScaling:
         logits = torch.from_numpy(logits_np.astype(np.float32))
         y_t = torch.from_numpy(y_cal.astype(np.int64))
 
+        # Remap y_t through probe.classes_: the probe re-indexes training labels to [0, n_unique)
+        # but cal labels are still original values. Mismatches cause IndexError in cross_entropy
+        # when the cal set contains a class absent from training (e.g. class 9 in sen12ms).
+        assert self._probe.classes_ is not None
+        classes = torch.from_numpy(self._probe.classes_.astype(np.int64))
+        remap = torch.full((int(classes.max()) + 1,), -1, dtype=torch.long)
+        remap[classes] = torch.arange(len(classes), dtype=torch.long)
+        y_t = remap[y_t]
+
         optimizer = torch.optim.LBFGS([self._log_T], lr=0.1, max_iter=200)
 
         def closure() -> torch.Tensor:

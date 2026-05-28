@@ -222,6 +222,6 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
     ) -> torch.Tensor:
         del bboxes
         model_bands = TERRAMIND_RGB_BANDS if "rgb" in self.modality.lower() else TERRAMIND_S2L2A_BANDS
-        x, _ = map_to_model_bands(images, self.bands, model_bands)
+        x, _ = map_to_model_bands(images, self.bands, model_bands, allow_missing=True)
         x = _maybe_resize(x, self.target_size)
         return _reduce_to_vec(self.backbone({self.modality: x}), pool=self.pool)

@@ -396,6 +396,17 @@ def _run_uq_block(
     assert X_test is not None
     assert y_test is not None
 
+    # Remap y_test through probe.classes_ so label indices match the probe's output columns.
+    # Probes re-index training labels to [0, n_unique); test labels are still original values.
+    # This matters when a class present in the test set was absent from training (e.g. sen12ms
+    # class 9 missing from some splits), which would cause IndexError in nll / ece / brier.
+    probe = getattr(method, "_probe", None)
+    if probe is not None and getattr(probe, "classes_", None) is not None:
+        classes = probe.classes_.astype(np.int64)
+        remap = np.full(int(classes.max()) + 1, -1, dtype=np.int64)
+        remap[classes] = np.arange(len(classes), dtype=np.int64)
+        y_test = remap[y_test]
+
     rows: list[dict[str, Any]] = []
     trace_df = None
     trace_link: dict[str, str] = {}

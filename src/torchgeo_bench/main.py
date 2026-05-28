@@ -427,7 +427,16 @@ def evaluate_logistic(
         # T is a single scalar so the resulting leakage is minimal.
         val_logits = final_model.decision_function(x_val_tensor)
         test_logits = final_model.decision_function(x_test_tensor)
-        temperature = fit_temperature(val_logits, y_val, multi_label=multi_label)
+        if not multi_label:
+            # LogisticRegression.fit() remaps labels to dense [0, n_unique); remap
+            # y_val the same way so CrossEntropyLoss sees indices in [0, n_classes).
+            classes_tensor = torch.as_tensor(final_model.classes_, dtype=torch.long)
+            y_val_ts = torch.bucketize(
+                torch.as_tensor(y_val, dtype=torch.long), classes_tensor
+            ).numpy()
+        else:
+            y_val_ts = y_val
+        temperature = fit_temperature(val_logits, y_val_ts, multi_label=multi_label)
         test_scores_ts = apply_temperature(test_logits, temperature, multi_label=multi_label)
         cal_ts = compute_calibration_metrics(
             y_test, test_scores_ts, multi_label=multi_label, n_bins=calibration_n_bins

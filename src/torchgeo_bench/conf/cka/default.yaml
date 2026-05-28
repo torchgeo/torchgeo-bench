@@ -50,33 +50,45 @@ layers:
     - backbone.blocks.11
     - backbone.blocks.17
     - backbone.blocks.23
+  vit_large_patch16_224:
+    - backbone.blocks.5
+    - backbone.blocks.11
+    - backbone.blocks.17
+    - backbone.blocks.23
+  rcf_empirical:
+    - rcf
   tgeo_dofa_base:
     - backbone.blocks.2
     - backbone.blocks.5
     - backbone.blocks.8
     - backbone.blocks.11
   tgeo_panopticon:
-    - backbone.blocks.2
-    - backbone.blocks.5
-    - backbone.blocks.8
-    - backbone.blocks.11
+    - backbone.model.blocks.2
+    - backbone.model.blocks.5
+    - backbone.model.blocks.8
+    - backbone.model.blocks.11
   olmoearth_v1_1_base:
-    - encoder_model.blocks.2
-    - encoder_model.blocks.5
-    - encoder_model.blocks.8
-    - encoder_model.blocks.11
+    - encoder_model.encoder.blocks.2
+    - encoder_model.encoder.blocks.5
+    - encoder_model.encoder.blocks.8
+    - encoder_model.encoder.blocks.11
   tt_clay_v1_5_base:
-    - backbone.blocks.2
-    - backbone.blocks.5
-    - backbone.blocks.8
-    - backbone.blocks.11
+    - backbone.clay_encoder.transformer.layers.2.1
+    - backbone.clay_encoder.transformer.layers.5.1
+    - backbone.clay_encoder.transformer.layers.8.1
+    - backbone.clay_encoder.transformer.layers.11.1
   tt_prithvi_eo_v2_300_tl:
     - backbone.blocks.5
     - backbone.blocks.11
     - backbone.blocks.17
     - backbone.blocks.23
   tt_terramind_v1_base:
-    - backbone.blocks.2
-    - backbone.blocks.5
-    - backbone.blocks.8
-    - backbone.blocks.11
+    - backbone.encoder.2
+    - backbone.encoder.5
+    - backbone.encoder.8
+    - backbone.encoder.11
+  olmoearth_v1_1_tiny:
+    - encoder_model.encoder.blocks.2
+    - encoder_model.encoder.blocks.5
+    - encoder_model.encoder.blocks.8
+    - encoder_model.encoder.blocks.11
