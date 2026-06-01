@@ -19,7 +19,7 @@ progress: false
 <div class="rule"></div>
 
 <span style="font-family:'Inter',sans-serif; font-size:0.9em; color:var(--ft-muted)">
-~40 PRs · GPU evaluation · new models · efficiency profiling · leaderboard results
+~50 PRs · GPU evaluation · OlmoEarth v1.1 · calibration · efficiency profiling · leaderboards
 </span>
 
 <br>
@@ -44,8 +44,11 @@ progress: false
 <p><span class="tag tag-oxford">PROFILE</span> <strong>Efficiency Profiling</strong><br>
 <span class="muted">Throughput, GFLOPs, peak GPU mem, energy (Wh/1k), $/inference.</span></p>
 
-<p><span class="tag tag-wheat">MODELS</span> <strong>OlmoEarth + DINOv3-SAT</strong><br>
-<span class="muted">OlmoEarth nano/tiny/base/large. DINOv3-sat ViT-L web-pretrained.</span></p>
+<p><span class="tag tag-wheat">MODELS</span> <strong>OlmoEarth v1 + v1.1</strong><br>
+<span class="muted">nano→large, plus v1.1 linear-embed family. DINOv3-SAT ViT-L web-pretrained.</span></p>
+
+<p><span class="tag tag-oxford">CALIB</span> <strong>Calibration Metrics</strong><br>
+<span class="muted">ECE · RMS-CE · MCE + temperature scaling on every probe.</span></p>
 
 </div>
 <div>
@@ -62,13 +65,16 @@ progress: false
 <p><span class="tag tag-wheat">FIX</span> <strong>Silent-bug Sweep</strong><br>
 <span class="muted">Removed try/except covers; fixed minmax_zscore, fp16 overflow, label gaps.</span></p>
 
+<p><span class="tag tag-wheat">MULTI</span> <strong>SAR + Landsat Modalities</strong><br>
+<span class="muted">OlmoEarth mixed-sensor support, auto input-resolution.</span></p>
+
 </div>
 </div>
 
 ---
 
 # GPU KNN — faissknn
-<span class="tag">PR #53</span> <span class="tag">PR #55</span> <span class="tag">PR #89</span>
+<span class="tag">PR #53</span> <span class="tag">PR #55</span> <span class="tag">PR #89</span> <span class="tag">PR #94</span> <span class="tag">PR #101</span>
 
 <div class="rule"></div>
 
@@ -104,15 +110,17 @@ proba  = clf.predict_proba(x_test)
 
 - `n_classes = max(y)+1` not `len(unique(y))` — avoids `IndexError` on partitions with missing class labels
 - `use_fp16=False` in evaluation — raw sensor DN values (~10 000) overflow fp16 L2 distances → random KNN
-- faiss-cpu + faiss-cuda namespace conflict resolved on GPU SLURM nodes
+- `faiss-cuda-cu128` now the **sole** core backend — `manylinux_2_28` wheels run on CPU *and* GPU, killing the old faiss-cpu namespace clash (`#101`)
 
 <br>
 
-**Auto-fallback:**
+**Config knobs** (`#94`, `#99`):
 
-```python
-# faissknn not installed →
-# silently falls back to CPU faiss path
+```yaml
+eval:
+  knn_k: 5          # neighbours
+  knn_device: null  # null → inherit cfg.device
+                    # "cpu" forces faiss-cpu KNN
 ```
 
 </div>
@@ -263,7 +271,7 @@ Explorer shows Pareto front: accuracy vs cost / CO₂.
 ---
 
 # OlmoEarth Integration
-<span class="tag tag-wheat">PR #84</span> <span class="tag tag-wheat">PR #85</span>
+<span class="tag tag-wheat">PR #84</span> <span class="tag tag-wheat">PR #85</span> <span class="tag tag-wheat">PR #93</span>
 
 <div class="rule"></div>
 
@@ -312,6 +320,51 @@ class OlmoEarthBench(BenchModel):
 **Dominates S2 datasets** — EuroSAT, BigEarthNet, So2Sat. Nano/Tiny competitive at a fraction of the size.
 
 `normalization=identity` bypasses z-score — OlmoEarth handles its own preprocessing.
+
+</div>
+</div>
+
+---
+
+# OlmoEarth v1.1
+<span class="tag tag-wheat">PR #99</span>
+
+<div class="rule"></div>
+
+<div style="display:grid; grid-template-columns:0.95fr 1.05fr; gap:1.5rem; align-items:start;">
+<div style="font-family:'Inter',sans-serif; font-size:0.82em;">
+
+**What changed (v1 → v1.1):**
+
+- **Linear** patch embedding (vs. convolutional)
+- Single bandset per modality
+- Updated masking + loss functions
+
+<p style="margin-top:0.6rem;"><span class="tag tag-claret">≈ 3× fewer MACs</span> at comparable accuracy.</p>
+
+```yaml
+# conf/model/olmoearth_v1_1_base.yaml
+name: olmoearth_v1_1_base
+version: v1.1     # selects weight family
+```
+
+<span class="muted">30/30 sweep tasks · 0 failures · Nano/Tiny/Base.</span>
+
+</div>
+<div style="font-family:'Inter',sans-serif; font-size:0.78em;">
+
+**Linear probe — v1 vs v1.1**
+
+| Dataset | Metric | v1 | v1.1 |
+|---------|:------:|:--:|:----:|
+| m-eurosat (Base) | Acc | .975 | .970 |
+| m-so2sat (Base) | Acc | .720 | **.728** |
+| m-so2sat (Tiny) | Acc | .656 | **.693** |
+| m-bigearthnet (Tiny) | mAP | .691 | **.717** |
+| benv2 (Tiny) | mAP | .817 | **.826** |
+| treesatai (Base) | mAP | .647 | .645 |
+
+<p style="margin-top:0.4rem;"><strong>Smaller variants gain most</strong> — Tiny/Nano jump on So2Sat + BigEarthNet (KNN So2Sat Tiny .506 → <strong>.567</strong>). Slight EuroSAT dip. Net: same accuracy at a third of the compute.</p>
 
 </div>
 </div>
@@ -671,6 +724,53 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 </div>
 
 ---
+
+# Calibration Metrics
+<span class="tag tag-oxford">PR #105</span>
+
+<div class="rule"></div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; align-items:start;">
+<div>
+
+ECE / RMS-CE / MCE on every classification probe, plus a temperature-scaling baseline (Guo et al., 2017):
+
+```yaml
+eval:
+  calibration:
+    n_bins_knn: null   # null → knn_k + 1
+    n_bins_linear: 15
+    temp_scale: true   # +ece_ts / mce_ts
+                       #  + temperature
+```
+
+```python
+# fit T on val logits, NLL via LBFGS
+T = fit_temperature(val_logits, y_val)
+# T > 1 overconfident · T < 1 under
+```
+
+<span class="muted">KNN probs quantize to k+1 levels → binned at knn_k+1. TS applies to Linear only.</span>
+
+</div>
+<div style="font-family:'Inter',sans-serif; font-size:0.82em;">
+
+**Linear probe — m-eurosat (RGB)**
+
+| Model | ECE | ECE·TS | T |
+|-------|:---:|:------:|:-:|
+| DOFA Large | **.007** | .021 | 0.23 |
+| DINOv3-SAT ViT-L | .016 | .030 | 0.18 |
+| ResNet-50 MoCo | .018 | .032 | 0.34 |
+| OlmoEarth Base | .032 | .054 | 0.71 |
+| DOFA Base | .043 | **.031** | 0.21 |
+
+<p style="margin-top:0.4rem;"><span class="tag tag-claret">FINDING</span> Probes are already well-calibrated (ECE &lt; .05). Fitted <strong>T &lt; 1</strong> → logits <em>underconfident</em>, so temperature scaling often <strong>raises</strong> ECE. DOFA Base is the lone beneficiary.</p>
+
+</div>
+</div>
+
+---
 layout: cover
 ---
 
@@ -700,6 +800,10 @@ layout: cover
 ⚡ **ImageStats** (raw pixel stats) ranks #3 on m-brick-kiln — dataset may have low semantic difficulty
 
 ⚡ **RCF** (random conv. features) ranks #3 on treesatai — signals weak label discrimination
+
+⚡ **OlmoEarth v1.1** matches v1 at **≈ 3× fewer MACs**; Tiny/Nano gain most on So2Sat + BigEarthNet
+
+⚡ Linear probes are **well-calibrated out of the box** (ECE < .05) — temperature scaling rarely helps
 
 </div>
 </div>
