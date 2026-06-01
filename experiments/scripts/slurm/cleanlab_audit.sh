@@ -17,13 +17,13 @@
 #
 # Submit as:
 #
-#   N=$(wc -l < scripts/slurm/cleanlab_audit.jobs)
+#   N=$(wc -l < experiments/scripts/slurm/cleanlab_audit.jobs)
 #   # H100 partition:
-#   sbatch --array=0-$((N-1))%9 scripts/slurm/cleanlab_audit.sh
+#   sbatch --array=0-$((N-1))%9 experiments/scripts/slurm/cleanlab_audit.sh
 #   # or A100 partition:
-#   sbatch --partition=gpu_a100 --array=0-$((N-1))%9 scripts/slurm/cleanlab_audit.sh
+#   sbatch --partition=gpu_a100 --array=0-$((N-1))%9 experiments/scripts/slurm/cleanlab_audit.sh
 #
-# Each line in scripts/slurm/cleanlab_audit.jobs is one dataset name. The
+# Each line in experiments/scripts/slurm/cleanlab_audit.jobs is one dataset name. The
 # script picks the top-1 (method=linear) row per dataset from
 # results/all_results.csv.
 
@@ -31,7 +31,7 @@ set -euo pipefail
 
 mkdir -p logs results/cleanlab/probs
 
-JOBS_FILE=${JOBS_FILE:-scripts/slurm/cleanlab_audit.jobs}
+JOBS_FILE=${JOBS_FILE:-experiments/scripts/slurm/cleanlab_audit.jobs}
 DATASET=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$JOBS_FILE")
 
 echo "[$(date)] task=$SLURM_ARRAY_TASK_ID dataset=$DATASET"
@@ -51,7 +51,7 @@ done
 export MODEL_WEIGHTS_DIR=${MODEL_WEIGHTS_DIR:-$HOME/.cache/geobreeze_weights}
 mkdir -p "$MODEL_WEIGHTS_DIR"
 
-python scripts/cleanlab_extract_probs.py \
+python experiments/scripts/cleanlab_extract_probs.py \
   --dataset "$DATASET" \
   --results results/all_results.csv \
   --out results/cleanlab/probs \

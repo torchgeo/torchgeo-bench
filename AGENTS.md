@@ -29,7 +29,9 @@ data/                      # Datasets always live here (relative to CWD)
   ├── classification_v1.0/ # GeoBench V1
   ├── geobenchv2/          # GeoBench V2
   └── eurosat/             # torchgeo EuroSAT
-scripts/                   # Analysis and benchmark scripts
+experiments/               # Experiment runners, analysis scripts, SLURM jobs
+  ├── scripts/             # Analysis + benchmark scripts (with a slurm/ subdir)
+  └── slurm/               # Standalone SLURM batch files
 tests/                     # Test suite (pytest)
 pyproject.toml             # Project config, dependencies, tool settings
 ```

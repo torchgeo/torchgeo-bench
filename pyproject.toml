@@ -150,7 +150,7 @@ lint.ignore = [
   "D107", # missing docstring in __init__ (documented in class docstring)
   "E501", # line too long (handled by ruff format)
 ]
-lint.per-file-ignores."scripts/**/*.py" = [ "D" ]
+lint.per-file-ignores."experiments/scripts/**/*.py" = [ "D" ]
 lint.per-file-ignores."tests/**/*.py" = [ "ARG", "D" ]
 lint.pydocstyle.convention = "google"
 

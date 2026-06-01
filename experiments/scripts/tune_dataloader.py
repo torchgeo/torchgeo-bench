@@ -3,7 +3,7 @@ report samples/sec, peak GPU memory, and the throughput-maximising config.
 
 Usage::
 
-    python scripts/tune_dataloader.py \\
+    python experiments/scripts/tune_dataloader.py \\
         --model terratorch/prithvi_eo_v2_300 \\
         --dataset m-bigearthnet \\
         --bands all \\
