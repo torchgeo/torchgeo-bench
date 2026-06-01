@@ -312,8 +312,8 @@ class OlmoEarthBench(BenchModel):
 | <span class="gold">1</span> | OlmoEarth Large | **0.976** |
 | <span class="silver">2</span> | OlmoEarth Base | **0.975** |
 | 3 | DOFA Large | 0.973 |
-| 4 | DINOv3-SAT ViT-L | 0.969 |
-| 5 | Panopticon | 0.968 |
+| 4 | OlmoEarth v1.1 Base | 0.970 |
+| 5 | DINOv3-SAT ViT-L | 0.969 |
 
 <br>
 
@@ -495,9 +495,9 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 |--|-------|:---:|:---:|
 | <span class="gold">1</span> | OlmoEarth Large | .956 | .976 |
 | <span class="silver">2</span> | OlmoEarth Base | .946 | .975 |
-| <span class="bronze">3</span> | Panopticon | .948 | .962 |
-| 4 | OlmoEarth Tiny | .926 | .953 |
-| 5 | DOFA Large | .911 | .967 |
+| <span class="bronze">3</span> | Panopticon | .948 | .968 |
+| 4 | DOFA Large | .936 | .973 |
+| 5 | OlmoEarth v1.1 Base | .930 | .970 |
 
 </div>
 <div>
@@ -510,7 +510,7 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 | <span class="silver">2</span> | OlmoEarth Base | .941 | .978 |
 | <span class="bronze">3</span> | Panopticon | .930 | .962 |
 | 4 | OlmoEarth Tiny | .928 | .963 |
-| 5 | DOFA Large | .924 | .965 |
+| 5 | ResNet50-RGB MoCo | .933 | .958 |
 
 </div>
 </div>
@@ -529,11 +529,11 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 
 | | Model | KNN | Lin |
 |--|-------|:---:|:---:|
-| <span class="gold">1</span> | OlmoEarth Large | .664 | .764 |
-| <span class="silver">2</span> | OlmoEarth Base | .658 | .769 |
-| <span class="bronze">3</span> | Panopticon | .652 | .735 |
-| 4 | Terramind Base | .615 | .740 |
-| 5 | OlmoEarth Tiny | .607 | .691 |
+| <span class="gold">1</span> | OlmoEarth v1.1 Base | .664 | .771 |
+| <span class="silver">2</span> | OlmoEarth Large | .664 | .764 |
+| <span class="bronze">3</span> | OlmoEarth Base | .658 | .769 |
+| 4 | Panopticon | .652 | .735 |
+| 5 | Terramind Large | .628 | .750 |
 
 </div>
 <div>
@@ -543,10 +543,10 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 | | Model | KNN | Lin |
 |--|-------|:---:|:---:|
 | <span class="gold">1</span> | OlmoEarth Base | .735 | .853 |
-| <span class="silver">2</span> | OlmoEarth Large | .728 | .850 |
-| <span class="bronze">3</span> | Terramind Large | .712 | .846 |
-| 4 | Terramind Base | .710 | .839 |
-| 5 | Panopticon | .713 | .824 |
+| <span class="silver">2</span> | OlmoEarth v1.1 Base | .734 | .852 |
+| <span class="bronze">3</span> | OlmoEarth Large | .728 | .850 |
+| 4 | Terramind Large | .712 | .846 |
+| 5 | OlmoEarth v1.1 Tiny | .725 | .826 |
 
 </div>
 </div>
@@ -565,11 +565,11 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 
 | | Model | KNN | Lin |
 |--|-------|:---:|:---:|
-| <span class="gold">1</span> | ScaleMAE Large+CLS | .403 | .569 |
-| <span class="silver">2</span> | DINOv3-SAT ViT-L | .386 | .573 |
-| <span class="bronze">3</span> | DOFA Large | .369 | .574 |
-| 4 | ScaleMAE Large | .390 | .544 |
-| 5 | ResNet50-RGB MoCo | .389 | .537 |
+| <span class="gold">1</span> | DINOv3-SAT ViT-L | .425 | .582 |
+| <span class="silver">2</span> | Panopticon | .427 | .550 |
+| <span class="bronze">3</span> | ScaleMAE Large+CLS | .403 | .569 |
+| 4 | Clay v1.5 Base+CLS | .414 | .556 |
+| 5 | Clay v1.5 Base | .395 | .551 |
 
 <span class="muted" style="font-size:0.8em;">Hard dataset — all models below .60</span>
 
@@ -580,11 +580,11 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 
 | | Model | KNN | Lin |
 |--|-------|:---:|:---:|
-| <span class="gold">1</span> | OlmoEarth Base | .576 | .712 |
-| <span class="silver">2</span> | OlmoEarth Large | .560 | .678 |
-| <span class="bronze">3</span> | Clay v1.5 Base+CLS | .448 | .694 |
-| 4 | OlmoEarth Tiny | .506 | .635 |
-| 5 | Terramind Base | .385 | .739 |
+| <span class="gold">1</span> | OlmoEarth v1.1 Base | .606 | .728 |
+| <span class="silver">2</span> | OlmoEarth Base | .577 | .720 |
+| <span class="bronze">3</span> | OlmoEarth v1.1 Tiny | .567 | .693 |
+| 4 | OlmoEarth Large | .562 | .689 |
+| 5 | Panopticon | .532 | .693 |
 
 <span class="muted" style="font-size:0.8em;">Linear leader: Terramind Base .739 — biggest KNN/Lin gap in the set</span>
 
@@ -605,11 +605,11 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 
 | | Model | KNN | Lin |
 |--|-------|:---:|:---:|
-| <span class="gold">1</span> | Clay Base+CLS | .952 | .974 |
-| <span class="silver">2</span> | OlmoEarth Base | .945 | .970 |
-| <span class="bronze">3</span> | **ImageStats** | .949 | .953 |
-| 4 | OlmoEarth Large | .929 | .968 |
-| 5 | Terramind Base | .916 | .969 |
+| <span class="gold">1</span> | DOFA Large | .969 | .974 |
+| <span class="silver">2</span> | DOFA Base | .965 | .974 |
+| <span class="bronze">3</span> | Clay Base | .964 | .972 |
+| 4 | Clay Base+CLS | .960 | .975 |
+| 5 | OlmoEarth Base | .945 | .970 |
 
 </div>
 <div>
@@ -622,7 +622,7 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 | <span class="silver">2</span> | DOFA Large | .967 | .969 |
 | <span class="bronze">3</span> | DOFA Base | .965 | .966 |
 | 4 | ScaleMAE+CLS | .956 | .970 |
-| 5 | ResNet50-RGB MoCo | .954 | .961 |
+| 5 | Panopticon | .958 | .968 |
 
 </div>
 <div>
@@ -631,11 +631,11 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 
 | | Model | KNN | Lin |
 |--|-------|:---:|:---:|
-| <span class="gold">1</span> | DOFA Large | .474 | .647 |
-| <span class="silver">2</span> | OlmoEarth Base | .469 | .647 |
-| <span class="bronze">3</span> | **RCF** | .459 | .644 |
-| 4 | Terramind Base | .457 | .645 |
-| 5 | DOFA Base | .456 | .644 |
+| <span class="gold">1</span> | DINOv3-SAT ViT-L | .477 | .682 |
+| <span class="silver">2</span> | Clay Base+CLS | .475 | .671 |
+| <span class="bronze">3</span> | DINOv3 ViT-L | .473 | .664 |
+| 4 | DOFA Large | .474 | .647 |
+| 5 | OlmoEarth Base | .469 | .647 |
 
 </div>
 </div>
@@ -797,9 +797,9 @@ layout: cover
 
 ⚡ CLS token **collapses** on EuroSAT for Prithvi/Clay — patch-mean wins
 
-⚡ **ImageStats** (raw pixel stats) ranks #3 on m-brick-kiln — dataset may have low semantic difficulty
+⚡ **ImageStats** (raw pixel stats) still hits .95 on m-brick-kiln — low semantic difficulty, though GeoFMs now edge it out
 
-⚡ **RCF** (random conv. features) ranks #3 on treesatai — signals weak label discrimination
+⚡ **SatlasPretrain Swin** (RGB-only) peaks at m-pv4ger #9 / m-brick-kiln #16 — RGB backbones trail multispectral FMs on S2
 
 ⚡ **OlmoEarth v1.1** matches v1 at **≈ 3× fewer MACs**; Tiny/Nano gain most on So2Sat + BigEarthNet
 
