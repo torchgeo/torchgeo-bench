@@ -8,15 +8,15 @@
 # work against the mean rows.
 #
 # Usage:
-#   bash scripts/slurm/eurosat_spatial_pool_ablation.sh             # gpu_a100
-#   DRY_RUN=1 bash scripts/slurm/eurosat_spatial_pool_ablation.sh   # print and exit
+#   bash experiments/scripts/slurm/eurosat_spatial_pool_ablation.sh             # gpu_a100
+#   DRY_RUN=1 bash experiments/scripts/slurm/eurosat_spatial_pool_ablation.sh   # print and exit
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-JOBS_FILE="scripts/slurm/eurosat_spatial_pool_ablation.jobs"
+JOBS_FILE="experiments/scripts/slurm/eurosat_spatial_pool_ablation.jobs"
 
 cat > "$JOBS_FILE" <<'EOF'
 terratorch/prithvi_eo_v1_100_cls eurosat-spatial rgb bandspec_zscore
@@ -42,7 +42,7 @@ SBATCH_CMD=(
   sbatch
   --array="0-${ARRAY_MAX}"
   --export=ALL,JOBS_FILE="$JOBS_FILE"
-  scripts/slurm/probe_sweep.sh
+  experiments/scripts/slurm/probe_sweep.sh
 )
 
 echo "[2/2] ${SBATCH_CMD[*]}"

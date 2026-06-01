@@ -22,7 +22,7 @@
 set -euo pipefail
 mkdir -p logs results
 
-JOBS_FILE=${JOBS_FILE:-scripts/slurm/olmoearth_sweep.jobs}
+JOBS_FILE=${JOBS_FILE:-experiments/scripts/slurm/olmoearth_sweep.jobs}
 LINE=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$JOBS_FILE")
 read -r MODEL DATASET BANDS IMAGE_SIZE <<< "$LINE"
 

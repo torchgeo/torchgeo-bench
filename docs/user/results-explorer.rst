@@ -15,4 +15,4 @@ Results explorer
 A self-contained HTML page for browsing a snapshot of ``torchgeo-bench``
 benchmark results. The committed page is regenerated from
 ``results/all_results.csv`` and the archived JSON snapshots with
-:file:`scripts/regen_results_explorer.py`.
+:file:`experiments/scripts/regen_results_explorer.py`.

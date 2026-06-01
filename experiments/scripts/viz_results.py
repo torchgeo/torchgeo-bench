@@ -1,7 +1,7 @@
 """Generate a self-contained HTML visualizer for a torchgeo-bench results CSV.
 
 Usage:
-    python scripts/viz_results.py results/all_results_old.csv viz/all_results_old.html
+    python experiments/scripts/viz_results.py results/all_results_old.csv viz/all_results_old.html
 
 The output HTML embeds the CSV rows as a JSON array and renders interactive
 charts (Plotly.js) plus a sortable / searchable table (Tabulator). The page

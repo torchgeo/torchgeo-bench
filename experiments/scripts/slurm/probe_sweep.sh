@@ -17,12 +17,12 @@
 # Submit as:
 #
 #   sbatch --account=$PROJECT \
-#          --array=0-$(( $(wc -l < scripts/slurm/probe_sweep.jobs) - 1 )) \
-#          scripts/slurm/probe_sweep.sh
+#          --array=0-$(( $(wc -l < experiments/scripts/slurm/probe_sweep.jobs) - 1 )) \
+#          experiments/scripts/slurm/probe_sweep.sh
 #
-# The job-list file `scripts/slurm/probe_sweep.jobs` contains one whitespace-
+# The job-list file `experiments/scripts/slurm/probe_sweep.jobs` contains one whitespace-
 # separated record per line: `<model_config> <dataset_name> <bands>`.
-# Generate it with `python scripts/slurm/build_probe_jobs.py`.
+# Generate it with `python experiments/scripts/slurm/build_probe_jobs.py`.
 #
 # Each array task probes one (model x dataset x bands) combination on one A100,
 # extracts features once, runs KNN + linear-probe + intrinsic-dim, and appends
@@ -32,7 +32,7 @@ set -euo pipefail
 
 mkdir -p logs results
 
-JOBS_FILE=${JOBS_FILE:-scripts/slurm/probe_sweep.jobs}
+JOBS_FILE=${JOBS_FILE:-experiments/scripts/slurm/probe_sweep.jobs}
 LINE=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$JOBS_FILE")
 read -r MODEL DATASET BANDS NORM <<< "$LINE"
 NORM=${NORM:-bandspec_zscore}

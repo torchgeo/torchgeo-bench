@@ -14,7 +14,7 @@
 # Smoke test for the GPU path of torchgeo_bench.knn.KNNClassifier.
 # Installs the project's `cuda` extra (faissknn → faiss-cuda-cu128) into a
 # scratch venv on the compute node (where glibc may be newer than the login
-# node), then runs scripts/test_knn_gpu_smoke.py and compares CPU vs GPU
+# node), then runs experiments/scripts/test_knn_gpu_smoke.py and compares CPU vs GPU
 # predictions on synthetic data.
 
 set -euo pipefail
@@ -32,4 +32,4 @@ VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 source "$VENV/bin/activate"
 nvidia-smi | head -3 || true
 python -c "import faiss; print('faiss has GPU:', hasattr(faiss, 'GpuIndexFlatL2'))"
-python scripts/test_knn_gpu_smoke.py
+python experiments/scripts/test_knn_gpu_smoke.py

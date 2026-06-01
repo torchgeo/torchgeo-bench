@@ -6,13 +6,13 @@ committed snapshot (newest first) into the explorer HTML and bumps the
 masthead.  Keeps ``knn5`` / ``linear`` / ``profile`` rows; the explorer's
 Compute & efficiency figure joins the latter against the former.
 
-The GPU price / carbon intensity tables under ``scripts/cost/`` are
+The GPU price / carbon intensity tables under ``experiments/scripts/cost/`` are
 inlined as JS constants so the explorer can extrapolate $ and kgCO2 per
 1M inferences in-browser, without a separate fetch.
 
 Usage::
 
-    python scripts/regen_results_explorer.py [--label 2026-05-08]
+    python experiments/scripts/regen_results_explorer.py [--label 2026-05-08]
 """
 
 import argparse

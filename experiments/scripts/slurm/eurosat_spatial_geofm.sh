@@ -2,15 +2,15 @@
 # Submit the GeoFM sweep on the eurosat-spatial dataset.
 #
 # Generates the job manifest (idempotent — re-runs the builder each time),
-# computes the array size, and sbatches scripts/slurm/probe_sweep.sh with
+# computes the array size, and sbatches experiments/scripts/slurm/probe_sweep.sh with
 # the right JOBS_FILE.  probe_sweep.sh already enables intrinsic_dim and
 # profile metrics, so results land in results/all_results.csv with rows
 # for method in {knn5, linear, intrinsic_dim, profile}.
 #
 # Usage:
-#   bash scripts/slurm/eurosat_spatial_geofm.sh                # gpu_a100
-#   bash scripts/slurm/eurosat_spatial_geofm.sh --preempt      # preempt partition
-#   DRY_RUN=1 bash scripts/slurm/eurosat_spatial_geofm.sh ...  # print sbatch cmd, don't submit
+#   bash experiments/scripts/slurm/eurosat_spatial_geofm.sh                # gpu_a100
+#   bash experiments/scripts/slurm/eurosat_spatial_geofm.sh --preempt      # preempt partition
+#   DRY_RUN=1 bash experiments/scripts/slurm/eurosat_spatial_geofm.sh ...  # print sbatch cmd, don't submit
 #
 # --preempt: submit to the preempt partition with --requeue, so jobs
 # killed by higher-priority work are re-queued automatically.  Combined
@@ -30,10 +30,10 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-JOBS_FILE="scripts/slurm/eurosat_spatial_geofm.jobs"
+JOBS_FILE="experiments/scripts/slurm/eurosat_spatial_geofm.jobs"
 
 echo "[1/3] Regenerating job manifest -> $JOBS_FILE"
-uv run --no-sync python scripts/slurm/build_probe_jobs.py \
+uv run --no-sync python experiments/scripts/slurm/build_probe_jobs.py \
   --datasets eurosat-spatial \
   --bands rgb,all \
   --out "$JOBS_FILE"
@@ -50,7 +50,7 @@ SBATCH_CMD=(
 if [[ "$PREEMPT" -eq 1 ]]; then
   SBATCH_CMD+=(--partition=preempt --requeue)
 fi
-SBATCH_CMD+=(scripts/slurm/probe_sweep.sh)
+SBATCH_CMD+=(experiments/scripts/slurm/probe_sweep.sh)
 
 echo "[3/3] ${SBATCH_CMD[*]}"
 if [[ "${DRY_RUN:-0}" == "1" ]]; then

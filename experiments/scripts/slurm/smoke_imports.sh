@@ -16,7 +16,7 @@
 # x_dict keys before we burn SUs on a real sweep.
 #
 # Submit as:
-#   sbatch --account=$PROJECT scripts/slurm/smoke_imports.sh
+#   sbatch --account=$PROJECT experiments/scripts/slurm/smoke_imports.sh
 #
 # Output: results/smoke_imports.json + a summary table in the job log.
 
@@ -51,7 +51,7 @@ done
 # wrappers need rework before they can probe via the standard path.
 MODEL_GROUPS=${MODEL_GROUPS:-terratorch,geobreeze}
 
-python scripts/smoke_imports.py \
+python experiments/scripts/smoke_imports.py \
   --groups "${MODEL_GROUPS}" \
   --batch 2 \
   --device cuda:0 \
