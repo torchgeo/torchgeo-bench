@@ -2,6 +2,11 @@ cal_size: 400
 n_ensemble: 5
 laplace_batch_size: 512
 laplace_pred_batch_size: 64
+svgp_n_inducing: 200
+svgp_epochs: 100
+svgp_lr: 0.01
+svgp_batch_size: 512
+svgp_n_mc_samples: 20
 
 methods:
   - uncalibrated

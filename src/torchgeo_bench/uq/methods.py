@@ -314,6 +314,139 @@ class LaplaceProbe:
         return torch.cat(chunks, dim=0).numpy()
 
 
+class SVGPProbe:
+    """Sparse variational GP probe for OOD diagnostics using GeoFM embeddings.
+
+    Uses a Matérn-5/2 kernel with SoftmaxLikelihood and k-means inducing-point
+    initialization. Intended as a diagnostic instrument, not a competing UQ method.
+    """
+
+    def __init__(
+        self,
+        n_inducing: int = 200,
+        epochs: int = 100,
+        lr: float = 0.01,
+        batch_size: int = 512,
+        n_mc_samples: int = 20,
+    ) -> None:
+        self.n_inducing = int(n_inducing)
+        self.epochs = int(epochs)
+        self.lr = float(lr)
+        self.batch_size = int(batch_size)
+        self.n_mc_samples = int(n_mc_samples)
+        self._model = None
+        self._likelihood = None
+
+    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
+        """Fit a sparse variational GP on training embeddings.
+
+        Args:
+            X_train: Training embeddings with shape ``(N, D)``.
+            y_train: Training labels with shape ``(N,)``.
+
+        Raises:
+            ModuleNotFoundError: If ``gpytorch`` is not installed.
+        """
+        try:
+            import gpytorch
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "gpytorch is required for SVGPProbe. Install with `pip install gpytorch`."
+            ) from exc
+
+        from sklearn.cluster import MiniBatchKMeans
+
+        n_classes = int(np.unique(y_train).shape[0])
+        n_inducing = min(self.n_inducing, len(X_train))
+
+        kmeans = MiniBatchKMeans(n_clusters=n_inducing, random_state=0, n_init=3)
+        kmeans.fit(X_train)
+        inducing_pts = torch.from_numpy(kmeans.cluster_centers_.astype(np.float32))
+
+        class _GP(gpytorch.models.ApproximateGP):
+            def __init__(mdl, ind_pts: torch.Tensor, n_cls: int) -> None:
+                vd = gpytorch.variational.CholeskyVariationalDistribution(
+                    num_inducing_points=ind_pts.size(0),
+                    batch_shape=torch.Size([n_cls]),
+                )
+                base_vs = gpytorch.variational.VariationalStrategy(
+                    mdl, ind_pts, vd, learn_inducing_locations=True
+                )
+                # IndependentMultitaskVariationalStrategy turns batch_shape=[C]
+                # into MultitaskMultivariateNormal(N, C) expected by SoftmaxLikelihood
+                vs = gpytorch.variational.IndependentMultitaskVariationalStrategy(
+                    base_vs, num_tasks=n_cls
+                )
+                super().__init__(vs)
+                mdl.mean_module = gpytorch.means.ConstantMean(
+                    batch_shape=torch.Size([n_cls])
+                )
+                mdl.covar_module = gpytorch.kernels.ScaleKernel(
+                    gpytorch.kernels.MaternKernel(nu=2.5, batch_shape=torch.Size([n_cls])),
+                    batch_shape=torch.Size([n_cls]),
+                )
+
+            def forward(mdl, x: torch.Tensor) -> gpytorch.distributions.MultivariateNormal:
+                return gpytorch.distributions.MultivariateNormal(
+                    mdl.mean_module(x), mdl.covar_module(x)
+                )
+
+        model = _GP(inducing_pts, n_classes)
+        likelihood = gpytorch.likelihoods.SoftmaxLikelihood(
+            num_classes=n_classes, mixing_weights=False
+        )
+
+        model.train()
+        likelihood.train()
+
+        optimizer = torch.optim.Adam(
+            [*model.parameters(), *likelihood.parameters()],
+            lr=self.lr,
+        )
+        mll = gpytorch.mlls.VariationalELBO(likelihood, model, num_data=len(X_train))
+
+        x_t = torch.from_numpy(X_train.astype(np.float32, copy=False))
+        y_t = torch.from_numpy(y_train.astype(np.int64, copy=False))
+        loader = DataLoader(TensorDataset(x_t, y_t), batch_size=self.batch_size, shuffle=True)
+
+        for _ in range(self.epochs):
+            for x_batch, y_batch in loader:
+                optimizer.zero_grad(set_to_none=True)
+                loss = -mll(model(x_batch), y_batch)
+                loss.backward()
+                optimizer.step()
+
+        self._model = model
+        self._likelihood = likelihood
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Return class probabilities via MC sampling from the GP posterior.
+
+        Args:
+            X: Input embeddings with shape ``(N, D)``.
+
+        Returns:
+            Probability matrix with shape ``(N, C)``.
+
+        Raises:
+            RuntimeError: If ``fit`` has not been called.
+        """
+        if self._model is None:
+            raise RuntimeError("SVGPProbe has not been fit yet.")
+
+        self._model.eval()
+        x_t = torch.from_numpy(X.astype(np.float32, copy=False))
+
+        with torch.no_grad():
+            # f_dist: MultitaskMultivariateNormal with event_shape=[N, C]
+            f_dist = self._model(x_t)
+            # rsample gives (S, N, C); softmax over C; mean over S
+            f_samples = f_dist.rsample(torch.Size([self.n_mc_samples]))
+            probs = torch.softmax(f_samples, dim=-1).mean(0)
+
+        return probs.cpu().numpy()
+
+
 @dataclass
 class _SKLearnProbeWrapper:
     """Minimal sklearn-compatible wrapper around a fitted torchgeo probe."""

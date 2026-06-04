@@ -35,6 +35,16 @@ def test_cka_config_requires_model():
         compose(config_name="cka_config")
 
 
+def test_uq_config_has_svgp_keys():
+    with initialize_config_module(config_module="torchgeo_bench.conf", version_base="1.3"):
+        cfg = compose(config_name="uq_config", overrides=["model=timm/resnet50"])
+    assert cfg.uq.svgp_n_inducing == 200
+    assert cfg.uq.svgp_epochs == 100
+    assert cfg.uq.svgp_lr == pytest.approx(0.01)
+    assert cfg.uq.svgp_batch_size == 512
+    assert cfg.uq.svgp_n_mc_samples == 20
+
+
 def test_cka_layers_all_have_four_paths():
     with initialize_config_module(config_module="torchgeo_bench.conf", version_base="1.3"):
         cfg = compose(config_name="cka_config", overrides=["model=timm/resnet50"])

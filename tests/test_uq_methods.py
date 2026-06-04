@@ -12,6 +12,7 @@ from torchgeo_bench.uq.methods import (
     ConformalPredictor,
     DeepEnsemble,
     LaplaceProbe,
+    SVGPProbe,
     TemperatureScaling,
     Uncalibrated,
 )
@@ -235,3 +236,46 @@ def test_conformal_predict_sets_rejects_unfitted_alpha(fitted_probe):
         pytest.skip(f"conformal unavailable at runtime: {exc}")
     with pytest.raises(ValueError):
         method.predict_sets(X_test, alpha=0.2)
+
+
+def test_svgp_probe_predict_proba_shape(fitted_probe):
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=2)
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert probs.shape == (X_test.shape[0], 3)
+
+
+def test_svgp_probe_proba_sums_to_one(fitted_probe):
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=2)
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_svgp_probe_finite_output(fitted_probe):
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=2)
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert np.isfinite(probs).all()
+    assert np.all(probs >= 0.0)
