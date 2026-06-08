@@ -594,10 +594,18 @@ def main(cfg: DictConfig) -> None:
             trace_ctx["trace_dataset_root"],
         )
 
-    prior_results = pd.read_csv(str(cfg.prior_results)) if os.path.exists(str(cfg.prior_results)) else None
-    if prior_results is None:
-        logger.warning("Prior results file missing at %s; skipping all datasets.", cfg.prior_results)
-        return
+    _PROBE_DEPENDENT_METHODS = frozenset(
+        {"uncalibrated", "temp_scaling", "bootstrap_ensemble", "deep_ensemble", "laplace", "conformal"}
+    )
+    requested_methods = set(cfg.uq.methods)
+    needs_probe = bool(requested_methods & _PROBE_DEPENDENT_METHODS)
+
+    prior_results = None
+    if needs_probe:
+        prior_results = pd.read_csv(str(cfg.prior_results)) if os.path.exists(str(cfg.prior_results)) else None
+        if prior_results is None:
+            logger.warning("Prior results file missing at %s; skipping all datasets.", cfg.prior_results)
+            return
 
     for dataset_name in dataset_names:
         try:
@@ -659,51 +667,60 @@ def main(cfg: DictConfig) -> None:
         X_train, y_train = extract_features(model, train_loader, device, transforms=None, verbose=cfg.verbose)
         X_val, y_val = extract_features(model, val_loader, device, transforms=None, verbose=cfg.verbose)
 
-        cal_size = int(cfg.uq.cal_size)
-        if cal_size >= len(X_val):
-            logger.warning(
-                "Skipping dataset %s: uq.cal_size=%d >= val size=%d.",
-                dataset_name,
-                cal_size,
-                len(X_val),
+        X_cal: np.ndarray | None = None
+        y_cal: np.ndarray | None = None
+        probe = None
+        best_c = None
+
+        if needs_probe:
+            cal_size = int(cfg.uq.cal_size)
+            if cal_size >= len(X_val):
+                logger.warning(
+                    "Skipping dataset %s: uq.cal_size=%d >= val size=%d.",
+                    dataset_name,
+                    cal_size,
+                    len(X_val),
+                )
+                continue
+
+            X_cal, y_cal, X_val_rem, y_val_rem = stratified_cal_split(X_val, y_val, cal_size, cfg.seed)
+            X_final_train = np.concatenate([X_train, X_val_rem], axis=0)
+            y_final_train = np.concatenate([y_train, y_val_rem], axis=0)
+
+            alias_dataset = getattr(ds_cls, "prior_results_alias", None)
+            best_c = _lookup_best_c(
+                prior_results,
+                {
+                    "model": cfg.model._target_,
+                    "name": cfg.model.name,
+                    "dataset": dataset_name,
+                    "partition": cfg.dataset.partition,
+                    "bands": bands_value,
+                },
+                alias_dataset=alias_dataset,
             )
-            continue
+            if best_c is None:
+                logger.warning(
+                    "Skipping dataset %s: no prior best_c found for model=%s name=%s partition=%s bands=%s.",
+                    dataset_name,
+                    cfg.model._target_,
+                    cfg.model.name,
+                    cfg.dataset.partition,
+                    bands_value,
+                )
+                continue
 
-        X_cal, y_cal, X_val_rem, y_val_rem = stratified_cal_split(X_val, y_val, cal_size, cfg.seed)
-        X_final_train = np.concatenate([X_train, X_val_rem], axis=0)
-        y_final_train = np.concatenate([y_train, y_val_rem], axis=0)
-
-        alias_dataset = getattr(ds_cls, "prior_results_alias", None)
-        best_c = _lookup_best_c(
-            prior_results,
-            {
-                "model": cfg.model._target_,
-                "name": cfg.model.name,
-                "dataset": dataset_name,
-                "partition": cfg.dataset.partition,
-                "bands": bands_value,
-            },
-            alias_dataset=alias_dataset,
-        )
-        if best_c is None:
-            logger.warning(
-                "Skipping dataset %s: no prior best_c found for model=%s name=%s partition=%s bands=%s.",
-                dataset_name,
-                cfg.model._target_,
-                cfg.model.name,
-                cfg.dataset.partition,
-                bands_value,
+            probe = LogisticRegression(
+                C=best_c,
+                max_iter=4000,
+                tol=1e-6,
+                random_state=cfg.seed,
+                device=str(device),
             )
-            continue
-
-        probe = LogisticRegression(
-            C=best_c,
-            max_iter=4000,
-            tol=1e-6,
-            random_state=cfg.seed,
-            device=str(device),
-        )
-        probe.fit(torch.from_numpy(X_final_train), torch.from_numpy(y_final_train.astype(np.int64)))
+            probe.fit(torch.from_numpy(X_final_train), torch.from_numpy(y_final_train.astype(np.int64)))
+        else:
+            X_final_train = np.concatenate([X_train, X_val], axis=0)
+            y_final_train = np.concatenate([y_train, y_val], axis=0)
 
         methods: dict[str, Any] = {}
         if "uncalibrated" in cfg.uq.methods:
@@ -851,10 +868,10 @@ def main(cfg: DictConfig) -> None:
                         ece_bins=int(cfg.uq.ece_bins),
                         ece_binning=str(getattr(cfg.uq, "ece_binning", "equal_width")),
                         conformal_alpha=float(cfg.uq.conformal_alpha),
-                        n_cal=len(X_cal),
+                        n_cal=len(X_cal) if X_cal is not None else 0,
                         n_train=len(X_final_train),
                         feature_dim=int(X_final_train.shape[1]),
-                        best_c=float(best_c),
+                        best_c=float(best_c) if best_c is not None else float("nan"),
                         seed=int(cfg.seed),
                         X_test=X_test,
                         y_test=y_test,

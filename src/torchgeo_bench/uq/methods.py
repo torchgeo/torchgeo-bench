@@ -1,5 +1,6 @@
 """Post-hoc uncertainty method implementations for linear probes."""
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -8,6 +9,8 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from torchgeo_bench.linear import LogisticRegression
+
+logger = logging.getLogger(__name__)
 
 
 class Uncalibrated:
@@ -416,12 +419,45 @@ class SVGPProbe:
         y_t = torch.from_numpy(y_train.astype(np.int64, copy=False))
         loader = DataLoader(TensorDataset(x_t, y_t), batch_size=self.batch_size, shuffle=True)
 
-        for _ in range(self.epochs):
+        # Early stopping: halt when per-epoch ELBO improvement drops below
+        # min_delta for `patience` consecutive epochs.
+        _PATIENCE = 15
+        _MIN_DELTA = 1e-3
+
+        best_loss = float("inf")
+        epochs_no_improve = 0
+        self._epoch_losses: list[float] = []
+
+        for epoch in range(self.epochs):
+            epoch_loss = 0.0
             for x_batch, y_batch in loader:
                 optimizer.zero_grad(set_to_none=True)
                 loss = -mll(model(x_batch), y_batch)
                 loss.backward()
                 optimizer.step()
+                epoch_loss += loss.item()
+            epoch_loss /= len(loader)
+            self._epoch_losses.append(epoch_loss)
+
+            if epoch_loss < best_loss - _MIN_DELTA:
+                best_loss = epoch_loss
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+                if epochs_no_improve >= _PATIENCE:
+                    logger.info(
+                        "SVGP early stop at epoch %d/%d (ELBO=%.4f)",
+                        epoch + 1,
+                        self.epochs,
+                        best_loss,
+                    )
+                    break
+        else:
+            logger.info(
+                "SVGP finished %d epochs (ELBO=%.4f)",
+                self.epochs,
+                best_loss,
+            )
 
         self._model = model
         self._likelihood = likelihood
