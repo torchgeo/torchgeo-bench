@@ -1,0 +1,30 @@
+defaults:
+  - model: ???
+  - _self_
+
+seed: 0
+device: cpu
+verbose: false
+resume: false
+
+dataset:
+  names: all
+  partition: default
+  batch_size: 64
+  num_workers: 4
+  normalization: bandspec_zscore
+  bands: rgb
+  image_size: 224
+  interpolation: bilinear
+
+nf:
+  output: results/nf_results.csv
+  n_trials: 25
+  bootstrap: 200
+  epochs: 100
+  batch_size: 512
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

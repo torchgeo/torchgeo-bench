@@ -519,3 +519,44 @@ def test_normalize_cloud_pattern_mode():
 def test_normalize_cloud_pattern_mode_invalid():
     with np.testing.assert_raises(ValueError):
         _normalize_cloud_pattern_mode("invalid")
+
+
+def test_expected_metrics_nf_empirical():
+    assert _expected_metrics("nf_empirical") == _expected_metrics("uncalibrated")
+
+
+def test_expected_metrics_nf_uniform():
+    assert _expected_metrics("nf_uniform") == _expected_metrics("uncalibrated")
+
+
+def test_run_uq_block_nf_empirical_writes_standard_metrics(tmp_path):
+    csv_path = tmp_path / "uq_results.csv"
+    X_test = np.random.default_rng(0).standard_normal((12, 4)).astype(np.float32)
+    y_test = np.tile([0, 1, 2], 4).astype(np.int64)
+
+    class _DummyNF:
+        def predict_proba(self, X: np.ndarray) -> np.ndarray:
+            return np.full((len(X), 3), 1 / 3, dtype=np.float32)
+
+        def predict_confidence(self, X: np.ndarray) -> np.ndarray:
+            return np.zeros(len(X), dtype=np.float32)
+
+    rows = _run_uq_block(
+        method_name="nf_empirical",
+        method=_DummyNF(),
+        output_path=str(csv_path),
+        common_meta={
+            "model": "m.t", "name": "resnet50", "backbone": "resnet50",
+            "dataset": "m-eurosat", "normalization": "bandspec_zscore",
+            "image_size": 224, "interpolation": "bilinear",
+            "partition": "default", "bands": "rgb", "seed": 42,
+        },
+        corruption_type="clean", severity=0, ece_bins=15,
+        ece_binning="equal_width", conformal_alpha=0.1,
+        n_cal=0, n_train=100, feature_dim=4,
+        best_c=float("nan"), seed=42,
+        X_test=X_test, y_test=y_test,
+    )
+    df = pd.read_csv(csv_path)
+    assert set(df["metric_name"]) == _expected_metrics("nf_empirical")
+    assert np.isfinite(df["metric_value"].to_numpy(dtype=np.float64)).all()

@@ -111,7 +111,9 @@ optional-dependencies.uq = [
   "laplace-torch>=0.1",
   "curvlinops-for-pytorch >= 2.0, < 3", # laplace-torch issue https://github.com/aleximmer/Laplace/issues/285
   "mapie>=0.8",
+  "optuna>=3.0",
   "satellite-cloud-generator>=0.4",
+  "zuko>=0.3",
 ]
 optional-dependencies.viz = [
   "matplotlib>=3.5",

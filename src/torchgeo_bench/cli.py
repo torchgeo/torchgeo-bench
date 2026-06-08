@@ -4,9 +4,10 @@ Two subcommands:
 
 - ``torchgeo-bench run [hydra overrides...]`` — runs the benchmark via Hydra.
 - ``torchgeo-bench uq [hydra overrides...]`` — runs UQ benchmark via Hydra.
+- ``torchgeo-bench nf [hydra overrides...]`` — runs NF stage-1 pipeline via Hydra.
 - ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`` — fetches data.
 
-The ``run`` and ``uq`` subcommands forward every remaining arg to Hydra by
+The ``run``, ``uq``, and ``nf`` subcommands forward every remaining arg to Hydra by
 mutating ``sys.argv`` and calling the corresponding entry point in-process.
 We restore ``sys.argv`` afterwards so embedded use (tests, notebooks) is safe.
 """
@@ -57,6 +58,22 @@ def run(ctx: typer.Context) -> None:
 def uq(ctx: typer.Context) -> None:
     """Run UQ benchmark experiments; extra args are forwarded to Hydra."""
     from torchgeo_bench.uq.pipeline import main as hydra_main
+
+    saved = sys.argv[:]
+    try:
+        sys.argv = [saved[0], *ctx.args]
+        hydra_main()
+    finally:
+        sys.argv = saved
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Run NF stage-1 pipeline (extra args forwarded to Hydra).",
+)
+def nf(ctx: typer.Context) -> None:
+    """Run NF stage-1 Optuna pipeline; extra args are forwarded to Hydra."""
+    from torchgeo_bench.nf_pipeline import main as hydra_main
 
     saved = sys.argv[:]
     try:

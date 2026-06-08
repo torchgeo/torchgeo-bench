@@ -62,3 +62,15 @@ def test_download_eurosat(monkeypatch) -> None:
     result = runner.invoke(app, ["download", "eurosat"])
     assert result.exit_code == 0
     assert len(calls) == 1
+
+
+def test_nf_forwards_to_hydra(monkeypatch) -> None:
+    calls: list[tuple] = []
+
+    def _fake_nf_main() -> None:
+        calls.append(())
+
+    monkeypatch.setattr("torchgeo_bench.nf_pipeline.main", _fake_nf_main)
+    result = runner.invoke(app, ["nf", "model=resnet50"])
+    assert result.exit_code == 0
+    assert len(calls) == 1

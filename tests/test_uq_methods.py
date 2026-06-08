@@ -279,3 +279,99 @@ def test_svgp_probe_finite_output(fitted_probe):
     probs = method.predict_proba(X_test)
     assert np.isfinite(probs).all()
     assert np.all(probs >= 0.0)
+
+
+# ---------------------------------------------------------------------------
+# NormalizingFlowProbe — Slice 2 (predict_proba) + Slice 3 (predict_confidence)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def nf_xy():
+    X, y = make_classification(
+        n_samples=300, n_features=16, n_informative=12, n_redundant=0,
+        n_classes=3, n_clusters_per_class=1, class_sep=2.0, random_state=0,
+    )
+    return X.astype(np.float32), y.astype(np.int64)
+
+
+def test_nf_probe_predict_proba_shape(nf_xy):
+    if importlib.util.find_spec("zuko") is None:
+        pytest.skip("zuko not installed")
+    from torchgeo_bench.uq.nf import NormalizingFlowProbe
+    X, y = nf_xy
+    probe = NormalizingFlowProbe(prior="empirical", lr=1e-3, weight_decay=1e-4, epochs=2)
+    probe.fit(X, y)
+    probs = probe.predict_proba(X)
+    assert probs.shape == (len(X), 3)
+
+
+def test_nf_probe_proba_sums_to_one(nf_xy):
+    if importlib.util.find_spec("zuko") is None:
+        pytest.skip("zuko not installed")
+    from torchgeo_bench.uq.nf import NormalizingFlowProbe
+    X, y = nf_xy
+    probe = NormalizingFlowProbe(prior="empirical", lr=1e-3, weight_decay=1e-4, epochs=2)
+    probe.fit(X, y)
+    probs = probe.predict_proba(X)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_nf_probe_proba_finite(nf_xy):
+    if importlib.util.find_spec("zuko") is None:
+        pytest.skip("zuko not installed")
+    from torchgeo_bench.uq.nf import NormalizingFlowProbe
+    X, y = nf_xy
+    probe = NormalizingFlowProbe(prior="empirical", lr=1e-3, weight_decay=1e-4, epochs=2)
+    probe.fit(X, y)
+    probs = probe.predict_proba(X)
+    assert np.isfinite(probs).all()
+    assert np.all(probs >= 0.0)
+
+
+def test_nf_probe_uniform_prior_shape(nf_xy):
+    if importlib.util.find_spec("zuko") is None:
+        pytest.skip("zuko not installed")
+    from torchgeo_bench.uq.nf import NormalizingFlowProbe
+    X, y = nf_xy
+    probe = NormalizingFlowProbe(prior="uniform", lr=1e-3, weight_decay=1e-4, epochs=2)
+    probe.fit(X, y)
+    probs = probe.predict_proba(X)
+    assert probs.shape == (len(X), 3)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_nf_probe_predict_confidence_shape(nf_xy):
+    if importlib.util.find_spec("zuko") is None:
+        pytest.skip("zuko not installed")
+    from torchgeo_bench.uq.nf import NormalizingFlowProbe
+    X, y = nf_xy
+    probe = NormalizingFlowProbe(prior="empirical", lr=1e-3, weight_decay=1e-4, epochs=2)
+    probe.fit(X, y)
+    conf = probe.predict_confidence(X)
+    assert conf.shape == (len(X),)
+
+
+def test_nf_probe_predict_confidence_finite(nf_xy):
+    if importlib.util.find_spec("zuko") is None:
+        pytest.skip("zuko not installed")
+    from torchgeo_bench.uq.nf import NormalizingFlowProbe
+    X, y = nf_xy
+    probe = NormalizingFlowProbe(prior="empirical", lr=1e-3, weight_decay=1e-4, epochs=2)
+    probe.fit(X, y)
+    conf = probe.predict_confidence(X)
+    assert np.isfinite(conf).all()
+
+
+def test_nf_probe_confidence_higher_for_indist_than_noise(nf_xy):
+    if importlib.util.find_spec("zuko") is None:
+        pytest.skip("zuko not installed")
+    from torchgeo_bench.uq.nf import NormalizingFlowProbe
+    X, y = nf_xy
+    probe = NormalizingFlowProbe(prior="empirical", lr=1e-3, weight_decay=1e-4, epochs=10)
+    probe.fit(X, y)
+    conf_in = probe.predict_confidence(X).mean()
+    rng = np.random.default_rng(99)
+    X_noise = rng.standard_normal(X.shape).astype(np.float32) * 10
+    conf_noise = probe.predict_confidence(X_noise).mean()
+    assert conf_in > conf_noise
