@@ -87,6 +87,38 @@ _CLOUD_PATTERN_MODE_MAP: dict[str, str] = {
 }
 
 
+def _lookup_nf_hyperparams(
+    nf_df: pd.DataFrame | None, model: str, name: str, dataset: str, partition: str, bands: str
+) -> tuple[float, float] | None:
+    """Return ``(best_lr, best_wd)`` from NF prior results, or ``None`` if missing.
+
+    Args:
+        nf_df: DataFrame loaded from ``nf_results.csv``, or ``None``.
+        model: Model ``_target_`` string.
+        name: Model ``name`` field.
+        dataset: Dataset name.
+        partition: Partition name.
+        bands: Bands value.
+
+    Returns:
+        ``(best_lr, best_wd)`` tuple, or ``None`` if no matching row found.
+    """
+    if nf_df is None or nf_df.empty:
+        return None
+    mask = (
+        (nf_df["model"] == model)
+        & (nf_df["name"] == name)
+        & (nf_df["dataset"] == dataset)
+        & (nf_df["partition"] == partition)
+        & (nf_df["bands"] == bands)
+    )
+    sub = nf_df.loc[mask]
+    if sub.empty:
+        return None
+    row = sub.iloc[0]
+    return float(row["best_lr"]), float(row["best_wd"])
+
+
 def _is_uq_classification_dataset(ds_cls: type) -> bool:
     """Return whether a dataset class is in scope for UQ runs.
 
@@ -764,6 +796,42 @@ def main(cfg: DictConfig) -> None:
                 methods["svgp"] = svgp
             except ModuleNotFoundError as exc:
                 logger.warning("Skipping svgp for dataset %s: %s", dataset_name, exc)
+
+        for nf_method in ("nf_empirical", "nf_uniform"):
+            if nf_method not in cfg.uq.methods:
+                continue
+            nf_prior_path = str(getattr(cfg.uq, "nf_prior_results", "results/nf_results.csv"))
+            nf_prior_df = pd.read_csv(nf_prior_path) if os.path.exists(nf_prior_path) else None
+            hp = _lookup_nf_hyperparams(
+                nf_prior_df,
+                model=str(cfg.model._target_),
+                name=str(cfg.model.name),
+                dataset=dataset_name,
+                partition=str(cfg.dataset.partition),
+                bands=bands_value,
+            )
+            if hp is None:
+                logger.warning(
+                    "No NF hyperparams for %s / %s — run nf_pipeline first. Skipping %s.",
+                    str(cfg.model.name), dataset_name, nf_method,
+                )
+                continue
+            best_lr, best_wd = hp
+            nf_prior = "empirical" if nf_method == "nf_empirical" else "uniform"
+            try:
+                from torchgeo_bench.uq.nf import NormalizingFlowProbe
+
+                nf_probe = NormalizingFlowProbe(
+                    prior=nf_prior,
+                    lr=best_lr,
+                    weight_decay=best_wd,
+                    epochs=int(getattr(cfg.uq, "nf_epochs", 100)),
+                    batch_size=int(getattr(cfg.uq, "nf_batch_size", 512)),
+                )
+                nf_probe.fit(X_final_train, y_final_train)
+                methods[nf_method] = nf_probe
+            except ModuleNotFoundError as exc:
+                logger.warning("Skipping %s for dataset %s: %s", nf_method, dataset_name, exc)
 
         common_meta = {
             "model": str(cfg.model._target_),

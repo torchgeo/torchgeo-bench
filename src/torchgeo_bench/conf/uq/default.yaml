@@ -29,6 +29,7 @@ conformal_alpha: 0.1
 ece_bins: 15
 ece_binning: equal_width
 output: results/uq_results.csv
+nf_prior_results: results/nf_results.csv
 
 trace:
   enabled: false
