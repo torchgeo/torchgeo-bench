@@ -92,9 +92,25 @@ class _TerraTorchBench(BenchModel):
 
 PRITHVI_BANDS: list[str] = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
 
+# Maps canonical band names to HLSBands enum attribute names used by terratorch.
+_CANONICAL_TO_HLS: dict[str, str] = {
+    "blue": "BLUE",
+    "green": "GREEN",
+    "red": "RED",
+    "nir_narrow": "NIR_NARROW",
+    "swir1": "SWIR_1",
+    "swir2": "SWIR_2",
+}
+
 
 class TerraTorchPrithviBench(_TerraTorchBench):
-    """IBM/NASA Prithvi-EO v1/v2 — auto-maps dataset bands onto 6 HLS slots @ 224.
+    """IBM/NASA Prithvi-EO v1/v2 — auto-maps dataset bands onto HLS slots @ 224.
+
+    Supports any subset of the 6 HLS bands (blue, green, red, nir_narrow,
+    swir1, swir2), including pure RGB input.  The backbone is instantiated
+    with only the bands present in the dataset; terratorch selects the
+    matching columns of the pretrained patch-embed weight via
+    ``select_patch_embed_weights``.
 
     ``expected_input_unit = S2_DN``: under ``model_native`` the wrapper
     rescales the input to S2 DN scale before band-mapping.  Per-version
@@ -102,7 +118,7 @@ class TerraTorchPrithviBench(_TerraTorchBench):
     correspond to the post-mapped 6-band layout, while strategy
     normalisation runs on the dataset's raw channel count.  The BandSpec
     z-score (default) and minmax strategies compose cleanly with the
-    band-mapping zero-fill that follows.
+    band-mapping that follows.
     """
 
     expected_input_unit = InputUnit.S2_DN
@@ -116,17 +132,40 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         target_size: int | None = 224,
         **kwargs: Any,
     ) -> None:
+        try:
+            from terratorch.datasets import HLSBands
+        except ImportError as e:
+            raise ImportError(
+                "terratorch is required for TerraTorchPrithviBench; install with "
+                "`pip install torchgeo-bench[terratorch]`."
+            ) from e
+
+        from ._band_mapping import canonical_band_name
+
         self.backbone_name = backbone_name
+
+        # Build the HLSBands list for only the bands present in the dataset,
+        # preserving Prithvi's canonical band order.
+        avail = {canonical_band_name(b.name) for b in bands}
+        model_bands = [
+            getattr(HLSBands, hls_name)
+            for canon, hls_name in _CANONICAL_TO_HLS.items()
+            if canon in avail
+        ] or None  # None → terratorch falls back to its default (all 6 bands)
+
         super().__init__(
             bands=bands,
             target_size=target_size,
-            backbone_kwargs={"pretrained": pretrained, "num_frames": 1},
+            backbone_kwargs={"pretrained": pretrained, "num_frames": 1, "bands": model_bands},
             **kwargs,
         )
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
-        mapped, _ = map_to_model_bands(images, self.bands, PRITHVI_BANDS)
-        return mapped
+        # Reorder channels to Prithvi's band order and drop any missing slots,
+        # so the output channel count matches the backbone's in_chans.
+        mapped, missing = map_to_model_bands(images, self.bands, PRITHVI_BANDS, allow_missing=True)
+        present = [i for i, m in enumerate(missing) if not m]
+        return mapped[:, present]
 
 
 CLAY_BANDS: list[str] = ["blue", "green", "red", "nir", "swir1", "swir2"]
