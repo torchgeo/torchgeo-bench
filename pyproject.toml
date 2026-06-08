@@ -107,6 +107,7 @@ optional-dependencies.terratorch = [
   "terratorch>=1",
 ]
 optional-dependencies.uq = [
+  "gpytorch>=1.13",
   "laplace-torch>=0.1",
   "curvlinops-for-pytorch >= 2.0, < 3", # laplace-torch issue https://github.com/aleximmer/Laplace/issues/285
   "mapie>=0.8",

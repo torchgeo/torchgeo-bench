@@ -90,6 +90,7 @@ def test_expected_metrics_for_method():
     assert _expected_metrics("uncalibrated") == {
         "accuracy",
         "ece",
+        "signed_ece",
         "nll",
         "brier",
         "predictive_entropy",
@@ -103,6 +104,19 @@ def test_expected_metrics_for_method():
         "accuracy",
         "empirical_coverage",
         "mean_set_size",
+    }
+    assert _expected_metrics("svgp") == {
+        "accuracy",
+        "ece",
+        "signed_ece",
+        "nll",
+        "brier",
+        "predictive_entropy",
+        "normalized_predictive_entropy",
+        "max_probability",
+        "raw_aurc",
+        "eaurc",
+        "selective_acc_90",
     }
 
 

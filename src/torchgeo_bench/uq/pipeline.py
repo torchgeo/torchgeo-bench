@@ -27,6 +27,7 @@ from torchgeo_bench.uq.methods import (
     ConformalPredictor,
     DeepEnsemble,
     LaplaceProbe,
+    SVGPProbe,
     TemperatureScaling,
     Uncalibrated,
 )
@@ -733,6 +734,19 @@ def main(cfg: DictConfig) -> None:
                 methods["conformal"] = conf
             except (ModuleNotFoundError, ValueError) as exc:
                 logger.warning("Skipping conformal for dataset %s: %s", dataset_name, exc)
+        if "svgp" in cfg.uq.methods:
+            try:
+                svgp = SVGPProbe(
+                    n_inducing=int(cfg.uq.svgp_n_inducing),
+                    epochs=int(cfg.uq.svgp_epochs),
+                    lr=float(cfg.uq.svgp_lr),
+                    batch_size=int(cfg.uq.svgp_batch_size),
+                    n_mc_samples=int(cfg.uq.svgp_n_mc_samples),
+                )
+                svgp.fit(X_final_train, y_final_train)
+                methods["svgp"] = svgp
+            except ModuleNotFoundError as exc:
+                logger.warning("Skipping svgp for dataset %s: %s", dataset_name, exc)
 
         common_meta = {
             "model": str(cfg.model._target_),
