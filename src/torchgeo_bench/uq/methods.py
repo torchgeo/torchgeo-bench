@@ -104,6 +104,13 @@ class _EnsembleBase:
 
     _members: list[LogisticRegression]
 
+    @property
+    def classes_(self) -> np.ndarray | None:
+        """Return classes seen during training, delegating to the first member."""
+        if not self._members:
+            return None
+        return self._members[0].classes_
+
     def _member_probs(self, X: np.ndarray) -> np.ndarray:
         """Return stacked per-member probability arrays with shape ``(M, N, C)``."""
         if not self._members:
