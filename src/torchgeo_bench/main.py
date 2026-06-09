@@ -18,7 +18,7 @@ from omegaconf import DictConfig, OmegaConf
 from rich.progress import track
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
-from torchgeo.datasets.errors import DatasetNotFoundError
+from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.calibration import (
     apply_temperature,

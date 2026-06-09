@@ -171,12 +171,12 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
   ```python
   # ❌ BAD
   try:
-      from torchgeo.datasets.errors import DatasetNotFoundError
+      from torchgeo.datasets import DatasetNotFoundError
   except ImportError:  # pragma: no cover - older torchgeo versions
       DatasetNotFoundError = FileNotFoundError
 
   # ✅ GOOD
-  from torchgeo.datasets.errors import DatasetNotFoundError
+  from torchgeo.datasets import DatasetNotFoundError
   ```
 
   Same rule for bare `except Exception:` blocks that swallow errors to

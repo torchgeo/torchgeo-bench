@@ -20,7 +20,7 @@ or a bug in our wrapper's ``get_dataset`` plumbing.
 """
 
 import pytest
-from torchgeo.datasets.errors import DatasetNotFoundError
+from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.datasets import (
     get_bench_dataset_class,
