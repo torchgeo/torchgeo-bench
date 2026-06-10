@@ -407,10 +407,7 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
         _adapt_first_conv(self.backbone, "conv1", len(bands))
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
@@ -455,10 +452,7 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
         _adapt_first_conv(self.backbone, "features.0.0", len(bands))
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
@@ -509,10 +503,7 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         _adapt_first_conv(self.backbone, "patch_embed.proj", len(bands))
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         tokens = self.backbone.forward_features(images)  # (B, N+1, D)
@@ -591,10 +582,7 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
         self.wavelengths = _resolve_dofa_wavelengths(bands, wavelengths)
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone.forward_features(images, wavelengths=self.wavelengths)
@@ -640,10 +628,7 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
         _adapt_first_conv(self.backbone, "backbone.conv1", len(bands))
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
@@ -694,14 +679,11 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
         )
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         # Bypass CROMA.forward — its joint branch references `sar_encodings`
         # even when only the optical modality is provided.
         from ._band_mapping import map_to_model_bands
 
-        del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         x_opt, _ = map_to_model_bands(images, self.bands, _CROMA_S2_12)
@@ -742,10 +724,7 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
         self.register_buffer("_chn_ids", torch.tensor(wls_nm, dtype=torch.float32))
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         chn_ids = self._chn_ids.unsqueeze(0).expand(images.shape[0], -1)

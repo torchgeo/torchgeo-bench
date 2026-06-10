@@ -9,19 +9,24 @@ same conventions).
 Environment
 -----------
 
-The repo's canonical workflow uses both `conda <https://docs.conda.io>`_
-and `uv <https://docs.astral.sh/uv/>`_:
+The canonical workflow uses `uv <https://docs.astral.sh/uv/>`_, which
+resolves dependencies from :file:`pyproject.toml` and manages the virtual
+environment for you:
 
 .. code-block:: console
 
    $ git clone https://github.com/torchgeo/torchgeo-bench.git
    $ cd torchgeo-bench
-   $ conda env update -n torchgeo-bench -f environment.yml
-   $ conda activate torchgeo-bench
    $ uv sync --extra dev
 
-If you'd rather skip conda, ``uv sync --extra dev`` alone is enough on
-any Python 3.12+ install.
+If you prefer `conda <https://docs.conda.io>`_, create an environment with a
+compatible Python first and run ``uv sync`` inside it:
+
+.. code-block:: console
+
+   $ conda create -n torchgeo-bench 'python>=3.12,<3.13'
+   $ conda activate torchgeo-bench
+   $ uv sync --extra dev
 
 Makefile shortcuts
 ------------------
