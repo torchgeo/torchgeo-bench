@@ -1,19 +1,19 @@
 """Emit a job-list file for the SLURM probe sweep array.
 
-Writes ``scripts/slurm/probe_sweep.jobs`` with one whitespace-separated
+Writes ``experiments/scripts/slurm/probe_sweep.jobs`` with one whitespace-separated
 record per line:  ``<model_config> <dataset> <bands>``.
 
 Usage::
 
-    python scripts/slurm/build_probe_jobs.py            # all GeoFMs x classification + segmentation
-    python scripts/slurm/build_probe_jobs.py --dry-run  # print and exit
-    python scripts/slurm/build_probe_jobs.py --models terratorch/prithvi_eo_v2_300 \
+    python experiments/scripts/slurm/build_probe_jobs.py            # all GeoFMs x classification + segmentation
+    python experiments/scripts/slurm/build_probe_jobs.py --dry-run  # print and exit
+    python experiments/scripts/slurm/build_probe_jobs.py --models terratorch/prithvi_eo_v2_300 \
         --datasets m-eurosat,m-forestnet --bands rgb,all
 
-The output file is consumed by ``scripts/slurm/probe_sweep.sh``::
+The output file is consumed by ``experiments/scripts/slurm/probe_sweep.sh``::
 
-    sbatch --array=0-$(( $(wc -l < scripts/slurm/probe_sweep.jobs) - 1 )) \\
-           scripts/slurm/probe_sweep.sh
+    sbatch --array=0-$(( $(wc -l < experiments/scripts/slurm/probe_sweep.jobs) - 1 )) \\
+           experiments/scripts/slurm/probe_sweep.sh
 """
 
 import argparse
@@ -37,7 +37,7 @@ SINGLE_BAND_MODE_MODELS: dict[str, str] = {
     "torchgeo/dofa_base": "rgb",
     "torchgeo/dofa_large": "rgb",
     # OlmoEarth has its own multi-modal sweep tooling
-    # (``scripts/slurm/olmoearth_sweep.{py,sh}``) that constructs the right
+    # (``experiments/scripts/slurm/olmoearth_sweep.{py,sh}``) that constructs the right
     # 12-band / 10-band / RGB layout per dataset.  The build_probe_jobs.py
     # path only emits RGB-only entries to avoid passing
     # m-eurosat "all" (13 bands including swir_cirrus, which OlmoEarth's S2
@@ -159,7 +159,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="scripts/slurm/probe_sweep.jobs",
+        default="experiments/scripts/slurm/probe_sweep.jobs",
         help="output job-list file path",
     )
     parser.add_argument("--dry-run", action="store_true")

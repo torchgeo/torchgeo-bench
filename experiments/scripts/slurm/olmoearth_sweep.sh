@@ -22,7 +22,7 @@
 set -euo pipefail
 mkdir -p logs results
 
-JOBS_FILE=${JOBS_FILE:-scripts/slurm/olmoearth_sweep.jobs}
+JOBS_FILE=${JOBS_FILE:-experiments/scripts/slurm/olmoearth_sweep.jobs}
 LINE=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$JOBS_FILE")
 read -r MODEL DATASET BANDS IMAGE_SIZE <<< "$LINE"
 
@@ -65,7 +65,6 @@ torchgeo-bench run \
   dataset.num_workers="${TGB_NUM_WORKERS:-4}" \
   resume=true \
   output=results/all_results.csv \
-  eval.knn_device=cpu \
   eval.intrinsic_dim.enabled=true \
   eval.profile.enabled=true \
   eval.profile.cpu_throughput.enabled=true

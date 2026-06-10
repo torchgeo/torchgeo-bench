@@ -33,6 +33,7 @@ from torchvision.transforms.v2 import Normalize as NormalizeV2
 from torchgeo_bench.datasets.base import BandSpec
 
 from ._input_units import InputUnit, convert_unit, detect_input_unit
+from ._normalization import NormalizationStrategy
 from ._pooling import VALID_MODES, pool_tokens
 from .interface import BenchModel
 
@@ -319,10 +320,24 @@ class _TorchGeoBackboneBench(BenchModel):
         weights' ``Normalize(mean=[0], std=[10000])`` becomes near-zero
         and the features collapse.
         """
-        # Scale conversion: bring inputs into the weights' expected unit.
-        if self._weights_target_unit is not None:
-            images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
+        # Scale conversion: bring inputs into the scale the weights' Normalize
+        # was calibrated for.  Required when a weights_normalize layer exists
+        # (e.g. ResNet with Normalize(std=10000)) — without it a reflectance
+        # dataset would produce near-zero outputs.  Also required for
+        # model_native, which relies on this conversion explicitly.
+        #
+        # Skip when there is NO weights_normalize and strategy is not
+        # model_native: the strategy (bandspec_zscore, identity, …) in
+        # super().normalize_inputs already handles scaling correctly, and
+        # applying unit conversion first would corrupt it (e.g. z-score uses
+        # DN-scale mean/std — dividing raw DN by 10 000 before z-scoring
+        # produces values ≈ 0 - 1000/500 ≈ -2, i.e. garbage).
         weights_norm = self._weights_normalize
+        _need_unit_conv = self._weights_target_unit is not None and (
+            weights_norm is not None or self.normalization is NormalizationStrategy.MODEL_NATIVE
+        )
+        if _need_unit_conv:
+            images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
         if weights_norm is not None:
             expected_c = None
             for m in weights_norm.modules():

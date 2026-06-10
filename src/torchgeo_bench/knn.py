@@ -2,11 +2,10 @@
 
 Single-label and multi-label k-nearest neighbours backed by FAISS.
 
-CPU path (always available) uses ``faiss-cpu`` with ``IndexFlatL2`` and
-matches the historic implementation. GPU path (opt-in via the ``cuda``
-extra: ``pip install -e ".[cuda]"``) delegates to :mod:`faissknn`, which
-links against the GPU FAISS wheels (``faiss-cuda-cu128``). The two paths
-produce identical predictions modulo float-precision noise.
+CPU path uses ``faiss-cuda-cu128`` with ``IndexFlatL2``. GPU path (opt-in
+via the ``cuda`` extra: ``pip install -e ".[cuda]"``) delegates to
+:mod:`faissknn`. The two paths produce identical predictions modulo
+float-precision noise.
 """
 
 import logging
@@ -35,7 +34,7 @@ class KNNClassifier:
     Args:
         n_neighbors: Number of neighbours (k). Clamped to ``min(k, n_train)``
             on the CPU path; faissknn does not clamp internally.
-        device: ``"cpu"`` (default) → ``faiss-cpu``. Anything else
+        device: ``"cpu"`` (default) → ``faiss-cuda-cu128`` CPU index. Anything else
             (``"cuda"``, ``"cuda:0"``) requires the ``cuda`` extra
             (``faissknn``); raises :class:`ImportError` if not installed.
         metric: Distance metric — ``"l2"`` (default), ``"ip"`` (inner
@@ -83,7 +82,7 @@ class KNNClassifier:
             self._fit_gpu(X, y)
         return self
 
-    # ---- CPU path (faiss-cpu) ---------------------------------------------
+    # ---- CPU path (faiss-cuda-cu128 IndexFlatL2) --------------------------
 
     def _fit_cpu(self, X: np.ndarray, y: np.ndarray) -> None:
         self._index = faiss.IndexFlatL2(X.shape[1])

@@ -32,6 +32,16 @@ eval:
   knn_k: 5                 # number of neighbours for KNN evaluation
   knn_device: null         # null = inherit cfg.device; set "cpu" to force faiss-cpu KNN
 
+  # Calibration metrics (ECE / RMS-CE / MCE) reported per classification row.
+  # KNN probabilities are quantized to (knn_k + 1) levels, so its default
+  # bin count matches that; Linear uses the conventional 15. Temperature
+  # scaling (Guo et al., 2017) is fit on val logits and applied only to
+  # Linear Probing — KNN has no meaningful logit to scale.
+  calibration:
+    n_bins_knn: null       # null = knn_k + 1
+    n_bins_linear: 15
+    temp_scale: true       # adds ece_ts/rms_ce_ts/mce_ts/temperature columns
+
   # Optional intrinsic dimension (ID) metrics on extracted embeddings.
   # Computed alongside KNN/linear probing when enabled. Adds rows with
   # method="intrinsic_dim" and metric_name="id_<estimator>_<split>".

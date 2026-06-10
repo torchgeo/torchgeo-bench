@@ -90,6 +90,9 @@ _MODALITY_INFO: dict[str, dict] = {
             "b01": 10,
             "water_vapour": 11,
             "b09": 11,
+            # B10 (cirrus) — OlmoEarth has no cirrus slot; skip gracefully.
+            "swir_cirrus": None,
+            "b10": None,
         },
     },
     "landsat": {
@@ -254,9 +257,10 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
             key_name = b.name.lower()
             if key_name not in name_to_idx:
                 unknown.append(b.name)
-            else:
+            elif name_to_idx[key_name] is not None:
                 src_indices.append(src_idx)
                 dst_indices.append(name_to_idx[key_name])
+            # else: known-but-skippable band (e.g. swir_cirrus / B10 for S2) — zero-filled
         if unknown:
             raise ValueError(
                 f"OlmoEarth wrapper can't map BandSpec names {unknown} for "

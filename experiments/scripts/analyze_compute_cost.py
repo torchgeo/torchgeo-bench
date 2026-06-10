@@ -1,7 +1,7 @@
 """Extrapolate $/inference and gCO2/inference from measured profile metrics.
 
 Joins the ``method="profile"`` rows of an ``all_results.csv`` against the
-GPU price and carbon-intensity tables in ``scripts/cost/``, then computes
+GPU price and carbon-intensity tables in ``experiments/scripts/cost/``, then computes
 per-cloud and per-region cost/emissions for an arbitrary inference
 budget (defaults to 1M samples).
 
@@ -11,14 +11,14 @@ Extrapolating across GPU families is out of scope -- run the profile
 sweep on the target GPU and re-join.
 
 Usage:
-    python scripts/analyze_compute_cost.py \\
+    python experiments/scripts/analyze_compute_cost.py \\
         --results results/all_results.csv \\
         --measured-gpu "NVIDIA A100-SXM4-80GB" \\
         --samples 1000000 \\
         --top 20
 
     # All GPU types in the price table, only AWS, sorted by emissions
-    python scripts/analyze_compute_cost.py --provider aws --sort kg_co2
+    python experiments/scripts/analyze_compute_cost.py --provider aws --sort kg_co2
 """
 
 import argparse

@@ -296,8 +296,8 @@ REPORT.md                                    # this file
 Reproduce with:
 
 ```bash
-sbatch --array=0-10%10 scripts/slurm/cleanlab_audit.sh
-.venv/bin/python scripts/run_cleanlab_audit.py --verbose
-.venv/bin/python scripts/cleanlab_per_class_singlelabel.py --splits test
-.venv/bin/python scripts/cleanlab_per_class_multilabel.py --splits test
+sbatch --array=0-10%10 experiments/scripts/slurm/cleanlab_audit.sh
+.venv/bin/python experiments/scripts/run_cleanlab_audit.py --verbose
+.venv/bin/python experiments/scripts/cleanlab_per_class_singlelabel.py --splits test
+.venv/bin/python experiments/scripts/cleanlab_per_class_multilabel.py --splits test
 ```

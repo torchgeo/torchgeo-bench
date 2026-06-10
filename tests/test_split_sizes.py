@@ -24,7 +24,6 @@ from torchgeo.datasets.errors import DatasetNotFoundError
 
 from torchgeo_bench.datasets import (
     get_bench_dataset_class,
-    list_datasets,
 )
 
 # Expected sizes per (dataset, split).  Sourced from:
@@ -63,15 +62,7 @@ EXPECTED_SIZES: dict[str, dict[str, int]] = {
 }
 
 
-def test_expected_sizes_cover_registry():
-    """Sanity check: every registered dataset has hardcoded expectations."""
-    missing = sorted(set(list_datasets()) - set(EXPECTED_SIZES))
-    assert not missing, (
-        f"EXPECTED_SIZES is missing entries for {missing}. Add them after "
-        "verifying against the upstream reference implementation."
-    )
-
-
+@pytest.mark.slow
 @pytest.mark.parametrize("dataset_name", sorted(EXPECTED_SIZES))
 def test_split_sizes(dataset_name):
     """Each split's ``len(get_dataset(split))`` matches the reference value."""

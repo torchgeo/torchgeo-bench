@@ -3,4 +3,4 @@
 from .main import main
 
 if __name__ == "__main__":
-    main()  # type: ignore[misc]
+    main()  # type: ignore[misc]  # pragma: no cover
