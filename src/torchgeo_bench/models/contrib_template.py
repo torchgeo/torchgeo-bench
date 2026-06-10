@@ -43,9 +43,9 @@ class NewModel(BenchModel):
     ) -> None:
         # --- Choose your normalization strategy ---
         #
-        # Option A — "bandspec_zscore" (default, safe choice):
-        #   Framework z-scores each channel using dataset BandSpec mean/std.
-        #   Use for most backbones trained on normalized remote-sensing inputs.
+        # Option A — "bandspec_zscore" (default):
+        #   Framework z-scores each channel using dataset specific BandSpec mean/std.
+        #   Use for most backbones trained on normalized remote-sensing inputs, or ImageNet.
         #   Real examples: ScaleMAE, DOFA, Satlas Swin, timm ImageNet models.
         super().__init__(bands=bands, normalization="bandspec_zscore")
         #
