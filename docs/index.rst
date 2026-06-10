@@ -4,7 +4,7 @@ torchgeo-bench
 ==============
 
 A lightweight benchmarking framework for frozen geospatial foundation models.
-Evaluate any backbone on GeoBench V1 / V2 in minutes — choose your path below.
+Choose your path below.
 
 .. grid:: 3
 
@@ -12,7 +12,7 @@ Evaluate any backbone on GeoBench V1 / V2 in minutes — choose your path below.
       :link: user/quickstart
       :link-type: doc
 
-      Evaluate any frozen backbone on GeoBench V1 / V2 in minutes.
+      Evaluate any frozen backbone on GeoBench V1 / V2.
 
    .. grid-item-card:: Bring your own model
       :link: user/eval_own_model
