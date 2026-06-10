@@ -98,7 +98,7 @@ Procedure
 1. Extract train, validation, and test embeddings.
 2. **Hyperparameter sweep:** train one logistic regression per ``C``
    value in a log-spaced grid
-   (``eval.c_range``, default 20 values from 10⁻⁷ to 10²).
+   (``eval.c_range``, default 40 values from 10⁻⁶ to 10⁴).
    Each model is evaluated on the validation set to pick the best ``C``.
 3. **Final model:** retrain with the chosen ``C``, optionally on
    ``train ∪ val`` (``eval.merge_val=true``, the default).
@@ -136,7 +136,7 @@ Hyperparameters
      - Default
      - Description
    * - ``eval.c_range``
-     - ``[-7, 2, 20]``
+     - ``[-6, 4, 40]``
      - log₁₀ start, stop, and number of ``C`` values
    * - ``eval.merge_val``
      - ``true``

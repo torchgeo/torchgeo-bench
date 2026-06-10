@@ -186,7 +186,7 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
 - **Logging, not `print()`.** Use `logger = logging.getLogger(__name__)`. The
   benchmark script writes structured logs; `print` interleaves badly.
 - **Google-style docstrings.** Pydocstyle is enforced (ruff rule `D`,
-  convention `google`). `D104`/`D105`/`D107` are ignored. Tests and `scripts/`
+  convention `google`). `D104`/`D105`/`D107` are ignored. Tests and `experiments/scripts/`
   are exempt from pydocstyle (`per-file-ignores`); tests are also exempt from
   `ARG` (pytest fixture params look syntactically unused).
 - **Ruff rules enabled:** `ARG, B, C4, D, E, F, I, SIM, UP, W`. Ignored:

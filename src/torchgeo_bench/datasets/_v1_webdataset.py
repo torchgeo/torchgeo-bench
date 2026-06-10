@@ -2,7 +2,7 @@
 
 Drops the per-sample HDF5 file-open from ``__getitem__`` (one NFS round-trip
 per sample) by reading from ~22 tar shards instead.  Format is produced by
-``scripts/repack_geobench_v1.py`` and mirrored on the Hub at
+``experiments/scripts/repack_geobench_v1.py`` and mirrored on the Hub at
 ``isaaccorley/geobenchv1-webdataset`` (auto-pulled by
 :func:`ensure_sharded_root` when no local copy is present).
 

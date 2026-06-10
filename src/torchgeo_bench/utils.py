@@ -2,8 +2,8 @@
 
 import numpy as np
 import torch
+from rich.progress import track
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 
 def extract_features(
@@ -28,7 +28,11 @@ def extract_features(
     x_all = []
     y_all = []
 
-    iterator = tqdm(dataloader, total=len(dataloader)) if verbose else dataloader
+    iterator = (
+        track(dataloader, total=len(dataloader), description="Extracting")
+        if verbose
+        else dataloader
+    )
 
     for batch in iterator:
         images = batch["image"].to(device)
@@ -53,7 +57,9 @@ def extract_features(
                 elif "global_pool" in features:
                     features = features["global_pool"].cpu().numpy()
                 elif "head.global_pool" in features:
-                    features = features["head.global_pool"].cpu().numpy().squeeze()
+                    features = features["head.global_pool"].cpu().numpy()
+                    if features.ndim == 3 and features.shape[1] == 1:
+                        features = features[:, 0, :]
                 else:
                     raise ValueError(f"Unexpected features format: {features.keys()}")
 

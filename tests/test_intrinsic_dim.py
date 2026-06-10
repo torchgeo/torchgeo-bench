@@ -10,6 +10,9 @@ import torch
 
 from torchgeo_bench.intrinsic_dim import (
     SUPPORTED_ESTIMATORS,
+    DegenerateManifoldError,
+    _drop_zero_distance_rows,
+    _load_estimator,
     _resolve_device,
     _subsample,
     compute_intrinsic_dim,
@@ -100,57 +103,145 @@ class TestComputeBasic:
 
 
 class TestErrorHandling:
-    def test_unknown_estimator_returns_nan(self, caplog: pytest.LogCaptureFixture) -> None:
+    @requires_torchid
+    def test_unknown_estimator_raises(self) -> None:
+        """Estimator lookup failures surface immediately — we no longer
+        swallow them as NaN, which previously hid the TwoNN bug.
+
+        Needs the real torchid because the error is raised by
+        ``_load_estimator`` after a successful import; without torchid it
+        raises ImportError first (still a propagated failure, just from
+        a different layer)."""
         X = np.random.RandomState(0).randn(100, 5).astype(np.float32)
-        with caplog.at_level(logging.WARNING):
-            out = compute_intrinsic_dim(
+        with pytest.raises(ValueError, match="Unknown torchid estimator"):
+            compute_intrinsic_dim(
                 X, estimators=["NotARealEstimator"], device="cpu", max_samples=None
             )
-        assert "NotARealEstimator" in out
-        assert np.isnan(out["NotARealEstimator"])
-        assert any("NotARealEstimator" in r.message for r in caplog.records)
 
-    def test_failing_estimator_continues_others(self, caplog: pytest.LogCaptureFixture) -> None:
-        """A failing estimator should log+nan, not abort the loop."""
+    @requires_torchid
+    def test_failing_estimator_propagates(self) -> None:
+        """A torchid-internal exception propagates — we don't silently
+        write NaN for it, because that previously hid real bugs.
+
+        Patches the torchid estimators registry rather than swapping the
+        whole module so ``torchid.primitives`` (used by the
+        zero-distance dedup) keeps working."""
+        import torchid.estimators as real_estimators
 
         class _Boom:
             def fit(self, X: torch.Tensor) -> "_Boom":  # noqa: ARG002
                 raise RuntimeError("boom")
 
-        class _Good:
-            def fit(self, X: torch.Tensor) -> "_Good":  # noqa: ARG002
-                self.dimension_ = 3.5
-                return self
-
-        fake_module = mock.MagicMock()
-        fake_module.Boom = _Boom
-        fake_module.Good = _Good
-        fake_pkg = mock.MagicMock()
-        fake_pkg.estimators = fake_module
-
         X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
         with (
-            mock.patch.dict(
-                "sys.modules", {"torchid": fake_pkg, "torchid.estimators": fake_module}
-            ),
-            caplog.at_level(logging.WARNING),
+            mock.patch.object(real_estimators, "Boom", _Boom, create=True),
+            pytest.raises(RuntimeError, match="boom"),
         ):
-            out = compute_intrinsic_dim(
-                X, estimators=["Boom", "Good"], device="cpu", max_samples=None
-            )
-        assert np.isnan(out["Boom"])
-        assert out["Good"] == pytest.approx(3.5)
-        assert any("Boom" in r.message for r in caplog.records)
+            compute_intrinsic_dim(X, estimators=["Boom"], device="cpu", max_samples=None)
 
     def test_missing_torchid_raises_importerror(self) -> None:
+        """ImportError from ``_load_estimator`` propagates instead of
+        becoming a silent NaN row."""
         from torchgeo_bench import intrinsic_dim as mod
 
         X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
-        # Force ImportError inside _load_estimator regardless of install state.
-        with mock.patch.object(mod, "_load_estimator", side_effect=ImportError("no torchid")):
-            out = compute_intrinsic_dim(X, estimators=["TwoNN"], device="cpu", max_samples=None)
-        # ImportError is caught per-estimator → nan, not raised.
-        assert np.isnan(out["TwoNN"])
+        with (
+            mock.patch.object(mod, "_load_estimator", side_effect=ImportError("forced")),
+            pytest.raises(ImportError, match="forced"),
+        ):
+            compute_intrinsic_dim(X, estimators=["TwoNN"], device="cpu", max_samples=None)
+
+
+# ---- _load_estimator ---------------------------------------------------------
+
+
+class TestLoadEstimator:
+    @requires_torchid
+    def test_known_estimator_returns_class(self) -> None:
+        cls = _load_estimator("TwoNN")
+        assert callable(cls)
+
+    @requires_torchid
+    def test_unknown_estimator_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown torchid estimator"):
+            _load_estimator("NotReal")
+
+    def test_missing_torchid_raises_import_error(self) -> None:
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _mock(name, *a, **kw):
+            if name == "torchid":
+                raise ImportError("mocked")
+            return real_import(name, *a, **kw)
+
+        with (
+            mock.patch.object(builtins, "__import__", side_effect=_mock),
+            pytest.raises(ImportError, match="torchid is required"),
+        ):
+            _load_estimator("TwoNN")
+
+
+# ---- _drop_zero_distance_rows ------------------------------------------------
+
+
+class TestDropZeroDistanceRows:
+    def test_no_duplicates_all_rows_kept(self) -> None:
+        torch.manual_seed(0)
+        X = torch.randn(20, 4)
+        out = _drop_zero_distance_rows(X)
+        assert out.shape[0] == 20
+
+    def test_exact_duplicates_rows_dropped(self) -> None:
+        torch.manual_seed(1)
+        X = torch.randn(10, 4)
+        X[3] = X[1].clone()  # inject duplicate
+        out = _drop_zero_distance_rows(X)
+        assert out.shape[0] < 10
+
+    def test_output_has_no_zero_distance(self) -> None:
+        torch.manual_seed(2)
+        X = torch.randn(15, 4)
+        X[5] = X[2].clone()
+        out = _drop_zero_distance_rows(X)
+        # After dropping, no two rows should share zero d1
+        if out.shape[0] >= 2:
+            from torchgeo_bench.intrinsic_dim import _two_nearest_distances
+
+            d = _two_nearest_distances(out)
+            assert (d[:, 0] > 0).all()
+
+    def test_logging_on_drop(self, caplog: pytest.LogCaptureFixture) -> None:
+        torch.manual_seed(3)
+        X = torch.randn(10, 4)
+        X[0] = X[1].clone()
+        with caplog.at_level(logging.INFO):
+            _drop_zero_distance_rows(X)
+        assert any("dropped" in r.message for r in caplog.records)
+
+
+# ---- DegenerateManifoldError --------------------------------------------------
+
+
+class TestDegenerateManifoldError:
+    @requires_torchid
+    def test_raised_on_non_finite_dimension(self) -> None:
+        """Mock a torchid estimator that returns NaN to trigger the error."""
+        import torchid.estimators as real_estimators
+
+        class _NaNEstimator:
+            dimension_: float = float("nan")
+
+            def fit(self, X: torch.Tensor) -> "_NaNEstimator":  # noqa: ARG002
+                return self
+
+        X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
+        with (
+            mock.patch.object(real_estimators, "NaNEst", _NaNEstimator, create=True),
+            pytest.raises(DegenerateManifoldError, match="non-finite"),
+        ):
+            compute_intrinsic_dim(X, estimators=["NaNEst"], device="cpu", max_samples=None)
 
 
 # ---- real torchid integration (requires py>=3.13) ------------------------

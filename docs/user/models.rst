@@ -95,16 +95,72 @@ optional ``olmoearth`` extra:
 .. code-block:: console
 
    $ pip install 'torchgeo-bench[olmoearth]'
+
+   $ # OlmoEarth v1 (Nano / Tiny / Base / Large)
+   $ torchgeo-bench run model=olmoearth_nano
    $ torchgeo-bench run model=olmoearth_base
    $ torchgeo-bench run model=olmoearth_large dataset.bands=all
 
+   $ # OlmoEarth v1.1 (Nano / Tiny / Base)
+   $ torchgeo-bench run model=olmoearth_v1_1_nano
+   $ torchgeo-bench run model=olmoearth_v1_1_tiny
+   $ torchgeo-bench run model=olmoearth_v1_1_base
+
+OlmoEarth v1.1 uses a **linear patch embedding** (vs. convolutional in v1),
+a single bandset per modality, and updated masking/loss functions, yielding a
+≈ 3× reduction in MACs with comparable accuracy.  The ``version`` parameter
+selects the weight family:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 15 15 50
+
+   * - Config
+     - Version
+     - Size
+     - Notes
+   * - ``olmoearth_nano``
+     - v1
+     - Nano
+     - multi-bandset, conv patch embed
+   * - ``olmoearth_tiny``
+     - v1
+     - Tiny
+     -
+   * - ``olmoearth_base``
+     - v1
+     - Base
+     -
+   * - ``olmoearth_large``
+     - v1
+     - Large
+     -
+   * - ``olmoearth_v1_1_nano``
+     - v1.1
+     - Nano
+     - single-bandset, linear patch embed
+   * - ``olmoearth_v1_1_tiny``
+     - v1.1
+     - Tiny
+     -
+   * - ``olmoearth_v1_1_base``
+     - v1.1
+     - Base
+     -
+
 .. note::
 
-   Each model wrapper owns its own normalization policy by overriding
-   :meth:`~torchgeo_bench.models.BenchModel.normalize_inputs`.  There is
-   no ``dataset.normalization`` key — backbones that do their own
-   normalization (OlmoEarth, some torchgeo wrappers) override
-   ``normalize_inputs`` to identity.
+   Input normalization is selected globally with ``dataset.normalization``
+   (default ``bandspec_zscore``).  Each model receives that strategy through
+   :class:`~torchgeo_bench.models.BenchModel`; use ``model_native`` for
+   wrappers that declare pretrained input units / statistics, or ``identity``
+   when a backbone owns all normalization internally.
+
+   For datasets using Landsat imagery (e.g. ``m-forestnet``), all OlmoEarth
+   configs route Landsat through the Sentinel-2 normalizer via
+   ``sensor_remap: {landsat: landsat_as_s2}``; this is required because
+   GeoBench delivers Landsat as uint8 [0, 255] and the Landsat normalizer
+   expects a different dynamic range.
 
 SAM 3 vision encoder
 ^^^^^^^^^^^^^^^^^^^^

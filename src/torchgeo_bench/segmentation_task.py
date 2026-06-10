@@ -5,6 +5,7 @@ import math
 
 import torch
 import torch.nn as nn
+from rich.progress import track
 from torch.utils.data import DataLoader
 from torchmetrics.classification import (
     MulticlassF1Score,
@@ -12,7 +13,6 @@ from torchmetrics.classification import (
     MulticlassPrecision,
     MulticlassRecall,
 )
-from tqdm import tqdm
 
 from .segmentation_probe import (
     CachedFeaturesDataset,
@@ -143,8 +143,9 @@ class SegmentationSolver:
 
             total_loss = 0.0
 
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", disable=not verbose)
-            for _num_batches, batch in enumerate(pbar, start=1):
+            desc = f"Epoch {epoch + 1}/{epochs}"
+            batches = track(train_loader, description=desc) if verbose else train_loader
+            for _num_batches, batch in enumerate(batches, start=1):
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
                     masks = batch["mask"].to(self.device).long()
@@ -164,7 +165,6 @@ class SegmentationSolver:
                 self.scaler.update()
 
                 total_loss += loss.item()
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
             if scheduler is not None:
                 scheduler.step()
@@ -283,13 +283,10 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             total_loss = 0.0
-            pbar = tqdm(
-                gpu_train.shuffled_batches(batch_size),
-                total=num_batches,
-                desc=f"Epoch {epoch + 1}/{epochs}",
-                disable=not verbose,
-            )
-            for features, masks in pbar:
+            desc = f"Epoch {epoch + 1}/{epochs}"
+            batches = gpu_train.shuffled_batches(batch_size)
+            batches = track(batches, total=num_batches, description=desc) if verbose else batches
+            for features, masks in batches:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                     logits = self.model.head(features, *input_hw)
@@ -300,7 +297,6 @@ class SegmentationSolver:
                 self.scaler.update()
 
                 total_loss += loss.item()
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
             if scheduler is not None:
                 scheduler.step()
