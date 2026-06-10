@@ -155,7 +155,9 @@ class _NvmlSampler:
             self._pynvml = pynvml
             self._handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
         except pynvml.NVMLError as exc:
-            logger.info(f"nvidia-ml-py installed but NVML init failed — GPU power/util disabled ({exc}).")
+            logger.info(
+                f"nvidia-ml-py installed but NVML init failed — GPU power/util disabled ({exc})."
+            )
 
     def __enter__(self) -> "_NvmlSampler":
         if self._handle is None:
