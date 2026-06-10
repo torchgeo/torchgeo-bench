@@ -1,0 +1,15 @@
+name: caffe
+task: segmentation
+num_classes: 4
+sensor: aerial
+version: v2
+v2_class: GeoBenchCaFFe
+rgb_bands:
+- gray
+- gray
+- gray
+bands:
+- name: gray
+  short: gray
+  mean: 62.6825
+  std: 79.8002

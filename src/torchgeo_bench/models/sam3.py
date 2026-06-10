@@ -114,6 +114,7 @@ class SAM3Encoder(BenchModel):
     is logged.  Only 3-channel RGB input is supported.
 
     Args:
+        num_channels: Number of input channels. Must be 3 (RGB only).
         bands: Ordered :class:`BandSpec` list. Must have exactly 3 entries
             (RGB only).
         checkpoint_path: Path to a local HuggingFace-format checkpoint
@@ -178,31 +179,20 @@ class SAM3Encoder(BenchModel):
         self._rope_size = (h, w)
 
     def _crop_to_patch_multiple(self, images: torch.Tensor) -> torch.Tensor:
-        """Crop spatial dims to the nearest multiple of ``_PATCH_SIZE``.
-
-        Raises:
-            ValueError: If the input is smaller than one patch (H < _PATCH_SIZE
-                or W < _PATCH_SIZE), which would produce empty tensors.
-        """
+        """Crop spatial dims to the nearest multiple of ``_PATCH_SIZE``."""
         H, W = images.shape[-2:]
-        if H < _PATCH_SIZE or W < _PATCH_SIZE:
-            raise ValueError(
-                f"Input spatial size {H}×{W} is smaller than patch_size={_PATCH_SIZE}. "
-                "Images must be at least patch_size pixels in each spatial dimension."
-            )
         h = (H // _PATCH_SIZE) * _PATCH_SIZE
         w = (W // _PATCH_SIZE) * _PATCH_SIZE
         if h == H and w == W:
             return images
         return images[..., :h, :w]
 
-    @torch.no_grad()
-    def _forward_patch_features(
+    def forward(
         self,
         images: torch.Tensor,
         bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Run the vision encoder on (already-normalized) images.
+        """Run the vision encoder.
 
         Called by :class:`~torchgeo_bench.segmentation_probe.SegmentationProbe`
         during feature extraction. Forward hooks on ``neck.fpn_layers.*`` capture
@@ -210,7 +200,7 @@ class SAM3Encoder(BenchModel):
         probe.
 
         Args:
-            images: ``(B, 3, H, W)`` normalized float tensor.
+            images: ``(B, 3, H, W)`` float tensor.
             bboxes: Unused.
 
         Returns:
@@ -219,6 +209,23 @@ class SAM3Encoder(BenchModel):
         del bboxes
         images = self._crop_to_patch_multiple(images)
         self._maybe_reset_rope(*images.shape[-2:])
-        out = self.backbone(pixel_values=images)
+        with torch.no_grad():
+            out = self.backbone(pixel_values=images)
         coarsest = out.fpn_hidden_states[-1]  # (B, 256, H', W')
         return coarsest.mean(dim=[-2, -1])  # (B, 256)
+
+    def forward_patch_features(
+        self,
+        images: torch.Tensor,
+        bboxes: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return a pooled image embedding for classification evaluation.
+
+        Args:
+            images: ``(B, 3, H, W)`` float tensor.
+            bboxes: Unused.
+
+        Returns:
+            Embeddings ``(B, 256)``.
+        """
+        return self.forward(images, bboxes)

@@ -1,6 +1,7 @@
 """Benchmark script for torchgeo-bench."""
 
 import fcntl
+import gc
 import io
 import logging
 import os
