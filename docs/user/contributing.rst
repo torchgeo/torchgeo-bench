@@ -29,18 +29,18 @@ Makefile shortcuts
 The top-level :file:`Makefile` provides convenient wrappers around the
 above:
 
-================== ===================================================
-Target             What it does
-================== ===================================================
-``make install``   Create / update the conda env and install ``[dev]``.
-``make sync``      Alias for ``install``.
-``make tests``     ``pytest`` (skips ``slow`` integration tests).
-``make lint``      ``pre-commit run --all-files``.
-``make format``    ``ruff format`` then ``ruff check --fix --select I``.
-``make docs``      Build HTML documentation into ``docs/_build/html``.
+=================== ===================================================
+Target              What it does
+=================== ===================================================
+``make install``    Create / update the conda env and install ``[dev]``.
+``make sync``       Alias for ``install``.
+``make tests``      ``pytest`` (skips ``slow`` integration tests).
+``make lint``       ``pre-commit run --all-files``.
+``make format``     ``ruff format`` then ``ruff check --fix --select I``.
+``make docs``       Build HTML documentation into ``docs/_build/html``.
 ``make docs-clean`` Remove the ``docs/_build`` directory.
-``make clean``     Removes ``htmlcov``, ``.coverage``, ``.pytest_cache``.
-================== ===================================================
+``make clean``      Removes ``htmlcov``, ``.coverage``, ``.pytest_cache``.
+=================== ===================================================
 
 Linting and formatting
 ----------------------
