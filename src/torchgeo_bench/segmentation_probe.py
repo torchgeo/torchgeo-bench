@@ -14,6 +14,7 @@ from torchgeo_bench.models.segmentation_heads import (
     DPTHead,
     FPNHead,
     LinearHead,
+    PatchLinearHead,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,7 @@ class SegmentationProbe(nn.Module):
         freeze_backbone: If ``True`` (default), backbone parameters are frozen
             and the backbone runs in eval mode during inference.
         head_type: Decoder architecture — one of ``"linear"``, ``"conv_block"``,
-            ``"fpn"``, ``"dpt"``.
+            ``"fpn"``, ``"dpt"``, ``"patch_linear"``.
         hidden_dim: Hidden channel dimension for ``conv_block``, ``fpn``, and
             ``dpt`` heads (default 256).
     """
@@ -198,9 +199,21 @@ class SegmentationProbe(nn.Module):
             self.head = FPNHead(self.channels_list, num_classes, hidden_dim=hdim)
         elif head_type == "dpt":
             self.head = DPTHead(self.channels_list, num_classes, hidden_dim=hdim)
+        elif head_type == "patch_linear":
+            self.head = PatchLinearHead(self.channels_list, num_classes)
+            dry_run_features = [
+                torch.zeros(
+                    (1, channels, height, width),
+                    device=self._backbone_device(),
+                )
+                for channels, (height, width) in zip(self.channels_list, self.feature_hw_list)
+            ]
+            with torch.no_grad():
+                _ = self.head(dry_run_features, *self.dry_run_input_hw)
         else:
             raise ValueError(
-                f"Unknown head_type: {head_type!r}. Choose from: linear, conv_block, fpn, dpt"
+                "Unknown head_type: "
+                f"{head_type!r}. Choose from: linear, conv_block, fpn, dpt, patch_linear"
             )
 
     # ------------------------------------------------------------------
@@ -229,6 +242,7 @@ class SegmentationProbe(nn.Module):
         device = self._backbone_device()
         in_channels = int(getattr(self.backbone, "num_channels", 3))
         dummy = torch.randn(1, in_channels, 224, 224, device=device)
+        self.dry_run_input_hw = (224, 224)
         if not self.layer_names:
             self.layer_names = ["backbone_output"]
             self.hooks.append(self.backbone.register_forward_hook(self._hook_fn("backbone_output")))
@@ -240,9 +254,11 @@ class SegmentationProbe(nn.Module):
             self.backbone(dummy)
 
         channels = []
+        self.feature_hw_list: list[tuple[int, int]] = []
         for name in self.layer_names:
             feat = self._process_feature(self._features[name])
             channels.append(feat.shape[1])
+            self.feature_hw_list.append((feat.shape[-2], feat.shape[-1]))
         self.backbone.train(was_training)
         return channels
 

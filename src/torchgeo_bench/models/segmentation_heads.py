@@ -44,6 +44,74 @@ class LinearHead(nn.Module):
         return total_logits  # type: ignore[return-value]
 
 
+class PatchLinearHead(nn.Module):
+    """ViT-specific patch decoder using a per-token linear projection.
+
+    The first hooked feature map is interpreted as a token grid. Each token is
+    independently projected from ``D`` channels to ``C * P^2`` logits via a
+    1x1 conv, then rearranged to pixel space with ``pixel_shuffle(P)``.
+
+    Args:
+        channels_list: Channel count for each hooked feature layer. Only the
+            first entry is used.
+        num_classes: Number of segmentation output classes.
+    """
+
+    def __init__(self, channels_list: list[int], num_classes: int) -> None:
+        super().__init__()
+        self.num_classes = num_classes
+        self.in_channels = channels_list[0]
+        self.norm = ChannelLayerNorm(self.in_channels)
+        self.conv: nn.Conv2d | None = None
+        self.patch_size: int | None = None
+
+    def _ensure_conv(
+        self,
+        patch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> nn.Conv2d:
+        if patch_size <= 0:
+            raise ValueError(f"Patch size must be positive, got {patch_size}.")
+
+        if self.conv is None:
+            conv = nn.Conv2d(self.in_channels, self.num_classes * patch_size**2, kernel_size=1)
+            self.conv = conv.to(device=device, dtype=dtype)
+            self.patch_size = patch_size
+            return self.conv
+
+        if self.patch_size != patch_size:
+            raise ValueError(
+                f"PatchLinearHead was initialized for patch_size={self.patch_size}, "
+                f"but got patch_size={patch_size}."
+            )
+
+        if self.conv.weight.device != device or self.conv.weight.dtype != dtype:
+            self.conv = self.conv.to(device=device, dtype=dtype)
+        return self.conv
+
+    def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
+        """Project the token grid into pixel logits."""
+        feat = features[0]
+        grid_h, grid_w = feat.shape[-2:]
+        patch_h = round(input_h / grid_h)
+        patch_w = round(input_w / grid_w)
+        if patch_h != patch_w:
+            raise ValueError(
+                "PatchLinearHead requires square patch geometry. "
+                f"Got input=({input_h}, {input_w}) and grid=({grid_h}, {grid_w})."
+            )
+
+        conv = self._ensure_conv(patch_h, feat.device, feat.dtype)
+        logits = conv(self.norm(feat))
+        logits = F.pixel_shuffle(logits, patch_h)
+        if logits.shape[-2:] != (input_h, input_w):
+            logits = F.interpolate(
+                logits, size=(input_h, input_w), mode="bilinear", align_corners=False
+            )
+        return logits
+
+
 class ConvBlockHead(nn.Module):
     """Per-layer 1×1 projection to hidden_dim, aligned concat, 1×1 classification head.
 

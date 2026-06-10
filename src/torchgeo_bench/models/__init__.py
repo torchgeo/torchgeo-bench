@@ -7,7 +7,7 @@ from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
 from .rcf import RCFBench
 from .sam3 import SAM3Encoder
-from .segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead
+from .segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead, PatchLinearHead
 from .terratorch_models import (
     TerraTorchClayBench,
     TerraTorchPrithviBench,
@@ -44,6 +44,7 @@ __all__: list[str] = [
     "TerraTorchClayBench",
     "TerraTorchTerraMindBench",
     "LinearHead",
+    "PatchLinearHead",
     "ConvBlockHead",
     "FPNHead",
     "DPTHead",

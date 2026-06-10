@@ -512,6 +512,105 @@ def test_probe_dpt_wrong_num_layers():
 
 
 # ---------------------------------------------------------------------------
+# Probe: PatchLinear head
+# ---------------------------------------------------------------------------
+
+
+def test_patch_linear_head_output_shape():
+    """PatchLinearHead upsamples a 4x4 token grid back to 64x64."""
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    head = PatchLinearHead([16], num_classes=5)
+    logits = head([torch.randn(2, 16, 4, 4)], 64, 64)
+
+    assert logits.shape == (2, 5, 64, 64)
+    assert torch.isfinite(logits).all()
+
+
+def test_patch_linear_head_small_patch():
+    """PatchLinearHead infers smaller patch sizes from denser token grids."""
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    head = PatchLinearHead([8], num_classes=3)
+    logits = head([torch.randn(2, 8, 16, 16)], 64, 64)
+
+    assert logits.shape == (2, 3, 64, 64)
+    assert torch.isfinite(logits).all()
+
+
+def test_patch_linear_head_non_exact_size():
+    """PatchLinearHead resizes to the requested image size when pixel shuffle is not exact."""
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    head = PatchLinearHead([8], num_classes=3)
+    logits = head([torch.randn(2, 8, 16, 16)], 65, 65)
+
+    assert logits.shape == (2, 3, 65, 65)
+    assert torch.isfinite(logits).all()
+
+
+def test_patch_linear_head_ignores_extra_channels():
+    """PatchLinearHead uses only the first feature map when extra layers are passed."""
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    head = PatchLinearHead([8, 16], num_classes=3)
+    logits = head([torch.randn(2, 8, 16, 16), torch.randn(2, 16, 8, 8)], 64, 64)
+
+    assert logits.shape == (2, 3, 64, 64)
+    assert torch.isfinite(logits).all()
+
+
+def test_patch_linear_head_has_expected_attributes():
+    """PatchLinearHead exposes the expected norm and projection layers."""
+    from torchgeo_bench.models.segmentation_heads import ChannelLayerNorm, PatchLinearHead
+
+    head = PatchLinearHead([16], num_classes=5)
+    head([torch.randn(2, 16, 4, 4)], 64, 64)
+
+    assert isinstance(head.norm, ChannelLayerNorm)
+    assert isinstance(head.conv, nn.Conv2d)
+    assert head.conv.out_channels == 5 * 16 * 16
+
+
+def test_probe_patch_linear_head_vit():
+    """Patch-linear probe works end-to-end with ViT token features."""
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    probe = make_probe(ViTBackbone(), ["blocks"], head_type="patch_linear")
+    images = torch.randn(2, 3, 64, 64)
+    logits = probe(images)
+
+    assert isinstance(probe.head, PatchLinearHead)
+    assert logits.shape == (2, NUM_CLASSES, 64, 64)
+
+
+def test_probe_patch_linear_head_attributes():
+    """Patch-linear probe head exposes the expected normalization and conv layers."""
+    from torchgeo_bench.models.segmentation_heads import ChannelLayerNorm, PatchLinearHead
+
+    probe = make_probe(ViTBackbone(), ["blocks"], head_type="patch_linear")
+
+    assert isinstance(probe.head, PatchLinearHead)
+    assert isinstance(probe.head.norm, ChannelLayerNorm)
+    assert isinstance(probe.head.conv, nn.Conv2d)
+
+
+def test_probe_patch_linear_cached_features():
+    """fit_cached trains a patch-linear probe on ViT feature caches."""
+    images = torch.randn(2, 3, 64, 64)
+    masks = torch.randint(0, NUM_CLASSES, (2, 64, 64))
+    loader = make_loader(images, masks)
+    probe = make_probe(ViTBackbone(), ["blocks"], head_type="patch_linear")
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    val_miou = solver.fit_cached(train_cache, val_cache=train_cache, batch_size=2, epochs=1)
+
+    assert isinstance(val_miou, float)
+    assert 0.0 <= val_miou <= 1.0
+
+
+# ---------------------------------------------------------------------------
 # Feature caching: extract_segmentation_features + CachedFeaturesDataset
 # ---------------------------------------------------------------------------
 
