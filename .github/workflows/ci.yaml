@@ -60,16 +60,26 @@ jobs:
           key: venv-${{ runner.os }}-py3.13-${{ hashFiles('uv.lock') }}-dev
       - name: Install dependencies (CPU only, no [cuda] extra)
         run: uv sync --extra dev --frozen
-      - name: Smoke test (import + KNN + main entrypoint)
-        # macOS-latest is ARM. We only need to prove that the default
-        # install works without the [cuda] extra and that the core
-        # CPU code paths import cleanly. A full pytest run on macOS
-        # ARM is very slow (~30+ min on a cold cache) and adds no
-        # signal over the Linux `test` job above, so we restrict to
-        # a focused subset.
+      - name: Smoke test (import + tiny KNN round-trip)
+        # macOS-latest is ARM and slow at torch CPU ops; the Linux `test`
+        # job above already exercises the full pytest matrix. We just
+        # need to prove `pip install torchgeo-bench` works end-to-end on
+        # macOS without the [cuda] extra, that `faiss` (the CPU wheel
+        # this PR makes the default) imports cleanly, and that KNN
+        # actually round-trips.
         run: |
-          uv run python -c "import torchgeo_bench, faiss; print('import OK', faiss.__version__)"
-          uv run pytest tests/test_main_fast.py tests/test_multilabel.py -v --no-cov
+          uv run python -c "
+          import faiss, numpy as np, torchgeo_bench
+          from torchgeo_bench.knn import KNNClassifier
+          print('imports OK; faiss', faiss.__version__)
+          rng = np.random.default_rng(0)
+          X = rng.standard_normal((50, 8)).astype(np.float32)
+          y = rng.integers(0, 3, size=50)
+          clf = KNNClassifier(n_neighbors=3, device='cpu').fit(X, y)
+          pred = clf.predict(X[:5])
+          assert pred.shape == (5,), pred.shape
+          print('KNN round-trip OK:', pred)
+          "
 
   pre-commit:
     runs-on: ubuntu-latest
