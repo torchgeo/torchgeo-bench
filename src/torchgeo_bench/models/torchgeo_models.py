@@ -683,6 +683,7 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
         # Bypass CROMA.forward — its joint branch references `sar_encodings`
         # even when only the optical modality is provided.
         from ._band_mapping import map_to_model_bands
+
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         x_opt, _ = map_to_model_bands(images, self.bands, _CROMA_S2_12)
