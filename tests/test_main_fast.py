@@ -10,7 +10,7 @@ import torch
 from hydra import compose, initialize_config_module
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
-from torchgeo.datasets.errors import DatasetNotFoundError
+from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.main import main
 

@@ -176,7 +176,7 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
       DatasetNotFoundError = FileNotFoundError
 
   # ✅ GOOD
-  from torchgeo.datasets.errors import DatasetNotFoundError
+  from torchgeo.datasets import DatasetNotFoundError
   ```
 
   Same rule for bare `except Exception:` blocks that swallow errors to
