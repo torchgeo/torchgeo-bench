@@ -18,10 +18,10 @@ from .interface import BenchModel
 logger = logging.getLogger(__name__)
 
 
-class MyGeoFM(BenchModel):
+class NewModel(BenchModel):
     """Template BenchModel subclass — fill in the TODOs before running.
 
-    The runner calls ``MyGeoFM(bands=<list[BandSpec]>, **yaml_kwargs)`` once
+    The runner calls ``NewModel(bands=<list[BandSpec]>, **yaml_kwargs)`` once
     per dataset.  ``self.num_channels`` is set to ``len(bands)`` by
     ``BenchModel.__init__`` before your code runs.
 
@@ -62,7 +62,7 @@ class MyGeoFM(BenchModel):
         #   Pattern: declare class attributes BEFORE the super().__init__ call:
         #
         #     from torchgeo_bench.models._input_units import InputUnit
-        #     class MyGeoFM(BenchModel):
+        #     class NewModel(BenchModel):
         #         expected_input_unit = InputUnit.REFLECTANCE_0_1  # or S2_DN
         #         pretrain_mean = [0.485, 0.456, 0.406]  # optional, per channel
         #         pretrain_std  = [0.229, 0.224, 0.225]  # optional, per channel
@@ -82,7 +82,7 @@ class MyGeoFM(BenchModel):
         #
         self.backbone = nn.Identity()  # TODO: replace with your backbone
         logger.info(
-            "MyGeoFM initialized with %d input channels (pretrained=%s)",
+            "NewModel initialized with %d input channels (pretrained=%s)",
             self.num_channels,
             pretrained,
         )

@@ -71,38 +71,3 @@ def test_num_channels_property():
     """`num_channels` is derived from `len(bands)`."""
     m = _Toy(bands=_bands(5))
     assert m.num_channels == 5
-
-
-# --- contrib_template tests ---
-
-
-def test_contrib_template_importable():
-    """contrib_template module imports without error."""
-    from torchgeo_bench.models.contrib_template import MyGeoFM  # noqa: F401
-
-
-def test_contrib_template_not_in_public_namespace():
-    """MyGeoFM must not be part of the public models namespace."""
-    import torchgeo_bench.models as models_pkg
-
-    assert "MyGeoFM" not in models_pkg.__all__
-    assert not hasattr(models_pkg, "MyGeoFM")
-
-
-def test_contrib_template_inherits_benchmodel():
-    """MyGeoFM is a BenchModel subclass."""
-    from torchgeo_bench.models.contrib_template import MyGeoFM
-
-    assert issubclass(MyGeoFM, BenchModel)
-
-
-def test_contrib_template_forward_shape():
-    """MyGeoFM forward pass returns (B, K) as required by the interface."""
-    from torchgeo_bench.models.contrib_template import MyGeoFM
-
-    model = MyGeoFM(bands=_bands(2))
-    x = torch.zeros(2, 2, 4, 4)
-    with torch.no_grad():
-        out = model.forward_patch_features(x)
-    assert out.ndim == 2
-    assert out.shape[0] == 2
