@@ -23,7 +23,7 @@ def _bands(n: int = 2) -> list[BandSpec]:
 
 
 class _Toy(BenchModel):
-    def _forward_patch_features(self, images, bboxes=None):
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         return images.flatten(1)[:, :4]
 
 

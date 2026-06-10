@@ -192,10 +192,8 @@ class TimmPatchBenchModel(BenchModel):
     def _forward_patch_features(
         self,
         images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return pooled patch embeddings of shape ``(B, K)`` from normalized inputs."""
-        del bboxes
         if self.auto_resize and self.target_size is not None:
             h, w = images.shape[-2], images.shape[-1]
             if h != self.target_size or w != self.target_size:

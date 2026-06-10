@@ -82,10 +82,7 @@ class _TerraTorchBench(BenchModel):
         return images
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         x = _maybe_resize(self._prepare_input(images), self.target_size)
         return _reduce_to_vec(self.backbone(x), pool=self.pool)
 
@@ -164,10 +161,7 @@ class TerraTorchClayBench(_TerraTorchBench):
         return mapped
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         x = _maybe_resize(self._prepare_input(images), self.target_size)
         return _reduce_to_vec(
             self.backbone(x, waves=self._clay_waves.to(x.device), gsd=self.gsd),
@@ -216,10 +210,7 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         self.modality = modality
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         x, _ = map_to_model_bands(images, self.bands, TERRAMIND_S2L2A_BANDS)
         x = _maybe_resize(x, self.target_size)
         return _reduce_to_vec(self.backbone({self.modality: x}), pool=self.pool)
