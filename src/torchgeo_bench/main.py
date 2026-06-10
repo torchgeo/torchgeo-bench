@@ -491,6 +491,7 @@ def _build_seg_probe_and_solver(
         layer_names=layer_names,
         num_classes=num_classes,
         head_type=eval_cfg.segmentation.head_type,
+        use_layer_norm=eval_cfg.segmentation.get("use_layer_norm", False),
         freeze_backbone=True,
     )
     criterion = instantiate(eval_cfg.segmentation.criterion)

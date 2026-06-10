@@ -1,13 +1,15 @@
 """Command-line interface for ``torchgeo-bench``.
 
-Two subcommands:
+Three subcommands:
 
 - ``torchgeo-bench run [hydra overrides...]`` — runs the benchmark via Hydra.
+- ``torchgeo-bench overfit-check [hydra overrides...]`` — pre-screens segmentation encoders.
 - ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`` — fetches data.
 
-The ``run`` subcommand forwards every remaining arg to Hydra by mutating
-``sys.argv`` and calling :func:`torchgeo_bench.main.main` in-process. We
-restore ``sys.argv`` afterwards so embedded use (tests, notebooks) is safe.
+The ``run`` and ``overfit-check`` subcommands forward every remaining arg to Hydra
+by mutating ``sys.argv`` and calling the respective Hydra-decorated entry point
+in-process. We restore ``sys.argv`` afterwards so embedded use (tests, notebooks)
+is safe.
 """
 
 import logging
@@ -40,6 +42,23 @@ app = typer.Typer(
 def run(ctx: typer.Context) -> None:
     """Run benchmark experiments; extra args are forwarded to Hydra."""
     from torchgeo_bench.main import main as hydra_main
+
+    saved = sys.argv[:]
+    try:
+        sys.argv = [saved[0], *ctx.args]
+        hydra_main()
+    finally:
+        sys.argv = saved
+
+
+@app.command(
+    "overfit-check",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Pre-screen segmentation encoders (extra args forwarded to Hydra).",
+)
+def overfit_check(ctx: typer.Context) -> None:
+    """Verify segmentation encoders can overfit a small batch before full benchmark."""
+    from torchgeo_bench.overfit_check import overfit_check as hydra_main
 
     saved = sys.argv[:]
     try:

@@ -112,11 +112,7 @@ class SegmentationSolver:
             return torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer, T_max=epochs, eta_min=1e-6
             )
-        if self.lr_scheduler_type == "none":
-            return None
-        raise ValueError(
-            f"Unknown lr_scheduler {self.lr_scheduler_type!r}. Expected 'cosine' or 'none'."
-        )
+        return None
 
     def fit(
         self,

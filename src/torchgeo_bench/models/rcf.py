@@ -20,6 +20,37 @@ from torchgeo_bench.datasets.base import BandSpec
 from .interface import BenchModel
 
 
+class _RCFSpatial(nn.Module):
+    """Applies the RCF filter bank and returns a spatial feature map.
+
+    Runs ``ReLU(Wx+b)`` and ``ReLU(-(Wx+b))``, concatenates them along the
+    channel axis, and returns the result as ``(B, features, H', W')``.  No
+    global pooling — this is the hookable spatial representation used by the
+    segmentation probe.
+
+    Buffers are owned by this module (registered via ``register_buffer``) so
+    they move correctly with ``.to(device)`` / ``.cuda()``.
+    """
+
+    weights: Tensor
+    biases: Tensor
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Placeholders replaced by RCF.__init__ via set_buffers.
+        self.register_buffer("weights", torch.empty(0))
+        self.register_buffer("biases", torch.empty(0))
+
+    def set_buffers(self, weights: Tensor, biases: Tensor) -> None:
+        """Copy filter weights/biases into this module's own buffers."""
+        self.weights = weights.clone()
+        self.biases = biases.clone()
+
+    def forward(self, x: Tensor) -> Tensor:
+        conv = F.conv2d(x, self.weights, bias=self.biases, stride=1, padding=0)
+        return torch.cat([F.relu(conv, inplace=False), F.relu(-conv, inplace=False)], dim=1)
+
+
 class RCF(nn.Module):
     """This model extracts random convolutional features (RCFs) from its input.
 
@@ -31,6 +62,9 @@ class RCF(nn.Module):
     the filters will be sampled from a Gaussian distribution, while in "empirical" mode,
     the filters will be sampled from a dataset.
 
+    A named ``rcf_spatial`` child module exposes the pre-pool ``(B, features, H', W')``
+    feature map so that the segmentation probe can hook it by name.
+
     If you use this model in your research, please cite the following paper:
 
     * https://www.nature.com/articles/s41467-021-24638-z
@@ -39,9 +73,6 @@ class RCF(nn.Module):
 
        This Module is *not* trainable. It is only used as a feature extractor.
     """
-
-    weights: Tensor
-    biases: Tensor
 
     def __init__(
         self,
@@ -87,22 +118,11 @@ class RCF(nn.Module):
         if seed:
             generator = generator.manual_seed(seed)
 
-        # We register the weight and bias tensors as "buffers". This does two things:
-        # makes them behave correctly when we call .to(...) on the module, and makes
-        # them explicitly _not_ Parameters of the model (which might get updated) if
-        # a user tries to train with this model.
-        self.register_buffer(
-            "weights",
-            torch.randn(
-                num_patches,
-                in_channels,
-                kernel_size,
-                kernel_size,
-                requires_grad=False,
-                generator=generator,
-            ),
+        weights = torch.randn(
+            num_patches, in_channels, kernel_size, kernel_size,
+            requires_grad=False, generator=generator,
         )
-        self.register_buffer("biases", torch.zeros(num_patches, requires_grad=False) + bias)
+        biases = torch.zeros(num_patches, requires_grad=False) + bias
 
         if mode == "empirical":
             assert dataset is not None
@@ -122,7 +142,11 @@ class RCF(nn.Module):
                 patches[i] = img[:, y : y + kernel_size, x : x + kernel_size]
 
             patches = self._normalize(patches)
-            self.weights = torch.tensor(patches)
+            weights = torch.tensor(patches)
+
+        # _RCFSpatial owns the buffers; .to(device) propagates through it automatically.
+        self.rcf_spatial = _RCFSpatial()
+        self.rcf_spatial.set_buffers(weights, biases)
 
     def _normalize(
         self,
@@ -183,14 +207,9 @@ class RCF(nn.Module):
         Returns:
             a tensor of size (B, ``self.num_features``)
         """
-        x1a = F.relu(
-            F.conv2d(x, self.weights, bias=self.biases, stride=1, padding=0),
-            inplace=True,
-        )
-        x1b = F.relu(
-            -F.conv2d(x, self.weights, bias=self.biases, stride=1, padding=0),
-            inplace=False,
-        )
+        # rcf_spatial is hookable by the segmentation probe; pool here for classification.
+        spatial = self.rcf_spatial(x)  # (B, features, H', W')
+        x1a, x1b = spatial.chunk(2, dim=1)
 
         x1a_mean = torch.mean(x1a, dim=(2, 3), keepdim=False)
         x1b_mean = torch.mean(x1b, dim=(2, 3), keepdim=False)
@@ -198,9 +217,7 @@ class RCF(nn.Module):
         if self.stats_mode == "stdev":
             x1a_std = torch.std(x1a, dim=(2, 3), keepdim=False)
             x1b_std = torch.std(x1b, dim=(2, 3), keepdim=False)
-
-            output = torch.cat((x1a_mean, x1b_mean, x1a_std, x1b_std), dim=1)
-            return output
+            return torch.cat((x1a_mean, x1b_mean, x1a_std, x1b_std), dim=1)
         elif self.stats_mode == "all":
             x1a_std = torch.std(x1a, dim=(2, 3), keepdim=False)
             x1b_std = torch.std(x1b, dim=(2, 3), keepdim=False)
@@ -208,14 +225,11 @@ class RCF(nn.Module):
             x1b_max = torch.amax(x1b, dim=(2, 3), keepdim=False)
             x1a_min = torch.amin(x1a, dim=(2, 3), keepdim=False)
             x1b_min = torch.amin(x1b, dim=(2, 3), keepdim=False)
-
-            output = torch.cat(
+            return torch.cat(
                 (x1a_mean, x1b_mean, x1a_std, x1b_std, x1a_max, x1b_max, x1a_min, x1b_min), dim=1
             )
-            return output
         elif self.stats_mode == "mean":
-            output = torch.cat((x1a_mean, x1b_mean), dim=1)
-            return output
+            return torch.cat((x1a_mean, x1b_mean), dim=1)
         else:
             raise ValueError(f"Unknown stats_mode: {self.stats_mode}")
 

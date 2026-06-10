@@ -75,7 +75,8 @@ eval:
       time_budget_s: 300.0           # hard cap per (model, dataset)
 
   segmentation:
-    head_type: "fpn"
+    head_type: "fpn"           # linear | conv_block | fpn | dpt | upernet
+    use_layer_norm: false      # true for ViT/Swin backbones; override per model
     layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10
@@ -90,6 +91,13 @@ eval:
     save_viz: false            # set true to save prediction grids and confusion matrices
     viz_dir: "viz"             # root output directory for visualizations
     n_viz_samples: 8           # number of test samples shown in the sample grid
+
+check:
+  output: "overfit_check_results.csv"
+  overfit_n_batches: 2
+  overfit_steps: 600
+  overfit_threshold: 0.95
+  overfit_lr: 3e-4
 
 hydra:
   run:

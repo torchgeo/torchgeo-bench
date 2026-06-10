@@ -81,6 +81,8 @@ nitpick_ignore = [
     ("py:meth", "_forward_patch_features"),
     ("py:meth", "SegmentationProbe.extract_segmentation_features"),
     ("py:mod", "torchgeo_bench.main"),
+    ("py:mod", "torchgeo_bench.overfit_check"),
+    ("py:mod", "torchgeo_bench.sanity_checks"),
     # Third-party types we don't control intersphinx mappings for
     ("py:class", "faiss.swigfaiss_avx2.IndexFlatL2"),
     ("py:class", "geobench.task.Task"),

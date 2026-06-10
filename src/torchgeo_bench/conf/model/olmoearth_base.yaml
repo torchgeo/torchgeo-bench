@@ -15,3 +15,7 @@ sensor_remap:
   landsat: landsat_as_s2  # route Landsat through S2 normalizer (+6.6pp on m-forestnet)
 min_image_size: 64  # upsample 32-px datasets (e.g. m-so2sat) for denser patch grids
 name: olmoearth_v1_base
+eval:
+  segmentation:
+    layers: ["encoder_model.encoder.blocks.11", "encoder_model.encoder.blocks.8", "encoder_model.encoder.blocks.5", "encoder_model.encoder.blocks.2"]
+    use_layer_norm: true

@@ -6,3 +6,10 @@ mode: gaussian         # or empirical
 stats_mode: mean       # mean | stdev | all
 seed: ${seed}
 name: rcf
+eval:
+  segmentation:
+    # RCF has no hierarchy — single spatial layer, linear head upsample to target res.
+    layers: ["rcf.rcf_spatial"]
+    head_type: linear
+    # Spatial cache would be (N, 512, H, W) — too large for any reasonable dataset.
+    cache_features: false

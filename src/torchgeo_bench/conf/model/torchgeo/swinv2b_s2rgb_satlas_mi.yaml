@@ -14,3 +14,4 @@ eval:
     # Coarse-to-fine: features.7 (8×8, 1024ch) → features.1 (64×64, 128ch).
     # backbone.* prefix is stripped by SegmentationProbe automatically.
     layers: ["features.7", "features.5", "features.3", "features.1"]
+    use_layer_norm: true
