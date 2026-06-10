@@ -29,16 +29,18 @@ Makefile shortcuts
 The top-level :file:`Makefile` provides convenient wrappers around the
 above:
 
-================ ===================================================
-Target           What it does
-================ ===================================================
-``make install`` Create / update the conda env and install ``[dev]``.
-``make sync``    Alias for ``install``.
-``make tests``   ``pytest`` (skips ``slow`` integration tests).
-``make lint``    ``pre-commit run --all-files``.
-``make format``  ``ruff format`` then ``ruff check --fix --select I``.
-``make clean``   Removes ``htmlcov``, ``.coverage``, ``.pytest_cache``.
-================ ===================================================
+================== ===================================================
+Target             What it does
+================== ===================================================
+``make install``   Create / update the conda env and install ``[dev]``.
+``make sync``      Alias for ``install``.
+``make tests``     ``pytest`` (skips ``slow`` integration tests).
+``make lint``      ``pre-commit run --all-files``.
+``make format``    ``ruff format`` then ``ruff check --fix --select I``.
+``make docs``      Build HTML documentation into ``docs/_build/html``.
+``make docs-clean`` Remove the ``docs/_build`` directory.
+``make clean``     Removes ``htmlcov``, ``.coverage``, ``.pytest_cache``.
+================== ===================================================
 
 Linting and formatting
 ----------------------
@@ -85,13 +87,20 @@ Code style
 Documentation
 -------------
 
-This very site is built with Sphinx.  To build it locally:
+This very site is built with Sphinx.  The quickest way to build it locally
+is via the Makefile shortcut:
 
 .. code-block:: console
 
-   $ uv sync --extra docs
-   $ cd docs && uv run make html
-   $ open _build/html/index.html
+   $ make docs
+   $ open docs/_build/html/index.html
+
+This assumes ``sphinx-build`` is on your ``PATH`` (install with
+``uv sync --extra docs``).  To rebuild from scratch:
+
+.. code-block:: console
+
+   $ make docs-clean && make docs
 
 Releasing to PyPI
 -----------------

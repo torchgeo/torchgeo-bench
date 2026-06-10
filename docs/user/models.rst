@@ -197,12 +197,12 @@ hosting weights, and submitting a PR.
      current dataset's :class:`~torchgeo_bench.datasets.base.BandSpec` list
      and injects it into the constructor automatically.  Adding ``bands`` to
      the YAML causes a ``TypeError`` (duplicate keyword argument).
-   * **Override** ``normalize_inputs`` **when your backbone handles
-     normalization internally** (e.g. it ships its own ``Normalizer`` module
-     or always expects raw sensor values).  Return the input tensor unchanged
-     — or more precisely, pass ``normalization="identity"`` to
-     ``super().__init__(bands=bands)`` and the sealed ``forward_patch_features``
-     will skip normalization for you.
+   * **Pass** ``normalization="identity"`` **to** ``super().__init__`` **when
+     your backbone handles normalization internally** (e.g. OlmoEarth, Clay,
+     any model whose ``forward()`` runs its own per-channel standardization).
+     The sealed ``forward_patch_features`` will then pass raw sensor values
+     straight to your ``_forward_patch_features`` without applying any
+     additional z-score.
 
 For segmentation models, also pick the
 :attr:`eval.segmentation.layers <torchgeo_bench.segmentation_probe.SegmentationProbe>`

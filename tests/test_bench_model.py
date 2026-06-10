@@ -96,8 +96,13 @@ def test_contrib_template_inherits_benchmodel():
     assert issubclass(MyGeoFM, BenchModel)
 
 
-def test_contrib_template_identity_variant_importable():
-    """MyGeoFMInternal exists in the module and is a BenchModel subclass."""
-    from torchgeo_bench.models.contrib_template import MyGeoFMInternal
+def test_contrib_template_forward_shape():
+    """MyGeoFM forward pass returns (B, K) as required by the interface."""
+    from torchgeo_bench.models.contrib_template import MyGeoFM
 
-    assert issubclass(MyGeoFMInternal, BenchModel)
+    model = MyGeoFM(bands=_bands(2))
+    x = torch.zeros(2, 2, 4, 4)
+    with torch.no_grad():
+        out = model.forward_patch_features(x)
+    assert out.ndim == 2
+    assert out.shape[0] == 2

@@ -1,10 +1,9 @@
 Evaluate your own model (Stage 1)
 ==================================
 
-This guide lets you benchmark any frozen pretrained geospatial model against
-the GeoBench datasets locally — with no pull request required.  Follow
-:doc:`contribute_model` (Stage 2) once you are happy with the results and want
-to contribute the model to the shared benchmark.
+This guide demonstrates how you can benchmark any frozen pretrained geospatial model against
+the included benchmark datasets. If you want to contribute a new open-source model with available weights such that the broader community can easily access your model, see
+:doc:`contribute_model` (Stage 2).
 
 .. _eval-prerequisites:
 
@@ -26,38 +25,26 @@ matching extra:
 
 .. code-block:: console
 
-   $ uv sync --extra myextra   # e.g. --extra olmoearth, --extra sam3
+   $ uv sync --extra newextra
 
-Then download one or more GeoBench datasets:
-
-.. code-block:: console
-
-   $ torchgeo-bench download geobench_v1          # all V1 classification (≈5 GB)
-   $ torchgeo-bench download geobench_v2          # all V2 cls + seg (≈40 GB)
-   $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # subset
-
-See :doc:`datasets` for the full list of dataset names and canonical sensor
-coverage for each.
+You can check how to download one or more dataset for evaluation in the :doc:`datasets` guide.
 
 .. _eval-implement:
 
 Implement your model
 --------------------
 
-Copy the template file to your working directory and fill in the ``TODO``
+We provide a template file to give you a general setup and fill in the gaps that are unique to your model and ensure
+that each of those parts will be used correctly in the benchmark pipeline. Copy the template file to your working directory and fill in the ``TODO``
 sections:
 
 .. code-block:: console
 
-   $ cp src/torchgeo_bench/models/contrib_template.py ./my_geofm.py
+   $ cp src/torchgeo_bench/models/contrib_template.py ./new_model.py
 
-The template ships two skeleton classes:
-
-* ``MyGeoFM`` — standard case, uses the default ``bandspec_zscore``
-  normalization.
-* ``MyGeoFMInternal`` — identity-normalization variant, for backbones that
-  handle preprocessing internally (e.g. they ship their own ``Normalizer``
-  module or always expect raw sensor values).
+The template is a single class ``NewModel``. One of the most important parts is carefully configuring the correct
+normalization-choice block in ``__init__``. Change the one ``normalization=``
+line to match the configurateion of your backbone.
 
 **Normalization strategy decision table**
 
@@ -65,53 +52,121 @@ Pick the strategy that matches how your backbone was trained:
 
 .. list-table::
    :header-rows: 1
-   :widths: 22 40 38
+   :widths: 20 42 38
 
    * - Strategy
-     - When to use
+     - When to use — in-repo examples
      - How to set it
    * - ``bandspec_zscore``
-     - Most remote-sensing backbones (pre-trained on normalized inputs).
-       Produces ~N(0, 1) features regardless of source sensor unit.  Safe
-       default when you are unsure.
-     - Default in ``MyGeoFM``; pass
-       ``normalization="bandspec_zscore"`` to ``super().__init__`` or leave
-       it out entirely.
+     - The framework z-scores each channel from
+       the dataset's BandSpec statistics, with the goal of producing ~N(0, 1) inputs regardless
+       of source sensor unit.
+
+       *In-repo examples:* ScaleMAE, Satlas Swin, EarthLoc, SAM3,
+       all timm ImageNet models (ResNet-50, ViT-B/16, ConvNeXt, …), RCF.
+     - Default; leave the ``normalization=`` line as-is.
    * - ``identity``
-     - Backbone ships its own normalizer (e.g. built-in ``Normalize`` layer,
-       OlmoEarth-style ``Normalizer`` module) or is always fed raw DN / float
-       values.  The framework must *not* apply a second normalization on top.
-     - Use ``MyGeoFMInternal`` template, which passes
-       ``normalization="identity"`` to ``super().__init__``.  The sealed
-       ``forward_patch_features`` then calls ``_forward_patch_features``
-       with the unchanged tensor.
+     - Your backbone ships its own normalizer and must receive raw sensor
+       values — applying a second normalization on top would corrupt the
+       inputs.
+
+       *In-repo example:* OlmoEarth — its internal ``Normalizer`` consumes
+       raw DN/reflectance directly and auto-detects the sensor scale.  See
+       :class:`~torchgeo_bench.models.OlmoEarthBenchModel` and
+       :file:`src/torchgeo_bench/models/olmoearth.py` for the pattern.
+     - Change to ``normalization="identity"`` in the ``super().__init__`` call. which will skip
+       the dataset normalization in the pipeline
    * - ``model_native``
-     - Pre-train mean/std are known (e.g. ImageNet RGB stats, or published
-       per-channel stats for your dataset).  The framework converts the raw
-       sensor units to the backbone's expected unit first, then applies the
-       declared mean/std.
+     - The exact pretraining input scale is published and you can declare it
+       explicitly.  The framework converts the dataset's sensor unit to the
+       backbone's expected unit, then applies any declared per-channel
+       mean/std.
+
+       *In-repo examples:* Prithvi-EO (``expected_input_unit = S2_DN``),
+       Clay v1.5 and TerraMind (``expected_input_unit = REFLECTANCE_0_1``),
+       CROMA (``expected_input_unit = REFLECTANCE_0_1``).  See
+       ``TerraTorchPrithviBench`` in :file:`src/torchgeo_bench/models/terratorch_models.py`
+       and :class:`~torchgeo_bench.models.TimmPatchBenchModel` for the pattern.
      - Set ``expected_input_unit``, ``pretrain_mean``, and ``pretrain_std``
        as class attributes *before* calling ``super().__init__(bands=bands)``.
-       See :class:`~torchgeo_bench.models.TimmPatchBenchModel` for a
-       real-world example.
 
 For the full list of available strategies and their exact semantics, see
 :file:`src/torchgeo_bench/models/_normalization.py`.
+
+Accessing band metadata
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The template shows ``backbone(images)`` as the minimal forward call, but many
+models need more than raw pixels — for example a wavelength list for
+band-agnostic ViTs, or sensor-conditional routing.
+
+The framework makes this straightforward.  The pipeline **reinstantiates your
+class once per dataset**, so the ``bands`` argument passed to ``__init__``
+always reflects exactly the channels being loaded for that run.  Every
+:class:`~torchgeo_bench.datasets.base.BandSpec` in that list carries the
+dataset-level metadata that is available:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Field
+     - Meaning
+   * - ``wavelength_um``
+     - Centre wavelength in micrometres (``None`` for non-optical bands such as
+       SAR backscatter or DEM elevation).  Use this to drive wavelength-aware
+       embeddings (e.g. DOFA).
+   * - ``sensor``
+     - Sensor family string — ``"s2"``, ``"landsat"``, ``"sar"``, ``"aerial"``,
+       ``"planet"``, ``"worldview"``.  Use this for sensor-conditional routing
+       or to detect unsupported modalities at construction time.
+   * - ``name``
+     - Canonical short band name — ``"red"``, ``"nir"``, ``"vv"``, ``"b02"``.
+       Use this when your backbone expects bands in a named order.
+
+The pattern is: extract what you need from ``bands`` in ``__init__`` and store
+it as an instance attribute, then use it in ``_forward_patch_features``:
+
+.. code-block:: python
+
+   from torchgeo_bench.datasets.base import BandSpec
+   from torchgeo_bench.models.interface import BenchModel
+
+   class NewModel(BenchModel):
+       def __init__(self, bands: list[BandSpec], **kwargs) -> None:
+           super().__init__(bands=bands, normalization="bandspec_zscore")
+
+           # The runner reinstantiates this class once per dataset, so these
+           # attributes are always current for the channels being loaded.
+           self.wavelengths = [b.wavelength_um for b in bands]  # None for SAR/DEM
+           self.sensors = [b.sensor for b in bands]             # e.g. "s2", "landsat"
+           self.band_names = [b.name for b in bands]            # e.g. "red", "nir"
+
+           self.backbone = ...  # your backbone here
+
+       def _forward_patch_features(self, images, _bboxes=None):
+           # Pass the cached metadata alongside the image tensor.
+           return self.backbone(images, wavelengths=self.wavelengths)
+
+For a complete example see ``TorchGeoDOFABench`` in
+:file:`src/torchgeo_bench/models/torchgeo_models.py`, which reads
+``wavelength_um`` from each ``BandSpec`` at construction and passes the
+resulting list to ``backbone.forward_features(images, wavelengths=...)``.
 
 .. _eval-hydra-config:
 
 Create a Hydra config
 ---------------------
 
-Drop a YAML file at :file:`src/torchgeo_bench/conf/model/my_model.yaml`.
+Create a model YAML file at :file:`src/torchgeo_bench/conf/model/new_model.yaml`.
 The only required key is ``_target_``, which must point to your class:
 
 .. code-block:: yaml
 
-   # src/torchgeo_bench/conf/model/my_model.yaml
-   _target_: my_geofm.MyGeoFM    # dotted import path to your class
+   # src/torchgeo_bench/conf/model/new_model.yaml
+   _target_: new_model.NewModel    # dotted import path to your class
    pretrained: true
-   name: my_model                 # human-readable label in the results CSV
+   name: new_model                 # human-readable label in the results CSV
 
    # Add any kwargs your __init__ accepts (except `bands` — see note below).
    # embed_dim: 768
@@ -119,7 +174,7 @@ The only required key is ``_target_``, which must point to your class:
 
 .. note::
 
-   **Do not put** ``bands`` **in the YAML.**  The runner reads the current
+   **Do not put** ``bands`` **in the YAML.**  The pipeline reads the current
    dataset's :class:`~torchgeo_bench.datasets.base.BandSpec` list at runtime
    and injects it into the constructor automatically.  Adding it to the YAML
    will cause a ``TypeError`` (duplicate keyword argument).
@@ -136,104 +191,44 @@ parent directory to ``PYTHONPATH`` before running:
 Run the benchmark
 -----------------
 
-Pass your config name as ``model=my_model`` to the ``run`` subcommand:
+Pass your config name as ``model=new_model`` and any combination of dataset
+names to the ``run`` subcommand (see :doc:`datasets` for the full list of
+available names):
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=my_model dataset.names=[m-eurosat]
-
-Run multiple datasets in one go (separate with commas, no spaces):
-
-.. code-block:: console
-
-   $ torchgeo-bench run model=my_model \
-       dataset.names=[m-eurosat,m-so2sat,m-bigearthnet,m-brick-kiln,m-forestnet,m-pv4ger]
-
-For V2 classification and segmentation datasets:
-
-.. code-block:: console
-
-   $ torchgeo-bench run model=my_model \
-       dataset.names=[benv2,treesatai,so2sat,forestnet]
-   $ torchgeo-bench run model=my_model \
-       dataset.names=[burn_scars,caffe,cloudsen12,dynamic_earthnet]
-
-**Sensor-coverage guidance**: skip datasets whose sensor modality your model
-was not trained on.  Document skipped datasets as inline comments in your
-notes — e.g. "``m-forestnet`` skipped: model trained on S2 only; Landsat
-not supported".
+   $ torchgeo-bench run model=new_model dataset.names=[m-eurosat]
+   $ torchgeo-bench run model=new_model \
+       dataset.names=[m-eurosat,m-bigearthnet,benv2,burn_scars]
 
 Skip the (slow) linear probe and reduce bootstrap samples for a quick trial:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=my_model dataset.names=[m-eurosat] \
+   $ torchgeo-bench run model=new_model dataset.names=[m-eurosat] \
        eval.skip_linear=true eval.bootstrap=100
 
-If a run is interrupted, resume from where it left off:
+To write results to a dedicated file instead of the shared
+``results/all_results.csv``, pass ``output=``:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=my_model resume=true
+   $ torchgeo-bench run model=new_model \
+       dataset.names=[m-eurosat,m-so2sat] \
+       output=results/new_model_results.csv
+
+The ``resume=true`` flag respects whatever ``output=`` is set to, so an
+interrupted run can be continued against the same file:
+
+.. code-block:: console
+
+   $ torchgeo-bench run model=new_model output=results/new_model_results.csv resume=true
 
 .. _eval-results:
 
-Interpreting results
---------------------
+Results
+-------
 
-Results are written to ``results/all_results.csv`` as they are computed.
-Each row is one ``(dataset, method, model, config)`` measurement.  The key
-columns are:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Column
-     - Meaning
-   * - ``dataset``
-     - Dataset CLI name (e.g. ``m-eurosat``).
-   * - ``method``
-     - ``knn5`` (KNN-5) or ``linear`` (L-BFGS logistic regression).
-   * - ``metric_name``
-     - ``accuracy`` (single-label) or ``micro_mAP`` (multi-label).
-   * - ``metric_value``
-     - Point estimate on the test split.
-   * - ``ci_lower`` / ``ci_upper``
-     - 95 % bootstrap confidence interval bounds (stratified by class).
-       The default uses 1 000 resamples; tune with ``eval.bootstrap=N``.
-   * - ``feature_dim``
-     - Embedding dimension from your backbone.
-   * - ``partition``
-     - GeoBench V1 partition name (``default`` for V2).
-   * - ``bands``
-     - Which input channels were used (``rgb``, ``all``, or a sorted
-       comma-joined list of band names).
-
-Read the CSV directly with pandas:
-
-.. code-block:: python
-
-   import pandas as pd
-
-   df = pd.read_csv("results/all_results.csv")
-   my_model = df[df["name"] == "my_model"]
-   print(my_model[["dataset", "method", "metric_value", "ci_lower", "ci_upper"]])
-
-For the full column reference, see :doc:`results-format`.
-
-.. _eval-cite:
-
-Citing torchgeo-bench
----------------------
-
-If you use ``torchgeo-bench`` in a paper or report, please cite:
-
-.. code-block:: bibtex
-
-   @software{torchgeo_bench,
-     author       = {torchgeo-bench contributors},
-     title        = {{torchgeo-bench}: Frozen geospatial foundation model benchmark},
-     year         = {2024},
-     url          = {https://github.com/torchgeo/torchgeo-bench},
-   }
+Results are written to ``results/all_results.csv`` by default, or to the
+path set via ``output=`` (see above).
+For the full column reference and how to read the CSV, see :doc:`results-format`.
