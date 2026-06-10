@@ -1,11 +1,15 @@
 import pytest
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
+from torchgeo_bench.main import _build_seg_probe_and_solver
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
+    GPUTensorCache,
     SegmentationProbe,
+    _estimate_cache_bytes,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver
 
@@ -55,6 +59,22 @@ class ViTBackbone(nn.Module):
         return x
 
 
+<<<<<<< HEAD
+=======
+class TwoChannelBackbone(nn.Module):
+    """Backbone with a BenchModel-like num_channels attribute."""
+
+    num_channels = 2
+
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 8, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        return self.conv(x).mean(dim=(-2, -1))
+
+
+>>>>>>> main
 @pytest.fixture
 def mock_backbone():
     return MockBackbone()
@@ -77,6 +97,7 @@ def make_probe(backbone, layers, head_type="linear", freeze=True, hidden_dim=Non
         freeze_backbone=freeze,
         head_type=head_type,
         hidden_dim=hidden_dim,
+<<<<<<< HEAD
     )
 
 
@@ -101,6 +122,99 @@ def test_probe_unknown_head_type(mock_backbone):
     with pytest.raises(ValueError, match="Unknown head_type"):
         SegmentationProbe(
             backbone=mock_backbone, layer_names=["layer1"], num_classes=2, head_type="invalid_type"
+=======
+    )
+
+
+def make_loader(images, masks, as_dict=False, mask_4d=False):
+    if mask_4d:
+        masks = masks.unsqueeze(1)
+    if as_dict:
+
+        class DictDataset(torch.utils.data.Dataset):
+            def __len__(self):
+                return len(images)
+
+            def __getitem__(self, idx):
+                return {"image": images[idx], "mask": masks[idx]}
+
+        return DataLoader(DictDataset(), batch_size=2)
+    return DataLoader(TensorDataset(images, masks), batch_size=2)
+
+
+def test_probe_unknown_head_type(mock_backbone):
+    """Test that an invalid head_type raises a ValueError."""
+    with pytest.raises(ValueError, match="Unknown head_type"):
+        SegmentationProbe(
+            backbone=mock_backbone, layer_names=["layer1"], num_classes=2, head_type="invalid_type"
+        )
+
+
+def test_build_seg_probe_requires_spatial_layers(mock_backbone):
+    """Segmentation evaluation refuses the global-output fallback."""
+    eval_cfg = OmegaConf.create(
+        {
+            "segmentation": {
+                "layers": [],
+                "head_type": "fpn",
+                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 255},
+                "lr_scheduler": "none",
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="requires eval.segmentation.layers"):
+        _build_seg_probe_and_solver(
+            mock_backbone,
+            num_classes=NUM_CLASSES,
+            eval_cfg=eval_cfg,
+            device=torch.device("cpu"),
+            lr=1e-3,
+        )
+
+
+def test_build_seg_solver_uses_criterion_ignore_index(mock_backbone):
+    """Metrics inherit the loss ignore_index when no separate override is set."""
+    eval_cfg = OmegaConf.create(
+        {
+            "segmentation": {
+                "layers": ["layer1"],
+                "head_type": "linear",
+                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 7},
+                "lr_scheduler": "none",
+            }
+        }
+    )
+    _, solver = _build_seg_probe_and_solver(
+        mock_backbone,
+        num_classes=NUM_CLASSES,
+        eval_cfg=eval_cfg,
+        device=torch.device("cpu"),
+        lr=1e-3,
+    )
+    assert solver.ignore_index == 7
+
+
+def test_build_seg_solver_rejects_ignore_index_mismatch(mock_backbone):
+    """Loss and metric ignore indices must not silently diverge."""
+    eval_cfg = OmegaConf.create(
+        {
+            "segmentation": {
+                "layers": ["layer1"],
+                "head_type": "linear",
+                "ignore_index": 255,
+                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 7},
+                "lr_scheduler": "none",
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="ignore_index mismatch"):
+        _build_seg_probe_and_solver(
+            mock_backbone,
+            num_classes=NUM_CLASSES,
+            eval_cfg=eval_cfg,
+            device=torch.device("cpu"),
+            lr=1e-3,
+>>>>>>> main
         )
 
 
@@ -293,6 +407,18 @@ def test_probe_vit_token_features():
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
 
+<<<<<<< HEAD
+=======
+def test_probe_dry_run_uses_backbone_num_channels():
+    """Dry-run channel inference supports non-RGB benchmark models."""
+    backbone = TwoChannelBackbone()
+    probe = make_probe(backbone, [], head_type="linear")
+    images = torch.randn(2, 2, 64, 64)
+    logits = probe(images)
+    assert logits.shape == (2, NUM_CLASSES, 64, 64)
+
+
+>>>>>>> main
 # ---------------------------------------------------------------------------
 # Solver: no LR scheduler path
 # ---------------------------------------------------------------------------
@@ -325,6 +451,7 @@ def test_solver_dict_batches(mock_backbone, dummy_data):
     metrics = solver.evaluate(loader)
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
+<<<<<<< HEAD
 
 # ---------------------------------------------------------------------------
 # Solver: 4D mask squeezing in fit and evaluate
@@ -410,6 +537,93 @@ def test_probe_dpt_head_forward():
     logits = probe(images)
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
+=======
+
+# ---------------------------------------------------------------------------
+# Solver: 4D mask squeezing in fit and evaluate
+# ---------------------------------------------------------------------------
+
+
+def test_solver_4d_masks(mock_backbone, dummy_data):
+    """fit and evaluate both squeeze (B, 1, H, W) masks to (B, H, W)."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks, mask_4d=True)
+    probe = make_probe(mock_backbone, ["layer1"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    solver.fit(loader, epochs=1, verbose=False)
+    metrics = solver.evaluate(loader)
+    assert 0.0 <= metrics["mIoU"] <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Solver: val_loader passed to fit returns mIoU
+# ---------------------------------------------------------------------------
+
+
+def test_solver_fit_with_val_loader(mock_backbone, dummy_data):
+    """fit returns the final epoch val mIoU when a val_loader is provided."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    train_loader = make_loader(images, masks)
+    val_loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    val_miou = solver.fit(train_loader, val_loader=val_loader, epochs=1, verbose=False)
+    assert isinstance(val_miou, float)
+    assert 0.0 <= val_miou <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Probe: DPT head
+# ---------------------------------------------------------------------------
+
+
+class MockBackbone4Layer(nn.Module):
+    """CNN backbone with 4 strided layers to provide multi-scale features for DPT."""
+
+    def __init__(self):
+        super().__init__()
+        self.layer1 = nn.Sequential(nn.Conv2d(3, 8, kernel_size=3, padding=1, stride=1), nn.ReLU())
+        self.layer2 = nn.Sequential(nn.Conv2d(8, 16, kernel_size=3, padding=1, stride=2), nn.ReLU())
+        self.layer3 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=3, padding=1, stride=2), nn.ReLU()
+        )
+        self.layer4 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=3, padding=1, stride=2), nn.ReLU()
+        )
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        return x
+
+
+def test_probe_dpt_head_forward():
+    """DPT head with 4 coarse-to-fine layers produces correct output shape."""
+    from torchgeo_bench.models.segmentation_heads import DPTHead
+
+    backbone = MockBackbone4Layer()
+    # Coarse-to-fine order (same convention as FPN)
+    probe = make_probe(
+        backbone,
+        layers=["layer4", "layer3", "layer2", "layer1"],
+        head_type="dpt",
+        hidden_dim=16,
+    )
+
+    assert isinstance(probe.head, DPTHead)
+    assert hasattr(probe.head, "convs")
+    assert hasattr(probe.head, "ref")
+    assert hasattr(probe.head, "out_conv")
+    assert len(probe.head.convs) == 4
+    assert len(probe.head.ref) == 4
+
+    images = torch.randn(2, 3, 64, 64)
+    logits = probe(images)
+    assert logits.shape == (2, NUM_CLASSES, 64, 64)
+
+>>>>>>> main
 
 def test_probe_dpt_wrong_num_layers():
     """DPT head raises ValueError when not exactly 4 layers are specified."""
@@ -419,17 +633,30 @@ def test_probe_dpt_wrong_num_layers():
 
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Feature caching: extract_all_features + CachedFeaturesDataset
 # ---------------------------------------------------------------------------
 
 
 def test_extract_all_features_returns_cached_dataset(mock_backbone, dummy_data):
     """extract_all_features produces a CachedFeaturesDataset with correct length and dtypes."""
+=======
+# Feature caching: extract_segmentation_features + CachedFeaturesDataset
+# ---------------------------------------------------------------------------
+
+
+def test_extract_segmentation_features_returns_cached_dataset(mock_backbone, dummy_data):
+    """extract_segmentation_features produces a CachedFeaturesDataset with correct length and dtypes."""
+>>>>>>> main
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
 
+<<<<<<< HEAD
     cache = probe.extract_all_features(loader, cache_dtype=torch.float16)
+=======
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float16)
+>>>>>>> main
 
     assert isinstance(cache, CachedFeaturesDataset)
     assert len(cache) == len(images)
@@ -444,7 +671,11 @@ def test_cached_features_dataset_indexing(mock_backbone, dummy_data):
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
+<<<<<<< HEAD
     cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
+=======
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+>>>>>>> main
 
     feats, mask = cache[0]
     assert len(feats) == 2  # two layers
@@ -458,8 +689,13 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
 
+<<<<<<< HEAD
     train_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
     val_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
+=======
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+>>>>>>> main
 
     val_miou = solver.fit_cached(
         train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
@@ -472,12 +708,21 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
+<<<<<<< HEAD
 def test_extract_all_features_dict_batches(mock_backbone, dummy_data):
     """extract_all_features handles dict-format batches {"image": ..., "mask": ...}."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks, as_dict=True)
     probe = make_probe(mock_backbone, ["layer1"])
     cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
+=======
+def test_extract_segmentation_features_dict_batches(mock_backbone, dummy_data):
+    """extract_segmentation_features handles dict-format batches {"image": ..., "mask": ...}."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks, as_dict=True)
+    probe = make_probe(mock_backbone, ["layer1"])
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+>>>>>>> main
     assert len(cache) == len(images)
 
 
@@ -486,15 +731,22 @@ def test_extract_all_features_dict_batches(mock_backbone, dummy_data):
 # ---------------------------------------------------------------------------
 
 
+<<<<<<< HEAD
 from torchgeo_bench.segmentation_probe import GPUTensorCache, _estimate_cache_bytes
 
 
+=======
+>>>>>>> main
 def _make_cpu_cache(mock_backbone, dummy_data):
     """Helper: extract a CachedFeaturesDataset on CPU."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
+<<<<<<< HEAD
     return probe.extract_all_features(loader, cache_dtype=torch.float16)
+=======
+    return probe.extract_segmentation_features(loader, cache_dtype=torch.float16)
+>>>>>>> main
 
 
 def test_estimate_cache_bytes(mock_backbone, dummy_data):
@@ -545,7 +797,11 @@ def test_gpu_tensor_cache_ordered_batches(mock_backbone, dummy_data):
     gpu_cache = GPUTensorCache.from_cached(cache, device="cpu")
 
     total = 0
+<<<<<<< HEAD
     for feats, masks in gpu_cache.ordered_batches(batch_size=1):
+=======
+    for _feats, masks in gpu_cache.ordered_batches(batch_size=1):
+>>>>>>> main
         total += masks.shape[0]
     assert total == len(cache)
 
@@ -557,8 +813,13 @@ def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
 
+<<<<<<< HEAD
     train_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
     val_cache = probe.extract_all_features(loader, cache_dtype=torch.float32)
+=======
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+>>>>>>> main
 
     # On CPU, use_amp=False so GPUTensorCache path is skipped; DataLoader fallback runs.
     val_miou = solver.fit_cached(

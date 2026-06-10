@@ -20,8 +20,7 @@
 # Local checkpoint (recommended — avoids gated-repo authentication):
 #   Set checkpoint_path to the directory containing model.safetensors + config.json.
 
-_target_: torchgeo_bench.models.SAM3EncoderBench
-num_channels: 3
+_target_: torchgeo_bench.models.SAM3Encoder
 checkpoint_path: checkpoints/sam3
 name: sam3_encoder
 

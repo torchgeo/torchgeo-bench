@@ -3,7 +3,6 @@
 # Model: tf_efficientnetv2_m
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: tf_efficientnetv2_m
 pretrained: true
 global_pool: avg

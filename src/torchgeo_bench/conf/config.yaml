@@ -17,23 +17,66 @@ dataset:
   names: all
   partition: default
   batch_size: 64
-  normalization: mean_stdev  # min_max | mean_stdev | percentile_2_98 | none
+  num_workers: 4              # set 0 to disable dataloader multiprocessing
+  normalization: bandspec_zscore   # bandspec_zscore | model_native | minmax | minmax_zscore | identity
   bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
   image_size: 224           # e.g., 224; if null, no resizing
   interpolation: bilinear     # bilinear | bicubic | nearest; used if image_size set
-  geobench_root: data/classification_v1.0     # Root for GeoBench V1 datasets
-  geobench_v2_root: data/geobenchv2           # Root for GeoBench V2 datasets
 
 # Evaluation settings
 eval:
   bootstrap: 200          # number of bootstrap resamples
-  c_range: [-7, 2, 20]     # log10 sweep start, stop, num samples
+  c_range: [-6, 4, 40]      # log10 [start, stop, num_points]; per-model overrides allowed
   merge_val: true          # merge train+val for final logistic training
   skip_linear: false       # if true, skip LogisticRegression evaluation
+  knn_k: 5                 # number of neighbours for KNN evaluation
+  knn_device: null         # null = inherit cfg.device; set "cpu" to force faiss-cpu KNN
+
+  # Calibration metrics (ECE / RMS-CE / MCE) reported per classification row.
+  # KNN probabilities are quantized to (knn_k + 1) levels, so its default
+  # bin count matches that; Linear uses the conventional 15. Temperature
+  # scaling (Guo et al., 2017) is fit on val logits and applied only to
+  # Linear Probing — KNN has no meaningful logit to scale.
+  calibration:
+    n_bins_knn: null       # null = knn_k + 1
+    n_bins_linear: 15
+    temp_scale: true       # adds ece_ts/rms_ce_ts/mce_ts/temperature columns
+
+  # Optional intrinsic dimension (ID) metrics on extracted embeddings.
+  # Computed alongside KNN/linear probing when enabled. Adds rows with
+  # method="intrinsic_dim" and metric_name="id_<estimator>_<split>".
+  intrinsic_dim:
+    enabled: false
+    estimators: [TwoNN, MLE, lPCA]   # subset of torchid global estimators
+    splits: [train]                  # any of: train, val, test
+    max_samples: 10000               # null disables subsampling
+    device: null                     # null = auto (cuda if available, else cpu)
+
+  # Compute/efficiency profile metrics: throughput, peak GPU mem,
+  # latency, params, GMACs, GPU power and energy.  One row per metric
+  # with method="profile".  GMACs requires fvcore; energy/power requires
+  # pynvml (both in `pip install 'torchgeo-bench[profile]'`).  Other
+  # metrics work without extras.
+  profile:
+    enabled: false
+    n_warmup: 3                      # forward passes discarded before timing
+    n_measure: 20                    # timed forward passes
+
+    # Optional CPU pass — adds *_cpu metrics so the explorer can show
+    # deployability ("can I run this on a laptop?").  Big ViT-L
+    # backbones take minutes per batch on CPU, hence the wall-clock
+    # budget; tasks that exceed it write None for the cpu metrics with
+    # a warning and don't block the rest of the sweep.
+    cpu_throughput:
+      enabled: false
+      batch_size: 8                  # smaller than GPU batch — CPUs choke at 256
+      n_warmup: 1
+      n_measure: 5
+      time_budget_s: 300.0           # hard cap per (model, dataset)
 
   segmentation:
     head_type: "fpn"
-    layers: []
+    layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10
     criterion:

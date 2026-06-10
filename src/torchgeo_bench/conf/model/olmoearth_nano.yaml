@@ -1,0 +1,16 @@
+# OlmoEarth-v1-Nano (AI2 geospatial foundation model)
+# Feature dimension: 128
+# Default: RGB mode (3 channels). For full S2, set dataset.bands=all
+# Run with: dataset.normalization=identity (the wrapper applies OlmoEarth's own normalizer)
+
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
+model_size: nano
+patch_size: 8
+input_res: null
+time_steps: 3
+std_multiplier: 2.0
+normalize: false
+sensor_remap:
+  landsat: landsat_as_s2  # route Landsat through S2 normalizer (+6.6pp on m-forestnet)
+min_image_size: 64  # upsample 32-px datasets (e.g. m-so2sat) for denser patch grids
+name: olmoearth_v1_nano

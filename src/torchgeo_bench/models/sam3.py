@@ -29,6 +29,8 @@ import logging
 
 import torch
 
+from torchgeo_bench.datasets.base import BandSpec
+
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,12 @@ def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int
 
     h_tokens = input_h // patch_size
     w_tokens = input_w // patch_size
+
+    if h_tokens == 0 or w_tokens == 0:
+        raise ValueError(
+            f"Input size {input_h}×{input_w} is smaller than patch_size={patch_size}. "
+            "Images must be at least patch_size pixels in each spatial dimension."
+        )
 
     logger.info(
         f"SAM3: resetting RoPE embeddings for {input_h}×{input_w} "
@@ -93,7 +101,7 @@ def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int
         rotary_emb.end_y = end_y
 
 
-class SAM3EncoderBench(BenchModel):
+class SAM3Encoder(BenchModel):
     """Frozen SAM3 vision encoder (ViT-H + FPN neck) as a benchmark backbone.
 
     The full SAM3 model is loaded but only the vision encoder is retained.
@@ -107,6 +115,8 @@ class SAM3EncoderBench(BenchModel):
 
     Args:
         num_channels: Number of input channels. Must be 3 (RGB only).
+        bands: Ordered :class:`BandSpec` list. Must have exactly 3 entries
+            (RGB only).
         checkpoint_path: Path to a local HuggingFace-format checkpoint
             directory containing ``model.safetensors`` and ``config.json``.
         model_name_or_path: HuggingFace Hub model ID. Used only if
@@ -115,20 +125,27 @@ class SAM3EncoderBench(BenchModel):
 
     def __init__(
         self,
-        num_channels: int,
+        bands: list[BandSpec],
+        *,
         checkpoint_path: str | None = None,
         model_name_or_path: str = "facebook/sam3",
         **_kwargs,
     ) -> None:
-        super().__init__(num_channels=num_channels)
+        super().__init__(bands=bands, **_kwargs)
 
-        if num_channels != 3:
+        if self.num_channels != 3:
             raise ValueError(
-                f"SAM3EncoderBench only supports 3-channel RGB input, got num_channels={num_channels}. "
+                f"SAM3Encoder only supports 3-channel RGB input, got {self.num_channels}. "
                 "Run with dataset.bands=[red,green,blue] or skip this dataset."
             )
 
-        from transformers import Sam3Model
+        try:
+            from transformers import Sam3Model
+        except ImportError as e:
+            raise ImportError(
+                "SAM3Encoder requires the 'transformers' package. "
+                "Install it with: pip install torchgeo-bench[sam3]"
+            ) from e
 
         source = checkpoint_path or model_name_or_path
         logger.info(f"Loading SAM3 from {source!r} …")

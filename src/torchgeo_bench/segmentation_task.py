@@ -5,6 +5,7 @@ import math
 
 import torch
 import torch.nn as nn
+from rich.progress import track
 from torch.utils.data import DataLoader
 from torchmetrics.classification import (
     MulticlassF1Score,
@@ -12,7 +13,6 @@ from torchmetrics.classification import (
     MulticlassPrecision,
     MulticlassRecall,
 )
-from tqdm import tqdm
 
 from .segmentation_probe import (
     CachedFeaturesDataset,
@@ -57,7 +57,6 @@ class SegmentationSolver:
         self.lr_scheduler_type = lr_scheduler
 
         self.ignore_index = ignore_index
-        # parameters can either be heads for linear probe or projectors + head for conv_block probe
         self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=lr,
@@ -113,6 +112,19 @@ class SegmentationSolver:
             return torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer, T_max=epochs, eta_min=1e-6
             )
+        if self.lr_scheduler_type == "none":
+            return None
+        raise ValueError(
+            f"Unknown lr_scheduler {self.lr_scheduler_type!r}. Expected 'cosine' or 'none'."
+        )
+        
+
+    def _make_scheduler(self, epochs: int) -> torch.optim.lr_scheduler.LRScheduler | None:
+        """Return a CosineAnnealingLR scheduler, or None for constant LR."""
+        if self.lr_scheduler_type == "cosine":
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=epochs, eta_min=1e-6
+            )
         return None
 
     def fit(
@@ -143,8 +155,9 @@ class SegmentationSolver:
 
             total_loss = 0.0
 
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", disable=not verbose)
-            for _num_batches, batch in enumerate(pbar, start=1):
+            desc = f"Epoch {epoch + 1}/{epochs}"
+            batches = track(train_loader, description=desc) if verbose else train_loader
+            for _num_batches, batch in enumerate(batches, start=1):
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
                     masks = batch["mask"].to(self.device).long()
@@ -155,7 +168,7 @@ class SegmentationSolver:
                     masks = masks.squeeze(1)
 
                 self.optimizer.zero_grad()
-                with torch.autocast(device_type="cuda", enabled=self.use_amp):
+                with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                     logits = self.model(images)
                     loss = self.criterion(logits, masks)
 
@@ -164,7 +177,6 @@ class SegmentationSolver:
                 self.scaler.update()
 
                 total_loss += loss.item()
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
             if scheduler is not None:
                 scheduler.step()
@@ -212,7 +224,7 @@ class SegmentationSolver:
                 masks = masks.squeeze(1)
             masks = masks.long()
 
-            with torch.autocast(device_type="cuda", enabled=self.use_amp):
+            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                 logits = self.model(images)
 
             for m in self._all_metrics:
@@ -252,7 +264,7 @@ class SegmentationSolver:
 
         Args:
             train_cache: Pre-extracted training features from
-                :meth:`SegmentationProbe.extract_all_features`.
+                :meth:`SegmentationProbe.extract_segmentation_features`.
             val_cache: Optional validation cache for per-epoch mIoU logging.
             batch_size: Batch size for iterating over cached data.
             epochs: Number of training epochs.
@@ -283,13 +295,10 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             total_loss = 0.0
-            pbar = tqdm(
-                gpu_train.shuffled_batches(batch_size),
-                total=num_batches,
-                desc=f"Epoch {epoch + 1}/{epochs}",
-                disable=not verbose,
-            )
-            for features, masks in pbar:
+            desc = f"Epoch {epoch + 1}/{epochs}"
+            batches = gpu_train.shuffled_batches(batch_size)
+            batches = track(batches, total=num_batches, description=desc) if verbose else batches
+            for features, masks in batches:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                     logits = self.model.head(features, *input_hw)
@@ -300,7 +309,6 @@ class SegmentationSolver:
                 self.scaler.update()
 
                 total_loss += loss.item()
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
             if scheduler is not None:
                 scheduler.step()
@@ -326,7 +334,7 @@ class SegmentationSolver:
 
         Args:
             cache: Pre-extracted features (output of
-                :meth:`SegmentationProbe.extract_all_features`).
+                :meth:`SegmentationProbe.extract_segmentation_features`).
             batch_size: Batch size for iterating over the cache.
             collect_preds: If True, also return predicted class maps (N, H, W) int64.
 

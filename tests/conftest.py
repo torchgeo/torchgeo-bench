@@ -5,23 +5,40 @@ from pathlib import Path
 
 import pytest
 
-# GeoBench data root - can override with environment variable
-GEOBENCH_ROOT = os.getenv("GEOBENCH_ROOT", "data/classification_v1.0")
+# Datasets always live under ./data/<canonical>/ from the test invocation CWD.
+GEOBENCH_ROOT = Path("data/classification_v1.0")
+GEOBENCH_V2_ROOT = Path("data/geobenchv2")
+EUROSAT_ROOT = Path("data/eurosat")
 
-# Set GEO_BENCH_DIR for reference implementation (geobench library)
-# This needs to be set BEFORE the geobench library is imported
-# Reference implementation expects parent directory (without classification_v1.0)
-if "GEO_BENCH_DIR" not in os.environ:
-    os.environ["GEO_BENCH_DIR"] = str(Path(GEOBENCH_ROOT).parent)
+# Tests rely on the dataset-not-on-disk path raising FileNotFoundError so the
+# test-skip branch fires.  The V1 loader otherwise auto-downloads the public
+# WebDataset mirror — which would force CI to pull tens of GBs and time out.
+os.environ.setdefault("GEOBENCH_V1_NO_HF_DOWNLOAD", "1")
+os.environ.setdefault("GEOBENCH_V2_NO_DOWNLOAD", "1")
 
 
 @pytest.fixture
 def geobench_root():
-    """Fixture providing GeoBench data root path."""
-    root = Path(GEOBENCH_ROOT)
-    if not root.exists():
-        pytest.skip(f"GeoBench data not found at {root}")
-    return str(root)
+    """Fixture providing GeoBench V1 data root path."""
+    if not (GEOBENCH_ROOT / "m-eurosat").exists():
+        pytest.skip(f"GeoBench V1 data not found at {GEOBENCH_ROOT}")
+    return str(GEOBENCH_ROOT)
+
+
+@pytest.fixture
+def geobench_v2_root():
+    """Fixture providing GeoBench V2 data root path."""
+    if not GEOBENCH_V2_ROOT.exists():
+        pytest.skip(f"GeoBench V2 data not found at {GEOBENCH_V2_ROOT}")
+    return str(GEOBENCH_V2_ROOT)
+
+
+@pytest.fixture
+def eurosat_root():
+    """Fixture providing the torchgeo EuroSAT data root path."""
+    if not EUROSAT_ROOT.exists():
+        pytest.skip(f"EuroSAT (torchgeo) data not found at {EUROSAT_ROOT}")
+    return str(EUROSAT_ROOT)
 
 
 @pytest.fixture

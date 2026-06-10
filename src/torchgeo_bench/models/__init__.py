@@ -1,14 +1,24 @@
 """Benchmark model implementations and exports."""
 
-from .bench_models import ImageStatsBench, RCFBench
+from ._input_units import InputUnit
+from ._normalization import NormalizationStrategy
+from .image_stats import ImageStatsBench
 from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
-from .sam3 import SAM3EncoderBench
+from .rcf import RCFBench
+from .sam3 import SAM3Encoder
 from .segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead
+from .terratorch_models import (
+    TerraTorchClayBench,
+    TerraTorchPrithviBench,
+    TerraTorchTerraMindBench,
+)
 from .timm import TimmPatchBenchModel
 from .torchgeo_models import (
+    TorchGeoCromaBench,
     TorchGeoDOFABench,
     TorchGeoEarthLocBench,
+    TorchGeoPanopticonBench,
     TorchGeoResNetBench,
     TorchGeoScaleMAEBench,
     TorchGeoSwinBench,
@@ -16,16 +26,23 @@ from .torchgeo_models import (
 
 __all__: list[str] = [
     "BenchModel",
+    "InputUnit",
+    "NormalizationStrategy",
     "RCFBench",
     "ImageStatsBench",
     "TimmPatchBenchModel",
     "OlmoEarthBenchModel",
-    "SAM3EncoderBench",
+    "SAM3Encoder",
+    "TorchGeoCromaBench",
     "TorchGeoDOFABench",
     "TorchGeoEarthLocBench",
+    "TorchGeoPanopticonBench",
     "TorchGeoResNetBench",
     "TorchGeoScaleMAEBench",
     "TorchGeoSwinBench",
+    "TerraTorchPrithviBench",
+    "TerraTorchClayBench",
+    "TerraTorchTerraMindBench",
     "LinearHead",
     "ConvBlockHead",
     "FPNHead",

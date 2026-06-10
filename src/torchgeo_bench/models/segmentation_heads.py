@@ -30,6 +30,7 @@ class LinearHead(nn.Module):
             self.scale_weights = nn.Parameter(torch.ones(len(channels_list)))
 
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
+        """Upsample and sum per-layer logits."""
         total_logits: torch.Tensor | int = 0
         for idx, (feat, head) in enumerate(zip(features, self.heads)):
             logits = head(feat)
@@ -71,6 +72,7 @@ class ConvBlockHead(nn.Module):
         self.head = nn.Conv2d(hidden_dim * len(channels_list), num_classes, kernel_size=1)
 
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
+        """Project, upsample, concat, and classify features."""
         proj_feats = [proj(f) for f, proj in zip(features, self.projectors)]
 
         target_h, target_w = 0, 0
@@ -187,6 +189,7 @@ class ChannelLayerNorm(nn.Module):
         self.norm = nn.LayerNorm(num_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply layer norm over channels."""
         # x: (B, C, H, W) → permute to (B, H, W, C) → LN → back
         return self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2).contiguous()
 
@@ -205,6 +208,7 @@ class ResidualConvUnit(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply residual conv block."""
         return self.conv(x) + x
 
 
@@ -219,6 +223,7 @@ class FeatureFusionBlock(nn.Module):
         self.resConfUnit2 = ResidualConvUnit(features, kernel_size)
 
     def forward(self, x: torch.Tensor, skip_x: torch.Tensor | None = None) -> torch.Tensor:
+        """Fuse skip connection and refine features."""
         if skip_x is not None:
             if skip_x.shape[-2:] != x.shape[-2:]:
                 skip_x = F.interpolate(
@@ -229,12 +234,12 @@ class FeatureFusionBlock(nn.Module):
 
 
 class DPTHead(nn.Module):
-    """DPT-style decoder head (adapted from probe3d — mbanani/probe3d, single-view).
+    """DPT-style decoder head (adapted from probe3d at mbanani/probe3d, single-view).
 
     Requires exactly **4** feature layers in **coarse-to-fine order** (same
     convention as FPN, e.g. ``["layer4", "layer3", "layer2", "layer1"]`` for
     ResNet). The forward pass processes features from coarsest to finest
-    through a cascade of :class:`FeatureFusionBlock`s.
+    through a cascade of :class:`FeatureFusionBlock` modules.
 
     Upsampling chain (mirroring probe3d):
       1. 1×1 project each map to ``hidden_dim``

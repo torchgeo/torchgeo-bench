@@ -1,5 +1,4 @@
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: convnext_large
 pretrained: true
 global_pool: avg
@@ -8,5 +7,4 @@ name: convnext_large
 eval:
   segmentation:
     # Layers in coarse-to-fine order (deepest first) for FPN head.
-    # For ASPP head, only the last entry (stages.3) is used.
     layers: ["stages.3", "stages.2", "stages.1", "stages.0"]

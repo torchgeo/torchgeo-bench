@@ -3,7 +3,6 @@
 # Model: swinv2_small_window8_256
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: swinv2_small_window8_256
 pretrained: true
 global_pool: avg

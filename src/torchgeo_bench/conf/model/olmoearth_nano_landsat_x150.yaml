@@ -1,0 +1,9 @@
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
+model_size: nano
+patch_size: 8
+input_res: null
+time_steps: 3
+std_multiplier: 2.0
+normalize: false
+landsat_scale_factor: 3.825  # uint8*(10000/255)*3.825 ≈ uint8*150; maps mean~72 → ~10800 ≈ OlmoEarth B2 mean
+name: olmoearth_v1_nano_lsat_x150

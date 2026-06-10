@@ -1,154 +1,94 @@
-"""Command-line interface for torchgeo-bench."""
+"""Command-line interface for ``torchgeo-bench``.
 
-import argparse
+Two subcommands:
+
+- ``torchgeo-bench run [hydra overrides...]`` — runs the benchmark via Hydra.
+- ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`` — fetches data.
+
+The ``run`` subcommand forwards every remaining arg to Hydra by mutating
+``sys.argv`` and calling :func:`torchgeo_bench.main.main` in-process. We
+restore ``sys.argv`` afterwards so embedded use (tests, notebooks) is safe.
+"""
+
 import logging
 import sys
 from pathlib import Path
+from typing import Annotated
 
-logger = logging.getLogger(__name__)
+import typer
+from rich.logging import RichHandler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+)
+
+app = typer.Typer(
+    name="torchgeo-bench",
+    help="Lightweight benchmarking framework for geospatial foundation models.",
+    add_completion=False,
+    no_args_is_help=True,
+)
 
 
-def download_command(args: argparse.Namespace) -> int:
-    """Execute the download command."""
-    # Import here to avoid loading heavy dependencies for --help
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Run benchmark experiments (extra args forwarded to Hydra).",
+)
+def run(ctx: typer.Context) -> None:
+    """Run benchmark experiments; extra args are forwarded to Hydra."""
+    from torchgeo_bench.main import main as hydra_main
+
+    saved = sys.argv[:]
+    try:
+        sys.argv = [saved[0], *ctx.args]
+        hydra_main()
+    finally:
+        sys.argv = saved
+
+
+@app.command(help="Download benchmark datasets.")
+def download(
+    target: Annotated[
+        str,
+        typer.Argument(help="What to download: geobench_v1 | geobench_v2 | eurosat"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", "-o", help="Benchmark data root."),
+    ] = Path("data"),
+    datasets: Annotated[
+        str | None,
+        typer.Option(help="(geobench_v2 only) Comma-separated dataset names."),
+    ] = None,
+) -> None:
+    """Download a benchmark dataset to disk."""
     from torchgeo_bench.download import (
+        download_eurosat,
         download_geobench_v1,
         download_geobench_v2,
     )
 
-    if args.force:
-        print("Force mode enabled: existing files will be re-downloaded")
+    valid = {"geobench_v1", "geobench_v2", "eurosat"}
+    if target not in valid:
+        typer.echo(f"Unknown target {target!r}. Choose from: {', '.join(sorted(valid))}", err=True)
+        raise typer.Exit(1)
 
-    try:
-        if args.version == "v1":
-            download_geobench_v1(args.output_dir, args.force)
-        elif args.version == "v2":
-            # Parse datasets argument
-            datasets = None
-            if args.datasets and args.datasets != "all":
-                datasets = [d.strip() for d in args.datasets.split(",")]
-            download_geobench_v2(args.output_dir, datasets, args.force)
-        return 0
-    except Exception as e:
-        logger.error(f"Download failed: {e}")
-        return 1
+    if target == "geobench_v1":
+        download_geobench_v1(output_dir)
+    elif target == "geobench_v2":
+        names = [n.strip() for n in datasets.split(",") if n.strip()] if datasets else None
+        download_geobench_v2(output_dir, datasets=names)
+    elif target == "eurosat":
+        download_eurosat(output_dir)
 
 
-def run_command(args: argparse.Namespace) -> int:
-    """Execute the run command."""
-    import subprocess
-
-    # Pass through all arguments after 'run'
-    hydra_args = args.hydra_args if args.hydra_args else []
-
-    # Run the script directly with subprocess to preserve Hydra's argument handling
-    try:
-        cmd = [sys.executable, "-m", "torchgeo_bench"] + hydra_args
-        result = subprocess.run(cmd, check=False)
-        return result.returncode
-    except Exception as e:
-        logger.error(f"Benchmark run failed: {e}")
-        return 1
-
-
-def overfit_check_command(args: argparse.Namespace) -> int:
-    """Execute the overfit-check command."""
-    import subprocess
-
-    hydra_args = args.hydra_args if args.hydra_args else []
-    try:
-        cmd = [sys.executable, "-m", "torchgeo_bench.overfit_check"] + hydra_args
-        result = subprocess.run(cmd, check=False)
-        return result.returncode
-    except Exception as e:
-        logger.error(f"Overfit check failed: {e}")
-        return 1
-
-
-def main() -> int:
-    """Main CLI entry point."""
-    # Special handling for "run" command - pass everything after "run" to Hydra
-    if len(sys.argv) > 1 and sys.argv[1] == "run":
-        # Extract hydra args (everything after "run")
-        hydra_args = sys.argv[2:]
-
-        # Create a minimal args object for run_command
-        args = argparse.Namespace(hydra_args=hydra_args)
-        return run_command(args)
-
-    # Special handling for "overfit-check" command
-    if len(sys.argv) > 1 and sys.argv[1] == "overfit-check":
-        hydra_args = sys.argv[2:]
-        args = argparse.Namespace(hydra_args=hydra_args)
-        return overfit_check_command(args)
-
-    # For other commands, use standard argparse
-    parser = argparse.ArgumentParser(
-        prog="torchgeo-bench",
-        description="Lightweight benchmarking framework for geospatial foundation models",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # Download command
-    download_parser = subparsers.add_parser(
-        "download",
-        help="Download and extract GeoBench datasets from Hugging Face",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    download_parser.add_argument(
-        "--version",
-        type=str,
-        choices=["v1", "v2"],
-        default="v1",
-        help="GeoBench version to download",
-    )
-    download_parser.add_argument(
-        "--datasets",
-        type=str,
-        default="all",
-        help="For v2: comma-separated dataset names or 'all' (default: all)",
-    )
-    download_parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default="data/",
-        help="Directory to download and extract the dataset",
-    )
-    download_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force re-download of files even if they already exist",
-    )
-
-    # Run command - just show basic help since actual parsing is done above
-    subparsers.add_parser(
-        "run",
-        help="Run benchmark experiments with Hydra configuration",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-
-    # Overfit-check command
-    subparsers.add_parser(
-        "overfit-check",
-        help=(
-            "Pre-screening sanity check: verify segmentation encoders can overfit "
-            "a tiny training subset before running the full benchmark"
-        ),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-
-    args = parser.parse_args()
-
-    if args.command == "download":
-        return download_command(args)
-    elif args.command in ("run", "overfit-check"):
-        raise AssertionError("This should never be reached due to special handling above.")
-    else:
-        parser.print_help()
-        return 1
+def main() -> None:
+    """Entry point for the ``torchgeo-bench`` console script."""
+    app()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

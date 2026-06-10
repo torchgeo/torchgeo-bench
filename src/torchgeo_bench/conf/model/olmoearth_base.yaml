@@ -1,14 +1,17 @@
 # OlmoEarth-v1-Base (AI2 geospatial foundation model)
 # Feature dimension: 768
-# Default: RGB mode (3 channels). For full S2, set num_channels=12 and dataset.bands=all
-# Run with: dataset.normalization=none
+# Multi-modal: auto-routes S2/SAR/Landsat/NAIP bands to the correct modality.
+# input_res auto-detected from primary sensor (S2/SAR=10m, Landsat=30m).
+# The wrapper applies OlmoEarth's internal Normalizer (normalize_inputs=identity).
 
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
-num_channels: 3
 model_size: base
 patch_size: 8
-input_res: 10
+input_res: null
 time_steps: 3
 std_multiplier: 2.0
 normalize: false
+sensor_remap:
+  landsat: landsat_as_s2  # route Landsat through S2 normalizer (+6.6pp on m-forestnet)
+min_image_size: 64  # upsample 32-px datasets (e.g. m-so2sat) for denser patch grids
 name: olmoearth_v1_base

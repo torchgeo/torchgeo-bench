@@ -2,11 +2,9 @@
 # Feature dimension: 1024
 
 _target_: torchgeo_bench.models.TorchGeoSwinBench
-num_channels: 3
 factory: swin_v2_b
 weights_class: Swin_V2_B_Weights
 weights_member: SENTINEL2_SI_RGB_SATLAS
 auto_resize: true
 target_size: 256
 name: tgeo_swinv2b_s2rgb_satlas_si
-normalization: none

@@ -157,14 +157,19 @@ class TestEurosatResNet18Pipeline:
 @pytest.mark.slow
 @_skip_no_v1
 class TestTorchGeoModelNormalization:
-    """Verify torchgeo models use their own normalization (none) override."""
+    """The CSV records the active ``cfg.dataset.normalization`` strategy."""
 
     @pytest.fixture(autouse=True)
     def _output_csv(self, tmp_path):
         self.output = str(tmp_path / "tgeo_norm_results.csv")
 
-    def test_torchgeo_resnet_uses_none_normalization(self):
-        """torchgeo ResNet18 MoCo should record normalization=none."""
+    def test_normalization_recorded(self):
+        """The CSV ``normalization`` column reflects ``cfg.dataset.normalization``.
+
+        Default is ``bandspec_zscore``; this also exercises that override
+        via ``dataset.normalization=...`` lands in the output column for
+        downstream resume and ablation.
+        """
         result = _run_bench(
             "model=torchgeo/resnet18_s2rgb_moco",
             "dataset.names=[m-eurosat]",
@@ -172,14 +177,15 @@ class TestTorchGeoModelNormalization:
             f"output={self.output}",
             "eval.bootstrap=10",
             "eval.skip_linear=true",
+            "dataset.normalization=bandspec_zscore",
             "device=cuda:0",
         )
         assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
 
         df = pd.read_csv(self.output)
         assert len(df) == 1
-        assert df.iloc[0]["normalization"] == "none", (
-            f"Expected normalization=none, got {df.iloc[0]['normalization']}"
+        assert df.iloc[0]["normalization"] == "bandspec_zscore", (
+            f"Expected normalization=bandspec_zscore, got {df.iloc[0]['normalization']}"
         )
 
 
@@ -225,7 +231,7 @@ class TestMultiDatasetRun:
 # model                  | dataset     | knn5   | linear
 # rcf                    | m-eurosat   | 0.6110 | 0.7690
 # rcf                    | m-forestnet | 0.2276 | 0.4693
-# imagestats             | m-eurosat   | 0.5970 | 0.7180
+# imagestats             | m-eurosat   | 0.5970 | 0.6960
 # mobilenetv3_small_100  | m-eurosat   | 0.8150 | 0.9330
 # mobilenetv3_small_100  | m-forestnet | 0.3565 | 0.4975
 # resnet18               | m-eurosat   | 0.8580 | 0.9290
@@ -297,7 +303,7 @@ class TestImageStatsBaseline:
         knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
         linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
         assert knn == pytest.approx(0.597, abs=_TOL), f"KNN={knn}"
-        assert linear == pytest.approx(0.718, abs=_TOL), f"Linear={linear}"
+        assert linear == pytest.approx(0.696, abs=_TOL), f"Linear={linear}"
 
 
 @pytest.mark.slow
