@@ -55,7 +55,7 @@ eval:
   # Compute/efficiency profile metrics: throughput, peak GPU mem,
   # latency, params, GMACs, GPU power and energy.  One row per metric
   # with method="profile".  GMACs requires fvcore; energy/power requires
-  # pynvml (both in `pip install 'torchgeo-bench[profile]'`).  Other
+  # nvidia-ml-py (both in `pip install 'torchgeo-bench[profile]'`).  Other
   # metrics work without extras.
   profile:
     enabled: false

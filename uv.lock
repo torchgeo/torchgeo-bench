@@ -2577,18 +2577,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pynvml"
-version = "13.0.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "nvidia-ml-py" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5c/57/da7dc63a79f59e082e26a66ac02d87d69ea316b35b35b7a00d82f3ce3d2f/pynvml-13.0.1.tar.gz", hash = "sha256:1245991d9db786b4d2f277ce66869bd58f38ac654e38c9397d18f243c8f6e48f", size = 35226, upload-time = "2025-09-05T20:33:25.377Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d7/4a/cac76c174bb439a0c46c9a4413fcbea5c6cabfb01879f7bbdb9fdfaed76c/pynvml-13.0.1-py3-none-any.whl", hash = "sha256:e2b20e0a501eeec951e2455b7ab444759cf048e0e13a57b08049fa2775266aa8", size = 28810, upload-time = "2025-09-05T20:33:24.13Z" },
-]
-
-[[package]]
 name = "pyogrio"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3925,10 +3913,10 @@ all = [
     { name = "matplotlib" },
     { name = "mdformat" },
     { name = "myst-parser" },
+    { name = "nvidia-ml-py" },
     { name = "pillow" },
     { name = "pre-commit" },
     { name = "pydata-sphinx-theme" },
-    { name = "pynvml" },
     { name = "pyproject-fmt" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -3972,7 +3960,7 @@ olmoearth = [
     { name = "olmoearth-pretrain-minimal" },
 ]
 profile = [
-    { name = "pynvml" },
+    { name = "nvidia-ml-py" },
 ]
 sam3 = [
     { name = "transformers" },
@@ -4001,6 +3989,7 @@ requires-dist = [
     { name = "mdformat", marker = "extra == 'dev'", specifier = ">=0.7.22" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=2" },
     { name = "numpy", specifier = ">=1.24" },
+    { name = "nvidia-ml-py", marker = "extra == 'profile'", specifier = ">=12.535" },
     { name = "olmoearth-pretrain-minimal", marker = "extra == 'olmoearth'", specifier = ">=0.0.5" },
     { name = "omegaconf", specifier = ">=2.3" },
     { name = "pandas", specifier = ">=2" },
@@ -4008,7 +3997,6 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'viz'", specifier = ">=9" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.3" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.15" },
-    { name = "pynvml", marker = "extra == 'profile'", specifier = ">=11.5" },
     { name = "pyproject-fmt", marker = "extra == 'dev'", specifier = ">=2.21" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },

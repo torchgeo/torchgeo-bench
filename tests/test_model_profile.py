@@ -65,7 +65,7 @@ def test_measure_profile_nvml_absent_no_crash(monkeypatch: pytest.MonkeyPatch) -
 
     def _import_without_nvml(name: str, *args, **kwargs):
         if name == "pynvml":
-            raise ImportError("simulated missing pynvml")
+            raise ImportError("simulated missing nvidia-ml-py")
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", _import_without_nvml)

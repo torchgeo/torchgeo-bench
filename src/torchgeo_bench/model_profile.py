@@ -17,7 +17,7 @@ dataloader overhead. Reports:
 - ``sm_utilization_avg`` — mean GPU compute-utilization percentage during
   the timed loop (NVIDIA only)
 
-Energy/power/SM-utilization require ``pynvml`` (in the ``[profile]``
+Energy/power/SM-utilization require ``nvidia-ml-py`` (in the ``[profile]``
 extra). All other metrics work without extras.
 """
 
@@ -132,7 +132,7 @@ def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
 class _NvmlSampler:
     """Background thread polling NVML power (mW) and GPU utilization (%).
 
-    No-ops when pynvml is unavailable or NVML init fails; ``samples_w``
+    No-ops when nvidia-ml-py is unavailable or NVML init fails; ``samples_w``
     and ``samples_sm_util`` stay empty and callers should treat the
     derived metrics as ``None``.
     """
@@ -148,14 +148,14 @@ class _NvmlSampler:
         try:
             import pynvml
         except ImportError:
-            logger.info("pynvml not installed — GPU power/util disabled.")
+            logger.info("nvidia-ml-py not installed — GPU power/util disabled.")
             return
         try:
             pynvml.nvmlInit()
             self._pynvml = pynvml
             self._handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
         except pynvml.NVMLError as exc:
-            logger.info(f"pynvml installed but NVML init failed — GPU power/util disabled ({exc}).")
+            logger.info(f"nvidia-ml-py installed but NVML init failed — GPU power/util disabled ({exc}).")
 
     def __enter__(self) -> "_NvmlSampler":
         if self._handle is None:
@@ -215,7 +215,7 @@ def measure_profile(
 
     Returns:
         Mapping of metric name to value; entries may be ``None`` when the
-        underlying probe is unavailable (no GPU, no pynvml, no fvcore).
+        underlying probe is unavailable (no GPU, no nvidia-ml-py, no fvcore).
     """
     model.eval()
     batch_size = sample_batch.shape[0]
