@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate tests/fixtures/regression_baselines.csv from results/all_results.csv.
+"""Generate tests/fixtures/accuracy_baselines.csv from results/all_results.csv.
 
 Usage::
 
@@ -41,7 +41,7 @@ PINNED_CONFIGS: dict[str, str] = {
 
 # Canonical bands string for each pinned model.
 # For models with multiple band configs, select exactly one row per
-# (name, dataset, method) triple for the regression fixture.
+# (name, dataset, method) triple for the fixture.
 CANONICAL_BANDS: dict[str, str] = {
     "rcf": "all",
     "imagestats": "all",
@@ -119,7 +119,16 @@ def filter_and_deduplicate(
 
 
 def _output_columns() -> list[str]:
-    return ["model_config", "name", "dataset", "method", "metric_name", "bands", "partition", "expected_value"]
+    return [
+        "model_config",
+        "name",
+        "dataset",
+        "method",
+        "metric_name",
+        "bands",
+        "partition",
+        "expected_value",
+    ]
 
 
 def _diff_summary(old: pd.DataFrame | None, new: pd.DataFrame) -> None:

@@ -105,9 +105,7 @@ else:
     _fixture_df = pd.DataFrame(columns=list(_FIXTURE_COLS))
 
 _COMBOS = (
-    _fixture_df[["model_config", "name", "dataset", "bands"]]
-    .drop_duplicates()
-    .to_dict("records")
+    _fixture_df[["model_config", "name", "dataset", "bands"]].drop_duplicates().to_dict("records")
 )
 
 
