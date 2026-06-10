@@ -200,7 +200,6 @@ class SAM3Encoder(BenchModel):
     def _forward_patch_features(
         self,
         images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Run the vision encoder on (already-normalized) images.
 
@@ -211,12 +210,10 @@ class SAM3Encoder(BenchModel):
 
         Args:
             images: ``(B, 3, H, W)`` normalized float tensor.
-            bboxes: Unused.
 
         Returns:
             Pooled image embedding ``(B, 256)`` (average of the coarsest FPN level).
         """
-        del bboxes
         images = self._crop_to_patch_multiple(images)
         self._maybe_reset_rope(*images.shape[-2:])
         out = self.backbone(pixel_values=images)

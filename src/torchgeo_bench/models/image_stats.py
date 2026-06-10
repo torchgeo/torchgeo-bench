@@ -22,10 +22,8 @@ class ImageStatsBench(BenchModel):
     def _forward_patch_features(
         self,
         images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return per-channel image statistics (mean, std, max, min)."""
-        del bboxes
         feats = torch.cat(
             [
                 torch.mean(images, dim=(2, 3)),
