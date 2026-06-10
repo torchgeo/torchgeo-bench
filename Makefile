@@ -5,7 +5,7 @@ CONDA_RUN := conda run --no-capture-output -n torchgeo-bench
 .PHONY: install sync tests lint format clean help
 
 install:
-	conda env update -n torchgeo-bench -f environment.yml
+	conda create -y -n torchgeo-bench 'python>=3.12,<3.13' || true
 	$(CONDA_RUN) pip install -e ".[dev]"
 
 sync:
