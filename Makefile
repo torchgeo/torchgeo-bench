@@ -2,7 +2,7 @@
 
 CONDA_RUN := conda run --no-capture-output -n torchgeo-bench
 
-.PHONY: install sync tests lint format clean help accuracy-check update-baselines
+.PHONY: install sync tests lint format clean help accuracy-check update-baselines docs docs-clean help
 
 install:
 	conda create -y -n torchgeo-bench 'python>=3.12,<3.13' || true
@@ -26,6 +26,11 @@ accuracy-check:
 
 update-baselines:
 	$(CONDA_RUN) python scripts/update_baselines.py
+docs:
+	sphinx-build -b html docs/ docs/_build/html
+
+docs-clean:
+	rm -rf docs/_build
 
 clean:
 	rm -rf htmlcov .pytest_cache .coverage
@@ -37,5 +42,7 @@ help:
 	@echo "  tests   - Run test suite with coverage"
 	@echo "  lint    - Run pre-commit checks on all files"
 	@echo "  format  - Format code and auto-fix imports with ruff"
-	@echo "  clean   - Remove generated files (htmlcov, .coverage, .pytest_cache)"
-	@echo "  help    - Show this help message"
+	@echo "  docs       - Build HTML documentation into docs/_build/html"
+	@echo "  docs-clean - Remove the docs build directory"
+	@echo "  clean      - Remove generated files (htmlcov, .coverage, .pytest_cache)"
+	@echo "  help       - Show this help message"

@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import torch
+
+_DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_PATH = Path(__file__).parent / "fixtures" / "accuracy_baselines.csv"
@@ -132,7 +135,7 @@ def test_accuracy(combo: dict, tmp_path: Path) -> None:
         f"dataset.bands={bands}",
         f"output={out}",
         "eval.bootstrap=10",
-        "device=cuda:0",
+        f"device={_DEVICE}",
     )
     assert result.returncode == 0, f"CLI failed for {model_config} × {dataset}:\n{result.stderr}"
 

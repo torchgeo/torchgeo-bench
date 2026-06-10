@@ -1,5 +1,7 @@
 paper/
-results/
+results/*
+!results/contributed/
+results/contributed/*.csv
 experiments/scripts/*
 !experiments/scripts/viz_results.py
 !experiments/scripts/repack_geobench_v1.py

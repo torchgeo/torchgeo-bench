@@ -12,6 +12,8 @@ and models, and interpreting the results.
    quickstart
    datasets
    models
+   eval_own_model
+   contribute_model
    configuration
    results-format
    results-explorer

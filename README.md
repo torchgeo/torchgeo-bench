@@ -19,8 +19,13 @@ configured through Hydra.
   bands without code changes.
 - **Resumable** — `resume=true` skips already-computed `(dataset, method,
   model, …)` rows. Atomic CSV appends are safe across parallel jobs.
-- **Bring your own model** — implement `BenchModel._forward_patch_features`
-  and add a one-file Hydra config.
+- **Bring your own model** — copy
+  [`contrib_template.py`](src/torchgeo_bench/models/contrib_template.py),
+  implement `_forward_patch_features`, and add a one-file Hydra config.
+  See the [Stage 1 guide](https://torchgeo.org/torchgeo-bench/user/eval_own_model.html)
+  for a full walkthrough, or the
+  [Stage 2 guide](https://torchgeo.org/torchgeo-bench/user/contribute_model.html)
+  to contribute the model back upstream.
 
 ## Installation
 
