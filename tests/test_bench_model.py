@@ -71,3 +71,33 @@ def test_num_channels_property():
     """`num_channels` is derived from `len(bands)`."""
     m = _Toy(bands=_bands(5))
     assert m.num_channels == 5
+
+
+# --- contrib_template tests ---
+
+
+def test_contrib_template_importable():
+    """contrib_template module imports without error."""
+    from torchgeo_bench.models.contrib_template import MyGeoFM  # noqa: F401
+
+
+def test_contrib_template_not_in_public_namespace():
+    """MyGeoFM must not be part of the public models namespace."""
+    import torchgeo_bench.models as models_pkg
+
+    assert "MyGeoFM" not in models_pkg.__all__
+    assert not hasattr(models_pkg, "MyGeoFM")
+
+
+def test_contrib_template_inherits_benchmodel():
+    """MyGeoFM is a BenchModel subclass."""
+    from torchgeo_bench.models.contrib_template import MyGeoFM
+
+    assert issubclass(MyGeoFM, BenchModel)
+
+
+def test_contrib_template_identity_variant_importable():
+    """MyGeoFMInternal exists in the module and is a BenchModel subclass."""
+    from torchgeo_bench.models.contrib_template import MyGeoFMInternal
+
+    assert issubclass(MyGeoFMInternal, BenchModel)

@@ -176,58 +176,33 @@ SAM 3 vision encoder
 Adding a new model
 ------------------
 
-1. Implement :class:`~torchgeo_bench.models.BenchModel` in any importable
-   module:
+There are two contribution pathways.  **Stage 1** lets you benchmark your
+model locally and report results in a paper without opening a PR.  **Stage
+2** covers the full code contribution: exporting the class, writing tests,
+hosting weights, and submitting a PR.
 
-   .. code-block:: python
+.. seealso::
 
-      import torch
+   :doc:`eval_own_model`
+      Stage 1 — evaluate your model locally and report results.
 
-      from torchgeo_bench.datasets.base import BandSpec
-      from torchgeo_bench.models.interface import BenchModel
+   :doc:`contribute_model`
+      Stage 2 — contribute the model as a PR to the shared benchmark.
 
+.. note::
 
-      class MyModel(BenchModel):
-          def __init__(self, bands: list[BandSpec], pretrained: bool = True):
-              super().__init__(bands=bands)
-              # self.num_channels == len(bands) is set for you
-              self.backbone = create_my_backbone(
-                  in_channels=self.num_channels, pretrained=pretrained
-              )
+   Two key patterns apply regardless of stage:
 
-          def _forward_patch_features(
-              self,
-              images: torch.Tensor,
-              bboxes: torch.Tensor | None = None,
-          ) -> torch.Tensor:
-              # `images` has already been normalized via self.normalize_inputs
-              return self.backbone(images)  # must return (B, K)
-
-   Notes:
-
-   * ``BenchModel.__init__`` takes a ``bands: list[BandSpec]`` argument; the
-     runner builds it from the dataset wrapper and injects it for you.
-     Do **not** put ``bands`` in your YAML.
-   * The public ``forward_patch_features`` is sealed and applies
-     ``normalize_inputs`` (per-channel z-score from each ``BandSpec``'s
-     ``mean`` / ``std``) before dispatching to your
-     ``_forward_patch_features``.  Override ``normalize_inputs``
-     if your backbone expects a different policy (e.g. backbone-internal
-     normalization → return ``images`` unchanged).
-
-2. Drop a config at :file:`src/torchgeo_bench/conf/model/<name>.yaml`:
-
-   .. code-block:: yaml
-
-      _target_: my_pkg.MyModel
-      pretrained: true
-      name: my_model
-
-3. Run it:
-
-   .. code-block:: console
-
-      $ torchgeo-bench run model=<name>
+   * **Do not put** ``bands`` **in the Hydra YAML.**  The runner reads the
+     current dataset's :class:`~torchgeo_bench.datasets.base.BandSpec` list
+     and injects it into the constructor automatically.  Adding ``bands`` to
+     the YAML causes a ``TypeError`` (duplicate keyword argument).
+   * **Override** ``normalize_inputs`` **when your backbone handles
+     normalization internally** (e.g. it ships its own ``Normalizer`` module
+     or always expects raw sensor values).  Return the input tensor unchanged
+     — or more precisely, pass ``normalization="identity"`` to
+     ``super().__init__(bands=bands)`` and the sealed ``forward_patch_features``
+     will skip normalization for you.
 
 For segmentation models, also pick the
 :attr:`eval.segmentation.layers <torchgeo_bench.segmentation_probe.SegmentationProbe>`
