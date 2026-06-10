@@ -2,7 +2,7 @@
 
 CONDA_RUN := conda run --no-capture-output -n torchgeo-bench
 
-.PHONY: install sync tests lint format clean help
+.PHONY: install sync tests lint format clean help accuracy-check update-baselines
 
 install:
 	conda create -y -n torchgeo-bench 'python>=3.12,<3.13' || true
@@ -20,6 +20,12 @@ lint:
 format:
 	$(CONDA_RUN) ruff format src/ tests/
 	$(CONDA_RUN) ruff check --fix --select I src/ tests/
+
+accuracy-check:
+	$(CONDA_RUN) pytest -m accuracy_check tests/test_model_baselines.py
+
+update-baselines:
+	$(CONDA_RUN) python scripts/update_baselines.py
 
 clean:
 	rm -rf htmlcov .pytest_cache .coverage

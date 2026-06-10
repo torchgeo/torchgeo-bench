@@ -161,10 +161,11 @@ ini_options.python_classes = [ "Test*" ]
 ini_options.python_functions = [ "test_*" ]
 ini_options.addopts = [
   "--verbose",
-  "-m not slow",
+  "-m not slow and not accuracy_check",
 ]
 ini_options.markers = [
   "slow: integration tests that load real data and run models (use -m slow to include)",
+  "accuracy_check: per-class model accuracy regression tests (use -m accuracy_check to run)",
 ]
 
 [tool.coverage]
