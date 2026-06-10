@@ -19,6 +19,12 @@ development dependencies:
    $ cd torchgeo-bench
    $ uv sync --extra dev
 
+For GPU-accelerated KNN (Linux + CUDA 12 + glibc ≥ 2.28):
+
+.. code-block:: console
+
+   $ pip install 'torchgeo-bench[cuda]'
+
 The ``torchgeo-bench`` console script is then available via ``uv run``:
 
 .. code-block:: console

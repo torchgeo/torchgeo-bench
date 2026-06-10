@@ -36,6 +36,12 @@ cd torchgeo-bench
 uv sync --extra dev
 ```
 
+For GPU-accelerated KNN (Linux + CUDA 12 + glibc ≥ 2.28):
+
+```bash
+pip install 'torchgeo-bench[cuda]'
+```
+
 Requires Python 3.12+.
 
 ## Download a dataset

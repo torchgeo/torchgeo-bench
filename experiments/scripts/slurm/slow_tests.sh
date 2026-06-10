@@ -19,8 +19,9 @@ VENV=${TGB_VENV:-$SLURM_SUBMIT_DIR/.venv}
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
-# faiss-cpu and faiss-cuda share the faiss/ Python namespace.  When both are
-# present, _loader.py prefers faiss-cpu's CPU-only AVX2 .abi3.so and hides
+# faiss-cpu is installed by default, and the [cuda] extra adds faiss-cuda.
+# Both wheels share the faiss/ Python namespace.  When both are present,
+# _loader.py prefers faiss-cpu's CPU-only AVX2 .abi3.so and hides
 # StandardGpuResources.  Fix: remove faiss-cpu, then reinstall faiss-cuda so
 # its Python files (shared with faiss-cpu) are restored.
 FAISS_CUDA_WHEEL="${SLURM_SUBMIT_DIR}/../faiss-cuda/wheelhouse/faiss_cuda-1.14.1.post3-cp313-cp313-manylinux_2_34_x86_64.whl"
