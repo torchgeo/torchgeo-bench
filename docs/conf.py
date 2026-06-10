@@ -38,6 +38,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
+    "sphinx_design",
 ]
 
 # Files / directories the builder should ignore.

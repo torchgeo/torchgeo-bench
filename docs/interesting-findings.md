@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Interesting findings
 
 Running notes on things we've noticed during torchgeo-bench sweeps that

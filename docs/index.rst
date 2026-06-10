@@ -1,17 +1,30 @@
 .. module:: torchgeo_bench
 
-.. The README is included in two parts so the docs-landing page can skip
-   the redundant "Learn more" section (its primary "Documentation" link
-   would just self-redirect here).  The HTML-comment markers in
-   README.md are invisible on GitHub.
+torchgeo-bench
+==============
 
-.. include:: ../README.md
-   :parser: myst_parser.sphinx_
-   :end-before: <!-- skip-on-docs-landing-start -->
+A lightweight benchmarking framework for frozen geospatial foundation models.
+Evaluate any backbone on GeoBench V1 / V2 in minutes — choose your path below.
 
-.. include:: ../README.md
-   :parser: myst_parser.sphinx_
-   :start-after: <!-- skip-on-docs-landing-end -->
+.. grid:: 3
+
+   .. grid-item-card:: Benchmark a model
+      :link: user/quickstart
+      :link-type: doc
+
+      Evaluate any frozen backbone on GeoBench V1 / V2 in minutes.
+
+   .. grid-item-card:: Bring your own model
+      :link: user/eval_own_model
+      :link-type: doc
+
+      Implement ``BenchModel`` and run your pretrained GeoFM against the full suite.
+
+   .. grid-item-card:: Add a dataset
+      :link: user/contribute_dataset
+      :link-type: doc
+
+      Wire a new geospatial dataset into the benchmark and generate results.
 
 .. toctree::
    :maxdepth: 2
@@ -19,4 +32,3 @@
 
    user/index
    api/index
-   interesting-findings
