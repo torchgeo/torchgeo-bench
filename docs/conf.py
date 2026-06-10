@@ -1,3 +1,10 @@
+# Portions of this file (notably ``linkcode_resolve`` and the autodoc /
+# nitpick / theme configuration) are adapted from torchgeo
+# (https://github.com/torchgeo/torchgeo), Copyright (c) TorchGeo
+# Contributors, MIT License.
+# See LICENSE-THIRDPARTY at the repository root for the upstream license
+# text.
+
 # Configuration file for the Sphinx documentation builder.
 #
 # For the full list of built-in configuration values, see the documentation:
