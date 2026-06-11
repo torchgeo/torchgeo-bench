@@ -53,10 +53,8 @@ eval:
     device: null                     # null = auto (cuda if available, else cpu)
 
   # Compute/efficiency profile metrics: throughput, peak GPU mem,
-  # latency, params, GMACs, GPU power and energy.  One row per metric
-  # with method="profile".  GMACs requires fvcore; energy/power requires
-  # nvidia-ml-py (both in `pip install 'torchgeo-bench[profile]'`).  Other
-  # metrics work without extras.
+  # latency, params, and GMACs (FLOPs via torch.utils.flop_counter).  One
+  # row per metric with method="profile".  All metrics work without extras.
   profile:
     enabled: false
     n_warmup: 3                      # forward passes discarded before timing

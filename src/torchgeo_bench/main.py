@@ -619,7 +619,7 @@ def evaluate_profile(
 
     When ``cpu_throughput_enabled`` is set, *additionally* runs a short
     CPU measurement (smaller batch / fewer iters) and emits the
-    throughput / latency / energy / params with a ``_cpu`` suffix.  The
+    throughput / latency with a ``_cpu`` suffix.  The
     CPU pass is wall-clock-budgeted via ``cpu_time_budget_s`` so the
     heavyweight ViT-L backbones don't burn an hour on the login node.
     """

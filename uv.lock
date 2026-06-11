@@ -2011,15 +2011,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nvidia-ml-py"
-version = "13.595.45"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ce/49/c29f6e30d8662d2e94fef17739ea7309cc76aba269922ae999e4cc07f268/nvidia_ml_py-13.595.45.tar.gz", hash = "sha256:c9f34897fe0441ff35bc8f35baf80f830a20b0f4e6ce71e0a325bc0e66acf079", size = 50780, upload-time = "2026-03-19T16:59:44.956Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/24/fc256107d23597fa33d319505ce77160fa1a2349c096d01901ffc7cb7fc4/nvidia_ml_py-13.595.45-py3-none-any.whl", hash = "sha256:b65a7977f503d56154b14d683710125ef93594adb63fbf7e559336e3318f1376", size = 51776, upload-time = "2026-03-19T16:59:43.603Z" },
-]
-
-[[package]]
 name = "nvidia-nccl-cu13"
 version = "2.29.7"
 source = { registry = "https://pypi.org/simple" }
@@ -3913,7 +3904,6 @@ all = [
     { name = "matplotlib" },
     { name = "mdformat" },
     { name = "myst-parser" },
-    { name = "nvidia-ml-py" },
     { name = "pillow" },
     { name = "pre-commit" },
     { name = "pydata-sphinx-theme" },
@@ -3959,9 +3949,6 @@ id = [
 olmoearth = [
     { name = "olmoearth-pretrain-minimal" },
 ]
-profile = [
-    { name = "nvidia-ml-py" },
-]
 sam3 = [
     { name = "transformers" },
 ]
@@ -3989,7 +3976,6 @@ requires-dist = [
     { name = "mdformat", marker = "extra == 'dev'", specifier = ">=0.7.22" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=2" },
     { name = "numpy", specifier = ">=1.24" },
-    { name = "nvidia-ml-py", marker = "extra == 'profile'", specifier = ">=12.535" },
     { name = "olmoearth-pretrain-minimal", marker = "extra == 'olmoearth'", specifier = ">=0.0.5" },
     { name = "omegaconf", specifier = ">=2.3" },
     { name = "pandas", specifier = ">=2" },
@@ -4015,7 +4001,6 @@ requires-dist = [
     { name = "torchgeo-bench", extras = ["dev"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["docs"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["id"], marker = "extra == 'all'" },
-    { name = "torchgeo-bench", extras = ["profile"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["sam3"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["terratorch"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["viz"], marker = "extra == 'all'" },
@@ -4025,7 +4010,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'sam3'", specifier = ">=4.50" },
     { name = "typer", specifier = ">=0.9" },
 ]
-provides-extras = ["all", "cleanlab", "cuda", "dev", "docs", "id", "olmoearth", "profile", "sam3", "terratorch", "viz"]
+provides-extras = ["all", "cleanlab", "cuda", "dev", "docs", "id", "olmoearth", "sam3", "terratorch", "viz"]
 
 [[package]]
 name = "torchid"
