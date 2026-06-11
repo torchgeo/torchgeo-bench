@@ -103,14 +103,19 @@ def cosine_drift(X_clean: np.ndarray, X_corrupted: np.ndarray) -> float:
 
 
 def participation_ratio(X: np.ndarray) -> float:
-    """Compute effective rank of an activation matrix.
+    """Compute effective rank of the centered activation matrix.
+
+    The per-column mean is subtracted before the SVD (mirroring the
+    centering in :func:`linear_cka`) so the participation ratio measures the
+    effective dimensionality of the *variation* in the activations rather
+    than being dominated by a constant mean direction.
 
     Args:
         X: Activation matrix with shape ``(N, D)``.
 
     Returns:
         Participation ratio ``(sum(lambda))^2 / sum(lambda^2)`` where
-        ``lambda`` are singular values squared.
+        ``lambda`` are singular values squared of the centered matrix.
     """
     x = np.asarray(X, dtype=np.float64)
     if x.ndim != 2:
@@ -118,6 +123,7 @@ def participation_ratio(X: np.ndarray) -> float:
     if x.shape[0] == 0:
         return float("nan")
 
+    x = x - x.mean(axis=0, keepdims=True)
     singular_values = np.linalg.svd(x, compute_uv=False)
     eigenvalues = singular_values * singular_values
     numerator = float(np.sum(eigenvalues) ** 2)
@@ -127,30 +133,57 @@ def participation_ratio(X: np.ndarray) -> float:
     return float(numerator / denominator)
 
 
-def split_half_cka(X: np.ndarray, seed: int) -> tuple[float, float]:
-    """Compute split-half clean baseline metrics.
+def bootstrap_cka_ci(
+    X_clean: np.ndarray,
+    X_corr: np.ndarray,
+    n_boot: int = 200,
+    frac: float = 0.8,
+    seed: int = 0,
+) -> tuple[float, float, float]:
+    """Subsample-without-replacement bootstrap CI for :func:`linear_cka`.
+
+    Each resample draws ``round(frac * N)`` row indices without replacement,
+    recomputes linear CKA on the paired subsample, and the routine returns the
+    2.5/97.5 percentiles of the resampled estimates plus their width.
 
     Args:
-        X: Activation matrix ``(N, D)``.
-        seed: Random seed controlling the split.
+        X_clean: Activation matrix ``(N, D)``.
+        X_corr: Activation matrix ``(N, D)``.
+        n_boot: Number of bootstrap resamples.
+        frac: Fraction of rows per resample.
+        seed: Seed controlling the resampling.
 
     Returns:
-        Tuple ``(split_half_cka, split_half_cosine)``.
+        Tuple ``(ci_low, ci_high, width)``; all ``nan`` when the subsample is
+        too small or every resample is degenerate.
     """
-    x = np.asarray(X, dtype=np.float64)
-    if x.ndim != 2:
-        raise ValueError("X must be a 2D array.")
-    if x.shape[0] < 2:
-        raise ValueError("split_half_cka requires at least two samples.")
+    x = np.asarray(X_clean, dtype=np.float64)
+    y = np.asarray(X_corr, dtype=np.float64)
+    if x.ndim != 2 or y.ndim != 2:
+        raise ValueError("X_clean and X_corr must be 2D arrays.")
+    if x.shape[0] != y.shape[0]:
+        raise ValueError("X_clean and X_corr must have the same number of samples.")
 
-    n_half = x.shape[0] // 2
-    if n_half == 0:
-        raise ValueError("split_half_cka requires at least two samples.")
+    n = int(x.shape[0])
+    k = int(round(float(frac) * n))
+    if k < 2:
+        return (float("nan"), float("nan"), float("nan"))
+
     rng = np.random.default_rng(seed)
-    perm = rng.permutation(x.shape[0])
-    a = x[perm[:n_half]]
-    b = x[perm[n_half : 2 * n_half]]
-    return linear_cka(a, b), cosine_drift(a, b)
+    estimates: list[float] = []
+    for _ in range(int(n_boot)):
+        idx = rng.choice(n, size=k, replace=False)
+        value = linear_cka(x[idx], y[idx])
+        if np.isfinite(value):
+            estimates.append(float(value))
+
+    if not estimates:
+        return (float("nan"), float("nan"), float("nan"))
+
+    arr = np.asarray(estimates, dtype=np.float64)
+    ci_low = float(np.percentile(arr, 2.5))
+    ci_high = float(np.percentile(arr, 97.5))
+    return (ci_low, ci_high, float(ci_high - ci_low))
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -215,22 +248,26 @@ def track_b_summary(
     if x_clean.shape[0] != y.shape[0]:
         raise ValueError("y_true must align with activation rows.")
 
+    # Default to embedding-space L2 drift; overridden below to logit space
+    # when the probe exposes linear weights (the only drift the classifier
+    # actually responds to).
     drift = np.linalg.norm(x_corr - x_clean, axis=1)
 
     if hasattr(probe, "coef_") and hasattr(probe, "intercept_"):
-        coef = np.asarray(getattr(probe, "coef_"), dtype=np.float64)
-        intercept = np.asarray(getattr(probe, "intercept_"), dtype=np.float64)
+        coef = np.asarray(probe.coef_, dtype=np.float64)
+        intercept = np.asarray(probe.intercept_, dtype=np.float64)
+        drift = np.linalg.norm((x_corr - x_clean) @ coef.T, axis=1)
         logits = x_corr @ coef.T + intercept.reshape(1, -1)
         probs = _softmax(logits)
     elif hasattr(probe, "predict_proba"):
-        predict_proba = getattr(probe, "predict_proba")
+        predict_proba = probe.predict_proba
         probs = np.asarray(predict_proba(x_corr), dtype=np.float64)
     else:
         raise TypeError("probe must expose either coef_/intercept_ or predict_proba().")
 
     pred_index = np.argmax(probs, axis=1)
     if hasattr(probe, "classes_"):
-        classes = np.asarray(getattr(probe, "classes_"))
+        classes = np.asarray(probe.classes_)
         y_pred = classes[pred_index]
     else:
         y_pred = pred_index

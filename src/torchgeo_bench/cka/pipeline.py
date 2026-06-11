@@ -18,10 +18,10 @@ from torchgeo.datasets.errors import DatasetNotFoundError
 
 from torchgeo_bench.cka.hooks import HookCollector
 from torchgeo_bench.cka.metrics import (
+    bootstrap_cka_ci,
     cosine_drift,
     linear_cka,
     participation_ratio,
-    split_half_cka,
     track_b_summary,
 )
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets, list_datasets
@@ -246,7 +246,13 @@ def _write_sample_parquet(
     confidence = probs.max(axis=1).astype(np.float32)
     y_true_arr = np.asarray(y_true, dtype=np.int16)
     correct = (y_pred == y_true_arr).astype(bool)
-    drift = np.linalg.norm(X_corr_final - X_clean_final, axis=1).astype(np.float32)
+
+    # Logit-space drift and persisted per-class logits, consistent with
+    # track_b_summary; the bias cancels in the drift so only coef_ is used.
+    coef = np.asarray(probe.coef_, dtype=np.float64)
+    intercept = np.asarray(probe.intercept_, dtype=np.float64)
+    drift = np.linalg.norm((X_corr_final - X_clean_final) @ coef.T, axis=1).astype(np.float32)
+    logits = (X_corr_final.astype(np.float64) @ coef.T + intercept.reshape(1, -1)).astype(np.float32)
 
     frame = pd.DataFrame(
         {
@@ -258,6 +264,7 @@ def _write_sample_parquet(
             "correct": correct,
             "y_true": y_true_arr,
             "y_pred": y_pred,
+            "logits": list(logits),
         }
     )
 
@@ -283,6 +290,10 @@ def _build_row(
     n_test: int,
     feature_dim: int,
     best_c: float,
+    cka_ci_low: float = 1.0,
+    cka_ci_high: float = 1.0,
+    cka_ci_width: float = 0.0,
+    excluded: bool = False,
 ) -> dict[str, Any]:
     return {
         **common_meta,
@@ -294,6 +305,10 @@ def _build_row(
         "cosine_drift": float(cosine_value),
         "participation_ratio": float(participation_value),
         "clean_participation_ratio": float(clean_participation_value),
+        "cka_ci_low": float(cka_ci_low),
+        "cka_ci_high": float(cka_ci_high),
+        "cka_ci_width": float(cka_ci_width),
+        "excluded": bool(excluded),
         "n_test": int(n_test),
         "feature_dim": int(feature_dim),
         "best_c": float(best_c),
@@ -322,8 +337,9 @@ def run_cka(cfg: DictConfig) -> None:
         return
     prior_results = pd.read_csv(str(cfg.cka.prior_results))
 
+    # +1 for the canonical "head" row appended per condition.
     layer_counts_by_name = {
-        str(model_name): len(paths)
+        str(model_name): len(paths) + 1
         for model_name, paths in cfg.cka.layers.items()
     }
     completed = _build_cka_resume_set(output_path, layer_counts_by_name) if bool(cfg.resume) else set()
@@ -457,6 +473,8 @@ def run_cka(cfg: DictConfig) -> None:
             condition_label="clean",
         )
         clean_pr = {path: participation_ratio(clean_acts[path]) for path in hook_paths}
+        clean_head_pr = participation_ratio(X_test_head)
+        head_index = len(hook_paths)
 
         common_meta = {
             "model": str(cfg.model._target_),
@@ -476,26 +494,39 @@ def run_cka(cfg: DictConfig) -> None:
                 _purge_resume_key_rows(output_path, clean_key)
             clean_rows: list[dict[str, Any]] = []
             for layer_index, path in enumerate(hook_paths):
-                cka_value, cosine_value = split_half_cka(clean_acts[path], seed=int(cfg.seed))
                 row = _build_row(
                     common_meta=common_meta,
                     layer_name=path,
                     layer_index=layer_index,
                     corruption_type="clean",
                     severity=0,
-                    cka_value=cka_value,
-                    cosine_value=cosine_value,
+                    cka_value=1.0,
+                    cosine_value=1.0,
                     participation_value=clean_pr[path],
                     clean_participation_value=clean_pr[path],
                     n_test=int(len(y_test)),
                     feature_dim=int(clean_acts[path].shape[1]),
                     best_c=float(best_c),
                 )
-                if layer_index == len(hook_paths) - 1:
-                    row["spearman_drift_confidence"] = float("nan")
-                    row["spearman_drift_correctness"] = float("nan")
-                    row["frac_overconfident_high_drift"] = 0.0
                 clean_rows.append(row)
+            # Canonical head row on the probe-input embedding; the clean
+            # Track B policy lives here (no drift under no corruption).
+            head_row = _build_row(
+                common_meta=common_meta,
+                layer_name="head",
+                layer_index=head_index,
+                corruption_type="clean",
+                severity=0,
+                cka_value=1.0,
+                cosine_value=1.0,
+                participation_value=clean_head_pr,
+                clean_participation_value=clean_head_pr,
+                n_test=int(len(y_test)),
+                feature_dim=int(X_test_head.shape[1]),
+                best_c=float(best_c),
+            )
+            head_row["frac_overconfident_high_drift"] = 0.0
+            clean_rows.append(head_row)
             append_rows_atomic(output_path, clean_rows)
 
         X_clean_final = X_test_head
@@ -549,6 +580,14 @@ def run_cka(cfg: DictConfig) -> None:
 
                 rows: list[dict[str, Any]] = []
                 for layer_index, path in enumerate(hook_paths):
+                    ci_low, ci_high, ci_width = bootstrap_cka_ci(
+                        clean_acts[path],
+                        corr_acts[path],
+                        n_boot=int(cfg.cka.bootstrap.n_boot),
+                        frac=float(cfg.cka.bootstrap.frac),
+                        seed=int(cfg.seed),
+                    )
+                    excluded = bool(ci_width > float(cfg.cka.bootstrap.ci_width_gate))
                     row = _build_row(
                         common_meta=common_meta,
                         layer_name=path,
@@ -562,29 +601,63 @@ def run_cka(cfg: DictConfig) -> None:
                         n_test=int(len(y_test_corr)),
                         feature_dim=int(corr_acts[path].shape[1]),
                         best_c=float(best_c),
+                        cka_ci_low=ci_low,
+                        cka_ci_high=ci_high,
+                        cka_ci_width=ci_width,
+                        excluded=excluded,
                     )
-                    if layer_index == len(hook_paths) - 1:
-                        summary = track_b_summary(
-                            X_clean=X_clean_final,
-                            X_corrupted=X_test_corr,
-                            probe=probe,
-                            y_true=y_test_corr,
-                            confidence_threshold=float(cfg.cka.confidence_threshold),
-                        )
-                        row.update(summary)
-                        if bool(getattr(cfg.cka, "write_sample_traces", True)):
-                            _write_sample_parquet(
-                                traces_root=str(cfg.cka.traces_root),
-                                model_name=str(cfg.model.name),
-                                dataset_name=str(dataset_name),
-                                corruption_type=corruption_name,
-                                severity=severity_int,
-                                X_clean_final=X_clean_final,
-                                X_corr_final=X_test_corr,
-                                probe=probe,
-                                y_true=y_test_corr,
-                            )
                     rows.append(row)
+
+                # Canonical head row on the probe-input embedding: CKA, centered
+                # PR, bootstrap CI, and logit-space Track B all on the final
+                # representation the classifier actually consumes.
+                head_ci_low, head_ci_high, head_ci_width = bootstrap_cka_ci(
+                    X_clean_final,
+                    X_test_corr,
+                    n_boot=int(cfg.cka.bootstrap.n_boot),
+                    frac=float(cfg.cka.bootstrap.frac),
+                    seed=int(cfg.seed),
+                )
+                head_excluded = bool(head_ci_width > float(cfg.cka.bootstrap.ci_width_gate))
+                head_row = _build_row(
+                    common_meta=common_meta,
+                    layer_name="head",
+                    layer_index=head_index,
+                    corruption_type=corruption_name,
+                    severity=severity_int,
+                    cka_value=linear_cka(X_clean_final, X_test_corr),
+                    cosine_value=cosine_drift(X_clean_final, X_test_corr),
+                    participation_value=participation_ratio(X_test_corr),
+                    clean_participation_value=clean_head_pr,
+                    n_test=int(len(y_test_corr)),
+                    feature_dim=int(X_test_corr.shape[1]),
+                    best_c=float(best_c),
+                    cka_ci_low=head_ci_low,
+                    cka_ci_high=head_ci_high,
+                    cka_ci_width=head_ci_width,
+                    excluded=head_excluded,
+                )
+                summary = track_b_summary(
+                    X_clean=X_clean_final,
+                    X_corrupted=X_test_corr,
+                    probe=probe,
+                    y_true=y_test_corr,
+                    confidence_threshold=float(cfg.cka.confidence_threshold),
+                )
+                head_row.update(summary)
+                if bool(getattr(cfg.cka, "write_sample_traces", True)):
+                    _write_sample_parquet(
+                        traces_root=str(cfg.cka.traces_root),
+                        model_name=str(cfg.model.name),
+                        dataset_name=str(dataset_name),
+                        corruption_type=corruption_name,
+                        severity=severity_int,
+                        X_clean_final=X_clean_final,
+                        X_corr_final=X_test_corr,
+                        probe=probe,
+                        y_true=y_test_corr,
+                    )
+                rows.append(head_row)
                 append_rows_atomic(output_path, rows)
 
 

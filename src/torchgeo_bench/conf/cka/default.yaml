@@ -14,6 +14,13 @@ cloud_pattern_mode: fixed_across_severity
 cal_size: 400
 confidence_threshold: 0.9
 
+# Subsample-without-replacement bootstrap CI on CKA; width is the single
+# reliability gate (cells wider than ci_width_gate are flagged excluded).
+bootstrap:
+  n_boot: 200
+  frac: 0.8
+  ci_width_gate: 0.1
+
 layers:
   resnet50:
     - backbone.layer1
