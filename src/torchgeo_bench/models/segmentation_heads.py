@@ -1,3 +1,10 @@
+# The DPT decoder heads below (``ResidualConvUnit``, ``FeatureFusionBlock``,
+# ``DPTHead``) are adapted from probe3d (https://github.com/mbanani/probe3d),
+# Copyright (c) 2024 Mohamed El Banani, MIT License. The DPT decoder
+# architecture originates from https://github.com/isl-org/DPT, Copyright (c)
+# 2021 Intel ISL, MIT License.
+# See LICENSE-THIRDPARTY at the repository root for the upstream license text.
+
 """Segmentation decoder heads for use with SegmentationProbe."""
 
 import torch

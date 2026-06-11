@@ -1,3 +1,9 @@
+# The ``RCF`` nn.Module below is adapted from torchgeo
+# (https://github.com/torchgeo/torchgeo), Copyright (c) TorchGeo
+# Contributors, MIT License.
+# See LICENSE-THIRDPARTY at the repository root for the upstream license
+# text.
+
 """Random Convolutional Features (RCF) BenchModel and its underlying nn.Module.
 
 The :class:`RCF` ``nn.Module`` is a vendored copy of the MOSAIKS-style
