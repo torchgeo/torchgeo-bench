@@ -3917,7 +3917,6 @@ version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "faiss-cpu" },
-    { name = "filelock" },
     { name = "geobenchv2" },
     { name = "h5py" },
     { name = "huggingface-hub" },
@@ -4012,7 +4011,6 @@ requires-dist = [
     { name = "faiss-cpu", specifier = ">=1.7" },
     { name = "faiss-cuda-cu128", marker = "extra == 'cuda'", specifier = ">=1.14.1.post3" },
     { name = "faissknn", marker = "extra == 'cuda'", specifier = ">=0.0.3" },
-    { name = "filelock", specifier = ">=3" },
     { name = "geobenchv2", specifier = ">=0.9" },
     { name = "h5py", specifier = ">=3.8" },
     { name = "huggingface-hub", specifier = ">=0.20" },

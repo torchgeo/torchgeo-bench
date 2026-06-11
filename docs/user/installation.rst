@@ -7,6 +7,12 @@ canonical workflow.
 
 .. _uv: https://docs.astral.sh/uv/
 
+.. note::
+
+   ``torchgeo-bench`` is supported on **Linux** and **macOS**.  Windows is
+   not supported; on Windows, install inside `WSL2
+   <https://learn.microsoft.com/windows/wsl/>`_.
+
 uv (recommended)
 ----------------
 

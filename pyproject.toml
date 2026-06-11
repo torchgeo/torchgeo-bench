@@ -35,7 +35,6 @@ classifiers = [
 ]
 dependencies = [
   "faiss-cpu>=1.7",
-  "filelock>=3",
   "geobenchv2>=0.9",
   "h5py>=3.8",
   "huggingface-hub>=0.20",

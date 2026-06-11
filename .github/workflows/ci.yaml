@@ -41,17 +41,18 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
-  # Prove the default install works on Linux, macOS and Windows. This is
-  # the whole point of moving faiss-cuda-cu128 (Linux-only wheels) into the
-  # [cuda] extra: `pip install torchgeo-bench` must resolve and import on
-  # all three OSes, with faiss-cpu (which ships wheels for each) as the
-  # default. The full pytest matrix runs on Linux in the `test` job above.
+  # Prove the default install works on Linux and macOS. This is the whole
+  # point of moving faiss-cuda-cu128 (Linux-only wheels) into the [cuda]
+  # extra: `pip install torchgeo-bench` must resolve and import on both
+  # OSes, with faiss-cpu (which ships wheels for each) as the default.
+  # Windows is not a supported platform. The full pytest matrix runs on
+  # Linux in the `test` job above.
   install:
     name: install (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
