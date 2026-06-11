@@ -1,6 +1,5 @@
 """Benchmark script for torchgeo-bench."""
 
-import fcntl
 import io
 import logging
 import os
@@ -13,6 +12,7 @@ import hydra
 import numpy as np
 import pandas as pd
 import torch
+from filelock import FileLock
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from rich.progress import track
@@ -829,10 +829,14 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
     if not rows:
         return
     df_local = pd.DataFrame(rows)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT)
-    with os.fdopen(fd, "r+", closefd=True) as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        try:
+    # Serialise concurrent writers (e.g. SLURM array jobs appending to a
+    # shared results CSV) with a cross-process advisory lock so their
+    # read-modify-write cycles don't interleave and drop rows. filelock is
+    # cross-platform (fcntl on POSIX, msvcrt on Windows) and already in the
+    # dependency tree, so this behaves identically on Linux/macOS/Windows.
+    with FileLock(f"{path}.lock"):
+        fd = os.open(path, os.O_RDWR | os.O_CREAT)
+        with os.fdopen(fd, "r+", closefd=True) as f:
             f.seek(0, os.SEEK_END)
             empty = f.tell() == 0
             buf = io.StringIO()
@@ -866,8 +870,6 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
                     f.write(buf.getvalue())
             f.flush()
             os.fsync(f.fileno())
-        finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)

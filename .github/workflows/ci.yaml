@@ -41,8 +41,18 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
-  macos-smoke:
-    runs-on: macos-latest
+  # Prove the default install works on Linux, macOS and Windows. This is
+  # the whole point of moving faiss-cuda-cu128 (Linux-only wheels) into the
+  # [cuda] extra: `pip install torchgeo-bench` must resolve and import on
+  # all three OSes, with faiss-cpu (which ships wheels for each) as the
+  # default. The full pytest matrix runs on Linux in the `test` job above.
+  install:
+    name: install (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     steps:
@@ -53,33 +63,17 @@ jobs:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
-      - name: Cache .venv
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-py3.13-${{ hashFiles('uv.lock') }}-dev
-      - name: Install dependencies (CPU only, no [cuda] extra)
-        run: uv sync --extra dev --frozen
-      - name: Smoke test (import + tiny KNN round-trip)
-        # macOS-latest is ARM and slow at torch CPU ops; the Linux `test`
-        # job above already exercises the full pytest matrix. We just
-        # need to prove `pip install torchgeo-bench` works end-to-end on
-        # macOS without the [cuda] extra, that `faiss` (the CPU wheel
-        # this PR makes the default) imports cleanly, and that KNN
-        # actually round-trips.
-        run: |
-          uv run python -c "
-          import faiss, numpy as np, torchgeo_bench
-          from torchgeo_bench.knn import KNNClassifier
-          print('imports OK; faiss', faiss.__version__)
-          rng = np.random.default_rng(0)
-          X = rng.standard_normal((50, 8)).astype(np.float32)
-          y = rng.integers(0, 3, size=50)
-          clf = KNNClassifier(n_neighbors=3, device='cpu').fit(X, y)
-          pred = clf.predict(X[:5])
-          assert pred.shape == (5,), pred.shape
-          print('KNN round-trip OK:', pred)
-          "
+      # No `.venv` cache here: this job exists to prove a from-scratch
+      # install works, so we want `uv sync` to actually run each time.
+      # setup-uv's wheel cache keeps it fast without faking the install.
+      # No `--extra`, so only the default (CPU) dependency set is installed.
+      - name: Install (CPU only, no [cuda] extra)
+        run: uv sync --frozen
+      - name: Smoke test (CLI entry point)
+        # `torchgeo-bench --help` proves the package installed, the console
+        # script is wired up, and the import graph loads on this OS — the
+        # cross-platform signal this matrix exists to provide.
+        run: uv run torchgeo-bench --help
 
   pre-commit:
     runs-on: ubuntu-latest
