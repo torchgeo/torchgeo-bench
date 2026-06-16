@@ -288,8 +288,6 @@ class RCFBench(BenchModel):
     def _forward_patch_features(
         self,
         images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return RCF embeddings for already-normalized images."""
-        del bboxes
         return self.rcf(images)

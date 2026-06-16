@@ -480,10 +480,8 @@ class OlmoEarthBenchModel(BenchModel):
     def _forward_patch_features(
         self,
         images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Extract image-level embeddings from raw inputs."""
-        del bboxes
         from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import PoolingType
         from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
             MaskedOlmoEarthSample,

@@ -3,7 +3,7 @@
 [![CI](https://github.com/torchgeo/torchgeo-bench/actions/workflows/ci.yaml/badge.svg)](https://github.com/torchgeo/torchgeo-bench/actions/workflows/ci.yaml)
 [![PyPI version](https://img.shields.io/pypi/v/torchgeo-bench.svg)](https://pypi.org/project/torchgeo-bench/)
 [![Python 3.12+](https://img.shields.io/pypi/pyversions/torchgeo-bench.svg)](https://pypi.org/project/torchgeo-bench/)
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%20License%202.0-blue)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A lightweight benchmarking framework for evaluating **frozen** geospatial
 foundation models on the GeoBench V1 and V2 suites. Plug in any backbone, get
@@ -19,8 +19,13 @@ configured through Hydra.
   bands without code changes.
 - **Resumable** — `resume=true` skips already-computed `(dataset, method,
   model, …)` rows. Atomic CSV appends are safe across parallel jobs.
-- **Bring your own model** — implement `BenchModel._forward_patch_features`
-  and add a one-file Hydra config.
+- **Bring your own model** — copy
+  [`contrib_template.py`](src/torchgeo_bench/models/contrib_template.py),
+  implement `_forward_patch_features`, and add a one-file Hydra config.
+  See the [Stage 1 guide](https://torchgeo.org/torchgeo-bench/user/eval_own_model.html)
+  for a full walkthrough, or the
+  [Stage 2 guide](https://torchgeo.org/torchgeo-bench/user/contribute_model.html)
+  to contribute the model back upstream.
 
 ## Installation
 

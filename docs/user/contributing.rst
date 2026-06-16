@@ -9,19 +9,24 @@ same conventions).
 Environment
 -----------
 
-The repo's canonical workflow uses both `conda <https://docs.conda.io>`_
-and `uv <https://docs.astral.sh/uv/>`_:
+The canonical workflow uses `uv <https://docs.astral.sh/uv/>`_, which
+resolves dependencies from :file:`pyproject.toml` and manages the virtual
+environment for you:
 
 .. code-block:: console
 
    $ git clone https://github.com/torchgeo/torchgeo-bench.git
    $ cd torchgeo-bench
-   $ conda env update -n torchgeo-bench -f environment.yml
-   $ conda activate torchgeo-bench
    $ uv sync --extra dev
 
-If you'd rather skip conda, ``uv sync --extra dev`` alone is enough on
-any Python 3.12+ install.
+If you prefer `conda <https://docs.conda.io>`_, create an environment with a
+compatible Python first and run ``uv sync`` inside it:
+
+.. code-block:: console
+
+   $ conda create -n torchgeo-bench 'python>=3.12,<3.13'
+   $ conda activate torchgeo-bench
+   $ uv sync --extra dev
 
 Makefile shortcuts
 ------------------
@@ -29,16 +34,18 @@ Makefile shortcuts
 The top-level :file:`Makefile` provides convenient wrappers around the
 above:
 
-================ ===================================================
-Target           What it does
-================ ===================================================
-``make install`` Create / update the conda env and install ``[dev]``.
-``make sync``    Alias for ``install``.
-``make tests``   ``pytest`` (skips ``slow`` integration tests).
-``make lint``    ``pre-commit run --all-files``.
-``make format``  ``ruff format`` then ``ruff check --fix --select I``.
-``make clean``   Removes ``htmlcov``, ``.coverage``, ``.pytest_cache``.
-================ ===================================================
+=================== ===================================================
+Target              What it does
+=================== ===================================================
+``make install``    Create / update the conda env and install ``[dev]``.
+``make sync``       Alias for ``install``.
+``make tests``      ``pytest`` (skips ``slow`` integration tests).
+``make lint``       ``pre-commit run --all-files``.
+``make format``     ``ruff format`` then ``ruff check --fix --select I``.
+``make docs``       Build HTML documentation into ``docs/_build/html``.
+``make docs-clean`` Remove the ``docs/_build`` directory.
+``make clean``      Removes ``htmlcov``, ``.coverage``, ``.pytest_cache``.
+=================== ===================================================
 
 Linting and formatting
 ----------------------
@@ -85,13 +92,20 @@ Code style
 Documentation
 -------------
 
-This very site is built with Sphinx.  To build it locally:
+This very site is built with Sphinx.  The quickest way to build it locally
+is via the Makefile shortcut:
 
 .. code-block:: console
 
-   $ uv sync --extra docs
-   $ cd docs && uv run make html
-   $ open _build/html/index.html
+   $ make docs
+   $ open docs/_build/html/index.html
+
+This assumes ``sphinx-build`` is on your ``PATH`` (install with
+``uv sync --extra docs``).  To rebuild from scratch:
+
+.. code-block:: console
+
+   $ make docs-clean && make docs
 
 Releasing to PyPI
 -----------------

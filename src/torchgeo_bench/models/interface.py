@@ -86,11 +86,7 @@ class BenchModel(nn.Module, ABC):
         return self._normalizer(images)
 
     @abstractmethod
-    def _forward_patch_features(
-        self,
-        images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         """Subclass hook — receives normalized ``(B, C, H, W)``, returns ``(B, K)``.
 
         Implementations should call only the backbone; the public
@@ -99,18 +95,13 @@ class BenchModel(nn.Module, ABC):
 
         Args:
             images: Normalized input tensor of shape ``(B, C, H, W)``.
-            bboxes: Optional bounding boxes, shape ``(B, 4)``.
 
         Returns:
             Embeddings tensor of shape ``(B, K)``.
         """
         raise NotImplementedError
 
-    def forward_patch_features(
-        self,
-        images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    def forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         """Return a batch of vector embeddings ``(B, K)`` from raw inputs.
 
         Sealed: applies :meth:`normalize_inputs` then dispatches to
@@ -118,12 +109,8 @@ class BenchModel(nn.Module, ABC):
         :meth:`normalize_inputs` to change the normalization policy and
         :meth:`_forward_patch_features` to change the backbone forward.
         """
-        return self._forward_patch_features(self.normalize_inputs(images), bboxes)
+        return self._forward_patch_features(self.normalize_inputs(images))
 
-    def forward(
-        self,
-        images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
         """Alias for :meth:`forward_patch_features`."""
-        return self.forward_patch_features(images, bboxes)
+        return self.forward_patch_features(images)

@@ -82,10 +82,7 @@ class _TerraTorchBench(BenchModel):
         return images
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        del bboxes
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         x = _maybe_resize(self._prepare_input(images), self.target_size)
         return _reduce_to_vec(self.backbone(x), pool=self.pool)
 

@@ -8,9 +8,9 @@ throughput on the same data.
 
 Usage::
 
-    python scripts/repack_geobench_v1.py m-eurosat
-    python scripts/repack_geobench_v1.py m-bigearthnet --shard-size 1000
-    python scripts/repack_geobench_v1.py m-eurosat --validate
+    python experiments/scripts/repack_geobench_v1.py m-eurosat
+    python experiments/scripts/repack_geobench_v1.py m-bigearthnet --shard-size 1000
+    python experiments/scripts/repack_geobench_v1.py m-eurosat --validate
 
 Each output sample is::
 
