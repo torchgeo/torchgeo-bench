@@ -1,3 +1,6 @@
+import math
+
+import pandas as pd
 import pytest
 import torch
 import torch.nn as nn
@@ -11,7 +14,10 @@ from torchgeo_bench.segmentation_probe import (
     SegmentationProbe,
     _estimate_cache_bytes,
 )
-from torchgeo_bench.segmentation_task import SegmentationSolver
+from torchgeo_bench.segmentation_task import (
+    SegmentationSolver,
+    _compute_segmentation_image_stats_row,
+)
 
 NUM_CLASSES = 5
 
@@ -272,6 +278,116 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
     assert isinstance(metrics, dict)
     assert set(metrics.keys()) == {"mIoU", "fw_IoU", "precision", "recall", "f1"}
     assert 0.0 <= metrics["mIoU"] <= 1.0
+
+
+def test_compute_segmentation_image_stats_row_masks_ignored_pixels():
+    """Ignored pixels are excluded from support, quality, and error-detection metrics."""
+    logits = torch.full((NUM_CLASSES, 2, 2), -10.0)
+    logits[0, 0, 0] = 5.0
+    logits[1, 0, 0] = 0.0
+    logits[0, 0, 1] = 0.0
+    logits[1, 0, 1] = 5.0
+    logits[0, 1, 0] = 4.0
+    logits[1, 1, 0] = 4.0
+    logits[0, 1, 1] = 0.2
+    logits[1, 1, 1] = 0.1
+    mask = torch.tensor([[0, 1], [255, 1]], dtype=torch.long)
+
+    row = _compute_segmentation_image_stats_row(
+        logits=logits,
+        mask=mask,
+        image_index=7,
+        ignore_index=255,
+        num_classes=NUM_CLASSES,
+    )
+
+    assert row["image_index"] == 7
+    assert row["valid_pixel_count"] == 3
+    assert row["ignored_pixel_count"] == 1
+    assert row["n_gt_classes"] == 2
+    assert row["n_pred_classes"] == 2
+    assert row["n_pred_or_gt_classes"] == 2
+    assert row["image_pixel_accuracy"] == pytest.approx(2 / 3)
+    assert row["image_miou_gt_present"] == pytest.approx(0.5)
+    assert row["image_miou_pred_or_gt_present"] == pytest.approx(0.5)
+    assert row["pixel_error_aupr_1mp"] == pytest.approx(1.0)
+    assert row["pixel_error_auroc_1mp"] == pytest.approx(1.0)
+    assert row["pixel_error_aupr_entropy"] == pytest.approx(1.0)
+    assert row["pixel_error_auroc_entropy"] == pytest.approx(1.0)
+
+
+def test_compute_segmentation_image_stats_row_all_ignored_returns_nans():
+    """Ignore-only images still emit a row with support counts and NaN metrics."""
+    logits = torch.zeros(NUM_CLASSES, 3, 3)
+    mask = torch.full((3, 3), 255, dtype=torch.long)
+
+    row = _compute_segmentation_image_stats_row(
+        logits=logits,
+        mask=mask,
+        image_index=0,
+        ignore_index=255,
+        num_classes=NUM_CLASSES,
+    )
+
+    assert row["valid_pixel_count"] == 0
+    assert row["ignored_pixel_count"] == 9
+    assert row["n_gt_classes"] == 0
+    assert row["n_pred_classes"] == 0
+    assert row["n_pred_or_gt_classes"] == 0
+    for key in (
+        "image_pixel_accuracy",
+        "image_miou_gt_present",
+        "image_miou_pred_or_gt_present",
+        "mean_1mp",
+        "median_1mp",
+        "mean_entropy",
+        "median_entropy",
+        "mean_normalized_entropy",
+        "median_normalized_entropy",
+        "pixel_error_aupr_1mp",
+        "pixel_error_auroc_1mp",
+        "pixel_error_aupr_entropy",
+        "pixel_error_auroc_entropy",
+    ):
+        assert math.isnan(float(row[key]))
+
+
+def test_solver_collect_image_stats_enumerates_images_in_order(mock_backbone, dummy_data):
+    """Image stats use deterministic test-set enumeration across batches."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = DataLoader(TensorDataset(images, masks), batch_size=1, shuffle=False)
+    probe = make_probe(mock_backbone, ["layer1"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    metrics, rows = solver.evaluate(loader, collect_image_stats=True)
+
+    assert 0.0 <= metrics["mIoU"] <= 1.0
+    assert [row["image_index"] for row in rows] == [0, 1]
+
+
+def test_solver_cached_and_uncached_image_stats_match(mock_backbone, dummy_data):
+    """Cached and uncached evaluation emit identical per-image stats rows."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = DataLoader(TensorDataset(images, masks), batch_size=1, shuffle=False)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+
+    uncached_metrics, uncached_rows = solver.evaluate(loader, collect_image_stats=True)
+    cached_metrics, cached_rows = solver.evaluate_cached(
+        cache,
+        batch_size=1,
+        collect_image_stats=True,
+    )
+
+    assert cached_metrics == pytest.approx(uncached_metrics)
+    pd.testing.assert_frame_equal(
+        pd.DataFrame(uncached_rows),
+        pd.DataFrame(cached_rows),
+        check_exact=False,
+        atol=1e-6,
+        rtol=0.0,
+    )
 
 
 # ---------------------------------------------------------------------------

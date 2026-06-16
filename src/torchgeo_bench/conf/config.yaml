@@ -84,6 +84,7 @@ eval:
     layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10
+    batch_size: 64
     criterion:
       _target_: torch.nn.CrossEntropyLoss
       ignore_index: 255
@@ -91,6 +92,10 @@ eval:
     # Feature caching: run frozen backbone once, cache features to RAM for head training
     cache_features: true        # pre-extract backbone features (large speedup for ViT)
     cache_dtype: "float16"      # storage dtype: "float16" (half RAM) or "float32"
+    image_stats:
+      enabled: true
+      output: results/segmentation_image_stats.csv
+      overwrite: false
     # Visualization (opt-in)
     save_viz: false            # set true to save prediction grids and confusion matrices
     viz_dir: "viz"             # root output directory for visualizations

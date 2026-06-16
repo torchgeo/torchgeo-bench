@@ -4,11 +4,12 @@ import fcntl
 import io
 import logging
 import os
-import warnings
 import time
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from statistics import median
+from typing import Any
 
 import hydra
 import numpy as np
@@ -17,7 +18,6 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from rich.progress import track
-
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
 from torchgeo.datasets.errors import DatasetNotFoundError
@@ -45,6 +45,28 @@ from torchgeo_bench.segmentation_viz import save_segmentation_viz
 from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
+
+SEGMENTATION_SUMMARY_OUTPUT = "results/all_segmentation_results.csv"
+SEGMENTATION_IMAGE_STATS_KEY_COLS = (
+    "model",
+    "name",
+    "dataset",
+    "partition",
+    "seed",
+    "normalization",
+    "image_size",
+    "interpolation",
+    "bands",
+    "seg_head_type",
+    "seg_layers",
+    "seg_epochs",
+    "seg_lr",
+    "seg_batch_size",
+    "seg_cache_features",
+    "seg_cache_dtype",
+    "seg_ignore_index",
+    "seg_lr_scheduler",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +161,168 @@ def _profile_metric_names(profile_cfg: DictConfig | None) -> list[str]:
     if bool(cpu_cfg.get("enabled", False)):
         names.extend(["throughput_samples_per_sec_cpu", "latency_ms_per_batch_p50_cpu"])
     return names
+
+
+def _normalize_layers_value(layers: object) -> str:
+    """Canonicalize a segmentation layer list for CSV provenance and block keys."""
+    if layers is None:
+        return ""
+    if isinstance(layers, str):
+        return layers
+    try:
+        return ",".join(str(layer) for layer in layers)
+    except TypeError:
+        return str(layers)
+
+
+@dataclass(frozen=True)
+class SegmentationImageStatsBlockStatus:
+    """Completion status for one segmentation image-stats block."""
+
+    row_count: int
+    expected_count: int
+    is_complete: bool
+
+
+def _segmentation_image_stats_common_meta(
+    *,
+    common_meta: dict[str, Any],
+    seg_cfg: DictConfig,
+    ignore_index: int,
+) -> dict[str, Any]:
+    """Build the block-level provenance columns for segmentation image stats."""
+    return {
+        "model": common_meta["model"],
+        "name": common_meta["name"],
+        "dataset": common_meta["dataset"],
+        "partition": common_meta["partition"],
+        "seed": common_meta["seed"],
+        "normalization": common_meta["normalization"],
+        "bands": common_meta["bands"],
+        "image_size": common_meta["image_size"],
+        "interpolation": common_meta["interpolation"],
+        "seg_head_type": str(seg_cfg.head_type),
+        "seg_layers": _normalize_layers_value(seg_cfg.layers),
+        "seg_epochs": int(seg_cfg.epochs),
+        "seg_lr": float(seg_cfg.lr),
+        "seg_batch_size": int(seg_cfg.get("batch_size", 64)),
+        "seg_cache_features": bool(seg_cfg.get("cache_features", True)),
+        "seg_cache_dtype": str(seg_cfg.get("cache_dtype", "float16")),
+        "seg_ignore_index": int(ignore_index),
+        "seg_lr_scheduler": str(seg_cfg.get("lr_scheduler", "cosine")),
+    }
+
+
+def _block_match_mask(
+    df: pd.DataFrame,
+    key_cols: Sequence[str],
+    key: tuple[str, ...],
+) -> pd.Series:
+    """Return a boolean mask selecting rows that match one block key."""
+    if df.empty:
+        return pd.Series(dtype=bool)
+    mask = pd.Series(True, index=df.index, dtype=bool)
+    for idx, col in enumerate(key_cols):
+        if col not in df.columns:
+            return pd.Series(False, index=df.index, dtype=bool)
+        mask &= df[col].fillna("").astype(str) == str(key[idx])
+    return mask
+
+
+def _segmentation_image_stats_block_status(
+    path: str,
+    block_meta: dict[str, Any],
+    expected_count: int,
+) -> SegmentationImageStatsBlockStatus:
+    """Return whether one image-stats block already exists and is complete."""
+    if not os.path.exists(path):
+        return SegmentationImageStatsBlockStatus(0, expected_count, False)
+    existing_df = pd.read_csv(path)
+    key = _row_key(block_meta, SEGMENTATION_IMAGE_STATS_KEY_COLS)
+    row_count = int(_block_match_mask(existing_df, SEGMENTATION_IMAGE_STATS_KEY_COLS, key).sum())
+    return SegmentationImageStatsBlockStatus(
+        row_count=row_count,
+        expected_count=expected_count,
+        is_complete=row_count == expected_count,
+    )
+
+
+def _merge_segmentation_image_stats_rows(
+    block_meta: dict[str, Any],
+    image_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach block-level provenance columns to per-image statistics rows."""
+    return [{**block_meta, **row} for row in image_rows]
+
+
+def write_segmentation_image_stats_block_atomic(
+    path: str,
+    rows: list[dict[str, Any]],
+    *,
+    expected_count: int,
+    overwrite: bool,
+    resume: bool,
+) -> bool:
+    """Write one complete segmentation image-stats block under file lock.
+
+    Returns:
+        True if rows were written, False if a completed block was skipped.
+    """
+    if not rows:
+        return False
+    if len(rows) != expected_count:
+        raise ValueError(
+            f"Expected {expected_count} image-stats rows, got {len(rows)} for block at {path}."
+        )
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    df_local = pd.DataFrame(rows)
+    block_key = _row_key(rows[0], SEGMENTATION_IMAGE_STATS_KEY_COLS)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    with os.fdopen(fd, "r+", closefd=True) as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.seek(0, os.SEEK_END)
+            empty = f.tell() == 0
+            if empty:
+                existing_df = pd.DataFrame()
+                block_rows = 0
+            else:
+                f.seek(0)
+                existing_df = pd.read_csv(f)
+                block_rows = int(
+                    _block_match_mask(
+                        existing_df, SEGMENTATION_IMAGE_STATS_KEY_COLS, block_key
+                    ).sum()
+                )
+
+            is_complete = block_rows == expected_count
+            if resume and not overwrite and is_complete:
+                return False
+
+            if overwrite or (0 < block_rows < expected_count):
+                keep_df = existing_df.loc[
+                    ~_block_match_mask(existing_df, SEGMENTATION_IMAGE_STATS_KEY_COLS, block_key)
+                ].copy()
+            else:
+                keep_df = existing_df
+
+            extra = [c for c in keep_df.columns if c not in df_local.columns]
+            ordered = list(df_local.columns) + extra
+            combined = pd.concat([keep_df, df_local], ignore_index=True, sort=False).reindex(
+                columns=ordered
+            )
+
+            buf = io.StringIO()
+            f.seek(0)
+            f.truncate()
+            combined.to_csv(buf, header=True, index=False)
+            f.write(buf.getvalue())
+            f.flush()
+            os.fsync(f.fileno())
+            return True
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 def bootstrap_accuracy(
@@ -331,7 +515,9 @@ def _apply_feature_norm(
     elif feature_norm == "none":
         return x_train, x_val, x_test, None
     else:
-        raise ValueError(f"Unknown feature_norm: {feature_norm!r}. Expected 'none', 'standard', or 'l2'.")
+        raise ValueError(
+            f"Unknown feature_norm: {feature_norm!r}. Expected 'none', 'standard', or 'l2'."
+        )
 
 
 def evaluate_logistic(
@@ -803,7 +989,8 @@ def evaluate_segmentation(
     num_classes: int,
     device: torch.device,
     collect_preds: bool = False,
-) -> "tuple[SegMetrics, int, float | None, int | None, torch.Tensor | None]":
+    collect_image_stats: bool = False,
+) -> "tuple[SegMetrics, int, float | None, int | None, torch.Tensor | None, list[dict[str, Any]]]":
     """Evaluate segmentation performance using a frozen-backbone segmentation probe.
 
     Trains a lightweight segmentation head on top of the frozen backbone and
@@ -819,9 +1006,10 @@ def evaluate_segmentation(
         num_classes: Number of segmentation classes.
         device: Torch device.
         collect_preds: If True, collect and return test predictions as (N, H, W) tensor.
+        collect_image_stats: If True, collect one image-stats row per test image.
 
     Returns:
-        Tuple of (metrics_dict, feature_dim, None, None, preds_or_None).
+        Tuple of (metrics_dict, feature_dim, None, None, preds_or_None, image_rows).
         ``preds_or_None`` is None when collect_preds is False.
     """
     # Merge model-specific eval config if present
@@ -854,18 +1042,29 @@ def evaluate_segmentation(
             test_cache,
             batch_size=seg_cfg.get("batch_size", 64),
             collect_preds=collect_preds,
+            collect_image_stats=collect_image_stats,
         )
     else:
         solver.fit(
             train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose
         )
-        eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
+        eval_result = solver.evaluate(
+            test_loader,
+            collect_preds=collect_preds,
+            collect_image_stats=collect_image_stats,
+        )
 
-    if collect_preds:
+    preds: torch.Tensor | None = None
+    image_rows: list[dict[str, Any]] = []
+    if collect_preds and collect_image_stats:
+        metrics, preds, image_rows = eval_result
+    elif collect_preds:
         metrics, preds = eval_result
+    elif collect_image_stats:
+        metrics, image_rows = eval_result
     else:
-        metrics, preds = eval_result, None
-    return metrics, sum(probe.channels_list), None, None, preds
+        metrics = eval_result
+    return metrics, sum(probe.channels_list), None, None, preds, image_rows
 
 
 # ---------------------------------------------------------------------------
@@ -951,6 +1150,7 @@ def main(cfg: DictConfig) -> None:
 
     output_path = cfg.output
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    segmentation_output_path = SEGMENTATION_SUMMARY_OUTPUT
 
     all_rows: list[dict] = []
     model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
@@ -990,6 +1190,20 @@ def main(cfg: DictConfig) -> None:
         logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
+    segmentation_completed_runs: set[tuple[str, ...]] = set()
+    segmentation_completed_metrics: dict[str, set[tuple[str, ...]]] = {}
+    if cfg.resume and os.path.exists(segmentation_output_path):
+        existing_seg_df = pd.read_csv(segmentation_output_path)
+        for col in key_cols:
+            if col not in existing_seg_df.columns:
+                existing_seg_df[col] = ""
+        segmentation_completed_runs = _completed_run_keys(existing_seg_df, key_cols)
+        if "metric_name" in existing_seg_df.columns:
+            segmentation_completed_metrics = {
+                str(metric): _completed_run_keys(existing_seg_df, key_cols, str(metric))
+                for metric in existing_seg_df["metric_name"].dropna().unique()
+            }
+
     # Selectable input-normalisation strategy; recorded in the CSV so
     # ablations across strategies are distinguishable.
     normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
@@ -1020,13 +1234,53 @@ def main(cfg: DictConfig) -> None:
         knn_k = int(getattr(eval_cfg_merged, "knn_k", 5))
         feature_norm_val = str(cfg.eval.get("feature_norm", "none"))
         solver_val = str(cfg.eval.get("solver", "lbfgs"))
-        knn_key = (ds_name, f"knn{knn_k}", cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
-        linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
+        knn_key = (
+            ds_name,
+            f"knn{knn_k}",
+            cfg.model._target_,
+            cfg.model.name,
+            *config_tuple,
+            feature_norm_val,
+            solver_val,
+        )
+        linear_key = (
+            ds_name,
+            "linear",
+            cfg.model._target_,
+            cfg.model.name,
+            *config_tuple,
+            feature_norm_val,
+            solver_val,
+        )
 
         seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
-        seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
-        id_key = (ds_name, "intrinsic_dim", cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
-        profile_key = (ds_name, "profile", cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
+        seg_key = (
+            ds_name,
+            seg_method,
+            cfg.model._target_,
+            cfg.model.name,
+            *config_tuple,
+            feature_norm_val,
+            solver_val,
+        )
+        id_key = (
+            ds_name,
+            "intrinsic_dim",
+            cfg.model._target_,
+            cfg.model.name,
+            *config_tuple,
+            feature_norm_val,
+            solver_val,
+        )
+        profile_key = (
+            ds_name,
+            "profile",
+            cfg.model._target_,
+            cfg.model.name,
+            *config_tuple,
+            feature_norm_val,
+            solver_val,
+        )
 
         try:
             result = get_datasets(
@@ -1067,12 +1321,6 @@ def main(cfg: DictConfig) -> None:
             f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
         )
 
-        # Resume check for segmentation
-        if is_segmentation and cfg.resume and seg_key in completed_runs:
-            if cfg.verbose:
-                logger.info(f"[{ds_name}] Skipping segmentation (already computed)")
-            continue
-
         # Instantiate Backbone — pass `bands` post-hoc so Hydra never tries
         # to OmegaConf-ify the BandSpec list.  `_convert_="object"` keeps
         # the rest of the model config as plain Python primitives.
@@ -1110,13 +1358,48 @@ def main(cfg: DictConfig) -> None:
             "solver": str(cfg.eval.get("solver", "lbfgs")),
         }
 
+        seg_summary_complete = False
+        seg_image_stats_enabled = False
+        seg_image_stats_output = ""
+        seg_image_stats_overwrite = False
+        seg_image_stats_meta: dict[str, Any] = {}
+        seg_image_stats_status = SegmentationImageStatsBlockStatus(0, 0, False)
+        seg_ignore_index = 255
         if is_segmentation:
-            seg_cfg_merged = OmegaConf.merge(
-                cfg.eval,
-                cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
-            ).segmentation
+            seg_cfg_merged = eval_cfg_merged.segmentation
+            seg_summary_complete = seg_key in segmentation_completed_runs
+            image_stats_cfg = seg_cfg_merged.get("image_stats", {}) or {}
+            seg_image_stats_enabled = bool(image_stats_cfg.get("enabled", True))
+            seg_image_stats_output = str(
+                image_stats_cfg.get("output", "results/segmentation_image_stats.csv")
+            )
+            seg_image_stats_overwrite = bool(image_stats_cfg.get("overwrite", False))
+            seg_ignore_index = _resolve_segmentation_ignore_index(
+                seg_cfg_merged,
+                instantiate(seg_cfg_merged.criterion),
+            )
+            seg_image_stats_meta = _segmentation_image_stats_common_meta(
+                common_meta=common_meta,
+                seg_cfg=seg_cfg_merged,
+                ignore_index=seg_ignore_index,
+            )
+            seg_image_stats_status = _segmentation_image_stats_block_status(
+                seg_image_stats_output,
+                seg_image_stats_meta,
+                len(test_loader.dataset),
+            )
+            if (
+                cfg.resume
+                and seg_summary_complete
+                and (not seg_image_stats_enabled or seg_image_stats_status.is_complete)
+            ):
+                if cfg.verbose:
+                    logger.info(f"[{ds_name}] Skipping segmentation (already computed)")
+                continue
+
+        if is_segmentation:
             save_viz = seg_cfg_merged.get("save_viz", False)
-            metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
+            metrics, feat_dim, best_lr, best_bs, preds, image_stats_rows = evaluate_segmentation(
                 model,
                 train_loader,
                 val_loader,
@@ -1125,8 +1408,9 @@ def main(cfg: DictConfig) -> None:
                 num_classes,
                 device,
                 collect_preds=save_viz,
+                collect_image_stats=seg_image_stats_enabled,
             )
-            all_rows.append(
+            segmentation_rows = [
                 EvaluationResult(
                     **common_meta,
                     method=seg_method,
@@ -1146,7 +1430,26 @@ def main(cfg: DictConfig) -> None:
                     recall=metrics.get("recall"),
                     f1=metrics.get("f1"),
                 ).to_row()
-            )
+            ]
+            if not (
+                cfg.resume
+                and seg_summary_complete
+                and seg_key in segmentation_completed_metrics.get("mIoU", set())
+            ):
+                os.makedirs(os.path.dirname(segmentation_output_path) or ".", exist_ok=True)
+                append_rows_atomic(segmentation_output_path, segmentation_rows)
+            if seg_image_stats_enabled:
+                image_stats_rows = _merge_segmentation_image_stats_rows(
+                    seg_image_stats_meta,
+                    image_stats_rows,
+                )
+                write_segmentation_image_stats_block_atomic(
+                    seg_image_stats_output,
+                    image_stats_rows,
+                    expected_count=len(test_loader.dataset),
+                    overwrite=seg_image_stats_overwrite,
+                    resume=bool(cfg.resume),
+                )
             if save_viz and preds is not None:
                 rgb_indices = ds_cls().rgb_indices or [0, 1, 2]
                 # Collect images and GT masks from test_loader (cheap pass, no backbone)
@@ -1163,7 +1466,6 @@ def main(cfg: DictConfig) -> None:
                     test_gts.append(_m.long())
                 test_imgs_t = torch.cat(test_imgs, dim=0)
                 test_gts_t = torch.cat(test_gts, dim=0)
-                ignore_idx = seg_cfg_merged.get("ignore_index", 255)
                 n_viz = seg_cfg_merged.get("n_viz_samples", 8)
                 viz_dir = seg_cfg_merged.get("viz_dir", "viz")
                 _class_names = list(getattr(train_dataset, "classes", None) or []) or None
@@ -1176,7 +1478,7 @@ def main(cfg: DictConfig) -> None:
                     pred_masks=preds,
                     num_classes=num_classes,
                     rgb_indices=rgb_indices,
-                    ignore_index=ignore_idx,
+                    ignore_index=seg_ignore_index,
                     n_samples=n_viz,
                     class_names=_class_names,
                 )
@@ -1365,10 +1667,11 @@ def main(cfg: DictConfig) -> None:
                     )
                 all_rows.extend(profile_rows)
 
-        append_rows_atomic(output_path, all_rows)
-        all_rows.clear()
+        if all_rows:
+            append_rows_atomic(output_path, all_rows)
+            all_rows.clear()
 
-    logger.info(f"Benchmark complete. Results appended to {output_path}")
+    logger.info("Benchmark complete.")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -104,6 +104,8 @@ def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, 
         "interpolation": cfg.dataset.interpolation,
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
+        "feature_norm": cfg.eval.feature_norm,
+        "solver": cfg.eval.solver,
         "metric_name": metric_name,
         "metric_value": 0.1,
     }
