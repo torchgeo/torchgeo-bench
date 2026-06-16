@@ -18,11 +18,14 @@ dataset:
   interpolation: bilinear
 
 nf:
+  preprocessing: l2   # one of: l2 | standard | zca_l2
   output: results/nf_results.csv
-  n_trials: 25
+  n_trials: 10
   bootstrap: 200
   epochs: 100
   batch_size: 512
+  n_transforms: 16     # number of MAF affine transforms
+  hidden_size: 512     # MADE hidden layer width; null → D//8 (default heuristic)
 
 hydra:
   run:

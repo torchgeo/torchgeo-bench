@@ -281,6 +281,125 @@ def test_svgp_probe_finite_output(fitted_probe):
     assert np.all(probs >= 0.0)
 
 
+def test_svgp_probe_pca_dim(fitted_probe):
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=2, pca_dim=4)
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert probs.shape == (X_test.shape[0], 3)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_svgp_probe_zca(fitted_probe):
+    """ZCA path must produce finite probabilities better than uniform (not all equal)."""
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=5, zca=True)
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert probs.shape == (X_test.shape[0], 3)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+    assert np.all(np.isfinite(probs))
+    # After the L2-norm fix, the GP kernel sees O(1) distances and can learn.
+    # Max-probability should exceed 1/C = 0.333 for at least some test points,
+    # meaning the model is not outputting pure uniform distributions.
+    assert probs.max(axis=1).max() > 1.0 / 3 + 0.01
+
+
+def test_svgp_probe_matern_ard(fitted_probe):
+    """ARD Matérn path must produce finite shape-correct probabilities."""
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=5, kernel="matern_ard")
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert probs.shape == (X_test.shape[0], 3)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+    assert np.all(np.isfinite(probs))
+    assert probs.max(axis=1).max() > 1.0 / 3 + 0.01
+
+
+def test_svgp_probe_linear(fitted_probe):
+    """Linear kernel path must produce finite shape-correct probabilities."""
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=5, kernel="linear")
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert probs.shape == (X_test.shape[0], 3)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+    assert np.all(np.isfinite(probs))
+    assert probs.max(axis=1).max() > 1.0 / 3 + 0.01
+
+
+def test_svgp_probe_invalid_kernel():
+    """Unsupported kernel name must raise ValueError immediately."""
+    with pytest.raises(ValueError, match="kernel must be"):
+        SVGPProbe(kernel="rbf")
+
+
+@pytest.mark.parametrize("inducing_init", ["kmeans", "class_balanced", "random"])
+def test_svgp_probe_inducing_init(fitted_probe, inducing_init):
+    """All inducing_init strategies must produce finite, correctly-shaped probabilities."""
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=2, kernel="linear", inducing_init=inducing_init)
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert probs.shape == (X_test.shape[0], 3)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+    assert np.all(np.isfinite(probs))
+
+
+def test_svgp_probe_invalid_inducing_init():
+    """Unsupported inducing_init name must raise ValueError immediately."""
+    with pytest.raises(ValueError, match="inducing_init must be"):
+        SVGPProbe(inducing_init="grid")
+
+
+def test_svgp_probe_mixing_weights(fitted_probe):
+    """mixing_weights=True must produce finite probabilities that sum to one."""
+    if importlib.util.find_spec("gpytorch") is None:
+        pytest.skip("gpytorch not installed")
+
+    _, (X_train, y_train, _, _, X_test, _) = fitted_probe
+    method = SVGPProbe(n_inducing=10, epochs=2, kernel="linear", mixing_weights=True)
+    try:
+        method.fit(X_train, y_train)
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"gpytorch unavailable at runtime: {exc}")
+    probs = method.predict_proba(X_test)
+    assert probs.shape == (X_test.shape[0], 3)
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+    assert np.all(np.isfinite(probs))
+
+
 # ---------------------------------------------------------------------------
 # NormalizingFlowProbe — Slice 2 (predict_proba) + Slice 3 (predict_confidence)
 # ---------------------------------------------------------------------------

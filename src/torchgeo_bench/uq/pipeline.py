@@ -11,6 +11,7 @@ import hydra
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.preprocessing import StandardScaler
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
@@ -62,6 +63,55 @@ from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
 
+
+class _ScaledProbe:
+    """Wraps a probe so inputs are z-scored with a pre-fitted StandardScaler."""
+
+    def __init__(self, probe: Any, scaler: Any) -> None:
+        self._probe = probe
+        self._scaler = scaler
+        if hasattr(probe, "predict_confidence"):
+            def predict_confidence(X: np.ndarray) -> np.ndarray:
+                return probe.predict_confidence(scaler.transform(X))
+            self.predict_confidence = predict_confidence
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        return self._probe.predict_proba(self._scaler.transform(X))
+
+class _L2NormProbe:
+    """Wraps a probe so inputs are L2-normalized before each call, matching nf_pipeline."""
+
+    def __init__(self, probe: Any) -> None:
+        self._probe = probe
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        norms = np.linalg.norm(X, axis=1, keepdims=True).clip(min=1e-8)
+        return self._probe.predict_proba(X / norms)
+
+    def predict_confidence(self, X: np.ndarray) -> np.ndarray:
+        norms = np.linalg.norm(X, axis=1, keepdims=True).clip(min=1e-8)
+        return self._probe.predict_confidence(X / norms)
+
+
+class _ZCAProbe:
+    """Wraps a probe with ZCA + L2-norm preprocessing, matching nf_pipeline zca_l2 mode."""
+
+    def __init__(self, probe: Any, mean: np.ndarray, W: np.ndarray) -> None:
+        self._probe = probe
+        self._mean = mean
+        self._W = W
+
+    def _transform(self, X: np.ndarray) -> np.ndarray:
+        Z = (X - self._mean) @ self._W.T
+        return Z / np.linalg.norm(Z, axis=1, keepdims=True).clip(min=1e-8)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        return self._probe.predict_proba(self._transform(X))
+
+    def predict_confidence(self, X: np.ndarray) -> np.ndarray:
+        return self._probe.predict_confidence(self._transform(X))
+
+
 warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
 _RESUME_KEY_COLS: tuple[str, ...] = (
@@ -77,6 +127,8 @@ _RESUME_KEY_COLS: tuple[str, ...] = (
     "uq_method",
     "corruption_type",
     "severity",
+    "svgp_inducing_init",
+    "svgp_mixing_weights",
 )
 
 _CLOUD_PATTERN_MODE_MAP: dict[str, str] = {
@@ -88,7 +140,13 @@ _CLOUD_PATTERN_MODE_MAP: dict[str, str] = {
 
 
 def _lookup_nf_hyperparams(
-    nf_df: pd.DataFrame | None, model: str, name: str, dataset: str, partition: str, bands: str
+    nf_df: pd.DataFrame | None,
+    model: str,
+    name: str,
+    dataset: str,
+    partition: str,
+    bands: str,
+    preprocessing: str = "l2",
 ) -> tuple[float, float] | None:
     """Return ``(best_lr, best_wd)`` from NF prior results, or ``None`` if missing.
 
@@ -99,6 +157,8 @@ def _lookup_nf_hyperparams(
         dataset: Dataset name.
         partition: Partition name.
         bands: Bands value.
+        preprocessing: Preprocessing variant used during HPO (``"l2"``, ``"standard"``,
+            or ``"zca_l2"``). Only used when the ``preprocessing`` column is present.
 
     Returns:
         ``(best_lr, best_wd)`` tuple, or ``None`` if no matching row found.
@@ -112,6 +172,8 @@ def _lookup_nf_hyperparams(
         & (nf_df["partition"] == partition)
         & (nf_df["bands"] == bands)
     )
+    if "preprocessing" in nf_df.columns:
+        mask = mask & (nf_df["preprocessing"] == preprocessing)
     sub = nf_df.loc[mask]
     if sub.empty:
         return None
@@ -785,15 +847,33 @@ def main(cfg: DictConfig) -> None:
                 logger.warning("Skipping conformal for dataset %s: %s", dataset_name, exc)
         if "svgp" in cfg.uq.methods:
             try:
+                svgp_pca_dim = getattr(cfg.model, "svgp_pca_dim", None) or getattr(cfg.uq, "svgp_pca_dim", None)
+                svgp_pca_dim = int(svgp_pca_dim) if svgp_pca_dim is not None else None
+                svgp_zca = bool(getattr(cfg.uq, "svgp_zca", False))
+                svgp_kernel = str(getattr(cfg.uq, "svgp_kernel", "matern"))
+                svgp_inducing_init = str(getattr(cfg.uq, "svgp_inducing_init", "kmeans"))
+                svgp_mixing_weights = bool(getattr(cfg.uq, "svgp_mixing_weights", False))
                 svgp = SVGPProbe(
                     n_inducing=int(cfg.uq.svgp_n_inducing),
                     epochs=int(cfg.uq.svgp_epochs),
                     lr=float(cfg.uq.svgp_lr),
                     batch_size=int(cfg.uq.svgp_batch_size),
                     n_mc_samples=int(cfg.uq.svgp_n_mc_samples),
+                    device=device,
+                    pca_dim=svgp_pca_dim,
+                    zca=svgp_zca,
+                    kernel=svgp_kernel,
+                    inducing_init=svgp_inducing_init,
+                    mixing_weights=svgp_mixing_weights,
                 )
-                svgp.fit(X_final_train, y_final_train)
-                methods["svgp"] = svgp
+                if svgp_pca_dim is None and not svgp_zca and svgp_kernel != "linear":
+                    svgp_scaler = StandardScaler()
+                    X_svgp_train = svgp_scaler.fit_transform(X_final_train)
+                    svgp.fit(X_svgp_train, y_final_train)
+                    methods["svgp"] = _ScaledProbe(svgp, svgp_scaler)
+                else:
+                    svgp.fit(X_final_train, y_final_train)
+                    methods["svgp"] = svgp
             except ModuleNotFoundError as exc:
                 logger.warning("Skipping svgp for dataset %s: %s", dataset_name, exc)
 
@@ -801,6 +881,7 @@ def main(cfg: DictConfig) -> None:
             if nf_method not in cfg.uq.methods:
                 continue
             nf_prior_path = str(getattr(cfg.uq, "nf_prior_results", "results/nf_results.csv"))
+            nf_preprocessing = str(getattr(cfg.uq, "nf_preprocessing", "l2"))
             nf_prior_df = pd.read_csv(nf_prior_path) if os.path.exists(nf_prior_path) else None
             hp = _lookup_nf_hyperparams(
                 nf_prior_df,
@@ -809,6 +890,7 @@ def main(cfg: DictConfig) -> None:
                 dataset=dataset_name,
                 partition=str(cfg.dataset.partition),
                 bands=bands_value,
+                preprocessing=nf_preprocessing,
             )
             if hp is None:
                 logger.warning(
@@ -820,6 +902,7 @@ def main(cfg: DictConfig) -> None:
             nf_prior = "empirical" if nf_method == "nf_empirical" else "uniform"
             try:
                 from torchgeo_bench.uq.nf import NormalizingFlowProbe
+                from torchgeo_bench.nf_pipeline import _preprocess
 
                 nf_probe = NormalizingFlowProbe(
                     prior=nf_prior,
@@ -827,12 +910,29 @@ def main(cfg: DictConfig) -> None:
                     weight_decay=best_wd,
                     epochs=int(getattr(cfg.uq, "nf_epochs", 100)),
                     batch_size=int(getattr(cfg.uq, "nf_batch_size", 512)),
+                    device=device,
                 )
-                nf_probe.fit(X_final_train, y_final_train)
-                methods[nf_method] = nf_probe
+                X_nf_train, _, _ = _preprocess(
+                    X_final_train, X_final_train[:1], X_final_train[:1], nf_preprocessing
+                )
+                nf_probe.fit(X_nf_train, y_final_train)
+                if nf_preprocessing == "zca_l2":
+                    mean = X_final_train.mean(axis=0)
+                    cov  = np.cov(X_final_train, rowvar=False)
+                    vals, vecs = np.linalg.eigh(cov)
+                    W = vecs @ np.diag(1.0 / np.sqrt(vals + 1e-3)) @ vecs.T
+                    methods[nf_method] = _ZCAProbe(nf_probe, mean, W)
+                elif nf_preprocessing == "standard":
+                    from sklearn.preprocessing import StandardScaler
+                    nf_scaler = StandardScaler()
+                    nf_scaler.fit(X_final_train)
+                    methods[nf_method] = _ScaledProbe(nf_probe, nf_scaler)
+                else:
+                    methods[nf_method] = _L2NormProbe(nf_probe)
             except ModuleNotFoundError as exc:
                 logger.warning("Skipping %s for dataset %s: %s", nf_method, dataset_name, exc)
 
+        _svgp_pca_dim = getattr(cfg.model, "svgp_pca_dim", None) or getattr(cfg.uq, "svgp_pca_dim", None)
         common_meta = {
             "model": str(cfg.model._target_),
             "name": str(cfg.model.name),
@@ -844,6 +944,14 @@ def main(cfg: DictConfig) -> None:
             "partition": str(cfg.dataset.partition),
             "bands": bands_value,
             "seed": int(cfg.seed),
+            "svgp_n_inducing": int(cfg.uq.svgp_n_inducing),
+            "svgp_pca_dim": int(_svgp_pca_dim) if _svgp_pca_dim is not None else None,
+            "svgp_zca": bool(getattr(cfg.uq, "svgp_zca", False)),
+            "svgp_kernel": str(getattr(cfg.uq, "svgp_kernel", "linear")),
+            "svgp_epochs": int(cfg.uq.svgp_epochs),
+            "svgp_lr": float(cfg.uq.svgp_lr),
+            "svgp_inducing_init": str(getattr(cfg.uq, "svgp_inducing_init", "kmeans")),
+            "svgp_mixing_weights": bool(getattr(cfg.uq, "svgp_mixing_weights", False)),
         }
 
         for corruption_type in cfg.uq.corruptions:

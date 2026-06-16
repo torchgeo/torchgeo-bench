@@ -80,7 +80,8 @@ def signed_ece(
         binning: ``"equal_width"`` or ``"equal_mass"``.
 
     Returns:
-        Signed ECE in ``[-1, 1]``. Positive means overconfident.
+        Signed ECE in ``[0, 1]``. Zero means not overconfident (model is
+        well-calibrated or underconfident on every bin).
     """
     if probs.ndim != 2:
         raise ValueError(f"probs must be 2D, got shape {probs.shape}")

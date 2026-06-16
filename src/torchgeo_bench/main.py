@@ -235,6 +235,8 @@ class EvaluationResult:
     mce_ts: float | None = None
     temperature: float | None = None
     calibration_n_bins: int | None = None
+    feature_norm: str = "none"
+    solver: str = "lbfgs"
 
     def to_row(self) -> dict:
         """Convert to a flat dictionary suitable for CSV/DataFrame export."""
@@ -302,6 +304,36 @@ def evaluate_knn(
     return metric, lo, hi, calibration, n_bins
 
 
+def _apply_feature_norm(
+    x_train: np.ndarray,
+    x_val: np.ndarray,
+    x_test: np.ndarray,
+    feature_norm: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, object]:
+    """Fit a normalizer on x_train and apply to all splits. Returns (x_train, x_val, x_test, scaler)."""
+    if feature_norm == "standard":
+        from sklearn.preprocessing import StandardScaler
+
+        scaler = StandardScaler()
+        x_train = scaler.fit_transform(x_train)
+        x_val = scaler.transform(x_val)
+        x_test = scaler.transform(x_test)
+        return x_train, x_val, x_test, scaler
+    elif feature_norm == "l2":
+        eps = 1e-8
+        norms = np.linalg.norm(x_train, axis=1, keepdims=True)
+        x_train = x_train / np.maximum(norms, eps)
+        norms = np.linalg.norm(x_val, axis=1, keepdims=True)
+        x_val = x_val / np.maximum(norms, eps)
+        norms = np.linalg.norm(x_test, axis=1, keepdims=True)
+        x_test = x_test / np.maximum(norms, eps)
+        return x_train, x_val, x_test, None
+    elif feature_norm == "none":
+        return x_train, x_val, x_test, None
+    else:
+        raise ValueError(f"Unknown feature_norm: {feature_norm!r}. Expected 'none', 'standard', or 'l2'.")
+
+
 def evaluate_logistic(
     x_train: np.ndarray,
     y_train: np.ndarray,
@@ -318,6 +350,9 @@ def evaluate_logistic(
     head: str = "linear",
     calibration_n_bins: int = 15,
     temp_scale: bool = True,
+    feature_norm: str = "none",
+    solver: str = "lbfgs",
+    adam_lr: float = 1e-3,
 ) -> tuple[float, float, float, float, dict[str, float], dict[str, float | None]]:
     """Sweep C values, retrain, and evaluate. Auto-detects single/multi-label from y shape.
 
@@ -326,6 +361,8 @@ def evaluate_logistic(
     second dict with temperature-scaled calibration plus the fitted
     ``temperature`` (all ``None`` when ``temp_scale=False``).
     """
+    x_train, x_val, x_test, _scaler = _apply_feature_norm(x_train, x_val, x_test, feature_norm)
+
     multi_label = y_train.ndim == 2
     best_c: float | None = None
     best_val_score = -1.0
@@ -359,6 +396,8 @@ def evaluate_logistic(
             device=device,
             multi_label=multi_label,
             head=head,
+            solver=solver,
+            lr=adam_lr,
         )
         model.fit(x_train_tensor, y_train_tensor)
 
@@ -382,6 +421,15 @@ def evaluate_logistic(
     if merge_val:
         x_final_np = np.concatenate([x_train, x_val], axis=0)
         y_final_np = np.concatenate([y_train, y_val], axis=0)
+        # Refit StandardScaler on the merged set so final model sees consistent scaling.
+        # l2 and none have no stateful scaler so no refit is needed.
+        if feature_norm == "standard":
+            from sklearn.preprocessing import StandardScaler
+
+            merged_scaler = StandardScaler()
+            x_final_np = merged_scaler.fit_transform(x_final_np)
+            x_test = merged_scaler.transform(x_test)
+            x_test_tensor = torch.from_numpy(x_test)
         x_final = torch.from_numpy(x_final_np)
         y_final = (
             torch.from_numpy(y_final_np).float()
@@ -400,6 +448,8 @@ def evaluate_logistic(
         device=device,
         multi_label=multi_label,
         head=head,
+        solver=solver,
+        lr=adam_lr,
     )
     final_model.fit(x_final, y_final)
 
@@ -921,6 +971,8 @@ def main(cfg: DictConfig) -> None:
         "interpolation",
         "partition",
         "bands",
+        "feature_norm",
+        "solver",
     )
     completed_runs: set[tuple[str, ...]] = set()
     completed_metrics: dict[str, set[tuple[str, ...]]] = {}
@@ -966,13 +1018,15 @@ def main(cfg: DictConfig) -> None:
         )
 
         knn_k = int(getattr(eval_cfg_merged, "knn_k", 5))
-        knn_key = (ds_name, f"knn{knn_k}", cfg.model._target_, cfg.model.name, *config_tuple)
-        linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
+        feature_norm_val = str(cfg.eval.get("feature_norm", "none"))
+        solver_val = str(cfg.eval.get("solver", "lbfgs"))
+        knn_key = (ds_name, f"knn{knn_k}", cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
+        linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
 
         seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
-        seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
-        id_key = (ds_name, "intrinsic_dim", cfg.model._target_, cfg.model.name, *config_tuple)
-        profile_key = (ds_name, "profile", cfg.model._target_, cfg.model.name, *config_tuple)
+        seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
+        id_key = (ds_name, "intrinsic_dim", cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
+        profile_key = (ds_name, "profile", cfg.model._target_, cfg.model.name, *config_tuple, feature_norm_val, solver_val)
 
         try:
             result = get_datasets(
@@ -1052,6 +1106,8 @@ def main(cfg: DictConfig) -> None:
             "c_range_num": c_num,
             "merge_val": cfg.eval.merge_val,
             "bootstrap": cfg.eval.bootstrap,
+            "feature_norm": str(cfg.eval.get("feature_norm", "none")),
+            "solver": str(cfg.eval.get("solver", "lbfgs")),
         }
 
         if is_segmentation:
@@ -1211,6 +1267,9 @@ def main(cfg: DictConfig) -> None:
 
             if not skip_linear:
                 linear_head = str(cfg.eval.get("linear_head", "linear"))
+                feature_norm = str(cfg.eval.get("feature_norm", "none"))
+                solver = str(cfg.eval.get("solver", "lbfgs"))
+                adam_lr = float(cfg.eval.get("adam_lr", 1e-3))
                 lin_score, lin_lo, lin_hi, best_c, lin_cal, lin_cal_ts = evaluate_logistic(
                     x_train,
                     y_train,
@@ -1227,6 +1286,9 @@ def main(cfg: DictConfig) -> None:
                     head=linear_head,
                     calibration_n_bins=cal_n_bins_linear,
                     temp_scale=cal_temp_scale,
+                    feature_norm=feature_norm,
+                    solver=solver,
+                    adam_lr=adam_lr,
                 )
                 linear_method = "linear" if linear_head == "linear" else "linear_mlp"
                 all_rows.append(

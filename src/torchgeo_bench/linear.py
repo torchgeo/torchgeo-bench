@@ -225,7 +225,17 @@ class LogisticRegression:
             self.n_iter_ = int(state.get("n_iter", self.max_iter))
 
         else:  # Adam (mini-batch) -- keep everything on device, no DataLoader
-            optimizer = torch.optim.AdamW(model.parameters(), lr=self.lr, weight_decay=0.0)
+            # For a linear head, manual reg and AdamW weight_decay are equivalent;
+            # use manual reg to stay consistent with the lbfgs path (sklearn scaling).
+            # For MLP, delegate entirely to AdamW weight_decay and skip the manual
+            # term — mixing both would double-regularize.
+            if self.head == "mlp":
+                adam_weight_decay = reg * 2.0  # AdamW adds λ*w, manual term adds reg*2*w
+                adam_manual_reg = False
+            else:
+                adam_weight_decay = 0.0
+                adam_manual_reg = True
+            optimizer = torch.optim.AdamW(model.parameters(), lr=self.lr, weight_decay=adam_weight_decay)
             best_loss = float("inf")
             epochs_since_improve = 0
 
@@ -243,9 +253,10 @@ class LogisticRegression:
                     optimizer.zero_grad(set_to_none=True)
                     logits = model(xb)
                     loss = criterion(logits, yb)
-                    loss = loss + reg * sum(
-                        p.mul(p).sum() for p in model.parameters() if p.ndim >= 2
-                    )
+                    if adam_manual_reg:
+                        loss = loss + reg * sum(
+                            p.mul(p).sum() for p in model.parameters() if p.ndim >= 2
+                        )
                     loss.backward()
                     optimizer.step()
                     # accumulate loss (on device) then pull scalar once

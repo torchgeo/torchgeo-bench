@@ -69,7 +69,10 @@ class HookCollector:
         if output.ndim == 3:
             return output.mean(dim=1)
         if output.ndim == 4:
-            return output.mean(dim=(-2, -1))
+            _, d1, d2, d3 = output.shape
+            if d1 == d2 and d2 != d3:  # channels-last (B, H, W, C) — e.g. Swin
+                return output.mean(dim=(1, 2))
+            return output.mean(dim=(-2, -1))  # channels-first (B, C, H, W)
         if output.ndim == 2:
             return output
         raise ValueError(f"Unsupported hook output shape: {tuple(output.shape)}")

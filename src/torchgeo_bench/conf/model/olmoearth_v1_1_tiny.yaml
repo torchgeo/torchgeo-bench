@@ -14,3 +14,4 @@ sensor_remap:
   landsat: landsat_as_s2
 min_image_size: 64
 name: olmoearth_v1_1_tiny
+svgp_pca_dim: 128

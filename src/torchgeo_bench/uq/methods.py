@@ -242,6 +242,12 @@ class DeepEnsemble(_EnsembleBase):
             member = LogisticRegression(
                 C=best_c,
                 solver="adam",
+                # Adam needs its own hyperparameters: the class defaults
+                # (lr=1.0, patience=1) are tuned for LBFGS and leave Adam
+                # members badly under-trained (worse than a single probe).
+                lr=1e-2,
+                max_iter=1000,
+                patience=20,
                 random_state=seed + i,
                 random_init=True,
             )
@@ -338,14 +344,37 @@ class SVGPProbe:
         lr: float = 0.01,
         batch_size: int = 512,
         n_mc_samples: int = 20,
+        device: str | torch.device = "cpu",
+        pred_batch_size: int = 512,
+        pca_dim: int | None = None,
+        zca: bool = False,
+        kernel: str = "matern",
+        inducing_init: str = "kmeans",
+        mixing_weights: bool = False,
     ) -> None:
+        if pca_dim is not None and zca:
+            raise ValueError("pca_dim and zca are mutually exclusive.")
+        if kernel not in {"matern", "matern_ard", "linear"}:
+            raise ValueError(f"kernel must be 'matern', 'matern_ard', or 'linear', got {kernel!r}")
+        if inducing_init not in {"kmeans", "class_balanced", "random"}:
+            raise ValueError(f"inducing_init must be 'kmeans', 'class_balanced', or 'random', got {inducing_init!r}")
         self.n_inducing = int(n_inducing)
         self.epochs = int(epochs)
         self.lr = float(lr)
         self.batch_size = int(batch_size)
         self.n_mc_samples = int(n_mc_samples)
+        self.device = torch.device(device)
+        self.pred_batch_size = int(pred_batch_size)
+        self.pca_dim = int(pca_dim) if pca_dim is not None else None
+        self.zca = bool(zca)
+        self.kernel = str(kernel)
+        self.inducing_init = str(inducing_init)
+        self.mixing_weights = bool(mixing_weights)
         self._model = None
         self._likelihood = None
+        self._pca = None
+        self._zca: tuple | None = None
+        self._use_l2_norm: bool = False
 
     def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
         """Fit a sparse variational GP on training embeddings.
@@ -365,16 +394,62 @@ class SVGPProbe:
             ) from exc
 
         from sklearn.cluster import MiniBatchKMeans
+        from sklearn.decomposition import PCA
+
+        if self.pca_dim is not None and self.pca_dim < X_train.shape[1]:
+            self._pca = PCA(n_components=self.pca_dim, whiten=True, random_state=0)
+            X_train = self._pca.fit_transform(X_train)
+
+        if self.kernel == "linear":
+            norms = np.linalg.norm(X_train, axis=1, keepdims=True).clip(min=1e-8)
+            X_train = X_train / norms
+            self._use_l2_norm = True
+        elif self.zca:
+            mean = X_train.mean(axis=0)
+            cov = np.cov(X_train, rowvar=False)
+            vals, vecs = np.linalg.eigh(cov)
+            # Large eps prevents near-zero eigenvalues from producing enormous
+            # whitening factors, which collapse the Matern kernel to near-singular.
+            W = vecs @ np.diag(1.0 / np.sqrt(vals + 1e-3)) @ vecs.T
+            self._zca = (mean, W)
+            X_train = (X_train - mean) @ W.T
+            # L2-normalize so pairwise distances are O(1) regardless of feature dim.
+            # Without this, ||x - z|| ~ sqrt(2*D) which makes Matern-5/2 numerically
+            # zero for D>=512 (e.g. 3.7e-19 at D=512, 4.9e-59 at D=2048), causing the
+            # GP to output uniform probabilities and achieve only random-chance accuracy.
+            norms = np.linalg.norm(X_train, axis=1, keepdims=True).clip(min=1e-8)
+            X_train = X_train / norms
 
         n_classes = int(np.unique(y_train).shape[0])
         n_inducing = min(self.n_inducing, len(X_train))
 
-        kmeans = MiniBatchKMeans(n_clusters=n_inducing, random_state=0, n_init=3)
-        kmeans.fit(X_train)
-        inducing_pts = torch.from_numpy(kmeans.cluster_centers_.astype(np.float32))
+        if self.inducing_init == "kmeans":
+            kmeans = MiniBatchKMeans(n_clusters=n_inducing, random_state=0, n_init=3)
+            kmeans.fit(X_train)
+            init_pts = kmeans.cluster_centers_.astype(np.float32)
+        elif self.inducing_init == "class_balanced":
+            # floor(n_inducing / n_classes) points per class; fill remainder randomly.
+            rng = np.random.default_rng(0)
+            per_class = n_inducing // n_classes
+            idxs: list[np.ndarray] = []
+            for c in np.unique(y_train):
+                pool = np.where(y_train == c)[0]
+                idxs.append(rng.choice(pool, size=min(per_class, len(pool)), replace=False))
+            all_idxs = np.concatenate(idxs)
+            deficit = n_inducing - len(all_idxs)
+            if deficit > 0:
+                remaining = np.setdiff1d(np.arange(len(X_train)), all_idxs)
+                all_idxs = np.concatenate([all_idxs, rng.choice(remaining, size=deficit, replace=False)])
+            init_pts = X_train[all_idxs].astype(np.float32)
+        else:  # "random"
+            rng = np.random.default_rng(0)
+            idxs_r = rng.choice(len(X_train), size=n_inducing, replace=False)
+            init_pts = X_train[idxs_r].astype(np.float32)
+
+        inducing_pts = torch.from_numpy(init_pts).to(self.device)
 
         class _GP(gpytorch.models.ApproximateGP):
-            def __init__(mdl, ind_pts: torch.Tensor, n_cls: int) -> None:
+            def __init__(mdl, ind_pts: torch.Tensor, n_cls: int, kernel_name: str, feature_dim: int) -> None:
                 vd = gpytorch.variational.CholeskyVariationalDistribution(
                     num_inducing_points=ind_pts.size(0),
                     batch_shape=torch.Size([n_cls]),
@@ -391,20 +466,39 @@ class SVGPProbe:
                 mdl.mean_module = gpytorch.means.ConstantMean(
                     batch_shape=torch.Size([n_cls])
                 )
-                mdl.covar_module = gpytorch.kernels.ScaleKernel(
-                    gpytorch.kernels.MaternKernel(nu=2.5, batch_shape=torch.Size([n_cls])),
-                    batch_shape=torch.Size([n_cls]),
-                )
+                if kernel_name == "matern_ard":
+                    base = gpytorch.kernels.MaternKernel(
+                        nu=2.5,
+                        ard_num_dims=feature_dim,
+                        batch_shape=torch.Size([n_cls]),
+                    )
+                    mdl.covar_module = gpytorch.kernels.ScaleKernel(
+                        base, batch_shape=torch.Size([n_cls])
+                    )
+                elif kernel_name == "linear":
+                    mdl.covar_module = gpytorch.kernels.LinearKernel(
+                        batch_shape=torch.Size([n_cls])
+                    )
+                else:  # "matern" — isotropic, existing behaviour
+                    base = gpytorch.kernels.MaternKernel(
+                        nu=2.5, batch_shape=torch.Size([n_cls])
+                    )
+                    mdl.covar_module = gpytorch.kernels.ScaleKernel(
+                        base, batch_shape=torch.Size([n_cls])
+                    )
 
             def forward(mdl, x: torch.Tensor) -> gpytorch.distributions.MultivariateNormal:
                 return gpytorch.distributions.MultivariateNormal(
                     mdl.mean_module(x), mdl.covar_module(x)
                 )
 
-        model = _GP(inducing_pts, n_classes)
+        model = _GP(inducing_pts, n_classes, self.kernel, X_train.shape[1]).to(self.device)
         likelihood = gpytorch.likelihoods.SoftmaxLikelihood(
-            num_classes=n_classes, mixing_weights=False
-        )
+            num_classes=n_classes,
+            mixing_weights=self.mixing_weights,
+            # num_features required by gpytorch when mixing_weights=True
+            num_features=n_classes if self.mixing_weights else None,
+        ).to(self.device)
 
         model.train()
         likelihood.train()
@@ -428,36 +522,41 @@ class SVGPProbe:
         epochs_no_improve = 0
         self._epoch_losses: list[float] = []
 
-        for epoch in range(self.epochs):
-            epoch_loss = 0.0
-            for x_batch, y_batch in loader:
-                optimizer.zero_grad(set_to_none=True)
-                loss = -mll(model(x_batch), y_batch)
-                loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
-            epoch_loss /= len(loader)
-            self._epoch_losses.append(epoch_loss)
+        # ZCA-whitened features can produce ill-conditioned kernel matrices;
+        # a larger jitter budget and more retries prevent NotPSDError.
+        with gpytorch.settings.cholesky_jitter(1e-3, 1e-6, 1e-3), gpytorch.settings.cholesky_max_tries(6):
+            for epoch in range(self.epochs):
+                epoch_loss = 0.0
+                for x_batch, y_batch in loader:
+                    x_batch = x_batch.to(self.device)
+                    y_batch = y_batch.to(self.device)
+                    optimizer.zero_grad(set_to_none=True)
+                    loss = -mll(model(x_batch), y_batch)
+                    loss.backward()
+                    optimizer.step()
+                    epoch_loss += loss.item()
+                epoch_loss /= len(loader)
+                self._epoch_losses.append(epoch_loss)
 
-            if epoch_loss < best_loss - _MIN_DELTA:
-                best_loss = epoch_loss
-                epochs_no_improve = 0
+                if epoch_loss < best_loss - _MIN_DELTA:
+                    best_loss = epoch_loss
+                    epochs_no_improve = 0
+                else:
+                    epochs_no_improve += 1
+                    if epochs_no_improve >= _PATIENCE:
+                        logger.info(
+                            "SVGP early stop at epoch %d/%d (ELBO=%.4f)",
+                            epoch + 1,
+                            self.epochs,
+                            best_loss,
+                        )
+                        break
             else:
-                epochs_no_improve += 1
-                if epochs_no_improve >= _PATIENCE:
-                    logger.info(
-                        "SVGP early stop at epoch %d/%d (ELBO=%.4f)",
-                        epoch + 1,
-                        self.epochs,
-                        best_loss,
-                    )
-                    break
-        else:
-            logger.info(
-                "SVGP finished %d epochs (ELBO=%.4f)",
-                self.epochs,
-                best_loss,
-            )
+                logger.info(
+                    "SVGP finished %d epochs (ELBO=%.4f)",
+                    self.epochs,
+                    best_loss,
+                )
 
         self._model = model
         self._likelihood = likelihood
@@ -477,17 +576,32 @@ class SVGPProbe:
         if self._model is None:
             raise RuntimeError("SVGPProbe has not been fit yet.")
 
+        if self._pca is not None:
+            X = self._pca.transform(X)
+
+        if self._zca is not None:
+            mean, W = self._zca
+            X = (X - mean) @ W.T
+            norms = np.linalg.norm(X, axis=1, keepdims=True).clip(min=1e-8)
+            X = X / norms
+        elif self._use_l2_norm:
+            norms = np.linalg.norm(X, axis=1, keepdims=True).clip(min=1e-8)
+            X = X / norms
+
+        import gpytorch
+
         self._model.eval()
-        x_t = torch.from_numpy(X.astype(np.float32, copy=False))
-
-        with torch.no_grad():
-            # f_dist: MultitaskMultivariateNormal with event_shape=[N, C]
-            f_dist = self._model(x_t)
-            # rsample gives (S, N, C); softmax over C; mean over S
-            f_samples = f_dist.rsample(torch.Size([self.n_mc_samples]))
-            probs = torch.softmax(f_samples, dim=-1).mean(0)
-
-        return probs.cpu().numpy()
+        x_all = torch.from_numpy(X.astype(np.float32, copy=False))
+        chunks = []
+        with torch.no_grad(), gpytorch.settings.cholesky_jitter(1e-3, 1e-6, 1e-3), gpytorch.settings.cholesky_max_tries(6):
+            for start in range(0, len(x_all), self.pred_batch_size):
+                x_chunk = x_all[start : start + self.pred_batch_size].to(self.device)
+                # f_dist: MultitaskMultivariateNormal with event_shape=[B, C]
+                f_dist = self._model(x_chunk)
+                # rsample gives (S, B, C); softmax over C; mean over S
+                f_samples = f_dist.rsample(torch.Size([self.n_mc_samples]))
+                chunks.append(torch.softmax(f_samples, dim=-1).mean(0).cpu())
+        return torch.cat(chunks, dim=0).numpy()
 
 
 @dataclass

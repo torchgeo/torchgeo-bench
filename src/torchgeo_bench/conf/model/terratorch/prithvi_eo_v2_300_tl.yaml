@@ -3,5 +3,4 @@ backbone_name: prithvi_eo_v2_300_tl
 pretrained: true
 target_size: 224
 name: tt_prithvi_eo_v2_300_tl
-eval:
-  c_range: [-6, 5, 60]
+svgp_pca_dim: 256

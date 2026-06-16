@@ -7,6 +7,11 @@ svgp_epochs: 100
 svgp_lr: 0.01
 svgp_batch_size: 512
 svgp_n_mc_samples: 20
+svgp_pca_dim: null
+svgp_zca: false
+svgp_kernel: linear
+svgp_inducing_init: kmeans   # kmeans | class_balanced | random
+svgp_mixing_weights: false
 
 methods:
   - uncalibrated

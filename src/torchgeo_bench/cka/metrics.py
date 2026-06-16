@@ -32,6 +32,25 @@ def _spearman(x: np.ndarray, y: np.ndarray) -> float:
     return float(np.sum(rx * ry) / denom)
 
 
+def _biased_linear_cka(x: np.ndarray, y: np.ndarray) -> float:
+    """Biased linear CKA on pre-cast float64 2D arrays (no input validation)."""
+    x_centered = x - x.mean(axis=0, keepdims=True)
+    y_centered = y - y.mean(axis=0, keepdims=True)
+    xtx = x_centered.T @ x_centered
+    yty = y_centered.T @ y_centered
+    ytx = y_centered.T @ x_centered
+    num = float(np.sum(ytx * ytx))
+    den_x = float(np.sum(xtx * xtx))
+    den_y = float(np.sum(yty * yty))
+    denom = np.sqrt(den_x * den_y)
+    if denom <= 0:
+        return float("nan")
+    cka = num / denom
+    if cka < 0:
+        return 0.0
+    return min(float(cka), 1.0)
+
+
 def linear_cka(X: np.ndarray, Y: np.ndarray) -> float:
     """Compute biased linear CKA between two activation matrices.
 
@@ -51,30 +70,12 @@ def linear_cka(X: np.ndarray, Y: np.ndarray) -> float:
         raise ValueError("X and Y must have the same number of samples.")
     n = int(x.shape[0])
 
-    x_centered = x - x.mean(axis=0, keepdims=True)
-    y_centered = y - y.mean(axis=0, keepdims=True)
-
-    xtx = x_centered.T @ x_centered
-    yty = y_centered.T @ y_centered
-    ytx = y_centered.T @ x_centered
-
-    num = float(np.sum(ytx * ytx))
-    den_x = float(np.sum(xtx * xtx))
-    den_y = float(np.sum(yty * yty))
-    denom = np.sqrt(den_x * den_y)
-    if denom <= 0:
-        return float("nan")
-
-    cka = num / denom
     if n >= 200:
         unbiased = _unbiased_linear_cka(x, y)
         if np.isfinite(unbiased):
-            cka = unbiased
-    if cka < 0:
-        return 0.0
-    if cka > 1:
-        return 1.0
-    return float(cka)
+            return float(np.clip(unbiased, 0.0, 1.0))
+
+    return _biased_linear_cka(x, y)
 
 
 def cosine_drift(X_clean: np.ndarray, X_corrupted: np.ndarray) -> float:
@@ -169,13 +170,28 @@ def bootstrap_cka_ci(
     if k < 2:
         return (float("nan"), float("nan"), float("nan"))
 
+    # Pre-compute centered kernel matrices once (O(N·D) centering + O(N²·D) kernels),
+    # then each bootstrap resample is a cheap O(k²) kernel slice — avoids recomputing
+    # O(k·D²) or O(k²·D) inside the loop for high-D activations.
+    x_c = x - x.mean(axis=0, keepdims=True)
+    y_c = y - y.mean(axis=0, keepdims=True)
+    K = x_c @ x_c.T  # (N, N)
+    L = y_c @ y_c.T  # (N, N)
+
     rng = np.random.default_rng(seed)
     estimates: list[float] = []
     for _ in range(int(n_boot)):
         idx = rng.choice(n, size=k, replace=False)
-        value = linear_cka(x[idx], y[idx])
-        if np.isfinite(value):
-            estimates.append(float(value))
+        Ks = K[np.ix_(idx, idx)]
+        Ls = L[np.ix_(idx, idx)]
+        hsic_xy = float(np.sum(Ks * Ls))
+        hsic_xx = float(np.sum(Ks * Ks))
+        hsic_yy = float(np.sum(Ls * Ls))
+        den = np.sqrt(hsic_xx * hsic_yy)
+        if den <= 0:
+            continue
+        value = float(np.clip(hsic_xy / den, 0.0, 1.0))
+        estimates.append(value)
 
     if not estimates:
         return (float("nan"), float("nan"), float("nan"))

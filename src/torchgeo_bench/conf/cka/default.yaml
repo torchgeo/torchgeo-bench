@@ -94,6 +94,11 @@ layers:
     - backbone.encoder.5
     - backbone.encoder.8
     - backbone.encoder.11
+  tt_terramind_v1_base_rgb:
+    - backbone.encoder.2
+    - backbone.encoder.5
+    - backbone.encoder.8
+    - backbone.encoder.11
   olmoearth_v1_1_tiny:
     - encoder_model.encoder.blocks.2
     - encoder_model.encoder.blocks.5

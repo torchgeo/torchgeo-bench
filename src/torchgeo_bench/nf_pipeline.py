@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from typing import Any
 
 import hydra
@@ -19,13 +20,59 @@ from torchgeo_bench.main import append_rows_atomic
 from torchgeo_bench.uq.metrics import brier_score, ece, nll
 from torchgeo_bench.utils import extract_features
 
+warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
+
 logger = logging.getLogger(__name__)
 
 _METRICS = frozenset({"accuracy", "nll", "ece", "brier"})
 
 
+def _preprocess(
+    X_train: np.ndarray,
+    X_val: np.ndarray,
+    X_test: np.ndarray,
+    mode: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Apply preprocessing to feature splits. Fit only on X_train.
+
+    Args:
+        X_train: Training features ``(N, D)``.
+        X_val: Validation features ``(M, D)``.
+        X_test: Test features ``(T, D)``.
+        mode: One of ``"l2"``, ``"standard"``, ``"zca_l2"``.
+
+    Returns:
+        Tuple ``(X_train, X_val, X_test)`` after preprocessing.
+    """
+    if mode == "l2":
+        X_train = X_train / np.linalg.norm(X_train, axis=1, keepdims=True).clip(min=1e-8)
+        X_val   = X_val   / np.linalg.norm(X_val,   axis=1, keepdims=True).clip(min=1e-8)
+        X_test  = X_test  / np.linalg.norm(X_test,  axis=1, keepdims=True).clip(min=1e-8)
+    elif mode == "standard":
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_val   = scaler.transform(X_val)
+        X_test  = scaler.transform(X_test)
+    elif mode == "zca_l2":
+        mean = X_train.mean(axis=0)
+        cov  = np.cov(X_train, rowvar=False)
+        vals, vecs = np.linalg.eigh(cov)
+        W = vecs @ np.diag(1.0 / np.sqrt(vals + 1e-3)) @ vecs.T
+        X_train = (X_train - mean) @ W.T
+        X_val   = (X_val   - mean) @ W.T
+        X_test  = (X_test  - mean) @ W.T
+        X_train = X_train / np.linalg.norm(X_train, axis=1, keepdims=True).clip(min=1e-8)
+        X_val   = X_val   / np.linalg.norm(X_val,   axis=1, keepdims=True).clip(min=1e-8)
+        X_test  = X_test  / np.linalg.norm(X_test,  axis=1, keepdims=True).clip(min=1e-8)
+    else:
+        raise ValueError(f"Unknown preprocessing mode: {mode!r}. Choose 'l2', 'standard', or 'zca_l2'.")
+    return X_train, X_val, X_test
+
+
 def _is_done(df: pd.DataFrame | None, model: str, name: str, dataset: str,
-             partition: str, bands: str, seed: int) -> bool:
+             partition: str, bands: str, seed: int, preprocessing: str,
+             n_transforms: int, hidden_size: int | None) -> bool:
     if df is None or df.empty:
         return False
     mask = (
@@ -36,6 +83,16 @@ def _is_done(df: pd.DataFrame | None, model: str, name: str, dataset: str,
         & (df["bands"] == bands)
         & (df["seed"] == seed)
     )
+    if "preprocessing" in df.columns:
+        mask = mask & (df["preprocessing"] == preprocessing)
+    if "n_transforms" in df.columns:
+        mask = mask & (df["n_transforms"] == n_transforms)
+    if "hidden_size" in df.columns:
+        # null hidden_size is stored as NaN in CSV; match NaN vs value correctly
+        if hidden_size is None:
+            mask = mask & df["hidden_size"].isna()
+        else:
+            mask = mask & (df["hidden_size"] == hidden_size)
     existing = set(df.loc[mask, "metric_name"].tolist())
     return _METRICS.issubset(existing)
 
@@ -110,9 +167,13 @@ def main(cfg: DictConfig) -> None:
     n_bootstrap = int(cfg.nf.bootstrap)
     epochs = int(cfg.nf.epochs)
     batch_size = int(cfg.nf.batch_size)
+    n_transforms = int(cfg.nf.get("n_transforms", 8))
+    _hs = cfg.nf.get("hidden_size", None)
+    hidden_size = int(_hs) if _hs is not None else None
     partition = str(cfg.dataset.partition)
     bands = str(cfg.dataset.bands)
     seed = int(cfg.seed)
+    preprocessing = str(cfg.nf.preprocessing)
 
     existing_df = _load_existing(output_path) if bool(cfg.resume) else None
 
@@ -128,7 +189,8 @@ def main(cfg: DictConfig) -> None:
             continue
 
         if bool(cfg.resume) and _is_done(existing_df, model_target, model_name,
-                                          dataset_name, partition, bands, seed):
+                                          dataset_name, partition, bands, seed, preprocessing,
+                                          n_transforms, hidden_size):
             logger.info("Already done: %s / %s — skipping.", model_name, dataset_name)
             continue
 
@@ -145,18 +207,32 @@ def main(cfg: DictConfig) -> None:
             interpolation=str(cfg.dataset.get("interpolation", "bilinear")),
             bands=bands,
         )
-        train_loader, val_loader, test_loader, _ = loaded
-        model = instantiate(cfg.model)
+        _, train_loader, val_loader, test_loader = loaded
 
-        X_train, y_train = extract_features(model, train_loader, device, verbose=bool(cfg.verbose))
-        X_val, y_val = extract_features(model, val_loader, device, verbose=bool(cfg.verbose))
-        X_test, y_test = extract_features(model, test_loader, device, verbose=bool(cfg.verbose))
+        bench = ds_cls()
+        bands_resolved = (
+            tuple(bench.rgb_bands)
+            if bands == "rgb"
+            else None
+            if bands in ("all", None)
+            else tuple(bands)
+        )
+        band_specs = bench.select_band_specs(bands_resolved)
+        normalization = str(cfg.dataset.get("normalization", "bandspec_zscore"))
+        model = instantiate(cfg.model, bands=band_specs, normalization=normalization, _convert_="object")
+        model.to(device).eval()
+
+        X_train, y_train = extract_features(model, train_loader, device, transforms=None, verbose=bool(cfg.verbose))
+        X_val, y_val = extract_features(model, val_loader, device, transforms=None, verbose=bool(cfg.verbose))
+        X_test, y_test = extract_features(model, test_loader, device, transforms=None, verbose=bool(cfg.verbose))
 
         # Val split from train if no explicit val loader
         if X_val is None or len(X_val) == 0:
             X_train, X_val, y_train, y_val = train_test_split(
                 X_train, y_train, test_size=0.2, random_state=seed, stratify=y_train
             )
+
+        X_train, X_val, X_test = _preprocess(X_train, X_val, X_test, preprocessing)
 
         X_tr, y_tr, X_v, y_v = X_train, y_train, X_val, y_val
 
@@ -166,14 +242,26 @@ def main(cfg: DictConfig) -> None:
             wd = trial.suggest_float("wd", 1e-5, 1e-1, log=True)
             probe = NormalizingFlowProbe(
                 prior="empirical", lr=lr, weight_decay=wd,
-                epochs=epochs, batch_size=batch_size,
+                n_transforms=n_transforms, hidden_size=hidden_size,
+                epochs=epochs, batch_size=batch_size, device=device,
             )
-            probe.fit(X_tr, y_tr)
-            val_probs = probe.predict_proba(X_v)
-            return float(nll(val_probs, y_v))
+            final_val_nll = [float("inf")]
 
-        study = optuna.create_study(direction="minimize",
-                                    sampler=optuna.samplers.TPESampler(seed=seed))
+            def _epoch_cb(epoch: int, val_nll: float) -> bool:
+                final_val_nll[0] = val_nll
+                trial.report(val_nll, epoch)
+                if trial.should_prune():
+                    return False
+                return True
+
+            probe.fit_with_pruning(X_tr, y_tr, X_v, y_v, _epoch_cb)
+            return final_val_nll[0]
+
+        study = optuna.create_study(
+            direction="minimize",
+            sampler=optuna.samplers.TPESampler(seed=seed),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=3, n_warmup_steps=10),
+        )
         study.optimize(_objective, n_trials=n_trials)
 
         best_lr = float(study.best_params["lr"])
@@ -183,7 +271,8 @@ def main(cfg: DictConfig) -> None:
         # Refit on full train with best hyperparams
         best_probe = NormalizingFlowProbe(
             prior="empirical", lr=best_lr, weight_decay=best_wd,
-            epochs=epochs, batch_size=batch_size,
+            n_transforms=n_transforms, hidden_size=hidden_size,
+            epochs=epochs, batch_size=batch_size, device=device,
         )
         best_probe.fit(X_train, y_train)
         metrics = _evaluate(best_probe, X_test, y_test, rng, n_bootstrap)
@@ -196,12 +285,15 @@ def main(cfg: DictConfig) -> None:
                 "partition": partition,
                 "bands": bands,
                 "seed": seed,
+                "preprocessing": preprocessing,
                 "metric_name": metric_name,
                 "metric_value": metric_value,
                 "best_lr": best_lr,
                 "best_wd": best_wd,
                 "val_nll": val_nll,
                 "n_trials": n_trials,
+                "n_transforms": n_transforms,
+                "hidden_size": hidden_size,
                 "n_train": len(X_train),
                 "n_val": len(X_val),
                 "n_test": len(X_test),

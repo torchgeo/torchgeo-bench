@@ -31,6 +31,9 @@ eval:
   skip_knn: false          # if true, skip KNN-5 evaluation
   skip_linear: false       # if true, skip LogisticRegression evaluation
   linear_head: "linear"    # "linear" | "mlp" (Linear→BN→SiLU→Linear)
+  feature_norm: "none"     # "none" | "standard" (StandardScaler) | "l2" (unit-norm per sample)
+  solver: "lbfgs"          # "lbfgs" | "adam"
+  adam_lr: 1e-3            # learning rate for adam solver only
   knn_k: 5                 # number of neighbours for KNN evaluation
   knn_device: null         # null = inherit cfg.device; set "cpu" to force faiss-cpu KNN
 

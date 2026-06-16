@@ -4,3 +4,4 @@ pretrained: true
 target_size: 224
 modality: S2L2A
 name: tt_terramind_v1_base
+svgp_pca_dim: 256
