@@ -65,12 +65,6 @@ class RCF(nn.Module):
         This is a static model that serves to extract fixed length feature vectors from
         input patches.
 
-        .. versionadded:: 0.2
-           The *seed* parameter.
-
-        .. versionadded:: 0.5
-           The *mode* and *dataset* parameters.
-
         Args:
             in_channels: number of input channels
             features: number of features to compute, must be divisible by 2
@@ -147,8 +141,6 @@ class RCF(nn.Module):
 
         Returns:
             a numpy array of size (N, C, H, W) containing the normalized patches
-
-        .. versionadded:: 0.5
         """
         n_patches = patches.shape[0]
         orig_shape = patches.shape
