@@ -1,3 +1,5 @@
+# The DPT decoder heads are adapted from probe3d (MIT); see LICENSE-THIRDPARTY.
+
 """Segmentation decoder heads for use with SegmentationProbe."""
 
 import torch

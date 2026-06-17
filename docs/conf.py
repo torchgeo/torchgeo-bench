@@ -1,3 +1,5 @@
+# Portions of this file are adapted from torchgeo (MIT); see LICENSE-THIRDPARTY.
+
 # Configuration file for the Sphinx documentation builder.
 #
 # For the full list of built-in configuration values, see the documentation:
