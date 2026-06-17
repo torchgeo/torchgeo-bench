@@ -5,11 +5,13 @@ Two subcommands:
 - ``torchgeo-bench run [hydra overrides...]`` — runs the benchmark via Hydra.
 - ``torchgeo-bench uq [hydra overrides...]`` — runs UQ benchmark via Hydra.
 - ``torchgeo-bench nf [hydra overrides...]`` — runs NF stage-1 pipeline via Hydra.
+- ``torchgeo-bench sample-size [hydra overrides...]`` — runs sample-size calibration sweep.
 - ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`` — fetches data.
 
-The ``run``, ``uq``, and ``nf`` subcommands forward every remaining arg to Hydra by
-mutating ``sys.argv`` and calling the corresponding entry point in-process.
-We restore ``sys.argv`` afterwards so embedded use (tests, notebooks) is safe.
+The ``run``, ``uq``, ``nf``, and ``sample-size`` subcommands forward every remaining
+arg to Hydra by mutating ``sys.argv`` and calling the corresponding entry point
+in-process.  We restore ``sys.argv`` afterwards so embedded use (tests, notebooks)
+is safe.
 """
 
 import logging
@@ -74,6 +76,23 @@ def uq(ctx: typer.Context) -> None:
 def nf(ctx: typer.Context) -> None:
     """Run NF stage-1 Optuna pipeline; extra args are forwarded to Hydra."""
     from torchgeo_bench.nf_pipeline import main as hydra_main
+
+    saved = sys.argv[:]
+    try:
+        sys.argv = [saved[0], *ctx.args]
+        hydra_main()
+    finally:
+        sys.argv = saved
+
+
+@app.command(
+    name="sample-size",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Run sample-size calibration sweep (extra args forwarded to Hydra).",
+)
+def sample_size(ctx: typer.Context) -> None:
+    """Run sample-size calibration sweep; extra args are forwarded to Hydra."""
+    from torchgeo_bench.sample_size_pipeline import main as hydra_main
 
     saved = sys.argv[:]
     try:

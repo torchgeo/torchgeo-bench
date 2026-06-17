@@ -9,6 +9,7 @@ import torch.nn as nn
 from rich.progress import track
 from torch.utils.data import DataLoader
 from torchmetrics.classification import (
+    MulticlassCalibrationError,
     MulticlassF1Score,
     MulticlassJaccardIndex,
     MulticlassPrecision,
@@ -188,6 +189,7 @@ class SegmentationSolver:
         criterion: nn.Module | None = None,
         lr_scheduler: str = "cosine",
         ignore_index: int = 255,
+        n_bins_ece: int = 15,
     ) -> None:
         """Initialize the SegmentationSolver.
 
@@ -200,6 +202,7 @@ class SegmentationSolver:
             criterion: Loss module. Defaults to CrossEntropyLoss with ignore_index.
             lr_scheduler: LR schedule: "cosine" (CosineAnnealingLR) or "none" (constant LR).
             ignore_index: Label value to ignore in loss and metrics (default: 255).
+            n_bins_ece: Number of bins for pixel-level ECE (default: 15).
         """
         self.model = model.to(device)
         self.num_classes = num_classes
@@ -244,12 +247,18 @@ class SegmentationSolver:
             ignore_index=self.ignore_index,
             average="macro",
         )
+        self.metric_ece = MulticlassCalibrationError(
+            num_classes=self.num_classes,
+            n_bins=n_bins_ece,
+            ignore_index=self.ignore_index,
+        )
         self._all_metrics = [
             self.metric,
             self.metric_fw_iou,
             self.metric_precision,
             self.metric_recall,
             self.metric_f1,
+            self.metric_ece,
         ]
 
         self.use_amp = device.startswith("cuda") and torch.cuda.is_available()
@@ -532,6 +541,7 @@ class SegmentationSolver:
             "precision": self.metric_precision.compute().item(),
             "recall": self.metric_recall.compute().item(),
             "f1": self.metric_f1.compute().item(),
+            "pixel_ece": self.metric_ece.compute().item(),
         }
 
     @torch.no_grad()

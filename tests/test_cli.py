@@ -74,3 +74,9 @@ def test_nf_forwards_to_hydra(monkeypatch) -> None:
     result = runner.invoke(app, ["nf", "model=resnet50"])
     assert result.exit_code == 0
     assert len(calls) == 1
+
+
+def test_sample_size_subcommand_help_exits_cleanly() -> None:
+    result = runner.invoke(app, ["sample-size", "--help"])
+    assert result.exit_code == 0
+    assert "sample" in result.output.lower()

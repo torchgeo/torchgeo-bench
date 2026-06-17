@@ -1,0 +1,46 @@
+defaults:
+  - model: ???
+  - _self_
+
+seed: 0
+device: cpu
+verbose: false
+resume: false
+
+output: results/sample_size_results.csv
+
+dataset:
+  names: []
+  partition: default
+  batch_size: 64
+  num_workers: 4
+  normalization: bandspec_zscore
+  bands: rgb
+  image_size: 224
+  interpolation: bilinear
+
+sample_size:
+  fractions: [0.01, 0.10, 0.25, 0.50, 0.75]
+  seeds_cls: 5
+  seeds_seg: 3
+  target_grad_steps: 2000
+  c_range: [-4, -3, -2, -1, 0, 1, 2, 3, 4]
+  n_bins_ece: 15
+  merge_val: false
+
+eval:
+  segmentation:
+    layers: []
+    head_type: fpn
+    lr: 1.0e-3
+    weight_decay: 0.0
+    batch_size: 64
+    lr_scheduler: cosine
+    criterion:
+      _target_: torch.nn.CrossEntropyLoss
+      ignore_index: 255
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

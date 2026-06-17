@@ -276,7 +276,7 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
     metrics = solver.evaluate(loader)
 
     assert isinstance(metrics, dict)
-    assert set(metrics.keys()) == {"mIoU", "fw_IoU", "precision", "recall", "f1"}
+    assert set(metrics.keys()) == {"mIoU", "fw_IoU", "precision", "recall", "f1", "pixel_ece"}
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
@@ -772,3 +772,36 @@ def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
     )
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Slice 1: pixel_ece in SegmentationSolver
+# ---------------------------------------------------------------------------
+
+
+def test_solver_evaluate_includes_pixel_ece(mock_backbone, dummy_data):
+    """evaluate() returns 'pixel_ece' key in [0, 1] when valid pixels exist."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = DataLoader(TensorDataset(images, masks), batch_size=2)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    solver.fit(loader, epochs=1, verbose=False)
+    metrics = solver.evaluate(loader)
+    assert "pixel_ece" in metrics
+    ece_val = metrics["pixel_ece"]
+    assert math.isnan(ece_val) or 0.0 <= ece_val <= 1.0
+
+
+def test_solver_evaluate_cached_includes_pixel_ece(mock_backbone, dummy_data):
+    """evaluate_cached() returns 'pixel_ece' key in [0, 1] when valid pixels exist."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = DataLoader(TensorDataset(images, masks), batch_size=2)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    solver.fit_cached(train_cache, epochs=1, verbose=False)
+    test_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    metrics = solver.evaluate_cached(test_cache, batch_size=2)
+    assert "pixel_ece" in metrics
+    ece_val = metrics["pixel_ece"]
+    assert math.isnan(ece_val) or 0.0 <= ece_val <= 1.0
