@@ -204,6 +204,9 @@ _MODALITY_INFO: dict[str, dict] = {
 }
 # Aliases.
 _MODALITY_INFO["naip"] = _MODALITY_INFO["aerial"]
+# PlanetScope (spacenet7) is high-res RGB optical with no dedicated OlmoEarth
+# modality; route it through the aerial RGB layout like NAIP.
+_MODALITY_INFO["planet"] = _MODALITY_INFO["aerial"]
 
 
 # Canonical GSD (meters) per sensor for OlmoEarth's positional encodings.
@@ -214,6 +217,7 @@ _SENSOR_INPUT_RES: dict[str, int] = {
     "landsat": 30,
     "aerial": 1,
     "naip": 1,
+    "planet": 3,  # PlanetScope ~3 m GSD
 }
 
 # Sensors whose raw values should NOT be rescaled to S2 DN — pass as-is to

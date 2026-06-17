@@ -111,7 +111,7 @@ def _compute_segmentation_image_stats_row(
     union_present = unions > 0
     gt_present = gt_counts > 0
 
-    iou = torch.full((num_classes,), float("nan"), dtype=torch.float64)
+    iou = torch.full((num_classes,), float("nan"), dtype=torch.float64, device=unions.device)
     iou[union_present] = intersections[union_present].to(torch.float64) / unions[union_present].to(
         torch.float64
     )

@@ -316,6 +316,33 @@ def test_compute_segmentation_image_stats_row_masks_ignored_pixels():
     assert row["pixel_error_auroc_entropy"] == pytest.approx(1.0)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_compute_segmentation_image_stats_row_on_cuda():
+    """Per-image stats must compute when logits/mask are on CUDA (cached eval path).
+
+    Regression for a device mismatch: the per-class IoU buffer was created on CPU
+    while the boolean presence masks lived on CUDA, raising RuntimeError on GPU.
+    """
+    logits = torch.full((NUM_CLASSES, 2, 2), -10.0, device="cuda")
+    logits[0, 0, 0] = 5.0
+    logits[1, 0, 1] = 5.0
+    logits[0, 1, 0] = 4.0
+    logits[1, 1, 1] = 0.1
+    mask = torch.tensor([[0, 1], [0, 1]], dtype=torch.long, device="cuda")
+
+    row = _compute_segmentation_image_stats_row(
+        logits=logits,
+        mask=mask,
+        image_index=0,
+        ignore_index=255,
+        num_classes=NUM_CLASSES,
+    )
+
+    assert row["valid_pixel_count"] == 4
+    assert row["n_pred_or_gt_classes"] == 2
+    assert math.isfinite(row["image_miou_gt_present"])
+
+
 def test_compute_segmentation_image_stats_row_all_ignored_returns_nans():
     """Ignore-only images still emit a row with support counts and NaN metrics."""
     logits = torch.zeros(NUM_CLASSES, 3, 3)

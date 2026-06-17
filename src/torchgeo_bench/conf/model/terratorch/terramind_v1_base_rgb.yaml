@@ -4,3 +4,9 @@ pretrained: true
 target_size: 224
 modality: S2RGB
 name: tt_terramind_v1_base_rgb
+eval:
+  segmentation:
+    # Isotropic TerraMind v1 base (12 encoder blocks, 768ch, 14x14 token grid).
+    # Same architecture as terramind_v1_base; only the input modality differs.
+    # No spatial pyramid: pick 4 blocks spread across depth, deepest first.
+    layers: ["encoder.11", "encoder.8", "encoder.5", "encoder.2"]
