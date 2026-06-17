@@ -19,9 +19,8 @@ jobs:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
-      # Cache `.venv` keyed on uv.lock + python version + OS. When the lock
-      # hasn't changed (the common case on a feature branch), `uv sync
-      # --frozen` becomes a near-no-op and shaves ~30s off this job.
+      # Cache `.venv` keyed on uv.lock + python version + OS so unchanged
+      # locks make `uv sync --frozen` a near-no-op.
       - name: Cache .venv
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
@@ -30,9 +29,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --extra id --extra olmoearth --frozen
       - name: Run tests
-        # `-n auto` parallelises across the runner's CPUs (typically 4 on
-        # GitHub-hosted ubuntu-latest). `--dist=loadfile` groups tests by
-        # file so per-file heavy fixtures aren't repeated across workers.
+        # `-n auto` parallelises across CPUs; `--dist=loadfile` groups tests
+        # by file so heavy per-file fixtures aren't repeated across workers.
         run: uv run pytest -n auto --dist=loadfile --cov=torchgeo_bench --cov-report=xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -41,12 +39,9 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
-  # Prove the default install works on Linux and macOS. This is the whole
-  # point of moving faiss-cuda-cu128 (Linux-only wheels) into the [cuda]
-  # extra: `pip install torchgeo-bench` must resolve and import on both
-  # OSes, with faiss-cpu (which ships wheels for each) as the default.
-  # Windows is not a supported platform. The full pytest matrix runs on
-  # Linux in the `test` job above.
+  # Prove the default (CPU-only) install resolves and imports on Linux and
+  # macOS — the point of keeping faiss-cuda-cu128 in the [cuda] extra.
+  # Windows is unsupported; the full pytest suite runs on Linux above.
   install:
     name: install (${{ matrix.os }})
     strategy:
@@ -64,16 +59,14 @@ jobs:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
-      # No `.venv` cache here: this job exists to prove a from-scratch
-      # install works, so we want `uv sync` to actually run each time.
-      # setup-uv's wheel cache keeps it fast without faking the install.
+      # No `.venv` cache: this job exists to prove a from-scratch install
+      # works. setup-uv's wheel cache keeps it fast.
       # No `--extra`, so only the default (CPU) dependency set is installed.
       - name: Install (CPU only, no [cuda] extra)
         run: uv sync --frozen
       - name: Smoke test (CLI entry point)
         # `torchgeo-bench --help` proves the package installed, the console
-        # script is wired up, and the import graph loads on this OS — the
-        # cross-platform signal this matrix exists to provide.
+        # script is wired up, and the import graph loads on this OS.
         run: uv run torchgeo-bench --help
 
   pre-commit:
@@ -95,9 +88,8 @@ jobs:
           key: venv-${{ runner.os }}-py3.13-${{ hashFiles('uv.lock') }}-dev-id
       - name: Install dependencies
         run: uv sync --extra dev --extra id --frozen
-      # Cache the pre-commit hook environments (~/.cache/pre-commit/),
-      # keyed on the pinned hook revisions in .pre-commit-config.yaml.
-      # Saves ~20-30s on every CI run by skipping hook-env setup.
+      # Cache pre-commit hook environments, keyed on the pinned hook
+      # revisions in .pre-commit-config.yaml.
       - name: Cache pre-commit hooks
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
