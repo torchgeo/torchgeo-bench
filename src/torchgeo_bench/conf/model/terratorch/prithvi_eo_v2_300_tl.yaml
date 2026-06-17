@@ -4,3 +4,8 @@ pretrained: true
 target_size: 224
 name: tt_prithvi_eo_v2_300_tl
 svgp_pca_dim: 256
+eval:
+  segmentation:
+    # Isotropic Prithvi EO v2 300M (24 transformer blocks, 1024ch).
+    # No spatial pyramid: pick 4 blocks spread across depth, deepest first.
+    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]

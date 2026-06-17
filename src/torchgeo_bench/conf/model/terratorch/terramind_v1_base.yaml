@@ -5,3 +5,8 @@ target_size: 224
 modality: S2L2A
 name: tt_terramind_v1_base
 svgp_pca_dim: 256
+eval:
+  segmentation:
+    # Isotropic TerraMind v1 base (12 encoder blocks, 768ch, 14x14 token grid).
+    # No spatial pyramid: pick 4 blocks spread across depth, deepest first.
+    layers: ["encoder.11", "encoder.8", "encoder.5", "encoder.2"]

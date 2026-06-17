@@ -1,4 +1,10 @@
 # RCF benchmark model configuration
+#
+# NOTE: RCF has no `eval.segmentation.layers` block on purpose. It applies
+# random conv filters followed by global pooling, producing a single feature
+# vector with no spatial grid, so it cannot drive a segmentation head.
+# SegmentationProbe refuses to probe a global backbone output; RCF is therefore
+# expected to be skipped/FAIL on segmentation datasets (classification only).
 _target_: torchgeo_bench.models.RCFBench
 features: 512
 kernel_size: 3

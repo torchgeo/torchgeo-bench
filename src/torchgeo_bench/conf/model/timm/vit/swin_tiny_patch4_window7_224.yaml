@@ -8,3 +8,8 @@ pretrained: true
 global_pool: avg
 seed: null
 name: swin_tiny_patch4_window7_224
+eval:
+  segmentation:
+    # Hierarchical Swin-Tiny: 4 stages at 56/28/14/7 (true spatial pyramid).
+    # Coarse-to-fine, deepest stage first.
+    layers: ["layers.3", "layers.2", "layers.1", "layers.0"]

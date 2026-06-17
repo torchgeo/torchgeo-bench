@@ -15,3 +15,13 @@ sensor_remap:
 min_image_size: 64
 name: olmoearth_v1_1_tiny
 svgp_pca_dim: 128
+eval:
+  segmentation:
+    # Isotropic OlmoEarth v1.1 tiny (12 encoder blocks, 192ch, 28x28 token
+    # grid). No spatial pyramid: pick 4 blocks spread across depth, deepest
+    # first. Uses the encoder path (not decoder/target_encoder).
+    layers:
+      - "encoder_model.encoder.blocks.11"
+      - "encoder_model.encoder.blocks.8"
+      - "encoder_model.encoder.blocks.5"
+      - "encoder_model.encoder.blocks.2"

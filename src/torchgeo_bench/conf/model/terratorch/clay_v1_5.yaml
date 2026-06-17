@@ -5,3 +5,13 @@ target_size: 256  # Clay's pretrained pos_embed is fixed to 32x32 patches @ patc
 modality: sentinel-2-l2a
 name: tt_clay_v1_5_base
 svgp_pca_dim: 256
+eval:
+  segmentation:
+    # Isotropic Clay v1 base (12 transformer blocks, 768ch, 32x32 token grid).
+    # Each block is an [Attention, FeedForward] pair; `.N.1` is the block's
+    # feed-forward output (closest tappable per-block feature). Deepest first.
+    layers:
+      - "clay_encoder.transformer.layers.11.1"
+      - "clay_encoder.transformer.layers.8.1"
+      - "clay_encoder.transformer.layers.5.1"
+      - "clay_encoder.transformer.layers.2.1"

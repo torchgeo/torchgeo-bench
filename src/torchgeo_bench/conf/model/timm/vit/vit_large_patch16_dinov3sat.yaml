@@ -10,3 +10,9 @@ seed: null
 name: vit_large_patch16_dinov3sat
 auto_resize: true
 use_cls_token: false
+eval:
+  segmentation:
+    # Isotropic DINOv3 ViT-Large (24 transformer blocks). No spatial pyramid:
+    # pick 4 blocks spread across depth, deepest first. Register/CLS tokens are
+    # dropped automatically by SegmentationProbe when reshaping to a grid.
+    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
