@@ -3546,6 +3546,18 @@ wheels = [
 ]
 
 [[package]]
+name = "sphinx-design"
+version = "0.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sphinx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/13/7b/804f311da4663a4aecc6cf7abd83443f3d4ded970826d0c958edc77d4527/sphinx_design-0.7.0.tar.gz", hash = "sha256:d2a3f5b19c24b916adb52f97c5f00efab4009ca337812001109084a740ec9b7a", size = 2203582, upload-time = "2026-01-19T13:12:53.297Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/cf/45dd359f6ca0c3762ce0490f681da242f0530c49c81050c035c016bfdd3a/sphinx_design-0.7.0-py3-none-any.whl", hash = "sha256:f82bf179951d58f55dca78ab3706aeafa496b741a91b1911d371441127d64282", size = 2220350, upload-time = "2026-01-19T13:12:51.077Z" },
+]
+
+[[package]]
 name = "sphinxcontrib-applehelp"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3933,6 +3945,7 @@ all = [
     { name = "ruff" },
     { name = "sphinx" },
     { name = "sphinx-copybutton" },
+    { name = "sphinx-design" },
     { name = "terratorch" },
     { name = "torchid", marker = "python_full_version >= '3.13'" },
     { name = "transformers" },
@@ -3962,6 +3975,7 @@ docs = [
     { name = "pydata-sphinx-theme" },
     { name = "sphinx" },
     { name = "sphinx-copybutton" },
+    { name = "sphinx-design" },
 ]
 id = [
     { name = "torchid", marker = "python_full_version >= '3.13'" },
@@ -4013,6 +4027,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.3" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=7" },
     { name = "sphinx-copybutton", marker = "extra == 'docs'", specifier = ">=0.5" },
+    { name = "sphinx-design", marker = "extra == 'docs'", specifier = ">=0.5" },
     { name = "terratorch", marker = "extra == 'terratorch'", specifier = ">=1" },
     { name = "timm", specifier = ">=0.9" },
     { name = "torch", specifier = ">=2" },
