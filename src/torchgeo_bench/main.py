@@ -833,7 +833,9 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
     # array tasks don't interleave their read-modify-append and corrupt the CSV.
     with FileLock(f"{path}.lock"):
         fd = os.open(path, os.O_RDWR | os.O_CREAT)
-        with os.fdopen(fd, "r+", closefd=True) as f:
+        # newline="" keeps the csv line terminators from being translated to
+        # CRLF on Windows, which would otherwise inject blank rows.
+        with os.fdopen(fd, "r+", newline="", closefd=True) as f:
             f.seek(0, os.SEEK_END)
             empty = f.tell() == 0
             buf = io.StringIO()
