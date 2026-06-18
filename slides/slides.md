@@ -42,7 +42,7 @@ progress: false
 <span class="muted">Replaced argparse + tqdm. Beautiful progress bars, rich tracebacks.</span></p>
 
 <p><span class="tag tag-oxford">PROFILE</span> <strong>Efficiency Profiling</strong><br>
-<span class="muted">Throughput, GFLOPs, peak GPU mem, energy (Wh/1k), $/inference.</span></p>
+<span class="muted">Throughput, GFLOPs, peak GPU mem, $/inference. Pareto front: accuracy vs cost.</span></p>
 
 <p><span class="tag tag-wheat">MODELS</span> <strong>OlmoEarth v1 + v1.1</strong><br>
 <span class="muted">nano→large, plus v1.1 linear-embed family. DINOv3-SAT ViT-L web-pretrained.</span></p>
@@ -64,6 +64,9 @@ progress: false
 
 <p><span class="tag tag-wheat">FIX</span> <strong>Silent-bug Sweep</strong><br>
 <span class="muted">Removed try/except covers; fixed minmax_zscore, fp16 overflow, label gaps.</span></p>
+
+<p><span class="tag tag-wheat">SEG</span> <strong>Patch-Linear Head</strong><br>
+<span class="muted">ViT-native segmentation decoder. Segmentation probing now first-class.</span></p>
 
 <p><span class="tag tag-wheat">MULTI</span> <strong>SAR + Landsat Modalities</strong><br>
 <span class="muted">OlmoEarth mixed-sensor support, auto input-resolution.</span></p>
@@ -110,7 +113,7 @@ proba  = clf.predict_proba(x_test)
 
 - `n_classes = max(y)+1` not `len(unique(y))` — avoids `IndexError` on partitions with missing class labels
 - `use_fp16=False` in evaluation — raw sensor DN values (~10 000) overflow fp16 L2 distances → random KNN
-- `faiss-cuda-cu128` now the **sole** core backend — `manylinux_2_28` wheels run on CPU *and* GPU, killing the old faiss-cpu namespace clash (`#101`)
+- `faiss-cpu` is now the **default**; `faiss-cuda-cu128` moved to `[cuda]` extra — fixes install on macOS + non-manylinux Linux (`#120`)
 
 <br>
 
@@ -223,15 +226,12 @@ Metrics recorded per model run:
   # GPU
   "throughput_samples_per_sec": 1420.3,
   "peak_gpu_mem_gb":            3.2,
-  "gpu_power_w_avg":            182.0,
-  "energy_wh_per_1k_samples":   0.036,
   "gflops":                     61.6,
   "params_m":                   307.4,
   # CPU
   "throughput_samples_per_sec_cpu": 42.1,
   # Cost
   "cost_usd_per_1M_samples":    0.12,
-  "gco2_per_1M_samples":        18.4,
 }
 ```
 
@@ -246,14 +246,11 @@ with torch.profiler.FlopCounterMode() as fc:
 gflops = fc.get_total_flops() / 1e9
 ```
 
-**Energy via pynvml:**
+**Throughput:**
 
 ```python
-import pynvml
-pynvml.nvmlInit()
-h = pynvml.nvmlDeviceGetHandleByIndex(0)
-mw  = pynvml.nvmlDeviceGetPowerUsage(h)
-wh  = (mw / 1000) * (elapsed_s / 3600)
+# warm-up, then timed forward passes
+sps = n_samples / elapsed_s
 ```
 
 **Cost extrapolation:**
@@ -263,7 +260,7 @@ wh  = (mw / 1000) * (elapsed_s / 3600)
 cost = (1_000_000 / throughput) / 3600 * 1.50
 ```
 
-Explorer shows Pareto front: accuracy vs cost / CO₂.
+Explorer shows Pareto front: accuracy vs throughput / cost.
 
 </div>
 </div>
@@ -423,6 +420,54 @@ name: tt_clay_v1_5_base       # pool: mean (default)
 | 3 | DOFA Base | 0.974 |
 | 4 | DOFA Large | 0.974 |
 | 5 | Clay v1.5 Base | 0.972 |
+
+</div>
+</div>
+
+---
+
+# Patch-Linear Head
+<span class="tag tag-wheat">PR #124</span>
+
+<div class="rule"></div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; align-items:start;">
+<div>
+
+New segmentation decoder wired into `SegmentationProbe`:
+
+```python
+probe = SegmentationProbe(
+    model=backbone,
+    head_type="patch_linear",  # new
+)
+```
+
+**`PatchLinearHead`** — lightweight ViT decoder. Treats each patch token as a spatial unit and projects directly to pixel logits:
+
+```
+ChannelLayerNorm
+→ Conv2d(D, C × P², 1)
+→ pixel_shuffle(P)
+→ bilinear resize (if output ≠ exact token grid multiple)
+```
+
+Conceptually: P² independent D→C linear classifiers per token, one per subpixel position, rearranged into image space.
+
+</div>
+<div style="font-family:'Inter',sans-serif; font-size:0.82em;">
+
+**Why it matters:**
+
+<p><span class="tag">SIMPLE</span> No skip connections, no upsampling pyramid. Purely linear — interpretable and fast.</p>
+
+<p><span class="tag tag-claret">ViT-NATIVE</span> Designed for ViTs where spatial tokens are the primary representation. Complements the existing <code>LinearHead</code> (classification) decoder.</p>
+
+<p><span class="tag tag-oxford">FLEXIBLE</span> Handles arbitrary output sizes via bilinear resize fallback — works across datasets regardless of patch/image size mismatch.</p>
+
+<br>
+
+Previously only `head_type="linear"` (classification) was available. Segmentation probing is now a first-class evaluation path.
 
 </div>
 </div>
