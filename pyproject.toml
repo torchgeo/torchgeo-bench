@@ -27,6 +27,7 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
   "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
@@ -36,7 +37,9 @@ classifiers = [
   "Topic :: Scientific/Engineering :: GIS",
 ]
 dependencies = [
-  "faiss-cpu>=1.7",
+  # CPU KNN, cross-platform (macOS/Windows/Linux). Pulls faiss-cpu transitively
+  # and always makes faissknn importable. The [cuda] extra swaps in faiss-cuda.
+  "faissknn[cpu]>=0.3",
   "geobenchv2>=0.9",
   "h5py>=3.8",
   "huggingface-hub>=0.20",
@@ -70,10 +73,10 @@ optional-dependencies.cleanlab = [
   "pillow>=9",
 ]
 optional-dependencies.cuda = [
-  # GPU-accelerated KNN (Linux, glibc >= 2.28). Conflicts with faiss-cpu in
-  # the same venv; install from a fresh venv or uninstall faiss-cpu first.
-  "faiss-cuda-cu128>=1.14.1.post3",
-  "faissknn>=0.0.3",
+  # GPU-accelerated KNN (Linux, glibc >= 2.28). Swaps faiss-cpu for
+  # faiss-cuda-cu128 via faissknn's [cuda] extra. Install from a fresh venv
+  # or uninstall faiss-cpu first to avoid the two faiss builds clashing.
+  "faissknn[cuda]>=0.3",
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
