@@ -829,11 +829,7 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
     if not rows:
         return
     df_local = pd.DataFrame(rows)
-    # Serialise concurrent writers (e.g. SLURM array jobs appending to a
-    # shared results CSV) with a POSIX advisory lock so their
-    # read-modify-write cycles don't interleave and drop rows. fcntl is
-    # available on Linux and macOS; Windows is not a supported platform
-    # (see docs/user/installation.rst).
+    # fcntl advisory locking is Unix-only (Linux + macOS); Windows is unsupported.
     fd = os.open(path, os.O_RDWR | os.O_CREAT)
     with os.fdopen(fd, "r+", closefd=True) as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
