@@ -1,3 +1,5 @@
+# Portions of this file are adapted from torchgeo (MIT); see LICENSE-THIRDPARTY.
+
 # Configuration file for the Sphinx documentation builder.
 #
 # For the full list of built-in configuration values, see the documentation:
@@ -38,6 +40,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
+    "sphinx_design",
 ]
 
 # Files / directories the builder should ignore.

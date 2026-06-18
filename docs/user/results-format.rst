@@ -99,9 +99,9 @@ Atomic appends
 --------------
 
 Rows are appended via :func:`~torchgeo_bench.main.append_rows_atomic`,
-which uses ``fcntl`` advisory file locking.  This makes it safe to point
-multiple parallel jobs (e.g. one per GPU or per dataset) at the same
-output file without corrupting it.
+which uses ``fcntl`` advisory file locking (available on Linux and
+macOS).  This makes it safe to point multiple parallel jobs (e.g. one
+per GPU or per dataset) at the same output file without corrupting it.
 
 Resume mode
 -----------

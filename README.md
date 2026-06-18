@@ -41,7 +41,14 @@ cd torchgeo-bench
 uv sync --extra dev
 ```
 
-Requires Python 3.12+.
+For GPU-accelerated KNN (Linux + CUDA 12 + glibc ≥ 2.28):
+
+```bash
+pip install 'torchgeo-bench[cuda]'
+```
+
+Requires Python 3.12+. Supported on **Linux** and **macOS**. Windows is not
+supported — on Windows, install inside [WSL2](https://learn.microsoft.com/windows/wsl/).
 
 ## Download a dataset
 
@@ -82,8 +89,8 @@ to skip already-completed rows.
 
 ## Citation
 
-If you use this framework, please cite the underlying GeoBench papers
-(and, once available, the `torchgeo-bench` paper itself):
+If you use this framework, please cite it (once the `torchgeo-bench` paper is
+available):
 
 ```bibtex
 @misc{torchgeobench,
@@ -92,33 +99,6 @@ If you use this framework, please cite the underlying GeoBench papers
   year   = {TBD},
   note   = {Software},
   url    = {https://github.com/torchgeo/torchgeo-bench}
-}
-
-@misc{lacoste2023geobench,
-  title         = {GEO-Bench: Toward Foundation Models for Earth Monitoring},
-  author        = {Alexandre Lacoste and Nils Lehmann and Pau Rodriguez and Evan David Sherwin and
-                   Hannah Kerner and Bj{\"o}rn L{\"u}tjens and Jeremy Andrew Irvin and David Dao and
-                   Hamed Alemohammad and Alexandre Drouin and Mehmet Gunturkun and Gabriel Huang and
-                   David Vazquez and Dava Newman and Yoshua Bengio and Stefano Ermon and Xiao Xiang Zhu},
-  year          = {2023},
-  eprint        = {2306.03831},
-  archivePrefix = {arXiv},
-  primaryClass  = {cs.LG},
-  url           = {https://arxiv.org/abs/2306.03831},
-  doi           = {10.48550/arXiv.2306.03831}
-}
-
-@misc{simumba2025geobench2,
-  title         = {{GEO-Bench-2}: From Performance to Capability, Rethinking Evaluation in Geospatial AI},
-  author        = {Naomi Simumba and Nils Lehmann and Paolo Fraccaro and Hamed Alemohammad and
-                   Geeth De Mel and Salman Khan and Manil Maskey and Nicolas Longepe and
-                   Xiao Xiang Zhu and Hannah Kerner and Juan Bernabe-Moreno and Alexandre Lacoste},
-  year          = {2025},
-  eprint        = {2511.15658},
-  archivePrefix = {arXiv},
-  primaryClass  = {cs.CV},
-  url           = {https://arxiv.org/abs/2511.15658},
-  doi           = {10.48550/arXiv.2511.15658}
 }
 ```
 

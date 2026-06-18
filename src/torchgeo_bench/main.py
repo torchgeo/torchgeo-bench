@@ -18,7 +18,7 @@ from omegaconf import DictConfig, OmegaConf
 from rich.progress import track
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import ConcatDataset, DataLoader
-from torchgeo.datasets.errors import DatasetNotFoundError
+from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.calibration import (
     apply_temperature,
@@ -619,7 +619,7 @@ def evaluate_profile(
 
     When ``cpu_throughput_enabled`` is set, *additionally* runs a short
     CPU measurement (smaller batch / fewer iters) and emits the
-    throughput / latency / energy / params with a ``_cpu`` suffix.  The
+    throughput / latency with a ``_cpu`` suffix.  The
     CPU pass is wall-clock-budgeted via ``cpu_time_budget_s`` so the
     heavyweight ViT-L backbones don't burn an hour on the login node.
     """
@@ -829,6 +829,7 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
     if not rows:
         return
     df_local = pd.DataFrame(rows)
+    # fcntl advisory locking is Unix-only (Linux + macOS); Windows is unsupported.
     fd = os.open(path, os.O_RDWR | os.O_CREAT)
     with os.fdopen(fd, "r+", closefd=True) as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)

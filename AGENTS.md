@@ -200,12 +200,12 @@ breakage and forces every reader to mentally evaluate the fallback path.
 ```python
 # ❌ BAD: hides the real failure mode behind a fake fallback
 try:
-    from torchgeo.datasets.errors import DatasetNotFoundError
+    from torchgeo.datasets import DatasetNotFoundError
 except ImportError:  # pragma: no cover - older torchgeo versions
     DatasetNotFoundError = FileNotFoundError
 
 # ✅ GOOD: torchgeo is a hard dep, just import it
-from torchgeo.datasets.errors import DatasetNotFoundError
+from torchgeo.datasets import DatasetNotFoundError
 ```
 
 The same rule applies to bare `except Exception:` blocks that swallow errors
