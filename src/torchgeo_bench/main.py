@@ -829,6 +829,7 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
     if not rows:
         return
     df_local = pd.DataFrame(rows)
+    # fcntl advisory locking is Unix-only (Linux + macOS); Windows is unsupported.
     fd = os.open(path, os.O_RDWR | os.O_CREAT)
     with os.fdopen(fd, "r+", closefd=True) as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)

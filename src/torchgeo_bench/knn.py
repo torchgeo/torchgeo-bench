@@ -2,10 +2,10 @@
 
 Single-label and multi-label k-nearest neighbours backed by FAISS.
 
-CPU path uses ``faiss-cuda-cu128`` with ``IndexFlatL2``. GPU path (opt-in
-via the ``cuda`` extra: ``pip install -e ".[cuda]"``) delegates to
-:mod:`faissknn`. The two paths produce identical predictions modulo
-float-precision noise.
+CPU path uses ``faiss-cpu`` with ``IndexFlatL2`` (or ``faiss-cuda-cu128``'s
+CPU index when the ``cuda`` extra is installed). GPU path (opt-in via the
+``cuda`` extra: ``pip install -e ".[cuda]"``) delegates to :mod:`faissknn`.
+The two paths produce identical predictions modulo float-precision noise.
 """
 
 import logging
@@ -34,9 +34,10 @@ class KNNClassifier:
     Args:
         n_neighbors: Number of neighbours (k). Clamped to ``min(k, n_train)``
             on the CPU path; faissknn does not clamp internally.
-        device: ``"cpu"`` (default) → ``faiss-cuda-cu128`` CPU index. Anything else
-            (``"cuda"``, ``"cuda:0"``) requires the ``cuda`` extra
-            (``faissknn``); raises :class:`ImportError` if not installed.
+        device: ``"cpu"`` (default) → ``faiss-cpu`` (or ``faiss-cuda-cu128``'s CPU
+            index when the ``cuda`` extra is installed). Anything else (``"cuda"``,
+            ``"cuda:0"``) requires the ``cuda`` extra (``faissknn``); raises
+            :class:`ImportError` if not installed.
         metric: Distance metric — ``"l2"`` (default), ``"ip"`` (inner
             product), or ``"cosine"`` (cosine similarity; auto-normalizes
             inputs). GPU path only; CPU path always uses L2.

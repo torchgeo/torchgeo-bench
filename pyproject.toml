@@ -26,6 +26,8 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -34,7 +36,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: GIS",
 ]
 dependencies = [
-  "faiss-cuda-cu128>=1.14.1.post3",
+  "faiss-cpu>=1.7",
   "geobenchv2>=0.9",
   "h5py>=3.8",
   "huggingface-hub>=0.20",
@@ -68,8 +70,9 @@ optional-dependencies.cleanlab = [
   "pillow>=9",
 ]
 optional-dependencies.cuda = [
-  # GPU-accelerated KNN via faissknn (CUDA 12.x).
-  # faiss-cuda-cu128 wheels are manylinux_2_28 (glibc >= 2.28 / RHEL8+).
+  # GPU-accelerated KNN (Linux, glibc >= 2.28). Conflicts with faiss-cpu in
+  # the same venv; install from a fresh venv or uninstall faiss-cpu first.
+  "faiss-cuda-cu128>=1.14.1.post3",
   "faissknn>=0.0.3",
 ]
 optional-dependencies.dev = [

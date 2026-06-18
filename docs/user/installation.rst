@@ -7,6 +7,12 @@ canonical workflow.
 
 .. _uv: https://docs.astral.sh/uv/
 
+.. note::
+
+   ``torchgeo-bench`` is supported on **Linux** and **macOS**.  Windows is
+   not supported; on Windows, install inside `WSL2
+   <https://learn.microsoft.com/windows/wsl/>`_.
+
 uv (recommended)
 ----------------
 
@@ -18,6 +24,12 @@ development dependencies:
    $ git clone https://github.com/torchgeo/torchgeo-bench.git
    $ cd torchgeo-bench
    $ uv sync --extra dev
+
+For GPU-accelerated KNN (Linux + CUDA 12 + glibc ≥ 2.28):
+
+.. code-block:: console
+
+   $ pip install 'torchgeo-bench[cuda]'
 
 The ``torchgeo-bench`` console script is then available via ``uv run``:
 
