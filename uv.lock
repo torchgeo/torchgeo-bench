@@ -3915,6 +3915,7 @@ version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "faissknn", extra = ["cpu"] },
+    { name = "filelock" },
     { name = "geobenchv2" },
     { name = "h5py" },
     { name = "huggingface-hub" },
@@ -4004,6 +4005,7 @@ requires-dist = [
     { name = "cleanlab", marker = "extra == 'cleanlab'", specifier = ">=2.7" },
     { name = "faissknn", extras = ["cpu"], specifier = ">=0.3" },
     { name = "faissknn", extras = ["cuda"], marker = "extra == 'cuda'", specifier = ">=0.3" },
+    { name = "filelock", specifier = ">=3.12" },
     { name = "geobenchv2", specifier = ">=0.9" },
     { name = "h5py", specifier = ">=3.8" },
     { name = "huggingface-hub", specifier = ">=0.20" },

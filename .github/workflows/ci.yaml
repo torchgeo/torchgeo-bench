@@ -35,8 +35,6 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
-  # Prove the default CPU-only install (faissknn[cpu]) works on Linux, macOS,
-  # and Windows, and that the CPU KNN path actually runs on each.
   install:
     name: install (${{ matrix.os }})
     strategy:
@@ -55,8 +53,6 @@ jobs:
         with:
           enable-cache: true
       - name: Enable Git long paths (Windows)
-        # The torchgeo git dependency has paths exceeding the Windows
-        # MAX_PATH (260 char) limit; uv's git checkout fails without this.
         if: runner.os == 'Windows'
         run: git config --global core.longpaths true
       - name: Install (CPU only, no [cuda] extra)
@@ -64,10 +60,6 @@ jobs:
       - name: Smoke test (CLI entry point)
         run: uv run torchgeo-bench --help
       - name: CPU KNN tests (faiss-cpu path)
-        # faiss-cpu and torch each bundle their own libomp; on macOS arm64
-        # faiss's OpenMP-parallel search segfaults under torch's runtime.
-        # Single-threaded + allow-duplicate sidesteps the conflict (no-op on
-        # Linux/Windows).
         env:
           OMP_NUM_THREADS: "1"
           KMP_DUPLICATE_LIB_OK: "TRUE"
