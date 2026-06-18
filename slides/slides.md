@@ -24,7 +24,7 @@ progress: false
 
 <br>
 
-<span style="font-family:'Inter',sans-serif; font-size:0.8em; color:var(--ft-muted)">May 2026</span>
+<span style="font-family:'Inter',sans-serif; font-size:0.8em; color:var(--ft-muted)">June 2026</span>
 
 ---
 
@@ -136,75 +136,32 @@ eval:
 
 <div class="rule"></div>
 
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
+<div style="font-family:'Inter',sans-serif; font-size:0.88em; margin-top:0.5rem;">
+
+Replaced `argparse` + `tqdm` with **Typer** + **Rich** across the whole CLI.
+
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; margin-top:1.2rem; font-family:'Inter',sans-serif; font-size:0.85em;">
 <div>
 
-**Before** (argparse + tqdm):
+**Typed commands**
 
-```python
-parser = argparse.ArgumentParser()
-parser.add_argument("--model", ...)
-args = parser.parse_args()
-
-for batch in tqdm(dataloader):
-    ...
-```
-
-**After** (Typer + Rich):
-
-```python
-app = typer.Typer(no_args_is_help=True)
-
-@app.command(context_settings={
-    "allow_extra_args": True,
-    "ignore_unknown_options": True,
-})
-def run(ctx: typer.Context) -> None:
-    """Run benchmarks; extra args → Hydra."""
-    sys.argv = [sys.argv[0], *ctx.args]
-    hydra_main()
-
-@app.command()
-def download(target: str,
-             output_dir: Path = Path("data"),
-             ) -> None:
-    """Download benchmark datasets."""
-    ...
-```
+`torchgeo-bench run`, `torchgeo-bench download` — auto-generated `--help`, type-checked args, Hydra passthrough for config overrides.
 
 </div>
 <div>
 
-**Rich progress bars:**
+**Rich progress bars**
 
-```python
-from rich.progress import track
+Live extraction progress with ETA and throughput instead of plain tqdm spinners.
 
-for batch in track(dataloader,
-                   description="Extracting"):
-    features = model(batch["image"])
-```
+</div>
+<div>
 
-**Rich logging:**
+**Rich tables + tracebacks**
 
-```python
-from rich.logging import RichHandler
-
-logging.basicConfig(handlers=[
-    RichHandler(rich_tracebacks=True)
-])
-```
-
-**Rich tables (tune_dataloader.py):**
-
-```python
-from rich.table import Table
-table = Table(header_style="bold cyan")
-table.add_column("bs",  justify="right")
-table.add_column("sps", justify="right")
-table.add_row("256", "1420.3")
-console.print(table)
-```
+Dataloader tuning results rendered as formatted tables. Full color tracebacks with local variable context on errors.
 
 </div>
 </div>
@@ -373,43 +330,19 @@ version: v1.1     # selects weight family
 
 <div class="rule"></div>
 
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
-<div>
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem; align-items:start;">
+<div style="font-family:'Inter',sans-serif; font-size:0.85em;">
 
-`pool` kwarg across TerraTorch wrappers:
+Added `pool=cls|mean|both` sweep across TerraTorch/ScaleMAE/Clay wrappers.
 
-```python
-class TerramindBench(BenchModel):
-    def _forward_patch_features(
-        self, images: Tensor, **_
-    ) -> Tensor:
-        out = self.model.encode(images)
-        if self.pool == "cls":
-            return out[:, 0]
-        elif self.pool == "mean":
-            return out[:, 1:].mean(1)
-        else:  # "both"
-            return torch.cat([
-                out[:, 0],
-                out[:, 1:].mean(1),
-            ], dim=1)
-```
+**Finding:** token choice matters dataset-to-dataset.
 
-Config variants:
-
-```yaml
-name: tt_clay_v1_5_base_cls   # pool: cls
-name: tt_clay_v1_5_base       # pool: mean (default)
-```
+- **CLS** wins on ForestNet, Brick Kiln — tasks with strong global structure
+- **Patch-mean** wins on EuroSAT, BigEarthNet — spatially distributed labels
+- **Terramind** has no CLS token — `_cls` configs dropped (`#76`)
 
 </div>
 <div style="font-family:'Inter',sans-serif; font-size:0.82em;">
-
-**Finding:** CLS helps on ForestNet / Brick Kiln; patch-mean wins on EuroSAT / BigEarthNet.
-
-**Terramind** has no CLS token — `_cls` configs dropped (`#76`).
-
-<br>
 
 **m-brick-kiln Linear Accuracy:**
 
@@ -443,16 +376,16 @@ probe = SegmentationProbe(
 )
 ```
 
-**`PatchLinearHead`** — lightweight ViT decoder. Treats each patch token as a spatial unit and projects directly to pixel logits:
+**`PatchLinearHead`** — lightweight ViT decoder. Projects each patch token directly to pixel logits:
 
 ```
 ChannelLayerNorm
 → Conv2d(D, C × P², 1)
 → pixel_shuffle(P)
-→ bilinear resize (if output ≠ exact token grid multiple)
+→ bilinear resize (if needed)
 ```
 
-Conceptually: P² independent D→C linear classifiers per token, one per subpixel position, rearranged into image space.
+No skip connections, no upsampling pyramid — purely linear.
 
 </div>
 <div style="font-family:'Inter',sans-serif; font-size:0.82em;">
@@ -731,39 +664,31 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 
 <div class="rule"></div>
 
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
-<div>
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem; align-items:start;">
+<div style="font-size:0.78em;">
 
 **id_TwoNN avg · norm. acc = rank-normalized within each dataset**
 
-| Model | id_TwoNN | norm. acc | Feat dim |
-|-------|:--------:|:---------:|:--------:|
-| EarthLoc ResNet-50 | **44** | 27% | 4 096 |
-| OlmoEarth Large | 22 | 85% | 1 024 |
-| Prithvi v2 100M CLS | 18 | 53% | 768 |
-| DOFA Large | 17 | 85% | 1 024 |
-| DINOv3 ViT-L | 17 | 72% | 1 024 |
-| DINOv3-SAT ViT-L | 16 | 77% | 1 024 |
-| ResNet50-RGB MoCo | 15 | 74% | 2 048 |
-| DOFA Base | 15 | 78% | 768 |
-| OlmoEarth Nano | 14 | 75% | **128** |
-| Panopticon | 13 | 60% | 768 |
-| OlmoEarth Tiny | 11 | 79% | 384 |
+| Model | id_TwoNN | norm. acc |
+|-------|:--------:|:---------:|
+| EarthLoc ResNet-50 | **44** | 27% |
+| OlmoEarth Large | 22 | 85% |
+| Prithvi v2 100M CLS | 18 | 53% |
+| DOFA Large | 17 | 85% |
+| DINOv3-SAT ViT-L | 16 | 77% |
+| DOFA Base | 15 | 78% |
+| OlmoEarth Nano (128-d) | 14 | 75% |
 
 </div>
 <div style="font-family:'Inter',sans-serif; font-size:0.82em;">
 
-**Pattern:** High intrinsic dim ↔ high norm. accuracy. Models with id > 14 consistently score 72–85% norm. acc. Norm. acc = per-dataset rank-normalized, then averaged — removes scale differences between datasets.
+**Pattern:** id > 14 → consistently 72–85% norm. acc. Higher intrinsic dim correlates with better downstream accuracy.
 
-<br>
+<p style="margin-top:0.6rem;"><span class="tag tag-claret">TASK GAP</span> <strong>EarthLoc ResNet-50</strong> — id = 44 but only 27% norm. acc. Geo-localization training, not classification — high dimensionality without discriminative structure.</p>
 
-**Outliers:**
+<p><span class="tag">SURPRISE</span> <strong>OlmoEarth Nano</strong> — 128-d output, id_TwoNN = 14, matching DINOv3-SAT ViT-L (1024-d). Same intrinsic complexity in 8× fewer dimensions.</p>
 
-<p><span class="tag tag-claret">TASK GAP</span> <strong>EarthLoc ResNet-50</strong> — id = 44 (highest), but only .59 acc. Trained for geo-localization, not classification. High dimensionality without discriminative structure.</p>
-
-<p><span class="tag">SURPRISE</span> <strong>OlmoEarth Nano</strong> — 128-d output yet id_TwoNN = 14, matching DINOv3-SAT ViT-L (1024-d). Packs equivalent intrinsic complexity into 8× fewer dimensions.</p>
-
-<p><span class="tag tag-wheat">FLAT</span> <strong>Prithvi cluster</strong> — id ≈ 7, just above imagestats (6) and RCF (5). Geometrically flat despite 768–1280-d features — explains consistently low accuracy.</p>
+<p><span class="tag tag-wheat">FLAT</span> <strong>Prithvi cluster</strong> — id ≈ 7, geometrically flat despite 768–1280-d features. Explains consistently low accuracy.</p>
 
 </div>
 </div>
