@@ -54,6 +54,4 @@ def test_multilabel_parity(features: tuple[np.ndarray, np.ndarray]) -> None:
     assert p_cpu.shape == p_cu.shape
     assert (p_cpu == p_cu).all()
 
-    np.testing.assert_allclose(
-        cpu.predict_proba(x_test), cu.predict_proba(x_test), atol=1e-5
-    )
+    np.testing.assert_allclose(cpu.predict_proba(x_test), cu.predict_proba(x_test), atol=1e-5)
