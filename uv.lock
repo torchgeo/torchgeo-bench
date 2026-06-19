@@ -758,16 +758,23 @@ wheels = [
 
 [[package]]
 name = "faissknn"
-version = "0.1.1"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "faiss-cuda-cu128" },
     { name = "numpy" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c7/dd/215c7534599ffa9a17e1b1127afea2cc4ed4c16a2da24031d647b0ef0f1a/faissknn-0.1.1.tar.gz", hash = "sha256:ec21ece0fa0eb407a156acce1f43e6fbcae6118950887062234d8e3b5c1c6b26", size = 6530, upload-time = "2026-05-14T02:29:30.8Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/fd/40f72308cc258b784ac530b0d3202a10b4e028190ecf5906d4a8f1fcd396/faissknn-0.3.0.tar.gz", hash = "sha256:e571593b8afde29f3397469aff6eab1f63f9f7f6e8280f53e1e316647e3dae31", size = 7671, upload-time = "2026-06-18T01:57:01.644Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/a1/aa5cdd7c123d7ba5bc5b12a407e8216d0aa18dfb3f052bc2904b7713ba6c/faissknn-0.1.1-py3-none-any.whl", hash = "sha256:4a32d00fc59d01b070257e06130744e8a9e26cb1b4a5af478c35f43c3aa55ca5", size = 6184, upload-time = "2026-05-14T02:29:29.574Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/26/ec40a4513fdaad8d4e48764d47001dd6cfaa1b778cbcd98c22eaf940fae8/faissknn-0.3.0-py3-none-any.whl", hash = "sha256:91e6b514405f3870985654533b2cfefe77fb47873987f6d152f1d8b8e0a3c548", size = 7200, upload-time = "2026-06-18T01:57:02.515Z" },
+]
+
+[package.optional-dependencies]
+cpu = [
+    { name = "faiss-cpu" },
+]
+cuda = [
+    { name = "faiss-cuda-cu128" },
 ]
 
 [[package]]
@@ -3907,7 +3914,8 @@ name = "torchgeo-bench"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
-    { name = "faiss-cpu" },
+    { name = "faissknn", extra = ["cpu"] },
+    { name = "filelock" },
     { name = "geobenchv2" },
     { name = "h5py" },
     { name = "huggingface-hub" },
@@ -3928,8 +3936,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "cleanlab" },
-    { name = "faiss-cuda-cu128" },
-    { name = "faissknn" },
+    { name = "faissknn", extra = ["cuda"] },
     { name = "imagehash" },
     { name = "linkify-it-py" },
     { name = "matplotlib" },
@@ -3957,8 +3964,7 @@ cleanlab = [
     { name = "pillow" },
 ]
 cuda = [
-    { name = "faiss-cuda-cu128" },
-    { name = "faissknn" },
+    { name = "faissknn", extra = ["cuda"] },
 ]
 dev = [
     { name = "mdformat" },
@@ -3997,9 +4003,9 @@ viz = [
 [package.metadata]
 requires-dist = [
     { name = "cleanlab", marker = "extra == 'cleanlab'", specifier = ">=2.7" },
-    { name = "faiss-cpu", specifier = ">=1.7" },
-    { name = "faiss-cuda-cu128", marker = "extra == 'cuda'", specifier = ">=1.14.1.post3" },
-    { name = "faissknn", marker = "extra == 'cuda'", specifier = ">=0.0.3" },
+    { name = "faissknn", extras = ["cpu"], specifier = ">=0.3" },
+    { name = "faissknn", extras = ["cuda"], marker = "extra == 'cuda'", specifier = ">=0.3" },
+    { name = "filelock", specifier = ">=3.12" },
     { name = "geobenchv2", specifier = ">=0.9" },
     { name = "h5py", specifier = ">=3.8" },
     { name = "huggingface-hub", specifier = ">=0.20" },
