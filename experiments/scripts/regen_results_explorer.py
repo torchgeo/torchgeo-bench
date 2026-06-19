@@ -6,10 +6,6 @@ committed snapshot (newest first) into the explorer HTML and bumps the
 masthead.  Keeps ``knn5`` / ``linear`` / ``profile`` rows; the explorer's
 Compute & efficiency figure joins the latter against the former.
 
-The GPU price / carbon intensity tables under ``experiments/scripts/cost/`` are
-inlined as JS constants so the explorer can extrapolate $ and kgCO2 per
-1M inferences in-browser, without a separate fetch.
-
 Usage::
 
     python experiments/scripts/regen_results_explorer.py [--label 2026-05-08]
@@ -22,13 +18,10 @@ import re
 from datetime import date
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH = ROOT / "results" / "all_results.csv"
 HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
 SNAPSHOT_DIR = ROOT / "docs" / "_static" / "_results_snapshots"
-COST_DIR = ROOT / "scripts" / "cost"
 ALLOWED_METHODS = ("knn5", "linear", "profile", "intrinsic_dim")
 
 COLUMNS = [
@@ -159,16 +152,11 @@ def main() -> None:
     n_datasets = len({r["dataset"] for r in latest_rows})
     best = max(accuracy_rows or latest_rows, key=lambda r: r["metric_value"] or 0)
 
-    prices = yaml.safe_load((COST_DIR / "gpu_prices.yaml").read_text())["instances"]
-    carbon = yaml.safe_load((COST_DIR / "carbon_intensity.yaml").read_text())["regions"]
-
     js_columns = "const COLUMNS = " + json.dumps(COLUMNS) + ";"
     js_numeric = "const NUMERIC_COLS = " + json.dumps(sorted(NUMERIC)) + ";"
     js_snaps = "const SNAPSHOTS = " + json.dumps(snapshot_meta) + ";"
     js_default = "const DEFAULT_SNAPSHOT = " + json.dumps(latest_label) + ";"
     js_data = "const DATA = " + json.dumps(flat_rows, separators=(",", ":")) + ";"
-    js_prices = "const GPU_PRICES = " + json.dumps(prices, separators=(",", ":")) + ";"
-    js_carbon = "const CARBON_INTENSITY = " + json.dumps(carbon, separators=(",", ":")) + ";"
 
     text = HTML_PATH.read_text()
     pattern = re.compile(
@@ -178,9 +166,7 @@ def main() -> None:
         r"(?:\s*const GPU_PRICES = \[.*?\];)?(?:\s*const CARBON_INTENSITY = \[.*?\];)?",
         re.DOTALL,
     )
-    new_block = "\n".join(
-        [js_columns, js_numeric, js_snaps, js_default, js_data, js_prices, js_carbon]
-    )
+    new_block = "\n".join([js_columns, js_numeric, js_snaps, js_default, js_data])
     if not pattern.search(text):
         raise SystemExit("Could not locate COLUMNS/NUMERIC_COLS/DATA block in HTML.")
     text = pattern.sub(new_block, text, count=1)

@@ -129,12 +129,9 @@ def _worker(
             idx, job = job_queue.get_nowait()
         except Empty:
             return
-        try:
-            result = _run_one(job, gpu, idx, total, output)
-            with lock:
-                results.append(result)
-        finally:
-            job_queue.task_done()
+        result = _run_one(job, gpu, idx, total, output)
+        with lock:
+            results.append(result)
 
 
 def run_jobs(
