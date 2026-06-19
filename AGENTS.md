@@ -38,25 +38,45 @@ pyproject.toml             # Project config, dependencies, tool settings
 
 ## Environment Setup
 
+Two supported workflows — pick **one** (they manage *separate* environments):
+
 ```bash
-conda activate torchgeo-bench       # do this first
-uv sync --extra dev                 # install dependencies and dev tools
+# Option A — uv (the README's canonical path). Creates and manages its own
+# .venv and ignores any active conda env. Run tools via `uv run …`:
+uv sync --extra dev
+
+# Option B — conda (matches the Makefile). Create the env with `make install`,
+# then install editable:
+conda activate torchgeo-bench
+pip install -e ".[dev]"
 ```
+
+> Note: `uv sync` always uses its own `.venv`, so a preceding
+> `conda activate` does **not** change what `uv sync` installs into.
 
 ## Build/Lint/Test Commands
 
 ### Running Tests
 
 ```bash
-pytest                                    # Run ALL tests (after activating env)
+pytest                                    # Run the fast suite (excludes `slow`)
 pytest tests/test_geobench_dataset.py -v  # Run a SINGLE test file
 pytest tests/test_geobench_dataset.py::TestClass::test_method -v  # Single function
 pytest -k "m-eurosat" -v                  # Run tests matching a pattern
 pytest --no-cov                           # Skip coverage for faster iteration
+pytest -m slow                            # Include the slow integration suite
 ```
+
+The default `addopts` include `-m "not slow"`, so a bare `pytest` runs only the
+fast subset; use `-m slow` (or `-m ""` for everything) to run the integration
+tests, which load real data and run models.
 
 Tests skip gracefully if GeoBench data is missing — they look for it under
 `./data/classification_v1.0`, `./data/geobenchv2`, and `./data/eurosat`.
+Note the V1 *slow* tests need the legacy HDF5 bundle from
+`torchgeo-bench download geobench_v1`; the single-dataset auto-download writes a
+webdataset layout under `./data/classification_v1.0_wds/` that those tests do
+**not** read (they will skip).
 
 ### Linting and Formatting
 

@@ -3936,7 +3936,6 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "cleanlab" },
-    { name = "faissknn", extra = ["cuda"] },
     { name = "imagehash" },
     { name = "linkify-it-py" },
     { name = "matplotlib" },
@@ -4039,7 +4038,6 @@ requires-dist = [
     { name = "torch", specifier = ">=2" },
     { name = "torchgeo", git = "https://github.com/microsoft/torchgeo.git?rev=e585e2c07f7a" },
     { name = "torchgeo-bench", extras = ["cleanlab"], marker = "extra == 'all'" },
-    { name = "torchgeo-bench", extras = ["cuda"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["dev"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["docs"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["id"], marker = "extra == 'all'" },
