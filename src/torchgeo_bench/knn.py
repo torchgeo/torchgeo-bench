@@ -83,7 +83,7 @@ class KNNClassifier:
             self._fit_gpu(X, y)
         return self
 
-    # ---- CPU path (faiss-cuda-cu128 IndexFlatL2) --------------------------
+    # ---- CPU path (faiss IndexFlatL2) -------------------------------------
 
     def _fit_cpu(self, X: np.ndarray, y: np.ndarray) -> None:
         self._index = faiss.IndexFlatL2(X.shape[1])
