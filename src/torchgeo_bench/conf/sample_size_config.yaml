@@ -27,6 +27,12 @@ sample_size:
   c_range: [-4, -3, -2, -1, 0, 1, 2, 3, 4]
   n_bins_ece: 15
   merge_val: false
+  image_stats:
+    enabled: true
+    root: results/sample_size_image_stats
+    format: parquet
+    overwrite: false
+    compression: zstd
 
 eval:
   segmentation:
