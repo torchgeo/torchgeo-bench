@@ -17,11 +17,13 @@ class DynamicEarthNet(_V2Dataset):
     split_sizes = {"train": 700, "val": 100, "test": 200}
 
     # fmt: off
+    # PlanetScope (Dove) centre wavelengths in micrometres so wavelength-
+    # conditioned backbones (DOFA, Panopticon) can run on the RGB(+NIR) subset.
     bands = [
-        BandSpec("planet", "b", "b", mean=664.423, std=639.946, min=10, max=10051),
-        BandSpec("planet", "g", "g", mean=929.265, std=805.98, min=17, max=10039),
-        BandSpec("planet", "r", "r", mean=1031.28, std=1072.23, min=9, max=10057),
-        BandSpec("planet", "nir", "nir", mean=2605.98, std=1182.39, min=14, max=9998),
+        BandSpec("planet", "b", "b", mean=664.423, std=639.946, min=10, max=10051, wavelength_um=0.485),
+        BandSpec("planet", "g", "g", mean=929.265, std=805.98, min=17, max=10039, wavelength_um=0.545),
+        BandSpec("planet", "r", "r", mean=1031.28, std=1072.23, min=9, max=10057, wavelength_um=0.63),
+        BandSpec("planet", "nir", "nir", mean=2605.98, std=1182.39, min=14, max=9998, wavelength_um=0.82),
         BandSpec("s2", "b01", "B01", mean=1142.08, std=1588.17, min=0, max=15535, wavelength_um=0.443),
         BandSpec("s2", "b02", "B02", mean=1399.03, std=1516.62, min=1, max=15621, wavelength_um=0.49),
         BandSpec("s2", "b03", "B03", mean=1429.55, std=1606.99, min=1, max=15541, wavelength_um=0.56),

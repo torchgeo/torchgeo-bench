@@ -19,6 +19,23 @@ from torchgeo_bench.models.segmentation_heads import (
 logger = logging.getLogger(__name__)
 
 
+def _resolve_num_prefix_tokens(backbone: nn.Module) -> int | None:
+    """Return the number of non-spatial prefix tokens, or None if undetermined.
+
+    timm ViT-style models expose ``num_prefix_tokens`` (1 CLS + N register
+    tokens; e.g. 5 for DINOv3). The benchmark wraps the timm model under a
+    ``.backbone`` attribute, and some loaders nest deeper, so we search the
+    module tree for the first module exposing the attribute. Returns None when
+    no such attribute exists, in which case the caller falls back to the
+    square/CLS reshape heuristic.
+    """
+    for module in backbone.modules():
+        value = getattr(module, "num_prefix_tokens", None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
 class CachedFeaturesDataset(Dataset):
     """In-RAM cache of pre-extracted backbone features and masks.
 
@@ -170,6 +187,13 @@ class SegmentationProbe(nn.Module):
         self._features: dict[str, torch.Tensor] = {}
         self.hooks: list[Any] = []
 
+        # Number of non-spatial prefix tokens (CLS + register tokens) emitted by
+        # transformer backbones. Read authoritatively from the model rather than
+        # inferred, so register-token ViTs (e.g. DINOv3, num_prefix_tokens=5)
+        # reshape to the correct spatial grid. None => fall back to the
+        # square/CLS heuristic in _process_feature.
+        self.num_prefix_tokens = _resolve_num_prefix_tokens(self.backbone)
+
         found_layers = set()
         for name, module in self.backbone.named_modules():
             if name.startswith("backbone."):
@@ -253,6 +277,17 @@ class SegmentationProbe(nn.Module):
             # Handle transformer token features in either (B, L, C) or (B, C, L) layout.
             # Prefer exact square token grids; if L-1 is square, drop CLS token.
             bsz, d1, d2 = feat.shape
+
+            # Authoritative path: drop the model-reported prefix tokens (CLS +
+            # register tokens) so register-token ViTs (e.g. DINOv3,
+            # num_prefix_tokens=5) reshape to the correct grid instead of
+            # falling through to a spurious (B, C, L) match.
+            npt = self.num_prefix_tokens
+            if npt is not None and 0 <= npt < d1:
+                patch_len = d1 - npt
+                side = math.isqrt(patch_len)
+                if side * side == patch_len:
+                    return feat[:, npt:, :].permute(0, 2, 1).reshape(bsz, d2, side, side)
 
             # Try (B, L, C)
             side = math.isqrt(d1)

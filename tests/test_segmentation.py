@@ -65,6 +65,30 @@ class ViTBackbone(nn.Module):
         return x
 
 
+class RegisterTokenViTBackbone(nn.Module):
+    """ViT emitting CLS + register prefix tokens, like DINOv3 (num_prefix_tokens=5).
+
+    Output is ``(B, num_prefix_tokens + H*W, C)``; the probe must drop exactly
+    ``num_prefix_tokens`` leading tokens before reshaping to a spatial grid.
+    """
+
+    num_prefix_tokens = 5
+
+    def __init__(self):
+        super().__init__()
+        self.patch_embed = nn.Conv2d(3, 16, kernel_size=16, stride=16)
+        self.prefix = nn.Parameter(torch.zeros(1, self.num_prefix_tokens, 16))
+        self.blocks = nn.Identity()
+
+    def forward(self, x):
+        x = self.patch_embed(x)  # (B, 16, H/16, W/16)
+        B = x.shape[0]
+        x = x.flatten(2).transpose(1, 2)  # (B, H*W, C)
+        x = torch.cat([self.prefix.expand(B, -1, -1), x], dim=1)  # prepend prefix tokens
+        x = self.blocks(x)
+        return x
+
+
 class TwoChannelBackbone(nn.Module):
     """Backbone with a BenchModel-like num_channels attribute."""
 
@@ -276,7 +300,16 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
     metrics = solver.evaluate(loader)
 
     assert isinstance(metrics, dict)
-    assert set(metrics.keys()) == {"mIoU", "fw_IoU", "precision", "recall", "f1", "pixel_ece"}
+    assert set(metrics.keys()) == {
+        "mIoU",
+        "fw_IoU",
+        "precision",
+        "recall",
+        "f1",
+        "ece",
+        "rms_ce",
+        "mce",
+    }
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
@@ -417,6 +450,24 @@ def test_solver_cached_and_uncached_image_stats_match(mock_backbone, dummy_data)
     )
 
 
+def test_solver_temperature_scaling_cached(mock_backbone, dummy_data):
+    """TS fits a positive temperature and emits the three *_ts calibration keys."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = DataLoader(TensorDataset(images, masks), batch_size=2, shuffle=False)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+
+    temperature, cal_ts = solver.evaluate_cached_temperature_scaled(
+        cache, cache, batch_size=2
+    )
+
+    assert temperature > 0.0
+    assert set(cal_ts.keys()) == {"ece_ts", "rms_ce_ts", "mce_ts"}
+    for v in cal_ts.values():
+        assert 0.0 <= v <= 1.0
+
+
 # ---------------------------------------------------------------------------
 # Probe: FPN head
 # ---------------------------------------------------------------------------
@@ -517,6 +568,23 @@ def test_probe_vit_token_features():
     probe = make_probe(backbone, ["blocks"], head_type="linear")
     images = torch.randn(2, 3, 64, 64)
     logits = probe(images)
+    assert logits.shape == (2, NUM_CLASSES, 64, 64)
+
+
+def test_probe_register_token_vit_drops_prefix_tokens():
+    """A register-token ViT (num_prefix_tokens=5) reshapes to the right grid.
+
+    Regression guard for DINOv3-style backbones: the probe must read
+    num_prefix_tokens from the model and drop all prefix tokens, yielding C
+    channels (not L tokens-as-channels). With a 16x16 patch on 64px input the
+    patch grid is 4x4=16 tokens; prepending 5 prefix tokens gives L=21.
+    """
+    backbone = RegisterTokenViTBackbone()
+    probe = make_probe(backbone, ["blocks"], head_type="linear")
+    assert probe.num_prefix_tokens == 5
+    # 16 patch-embed channels survive as feature channels (not the 21 tokens).
+    assert probe.channels_list == [16]
+    logits = probe(torch.randn(2, 3, 64, 64))
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
 
@@ -802,25 +870,26 @@ def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: pixel_ece in SegmentationSolver
+# Slice 1: pixel-level calibration metrics in SegmentationSolver
 # ---------------------------------------------------------------------------
 
 
-def test_solver_evaluate_includes_pixel_ece(mock_backbone, dummy_data):
-    """evaluate() returns 'pixel_ece' key in [0, 1] when valid pixels exist."""
+def test_solver_evaluate_includes_calibration(mock_backbone, dummy_data):
+    """evaluate() returns ece/rms_ce/mce keys in [0, 1] when valid pixels exist."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = DataLoader(TensorDataset(images, masks), batch_size=2)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
     solver.fit(loader, epochs=1, verbose=False)
     metrics = solver.evaluate(loader)
-    assert "pixel_ece" in metrics
-    ece_val = metrics["pixel_ece"]
-    assert math.isnan(ece_val) or 0.0 <= ece_val <= 1.0
+    for key in ("ece", "rms_ce", "mce"):
+        assert key in metrics
+        val = metrics[key]
+        assert math.isnan(val) or 0.0 <= val <= 1.0
 
 
-def test_solver_evaluate_cached_includes_pixel_ece(mock_backbone, dummy_data):
-    """evaluate_cached() returns 'pixel_ece' key in [0, 1] when valid pixels exist."""
+def test_solver_evaluate_cached_includes_calibration(mock_backbone, dummy_data):
+    """evaluate_cached() returns ece/rms_ce/mce keys in [0, 1] when valid pixels exist."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = DataLoader(TensorDataset(images, masks), batch_size=2)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
@@ -829,6 +898,26 @@ def test_solver_evaluate_cached_includes_pixel_ece(mock_backbone, dummy_data):
     solver.fit_cached(train_cache, epochs=1, verbose=False)
     test_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
     metrics = solver.evaluate_cached(test_cache, batch_size=2)
-    assert "pixel_ece" in metrics
-    ece_val = metrics["pixel_ece"]
-    assert math.isnan(ece_val) or 0.0 <= ece_val <= 1.0
+    for key in ("ece", "rms_ce", "mce"):
+        assert key in metrics
+        val = metrics[key]
+        assert math.isnan(val) or 0.0 <= val <= 1.0
+
+
+def test_evaluate_cached_keys_match_sample_size_sweep(mock_backbone, dummy_data):
+    """Regression: sample-size _seg_sweep reads "mIoU" and "ece" from the solver.
+
+    The sample-size pipeline records segmentation rows keyed by these solver
+    metric names; if either disappears the sweep crashes with a KeyError mid-run
+    (it previously looked for a non-existent "pixel_ece" key).
+    """
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = DataLoader(TensorDataset(images, masks), batch_size=2)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    solver.fit_cached(cache, epochs=1, verbose=False)
+    metrics = solver.evaluate_cached(cache, batch_size=2)
+    # Keys consumed by sample_size_pipeline._seg_sweep.
+    assert "mIoU" in metrics
+    assert "ece" in metrics

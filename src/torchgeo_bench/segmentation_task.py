@@ -9,7 +9,6 @@ import torch.nn as nn
 from rich.progress import track
 from torch.utils.data import DataLoader
 from torchmetrics.classification import (
-    MulticlassCalibrationError,
     MulticlassF1Score,
     MulticlassJaccardIndex,
     MulticlassPrecision,
@@ -21,6 +20,7 @@ from .segmentation_probe import (
     GPUTensorCache,
     SegmentationProbe,
 )
+from .calibration import fit_temperature
 from .uq.error_pr import compute_error_pr
 
 logger = logging.getLogger(__name__)
@@ -176,6 +176,72 @@ def _collect_segmentation_image_stats_rows(
     return rows
 
 
+class _BatchedCalibrationError:
+    """GPU-resident, batched pixel-level calibration error accumulator.
+
+    ``MulticlassCalibrationError`` stores every (confidence, accuracy) pair in
+    growing state lists; for segmentation that is ``num_samples * H * W`` floats,
+    which OOMs on the GPU. The previous workaround kept those metrics on CPU,
+    which forced a CPU/GPU device split that was easy to get wrong.
+
+    The only statistics the L1/L2/max calibration errors need are the per-bin
+    ``count``, summed confidence and summed accuracy. Those are ``3 * n_bins``
+    floats total, so we accumulate them on the compute device, one batch at a
+    time, with the same ``bucketize`` binning torchmetrics uses
+    (``torchmetrics.functional.classification.calibration_error``). All three
+    norms (ece/rms_ce/mce) are derived from the same bins at compute time.
+    """
+
+    def __init__(self, *, n_bins: int, ignore_index: int, device: str):
+        self.n_bins = n_bins
+        self.ignore_index = ignore_index
+        self.device = device
+        # right=True bucketize over the inner boundaries, matching torchmetrics.
+        self.bin_boundaries = torch.linspace(0, 1, n_bins + 1, device=device)
+        self.reset()
+
+    def reset(self) -> None:
+        z = lambda: torch.zeros(self.n_bins, device=self.device, dtype=torch.float64)
+        self.count_bin = z()
+        self.conf_sum_bin = z()
+        self.acc_sum_bin = z()
+
+    @torch.no_grad()
+    def update(self, logits: torch.Tensor, masks: torch.Tensor) -> None:
+        # logits (B, C, H, W) -> per-pixel top-1 confidence + correctness.
+        probs = torch.softmax(logits.float(), dim=1)
+        conf, pred = probs.max(dim=1)            # (B, H, W)
+        conf = conf.reshape(-1)
+        pred = pred.reshape(-1)
+        target = masks.reshape(-1)
+
+        keep = target != self.ignore_index
+        conf = conf[keep]
+        correct = (pred[keep] == target[keep]).to(torch.float64)
+        if conf.numel() == 0:
+            return
+
+        # bucketize over the inner boundaries (drop the trailing 1.0), so a
+        # confidence of exactly 1.0 lands in the last bin (right=True - 1).
+        indices = torch.bucketize(conf, self.bin_boundaries[1:-1], right=True)
+        self.count_bin.scatter_add_(0, indices, torch.ones_like(conf, dtype=torch.float64))
+        self.conf_sum_bin.scatter_add_(0, indices, conf.to(torch.float64))
+        self.acc_sum_bin.scatter_add_(0, indices, correct)
+
+    def compute(self) -> dict[str, float]:
+        total = self.count_bin.sum()
+        if total == 0:
+            return {"ece": float("nan"), "rms_ce": float("nan"), "mce": float("nan")}
+        conf_bin = torch.nan_to_num(self.conf_sum_bin / self.count_bin)
+        acc_bin = torch.nan_to_num(self.acc_sum_bin / self.count_bin)
+        prop_bin = self.count_bin / total
+        gap = torch.abs(acc_bin - conf_bin)
+        ece = torch.sum(gap * prop_bin)
+        mce = torch.max(gap)
+        rms = torch.sqrt(torch.sum(torch.pow(acc_bin - conf_bin, 2) * prop_bin))
+        return {"ece": float(ece), "rms_ce": float(rms), "mce": float(mce)}
+
+
 class SegmentationSolver:
     """A lightweight trainer for the SegmentationProbe."""
 
@@ -247,19 +313,26 @@ class SegmentationSolver:
             ignore_index=self.ignore_index,
             average="macro",
         )
-        self.metric_ece = MulticlassCalibrationError(
-            num_classes=self.num_classes,
+        self.n_bins_ece = n_bins_ece
+        # Pixel-level calibration error via a batched, GPU-resident accumulator
+        # that keeps only per-bin sufficient statistics (3 * n_bins floats),
+        # rather than torchmetrics' growing per-pixel state which OOMs on GPU.
+        self.cal_metric = _BatchedCalibrationError(
             n_bins=n_bins_ece,
             ignore_index=self.ignore_index,
+            device=device,
         )
-        self._all_metrics = [
+        # Confusion-matrix style metrics keep small per-class state; place them
+        # all on the compute device so every update stays on-device.
+        self._cm_metrics = [
             self.metric,
             self.metric_fw_iou,
             self.metric_precision,
             self.metric_recall,
             self.metric_f1,
-            self.metric_ece,
         ]
+        for m in self._cm_metrics:
+            m.to(device)
 
         self.use_amp = device.startswith("cuda") and torch.cuda.is_available()
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -364,9 +437,7 @@ class SegmentationSolver:
             flags.
         """
         self.model.eval()
-        for m in self._all_metrics:
-            m.reset()
-            m.to(self.device)
+        self._reset_metrics()
 
         pred_list: list[torch.Tensor] = []
         image_stats_rows: list[SegImageStatsRow] = []
@@ -387,8 +458,7 @@ class SegmentationSolver:
             with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                 logits = self.model(images)
 
-            for m in self._all_metrics:
-                m.update(logits, masks)
+            self._update_metrics(logits, masks)
 
             if collect_preds:
                 pred_list.append(logits.argmax(dim=1).cpu())
@@ -533,15 +603,38 @@ class SegmentationSolver:
             collect_image_stats=collect_image_stats,
         )
 
+    def _reset_metrics(self, cal_only: bool = False) -> None:
+        """Reset metric state on the compute device.
+
+        All metrics now live on the compute device: the confusion-matrix metrics
+        keep tiny per-class state and the calibration accumulator keeps only
+        per-bin statistics, so nothing has to be offloaded to CPU.
+        """
+        self.cal_metric.reset()
+        if cal_only:
+            return
+        for m in self._cm_metrics:
+            m.reset()
+            m.to(self.device)
+
+    def _update_metrics(self, logits: torch.Tensor, masks: torch.Tensor) -> None:
+        """Update all metrics on-device for one batch."""
+        for m in self._cm_metrics:
+            m.update(logits, masks)
+        self.cal_metric.update(logits, masks)
+
     def _compute_metrics(self) -> "SegMetrics":
         """Compute and return all metrics as a dict."""
+        cal = self.cal_metric.compute()
         return {
             "mIoU": self.metric.compute().item(),
             "fw_IoU": self.metric_fw_iou.compute().item(),
             "precision": self.metric_precision.compute().item(),
             "recall": self.metric_recall.compute().item(),
             "f1": self.metric_f1.compute().item(),
-            "pixel_ece": self.metric_ece.compute().item(),
+            "ece": cal["ece"],
+            "rms_ce": cal["rms_ce"],
+            "mce": cal["mce"],
         }
 
     @torch.no_grad()
@@ -559,9 +652,7 @@ class SegmentationSolver:
     ):
         """Evaluate on a :class:`GPUTensorCache` and return segmentation metrics."""
         self.model.eval()
-        for m in self._all_metrics:
-            m.reset()
-            m.to(self.device)
+        self._reset_metrics()
 
         pred_list: list[torch.Tensor] = []
         image_stats_rows: list[SegImageStatsRow] = []
@@ -571,8 +662,7 @@ class SegmentationSolver:
         for features, masks in gpu_cache.ordered_batches(batch_size):
             with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                 logits = self.model.head(features, *input_hw)
-            for m in self._all_metrics:
-                m.update(logits, masks)
+            self._update_metrics(logits, masks)
             if collect_preds:
                 pred_list.append(logits.argmax(dim=1).cpu())
             if collect_image_stats:
@@ -595,3 +685,66 @@ class SegmentationSolver:
         if collect_image_stats:
             return metrics, image_stats_rows
         return metrics
+
+    @torch.no_grad()
+    def _fit_temperature_cached(
+        self,
+        val_cache: CachedFeaturesDataset,
+        batch_size: int,
+    ) -> float:
+        """Fit a single temperature on the val cache by pooling pixel logits.
+
+        Collects per-pixel logits and labels over the validation split (dropping
+        ``ignore_index`` pixels), then reuses the classification-path
+        :func:`fit_temperature` (LBFGS on NLL). Returns ``T > 0``.
+        """
+        self.model.eval()
+        gpu_cache = GPUTensorCache.from_cached(val_cache, self.device)
+        input_hw = (gpu_cache.masks.shape[-2], gpu_cache.masks.shape[-1])
+        logit_chunks: list[torch.Tensor] = []
+        label_chunks: list[torch.Tensor] = []
+        for features, masks in gpu_cache.ordered_batches(batch_size):
+            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+                logits = self.model.head(features, *input_hw)
+            # (B, C, H, W) -> (B*H*W, C); labels (B, H, W) -> (B*H*W,)
+            c = logits.shape[1]
+            flat_logits = logits.permute(0, 2, 3, 1).reshape(-1, c).float()
+            flat_labels = masks.reshape(-1)
+            keep = flat_labels != self.ignore_index
+            logit_chunks.append(flat_logits[keep].cpu())
+            label_chunks.append(flat_labels[keep].cpu())
+        all_logits = torch.cat(logit_chunks, dim=0).numpy()
+        all_labels = torch.cat(label_chunks, dim=0).numpy()
+        return fit_temperature(all_logits, all_labels, multi_label=False)
+
+    @torch.no_grad()
+    def evaluate_cached_temperature_scaled(
+        self,
+        test_cache: CachedFeaturesDataset,
+        val_cache: CachedFeaturesDataset,
+        batch_size: int,
+    ) -> "tuple[float, dict[str, float]]":
+        """Fit T on val, apply to test, and recompute calibration metrics.
+
+        Returns the fitted temperature and a dict of temperature-scaled
+        calibration metrics (``ece_ts``/``rms_ce_ts``/``mce_ts``).
+        """
+        temperature = self._fit_temperature_cached(val_cache, batch_size)
+
+        self.model.eval()
+        self._reset_metrics(cal_only=True)
+
+        gpu_cache = GPUTensorCache.from_cached(test_cache, self.device)
+        input_hw = (gpu_cache.masks.shape[-2], gpu_cache.masks.shape[-1])
+        for features, masks in gpu_cache.ordered_batches(batch_size):
+            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+                logits = self.model.head(features, *input_hw)
+            scaled = logits.float() / temperature
+            self.cal_metric.update(scaled, masks)
+        cal = self.cal_metric.compute()
+        cal_ts = {
+            "ece_ts": cal["ece"],
+            "rms_ce_ts": cal["rms_ce"],
+            "mce_ts": cal["mce"],
+        }
+        return temperature, cal_ts

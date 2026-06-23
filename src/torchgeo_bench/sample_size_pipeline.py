@@ -10,7 +10,7 @@ import hydra
 import numpy as np
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import StratifiedShuffleSplit
 
@@ -243,7 +243,10 @@ def _seg_sweep(
                 "n_test": n_test,
                 "best_c": float("nan"),
             }
-            for metric_name, key in [("miou", "mIoU"), ("pixel_ece", "pixel_ece")]:
+            # SegmentationSolver reports pixel-level calibration error under the
+            # "ece" key; we record it as "pixel_ece" to distinguish it from the
+            # image-level "ece" used on the classification path.
+            for metric_name, key in [("miou", "mIoU"), ("pixel_ece", "ece")]:
                 rows.append(
                     {**base, "metric_name": metric_name, "metric_value": metrics[key]}
                 )
@@ -359,11 +362,26 @@ def main(cfg: DictConfig) -> None:
                 )
 
         elif task == "segmentation":
+            # Merge the model-specific eval block into the top-level eval config,
+            # mirroring main.py. Without this, model configs that ship their own
+            # eval.segmentation.layers (e.g. resnet50's FPN layers) are ignored
+            # and SegmentationProbe silently falls back to ["backbone_output"].
+            seg_eval_cfg = cfg.eval
+            if "eval" in cfg.model and cfg.model.eval is not None:
+                seg_eval_cfg = OmegaConf.merge(seg_eval_cfg, cfg.model.eval)
+            seg_cfg = seg_eval_cfg.segmentation
+            if not list(seg_cfg.layers):
+                raise ValueError(
+                    f"Segmentation sweep for {dataset_name} requires "
+                    "eval.segmentation.layers to be set (none found in the "
+                    f"top-level config or the {model_name} model config)."
+                )
+
             seg_probe = SegmentationProbe(
                 backbone=model,
-                layer_names=list(cfg.eval.segmentation.layers),
+                layer_names=list(seg_cfg.layers),
                 num_classes=bench.num_classes,
-                head_type=str(cfg.eval.segmentation.head_type),
+                head_type=str(seg_cfg.head_type),
                 freeze_backbone=True,
             )
             train_cache = seg_probe.extract_segmentation_features(train_loader)
@@ -378,12 +396,12 @@ def main(cfg: DictConfig) -> None:
                 fractions=fractions,
                 seeds_seg=seeds_seg,
                 target_grad_steps=target_grad_steps,
-                batch_size=int(cfg.eval.segmentation.batch_size),
+                batch_size=int(seg_cfg.batch_size),
                 model_name=model_name,
                 dataset_name=dataset_name,
                 num_classes=bench.num_classes,
                 device=str(device),
-                seg_cfg=cfg.eval.segmentation,
+                seg_cfg=seg_cfg,
                 completed=completed,
             )
             if rows:

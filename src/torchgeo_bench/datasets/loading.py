@@ -125,12 +125,20 @@ def _make_resize_transform(
         img: torch.Tensor = sample["image"]
         h, w = img.shape[-2], img.shape[-1]
         if h != image_size or w != image_size:
-            img = F.interpolate(
-                img.unsqueeze(0),
+            # F.interpolate needs a 4-D (N, C, H, W) tensor. A plain 3-D
+            # (C, H, W) image gets a batch axis; a 4-D temporal/per-frame
+            # tensor (e.g. dynamic_earthnet's (T, C, H, W) before the upstream
+            # collapses its single-timestep axis) is already batched, so we
+            # resize each frame and restore the original rank afterwards.
+            squeeze_batch = img.ndim == 3
+            batched = img.unsqueeze(0) if squeeze_batch else img
+            batched = F.interpolate(
+                batched,
                 size=(image_size, image_size),
                 mode=interp_mode,
                 align_corners=align_corners,
-            ).squeeze(0)
+            )
+            img = batched.squeeze(0) if squeeze_batch else batched
             sample["image"] = img
         if "mask" in sample:
             mask: torch.Tensor = sample["mask"].float()

@@ -13,6 +13,7 @@ from typing import Literal
 
 import geobench_v2.datasets as _gb_v2
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 from .base import BenchDataset
@@ -110,7 +111,30 @@ class GeoBenchv2(Dataset):
         return len(self._inner)  # type: ignore[arg-type]
 
     def __getitem__(self, idx: int) -> dict:
-        return self._inner[idx]
+        sample = self._inner[idx]
+        # For ``by_sensor`` datasets the upstream applies our resize transform to
+        # the per-modality image only (the mask is attached afterwards), so a
+        # segmentation mask can come back at the native resolution while the
+        # image is already resized. Bring the mask to the image's spatial size
+        # with nearest-neighbour so label values are preserved. No-op when they
+        # already match (e.g. flat-strategy datasets, or classification).
+        image = sample.get("image")
+        mask = sample.get("mask")
+        if (
+            image is not None
+            and mask is not None
+            and hasattr(image, "shape")
+            and hasattr(mask, "shape")
+            and mask.shape[-2:] != image.shape[-2:]
+        ):
+            target_h, target_w = image.shape[-2], image.shape[-1]
+            resized = F.interpolate(
+                mask.unsqueeze(0).unsqueeze(0).float(),
+                size=(target_h, target_w),
+                mode="nearest",
+            )
+            sample["mask"] = resized.squeeze(0).squeeze(0).to(mask.dtype)
+        return sample
 
 
 class _V2Dataset(BenchDataset):

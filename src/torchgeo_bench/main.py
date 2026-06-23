@@ -753,6 +753,7 @@ def _build_seg_probe_and_solver(
         criterion=criterion,
         lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
         ignore_index=ignore_index,
+        n_bins_ece=eval_cfg.segmentation.get("n_bins_ece", 15),
     )
     return probe, solver
 
@@ -1044,6 +1045,11 @@ def evaluate_segmentation(
             collect_preds=collect_preds,
             collect_image_stats=collect_image_stats,
         )
+        temperature, cal_ts = solver.evaluate_cached_temperature_scaled(
+            test_cache,
+            val_cache,
+            batch_size=seg_cfg.get("batch_size", 64),
+        )
     else:
         solver.fit(
             train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose
@@ -1053,6 +1059,8 @@ def evaluate_segmentation(
             collect_preds=collect_preds,
             collect_image_stats=collect_image_stats,
         )
+        # Temperature scaling requires the cached-feature path (val + test caches).
+        temperature, cal_ts = None, {"ece_ts": None, "rms_ce_ts": None, "mce_ts": None}
 
     preds: torch.Tensor | None = None
     image_rows: list[dict[str, Any]] = []
@@ -1064,6 +1072,17 @@ def evaluate_segmentation(
         metrics, image_rows = eval_result
     else:
         metrics = eval_result
+    metrics = {**metrics, **cal_ts, "temperature": temperature}
+    if cfg.verbose:
+        logger.info(
+            f"Segmentation calibration: ECE={metrics.get('ece'):.4f} "
+            f"RMS-CE={metrics.get('rms_ce'):.4f} MCE={metrics.get('mce'):.4f}"
+            + (
+                f" | post-TS T={temperature:.3f} ECE={cal_ts['ece_ts']:.4f}"
+                if temperature is not None
+                else ""
+            )
+        )
     return metrics, sum(probe.channels_list), None, None, preds, image_rows
 
 
@@ -1429,6 +1448,14 @@ def main(cfg: DictConfig) -> None:
                     precision=metrics.get("precision"),
                     recall=metrics.get("recall"),
                     f1=metrics.get("f1"),
+                    ece=metrics.get("ece"),
+                    rms_ce=metrics.get("rms_ce"),
+                    mce=metrics.get("mce"),
+                    ece_ts=metrics.get("ece_ts"),
+                    rms_ce_ts=metrics.get("rms_ce_ts"),
+                    mce_ts=metrics.get("mce_ts"),
+                    temperature=metrics.get("temperature"),
+                    calibration_n_bins=seg_cfg_merged.get("n_bins_ece", 15),
                 ).to_row()
             ]
             if not (
