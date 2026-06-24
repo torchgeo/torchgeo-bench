@@ -1,6 +1,5 @@
 """Benchmark script for torchgeo-bench."""
 
-import fcntl
 import io
 import logging
 import os
@@ -13,6 +12,7 @@ import hydra
 import numpy as np
 import pandas as pd
 import torch
+from filelock import FileLock
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from rich.progress import track
@@ -91,6 +91,38 @@ def _normalize_bands_value(bands: object) -> str:
     return ",".join(items)
 
 
+def _canonical_key_cell(value: object) -> str:
+    """Canonicalize a single resume-key cell to a comparable string.
+
+    Resume keys are assembled from two sources that format values
+    differently: the Hydra config (``image_size`` is the int ``224`` →
+    ``"224"``) and the results CSV (pandas types any column containing a
+    missing value as ``float64``, so ``224`` round-trips as ``"224.0"``).
+    Without canonicalization those never compare equal, so ``resume=true``
+    silently recomputes and appends duplicate rows.
+
+    Whole-number floats collapse to their integer form (``"224.0"`` →
+    ``"224"``); values that don't parse as numbers (dataset names, band
+    lists, …) pass through unchanged.
+
+    Args:
+        value: A raw key cell from either a config tuple or a CSV row.
+
+    Returns:
+        A canonical string suitable for equality comparison across sources.
+    """
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    try:
+        f = float(s)
+    except (TypeError, ValueError):
+        return s
+    return str(int(f)) if f.is_integer() else s
+
+
 def _completed_run_keys(
     existing_df: pd.DataFrame,
     key_cols: Sequence[str],
@@ -102,12 +134,13 @@ def _completed_run_keys(
         if "metric_name" not in df.columns:
             return set()
         df = df[df["metric_name"].fillna("").astype(str) == metric_name]
-    return set(map(tuple, df[list(key_cols)].fillna("").astype(str).to_numpy()))
+    rows = df[list(key_cols)].fillna("").to_numpy()
+    return {tuple(_canonical_key_cell(cell) for cell in row) for row in rows}
 
 
 def _row_key(row: dict, key_cols: Sequence[str]) -> tuple[str, ...]:
     """Build a normalized resume key tuple from a result row dict."""
-    return tuple(str(row.get(col, "")) for col in key_cols)
+    return tuple(_canonical_key_cell(row.get(col, "")) for col in key_cols)
 
 
 def _filter_completed_metric_rows(
@@ -829,11 +862,13 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
     if not rows:
         return
     df_local = pd.DataFrame(rows)
-    # fcntl advisory locking is Unix-only (Linux + macOS); Windows is unsupported.
-    fd = os.open(path, os.O_RDWR | os.O_CREAT)
-    with os.fdopen(fd, "r+", closefd=True) as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        try:
+    # Cross-platform advisory lock (Linux/macOS/Windows) so concurrent SLURM
+    # array tasks don't interleave their read-modify-append and corrupt the CSV.
+    with FileLock(f"{path}.lock"):
+        fd = os.open(path, os.O_RDWR | os.O_CREAT)
+        # newline="" keeps the csv line terminators from being translated to
+        # CRLF on Windows, which would otherwise inject blank rows.
+        with os.fdopen(fd, "r+", newline="", closefd=True) as f:
             f.seek(0, os.SEEK_END)
             empty = f.tell() == 0
             buf = io.StringIO()
@@ -867,8 +902,6 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
                     f.write(buf.getvalue())
             f.flush()
             os.fsync(f.fileno())
-        finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -931,12 +964,15 @@ def main(cfg: DictConfig) -> None:
             logger.warning(f"Skipping dataset {ds_name} (not in registry)")
             continue
 
-        config_tuple = (
-            normalization,
-            str(getattr(cfg.dataset, "image_size", None)),
-            getattr(cfg.dataset, "interpolation", "bilinear"),
-            cfg.dataset.partition,
-            bands_value,
+        config_tuple = tuple(
+            _canonical_key_cell(v)
+            for v in (
+                normalization,
+                getattr(cfg.dataset, "image_size", None),
+                getattr(cfg.dataset, "interpolation", "bilinear"),
+                cfg.dataset.partition,
+                bands_value,
+            )
         )
 
         # Merge model-specific eval config early so resume key and result rows

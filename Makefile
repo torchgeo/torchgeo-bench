@@ -5,7 +5,7 @@ CONDA_RUN := conda run --no-capture-output -n torchgeo-bench
 .PHONY: install sync tests lint format clean docs docs-clean help
 
 install:
-	conda create -y -n torchgeo-bench 'python>=3.12,<3.13' || true
+	conda create -y -n torchgeo-bench 'python>=3.13' || true
 	$(CONDA_RUN) pip install -e ".[dev]"
 
 sync:
@@ -22,7 +22,8 @@ format:
 	$(CONDA_RUN) ruff check --fix --select I src/ tests/
 
 docs:
-	sphinx-build -b html docs/ docs/_build/html
+	$(CONDA_RUN) pip install -e ".[docs]"
+	$(CONDA_RUN) sphinx-build -b html docs/ docs/_build/html
 
 docs-clean:
 	rm -rf docs/_build
