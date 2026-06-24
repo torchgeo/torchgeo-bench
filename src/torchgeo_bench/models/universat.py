@@ -19,6 +19,7 @@ loader.
 """
 
 import logging
+from collections import defaultdict
 from typing import ClassVar
 
 import torch
@@ -72,7 +73,77 @@ _MODALITY_SUBPATCH: dict[str, int] = {
 }
 
 # SAR channels are sensor codes (not wavelengths) in UniverSat's registry.
-_SAR_CODES: list[str] = ["VV", "VH", "Ratio_VV_VH"]
+# Map each dataset SAR band name to the s1 code its embedding expects.
+def _sar_code(name: str) -> str:
+    n = name.lower()
+    if "ratio" in n or "vv_vh" in n or "vh_vv" in n:
+        return "Ratio_VV_VH"
+    if "vv" in n:
+        return "VV"
+    if "vh" in n:
+        return "VH"
+    raise ValueError(f"Cannot map SAR band {name!r} to a UniverSat s1 code (VV/VH/Ratio_VV_VH).")
+
+
+def _build_sensor_groups(
+    bands: list[BandSpec],
+    modality: str | None = None,
+    input_res: float | None = None,
+) -> list[dict]:
+    """Group channels by sensor and resolve each group's UniverSat modality.
+
+    Returns one dict per sensor (first-seen order) with keys ``modality``,
+    ``indices`` (channel positions in ``bands``), ``wavelengths`` (floats, or
+    s1 sensor codes), ``input_res``, and ``subpatch``. ``modality`` / ``input_res``
+    overrides apply only when the input has a single sensor.
+    """
+    sensor_to_indices: dict[str, list[int]] = defaultdict(list)
+    order: list[str] = []
+    for i, b in enumerate(bands):
+        s = b.sensor.lower()
+        if s not in sensor_to_indices:
+            order.append(s)
+        sensor_to_indices[s].append(i)
+    single_sensor = len(order) == 1
+
+    groups: list[dict] = []
+    seen: set[str] = set()
+    for sensor in order:
+        mod = modality if (modality and single_sensor) else _SENSOR_TO_MODALITY.get(sensor)
+        if mod is None:
+            raise ValueError(
+                f"No UniverSat modality mapping for sensor {sensor!r}. "
+                f"Pass `modality=` explicitly. Known: {sorted(_SENSOR_TO_MODALITY)}."
+            )
+        if mod in seen:
+            raise ValueError(
+                f"Two sensors map to the same UniverSat modality {mod!r}; "
+                "cannot disambiguate the encode() dict."
+            )
+        seen.add(mod)
+        indices = sensor_to_indices[sensor]
+        group_bands = [bands[i] for i in indices]
+        if mod == "s1":
+            wavelengths: list[float | str] = [_sar_code(b.name) for b in group_bands]
+        else:
+            wavelengths = [b.wavelength_um for b in group_bands]
+            if any(w is None for w in wavelengths):
+                missing = [b.name for b in group_bands if b.wavelength_um is None]
+                raise ValueError(
+                    f"UniverSat needs a wavelength per channel; BandSpecs {missing} "
+                    f"have wavelength_um=None."
+                )
+        res = input_res if (input_res is not None and single_sensor) else _MODALITY_INPUT_RES[mod]
+        groups.append(
+            {
+                "modality": mod,
+                "indices": indices,
+                "wavelengths": wavelengths,
+                "input_res": res,
+                "subpatch": _MODALITY_SUBPATCH.get(mod, 1),
+            }
+        )
+    return groups
 
 
 class UniverSatBenchModel(BenchModel):
@@ -116,40 +187,20 @@ class UniverSatBenchModel(BenchModel):
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
 
-        sensor = self.bands[0].sensor.lower()
-        if not all(b.sensor.lower() == sensor for b in self.bands):
-            sensors = sorted({b.sensor.lower() for b in self.bands})
-            raise ValueError(f"UniverSat wrapper expects a single sensor per call; got {sensors}.")
-        self.modality = modality or _SENSOR_TO_MODALITY.get(sensor)
-        if self.modality is None:
-            raise ValueError(
-                f"No UniverSat modality mapping for sensor {sensor!r}. "
-                f"Pass `modality=` explicitly. Known: {sorted(_SENSOR_TO_MODALITY)}."
-            )
-
-        if self.modality == "s1":
-            self.wavelengths: list[float | str] = _SAR_CODES[: self.num_channels]
-        else:
-            wl = [b.wavelength_um for b in self.bands]
-            if any(w is None for w in wl):
-                missing = [b.name for b in self.bands if b.wavelength_um is None]
-                raise ValueError(
-                    f"UniverSat needs a wavelength per channel; BandSpecs {missing} "
-                    f"have wavelength_um=None."
-                )
-            self.wavelengths = list(wl)
+        # Group input channels by sensor and map each to a UniverSat modality.
+        # Multi-sensor inputs (e.g. s2 + s1 in m-so2sat / benv2) become multiple
+        # modality entries in the encode() dict; single-sensor is just one group.
+        self._groups = _build_sensor_groups(self.bands, modality=modality, input_res=input_res)
 
         self.patch_size = patch_size
         self.output_grid = output_grid
-        self.input_res = input_res if input_res is not None else _MODALITY_INPUT_RES[self.modality]
-        self.subpatch = _MODALITY_SUBPATCH.get(self.modality, 1)
         self.do_normalize = normalize
 
         source = f"{repo}:{repo_ref}" if repo_ref else repo
         self.model = torch.hub.load(source, "from_pretrained", trust_repo=True).eval()
         logger.info(
-            "UniverSat loaded (modality=%s, %d channels, patch_size=%sm)",
-            self.modality,
+            "UniverSat loaded (modalities=%s, %d channels, patch_size=%sm)",
+            [g["modality"] for g in self._groups],
             self.num_channels,
             self.patch_size,
         )
@@ -157,14 +208,20 @@ class UniverSatBenchModel(BenchModel):
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         """Embed ``(B, C, H, W)`` into ``(B, 768)`` mean-pooled tile features."""
-        x = {self.modality: images}
+        x, wavelengths, input_res, subpatches = {}, {}, {}, {}
+        for g in self._groups:
+            mod = g["modality"]
+            x[mod] = images[:, g["indices"]]
+            wavelengths[mod] = g["wavelengths"]
+            input_res[mod] = g["input_res"]
+            subpatches[mod] = g["subpatch"]
         tokens, _ = self.model.encode(
             x,
             patch_size=self.patch_size,
             output_grid=self.output_grid,
-            wavelengths={self.modality: self.wavelengths},
-            input_res={self.modality: self.input_res},
-            subpatches={self.modality: self.subpatch},
+            wavelengths=wavelengths,
+            input_res=input_res,
+            subpatches=subpatches,
         )
         embeddings = tokens.mean(dim=1)
         if self.do_normalize:
