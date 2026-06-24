@@ -38,24 +38,34 @@ Follow the Stage 2 guide: [Contribute a model](https://torchgeo.org/torchgeo-ben
 
 ### 3. Run the model on every dataset
 
-Set up the environment and download the benchmark data:
+Set up the environment. If the model needs an optional extra, include it in the
+same sync command as `dev`.
 
 ```bash
-conda activate torchgeo-bench
 uv sync --extra dev
-torchgeo-bench download geobench_v1
-torchgeo-bench download geobench_v2
-torchgeo-bench download eurosat
+# uv sync --extra dev --extra <required_extra>
+```
+
+Download the benchmark data. This intentionally fetches the full V1 bundle;
+single-dataset auto-download is useful for quick trials, but not for a full
+model submission.
+
+```bash
+uv run torchgeo-bench download geobench_v1
+uv run torchgeo-bench download geobench_v2
+uv run torchgeo-bench download eurosat
 ```
 
 Run `torchgeo-bench` with only this model selected. Use `resume=true` so an
-interrupted run can continue without duplicating completed rows.
+interrupted run can continue without duplicating completed rows. Set `device`
+explicitly so maintainers rerun on the same CPU/GPU path.
 
 ```bash
-torchgeo-bench run model=<model_config_name> \
+uv run torchgeo-bench run model=<model_config_name> \
   dataset.names=all \
   output=results/all_results.csv \
-  resume=true
+  resume=true \
+  device=<cuda:0|cpu>
 ```
 
 If a dataset cannot run because the model does not support that sensor or
@@ -68,7 +78,8 @@ modality, list it here with the exact error or reason. Otherwise write `None`.
 ### 4. Commit results
 
 The goal is for maintainers to review and merge the model code and its
-benchmark rows together.
+benchmark rows together. `results/all_results.csv` ships pre-populated with
+reference results; do not replace it with a clean file for the final PR.
 
 - [ ] New rows are committed to `results/all_results.csv`.
 - [ ] Added result rows are only for this model and the command above.
@@ -82,9 +93,12 @@ Maintainers should be able to check out this PR and rerun the exact benchmark.
 
 ```bash
 git checkout <this-branch>
-conda activate torchgeo-bench
 uv sync --extra dev
-torchgeo-bench run model=<model_config_name> dataset.names=all output=results/all_results.csv resume=true
+uv run torchgeo-bench run model=<model_config_name> \
+  dataset.names=all \
+  output=results/all_results.csv \
+  resume=true \
+  device=<cuda:0|cpu>
 ```
 
 Hardware and software used for submitted results:
@@ -99,7 +113,7 @@ Hardware and software used for submitted results:
 
 ### 6. Local checks
 
-- [ ] `pytest --no-cov tests/test_<model>.py` passes locally.
-- [ ] `pytest --no-cov -m slow tests/test_<model>.py` passes locally, if pretrained weights were added.
-- [ ] `pytest --no-cov` passes locally.
-- [ ] `ruff check . && ruff format --check .` passes locally.
+- [ ] `uv run pytest --no-cov tests/test_<model>.py` passes locally.
+- [ ] `uv run pytest --no-cov -m slow tests/test_<model>.py` passes locally, if pretrained weights were added.
+- [ ] `uv run pytest --no-cov` passes locally.
+- [ ] `uv run ruff check . && uv run ruff format --check .` passes locally.
