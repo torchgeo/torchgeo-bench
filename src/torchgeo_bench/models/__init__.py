@@ -23,6 +23,7 @@ from .torchgeo_models import (
     TorchGeoScaleMAEBench,
     TorchGeoSwinBench,
 )
+from .universat import UniverSatBenchModel
 
 __all__: list[str] = [
     "BenchModel",
@@ -31,6 +32,7 @@ __all__: list[str] = [
     "RCFBench",
     "ImageStatsBench",
     "TimmPatchBenchModel",
+    "UniverSatBenchModel",
     "OlmoEarthBenchModel",
     "SAM3Encoder",
     "TorchGeoCromaBench",
