@@ -849,9 +849,18 @@ def main(cfg: DictConfig) -> None:
             else tuple(bands)
         )
         band_specs = bench.select_band_specs(bands_resolved)
-        model = instantiate(
-            cfg.model, bands=band_specs, normalization=normalization, _convert_="object"
-        )
+        try:
+            model = instantiate(
+                cfg.model, bands=band_specs, normalization=normalization, _convert_="object"
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Skipping %s/%s: model instantiation failed: %s",
+                model_name,
+                dataset_name,
+                exc,
+            )
+            continue
         model.to(device).eval()
 
         verbose = bool(cfg.verbose)
@@ -956,11 +965,13 @@ def main(cfg: DictConfig) -> None:
                 seg_eval_cfg = OmegaConf.merge(seg_eval_cfg, cfg.model.eval)
             seg_cfg = seg_eval_cfg.segmentation
             if not list(seg_cfg.layers):
-                raise ValueError(
-                    f"Segmentation sweep for {dataset_name} requires "
-                    "eval.segmentation.layers to be set (none found in the "
-                    f"top-level config or the {model_name} model config)."
+                logger.warning(
+                    "Skipping segmentation for %s/%s: eval.segmentation.layers "
+                    "is not set (model produces no spatial features).",
+                    model_name,
+                    dataset_name,
                 )
+                continue
 
             seg_ignore_index = _resolve_segmentation_ignore_index(
                 seg_cfg,
