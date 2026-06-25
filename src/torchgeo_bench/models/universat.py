@@ -1,21 +1,13 @@
 """UniverSat (AnySat v2) wrapper for torchgeo-bench.
 
-Wraps the UniverSat multimodal Earth-observation encoder
-(https://github.com/gastruc/UniverSat) for the BenchModel interface.
+UniverSat (https://github.com/gastruc/UniverSat) takes a ``{modality: tensor}``
+dict and embeds each channel by its wavelength/sensor code, accepting arbitrary
+band counts per sensor. The wrapper groups input channels by ``BandSpec.sensor``,
+runs ``model.encode(...)``, and mean-pools the spatial tokens to ``(B, 768)``.
 
-UniverSat ingests a ``{modality: tensor}`` dict and embeds each channel by
-its physical wavelength, so it accepts an arbitrary number of bands per
-sensor.  The wrapper picks the UniverSat modality from ``BandSpec.sensor``,
-passes the per-channel wavelengths straight from the ``BandSpec`` list, runs
-``model.encode(...)``, and mean-pools the spatial tokens into a ``(B, 768)``
-tile embedding.
-
-The model code is fetched via ``torch.hub`` (no pip package); pretrained
-weights load from the HuggingFace Hub (``g-astruc/UniverSat``).  Both are
-cached after the first load, so offline compute nodes work once the cache is
-warm.  Inputs are z-scored per channel by the framework
-(``normalization="bandspec_zscore"``), matching UniverSat's own GeoBench
-loader.
+Model code loads via ``torch.hub`` and weights from the HuggingFace Hub
+(``g-astruc/UniverSat``); no pip package. Inputs use the framework's
+``bandspec_zscore`` normalization, matching UniverSat's own GeoBench loader.
 """
 
 import logging
@@ -31,8 +23,7 @@ from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
 
-# Pinned UniverSat revision for reproducible torch.hub loads. Bump together
-# with the cached weights when the upstream model changes.
+# Pinned UniverSat revision for reproducible torch.hub loads.
 UNIVERSAT_REPO = "gastruc/UniverSat"
 UNIVERSAT_REF = "f6df2eec54955b0f7524cc95fe21a5e80c0239d9"
 
@@ -72,8 +63,8 @@ _MODALITY_SUBPATCH: dict[str, int] = {
     "l7": 1,
 }
 
-# SAR channels are sensor codes (not wavelengths) in UniverSat's registry.
-# Map each dataset SAR band name to the s1 code its embedding expects.
+
+# SAR bands are sensor codes (not wavelengths) in UniverSat's s1 modality.
 def _sar_code(name: str) -> str:
     n = name.lower()
     if "ratio" in n or "vv_vh" in n or "vh_vv" in n:
@@ -149,21 +140,19 @@ def _build_sensor_groups(
 class UniverSatBenchModel(BenchModel):
     """BenchModel wrapper for the UniverSat (AnySat v2) EO encoder.
 
-    The modality is auto-detected from ``bands[0].sensor`` and per-channel
-    wavelengths are read from the ``BandSpec`` list, so both RGB and
-    full-multispectral band modes work without a fixed channel layout.
+    Channels are grouped by ``BandSpec.sensor`` and each group is routed to its
+    UniverSat modality, so single- and multi-sensor inputs (e.g. S2+SAR) both
+    work without a fixed channel layout.
 
     Args:
-        bands: Ordered ``BandSpec`` list describing the input channels. All
-            bands must share one sensor.
-        modality: Override the auto-detected UniverSat modality name (e.g.
-            ``"s2"``). ``None`` (default) detects from ``BandSpec.sensor``.
+        bands: Ordered ``BandSpec`` list describing the input channels.
+        modality: Force the UniverSat modality (single-sensor inputs only);
+            ``None`` (default) maps from ``BandSpec.sensor``.
         patch_size: Patch size in metres passed to ``encode`` (default 40).
-        output_grid: Side ``G`` of the ``G×G`` token grid to request. ``None``
-            (default) lets UniverSat infer the natural patch grid from the
-            input size; tokens are mean-pooled either way.
-        input_res: Override the modality's physical resolution (m/px). ``None``
-            uses the registry value for the modality.
+        output_grid: Side ``G`` of the ``G×G`` token grid. ``None`` (default)
+            lets UniverSat infer the natural patch grid; tokens are mean-pooled.
+        input_res: Override the physical resolution (m/px), single-sensor only;
+            ``None`` uses the registry value per modality.
         normalize: If True, L2-normalize the output embeddings.
         repo: torch.hub source for the model code.
         repo_ref: Pinned git ref for the torch.hub load.
@@ -187,9 +176,6 @@ class UniverSatBenchModel(BenchModel):
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
 
-        # Group input channels by sensor and map each to a UniverSat modality.
-        # Multi-sensor inputs (e.g. s2 + s1 in m-so2sat / benv2) become multiple
-        # modality entries in the encode() dict; single-sensor is just one group.
         self._groups = _build_sensor_groups(self.bands, modality=modality, input_res=input_res)
 
         self.patch_size = patch_size
