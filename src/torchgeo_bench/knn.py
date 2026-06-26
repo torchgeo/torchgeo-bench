@@ -9,14 +9,21 @@ The two paths produce identical predictions modulo float-precision noise.
 """
 
 import logging
+import os
+import sys
 from typing import Literal, Self
 
-# Suppress noisy INFO messages from faiss loader (AVX512/AVX2 fallback probing)
+if sys.platform == "darwin":
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 logging.getLogger("faiss.loader").setLevel(logging.WARNING)
 
 import faiss  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
+
+if sys.platform == "darwin":
+    faiss.omp_set_num_threads(1)
 
 logger = logging.getLogger(__name__)
 
