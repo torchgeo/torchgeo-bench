@@ -42,7 +42,7 @@ progress: false
 <span class="muted">Replaced argparse + tqdm. Beautiful progress bars, rich tracebacks.</span></p>
 
 <p><span class="tag tag-oxford">PROFILE</span> <strong>Efficiency Profiling</strong><br>
-<span class="muted">Throughput, GFLOPs, peak GPU mem, $/inference. Pareto front: accuracy vs cost.</span></p>
+<span class="muted">Throughput, GFLOPs, peak GPU mem, latency, params. Pareto front: accuracy vs throughput.</span></p>
 
 <p><span class="tag tag-wheat">MODELS</span> <strong>OlmoEarth v1 + v1.1</strong><br>
 <span class="muted">nano→large, plus v1.1 linear-embed family. DINOv3-SAT ViT-L web-pretrained.</span></p>
@@ -169,7 +169,7 @@ Dataloader tuning results rendered as formatted tables. Full color tracebacks wi
 ---
 
 # Efficiency Profiling
-<span class="tag tag-oxford">PR #60</span> <span class="tag tag-oxford">PR #62</span> <span class="tag tag-oxford">PR #63</span> <span class="tag tag-oxford">PR #67</span>
+<span class="tag tag-oxford">PR #60</span> <span class="tag tag-oxford">PR #67</span>
 
 <div class="rule"></div>
 
@@ -182,13 +182,11 @@ Metrics recorded per model run:
 {
   # GPU
   "throughput_samples_per_sec": 1420.3,
+  "latency_ms_per_batch_p50":   18.0,
   "peak_gpu_mem_gb":            3.2,
+  "reserved_gpu_mem_gb":        4.1,
   "gflops":                     61.6,
   "params_m":                   307.4,
-  # CPU
-  "throughput_samples_per_sec_cpu": 42.1,
-  # Cost
-  "cost_usd_per_1M_samples":    0.12,
 }
 ```
 
@@ -210,14 +208,7 @@ gflops = fc.get_total_flops() / 1e9
 sps = n_samples / elapsed_s
 ```
 
-**Cost extrapolation:**
-
-```python
-# A100 spot ~$1.50/hr on Lambda
-cost = (1_000_000 / throughput) / 3600 * 1.50
-```
-
-Explorer shows Pareto front: accuracy vs throughput / cost.
+Explorer shows Pareto front: accuracy vs throughput.
 
 </div>
 </div>
@@ -236,7 +227,7 @@ Config (nano → large):
 
 ```yaml
 # conf/model/olmoearth_v1_base.yaml
-_target_: torchgeo_bench.models.OlmoEarthBench
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
 name: olmoearth_v1_base
 variant: base
 normalization: identity  # model handles its own
@@ -245,7 +236,7 @@ normalization: identity  # model handles its own
 Auto-rescale to S2 DN:
 
 ```python
-class OlmoEarthBench(BenchModel):
+class OlmoEarthBenchModel(BenchModel):
     expected_input_unit = InputUnit.S2_DN
 
     def _forward_patch_features(
@@ -423,10 +414,10 @@ Previously only `head_type="linear"` (classification) was available. Segmentatio
 
 # Spatial: tiles from different regions
 # → true generalization test
-ds = EuroSATSpatialBench(
+ds = EuroSATSpatial(
     root=DATA_ROOT,
-    partition="default",
-    bands=["B02","B03","B04","B08"],
+    split="test",
+    download=True,
 )
 ```
 
@@ -630,29 +621,31 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 
 **GPU throughput (img/s) — m-eurosat**
 
-| Model | img/s | GFLOPs | Acc |
+| Model | img/s | GFLOPs | Acc* |
 |-------|------:|-------:|----:|
-| ResNet-50 MoCo | 3 193 | 8 | .76 |
-| DOFA Base | 1 747 | 36 | .71 |
-| Terramind Base | 1 680 | 36 | .68 |
-| OlmoEarth Tiny | 780 | 9 | .73 |
-| OlmoEarth Nano | 789 | 2 | .67 |
-| DOFA Large | 581 | 124 | .73 |
-| DINOv3-SAT ViT-L | 346 | 165 | .74 |
-| OlmoEarth Large | 151 | 381 | .74 |
+| ResNet-50 MoCo | 3 361 | 9 | .75 |
+| DOFA Base | 1 807 | 37 | .76 |
+| OlmoEarth Nano | 789 | 2 | .72 |
+| OlmoEarth Tiny | 780 | 9 | .75 |
+| DOFA Large | 594 | 125 | .78 |
+| Terramind Large | 456 | 123 | .79 |
+| DINOv3-SAT ViT-L | 352 | 166 | .78 |
+| OlmoEarth Large | 151 | 381 | .76 |
+
+<span class="muted" style="font-size:0.75em;">*Acc = mean linear accuracy across 11 datasets · throughput &amp; GFLOPs on m-eurosat</span>
 
 </div>
 <div style="font-family:'Inter',sans-serif; font-size:0.82em;">
 
 **Pareto surprises:**
 
-<p><span class="tag tag-claret">WINNER</span> <strong>ResNet-50 MoCo</strong> — 3 193 img/s, 8 GFLOPs, 23M params, yet <strong>.76 avg acc</strong>. Matches or beats every ViT-scale model while running 5–10× faster.</p>
+<p><span class="tag tag-claret">BEST VALUE</span> <strong>ResNet-50 MoCo</strong> — 3 361 img/s, 9 GFLOPs, 24M params, <strong>.75 mean acc</strong>. Within a few points of the ViT-scale FMs (.76–.79) at 5–10× the throughput.</p>
 
-<p><span class="tag">EFFICIENT</span> <strong>OlmoEarth Nano</strong> — 3.6M params, 0.6 GB peak VRAM, 1.6 GFLOPs. Matches Panopticon accuracy at 5× lower cost.</p>
+<p><span class="tag">EFFICIENT</span> <strong>OlmoEarth Nano</strong> — 3.6M params, 0.6 GB peak VRAM, 1.6 GFLOPs, <strong>.72 mean acc</strong> — within a few points of models 30× its size.</p>
 
-<p><span class="tag">EFFICIENT</span> <strong>OlmoEarth Tiny</strong> (14M) ties DOFA Large (337M) and DINOv3-SAT (304M) at 2× the throughput.</p>
+<p><span class="tag">EFFICIENT</span> <strong>OlmoEarth Tiny</strong> (14M, .75) lands ~3 pts behind DOFA Large (337M) and DINOv3-SAT (308M) at higher throughput.</p>
 
-**Worst value:** Prithvi v1/v2 — 1 700 img/s, 35 GFLOPs, only .56–.60 acc. Same throughput tier as DOFA Base but far lower accuracy.
+**Worst value:** Prithvi 100M — ~1 750 img/s, 35 GFLOPs but <strong>.73 mean acc</strong>, trailing DOFA Base (.76) at the same speed tier.
 
 </div>
 </div>
@@ -671,24 +664,24 @@ Surfaces annotation noise in BigEarthNet, ForestNet, TreeSatAI — useful for re
 
 | Model | id_TwoNN | norm. acc |
 |-------|:--------:|:---------:|
-| EarthLoc ResNet-50 | **44** | 27% |
-| OlmoEarth Large | 22 | 85% |
-| Prithvi v2 100M CLS | 18 | 53% |
+| EarthLoc ResNet-50 | **44** | 17% |
+| Prithvi v2 100M CLS | 18 | 31% |
 | DOFA Large | 17 | 85% |
-| DINOv3-SAT ViT-L | 16 | 77% |
-| DOFA Base | 15 | 78% |
-| OlmoEarth Nano (128-d) | 14 | 75% |
+| DINOv3 ViT-L | 17 | 78% |
+| DINOv3-SAT ViT-L | 16 | 82% |
+| DOFA Base | 15 | 71% |
+| OlmoEarth Large | 14 | 72% |
 
 </div>
 <div style="font-family:'Inter',sans-serif; font-size:0.82em;">
 
-**Pattern:** id > 14 → consistently 72–85% norm. acc. Higher intrinsic dim correlates with better downstream accuracy.
+**Pattern:** mid-id models (15–17: DOFA, DINOv3) pair high intrinsic dim with strong accuracy (78–85%) — but high id alone doesn't guarantee it.
 
-<p style="margin-top:0.6rem;"><span class="tag tag-claret">TASK GAP</span> <strong>EarthLoc ResNet-50</strong> — id = 44 but only 27% norm. acc. Geo-localization training, not classification — high dimensionality without discriminative structure.</p>
+<p style="margin-top:0.6rem;"><span class="tag tag-claret">TASK GAP</span> <strong>EarthLoc ResNet-50</strong> — id = 44 but only 17% norm. acc. Geo-localization training, not classification — high dimensionality without discriminative structure.</p>
 
-<p><span class="tag">SURPRISE</span> <strong>OlmoEarth Nano</strong> — 128-d output, id_TwoNN = 14, matching DINOv3-SAT ViT-L (1024-d). Same intrinsic complexity in 8× fewer dimensions.</p>
+<p><span class="tag">OUTLIER</span> <strong>Prithvi v2 100M (CLS)</strong> — 2nd-highest id (18) yet 31% norm. acc. Like EarthLoc, dimensionality ≠ separability.</p>
 
-<p><span class="tag tag-wheat">FLAT</span> <strong>Prithvi cluster</strong> — id ≈ 7, geometrically flat despite 768–1280-d features. Explains consistently low accuracy.</p>
+<p><span class="tag tag-wheat">FLAT</span> <strong>Prithvi (patch-mean) cluster</strong> — id ≈ 7, geometrically flat despite 768–1280-d features.</p>
 
 </div>
 </div>
@@ -725,17 +718,17 @@ T = fit_temperature(val_logits, y_val)
 </div>
 <div style="font-family:'Inter',sans-serif; font-size:0.82em;">
 
-**Linear probe — m-eurosat (RGB)**
+**Linear probe — eurosat-spatial**
 
 | Model | ECE | ECE·TS | T |
 |-------|:---:|:------:|:-:|
-| DOFA Large | **.007** | .021 | 0.23 |
-| DINOv3-SAT ViT-L | .016 | .030 | 0.18 |
-| ResNet-50 MoCo | .018 | .032 | 0.34 |
-| OlmoEarth Base | .032 | .054 | 0.71 |
-| DOFA Base | .043 | **.031** | 0.21 |
+| Swin Satlas-B | **.026** | .047 | 0.83 |
+| OlmoEarth v1.1 Tiny | .031 | .035 | 0.98 |
+| OlmoEarth v1.1 Base | .036 | .047 | 0.90 |
+| OlmoEarth v1.1 Nano | .051 | **.021** | 1.19 |
+| ResNet-50 SeCo | .075 | **.041** | 1.18 |
 
-<p style="margin-top:0.4rem;"><span class="tag tag-claret">FINDING</span> Probes are already well-calibrated (ECE &lt; .05). Fitted <strong>T &lt; 1</strong> → logits <em>underconfident</em>, so temperature scaling often <strong>raises</strong> ECE. DOFA Base is the lone beneficiary.</p>
+<p style="margin-top:0.4rem;"><span class="tag tag-claret">FINDING</span> Most probes are well-calibrated (ECE ≈ .03–.05). Temperature scaling is <strong>situational</strong> — it helps the overconfident models (<strong>T &gt; 1</strong>: Nano, ResNet) but <strong>raises</strong> ECE on the already-underconfident ones (T &lt; 1). Not a free win.</p>
 
 </div>
 </div>
@@ -773,7 +766,7 @@ layout: cover
 
 ⚡ **OlmoEarth v1.1** matches v1 at **≈ 3× fewer MACs**; Tiny/Nano gain most on So2Sat + BigEarthNet
 
-⚡ Linear probes are **well-calibrated out of the box** (ECE < .05) — temperature scaling rarely helps
+⚡ Linear probes are **well-calibrated out of the box** (ECE ≈ .03–.05) — temperature scaling is situational (helps overconfident models, hurts underconfident ones)
 
 </div>
 </div>
