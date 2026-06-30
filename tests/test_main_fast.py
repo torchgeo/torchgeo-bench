@@ -177,6 +177,31 @@ def test_resume_skips_completed_knn_row(tmp_path: Path):
     assert int((df["method"] == "knn5").sum()) == 1
 
 
+def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
+    """Regression for the resume-key int/float mismatch (image_size).
+
+    A populated results CSV with any missing ``image_size`` cell is typed by
+    pandas as ``float64``, so the default ``224`` round-trips as ``"224.0"``
+    while the config-side key is ``"224"``. Resume must still treat the row
+    as complete instead of recomputing and appending a duplicate.
+    """
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
+    df = pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")])
+    # Reproduce the float64 dtype a real (partially-NaN) results CSV exhibits.
+    df["image_size"] = df["image_size"].astype(float)
+    df.to_csv(out, index=False)
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
+    ):
+        main.__wrapped__(cfg)
+
+    knn_mock.assert_not_called()
+    assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 1
+
+
 def test_dataset_not_found_skips(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out)

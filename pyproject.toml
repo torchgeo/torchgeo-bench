@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.11.6,<0.12" ]
 
 [project]
 name = "torchgeo-bench"
-version = "0.3.0"
+version = "0.4.0"
 description = "Lightweight benchmarking framework for geospatial models"
 readme = "README.md"
 keywords = [
@@ -50,17 +50,17 @@ dependencies = [
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
-  "torchgeo @ git+https://github.com/microsoft/torchgeo.git@e585e2c07f7a",
+  "torchgeo>=0.9",
   "torchmetrics>=1.4",
   "torchvision>=0.15",
   "typer>=0.9",
 ]
 optional-dependencies.all = [
   "torchgeo-bench[cleanlab]",
-  "torchgeo-bench[cuda]",
   "torchgeo-bench[dev]",
   "torchgeo-bench[docs]",
   "torchgeo-bench[id]",
+  "torchgeo-bench[olmoearth]",
   "torchgeo-bench[sam3]",
   "torchgeo-bench[terratorch]",
   "torchgeo-bench[viz]",
@@ -154,10 +154,6 @@ lint.per-file-ignores."tests/**/*.py" = [ "ARG", "D" ]
 lint.pydocstyle.convention = "google"
 
 [tool.pytest]
-ini_options.testpaths = [ "tests" ]
-ini_options.python_files = [ "test_*.py" ]
-ini_options.python_classes = [ "Test*" ]
-ini_options.python_functions = [ "test_*" ]
 ini_options.addopts = [
   "--verbose",
   "-m not slow and not accuracy_check",
@@ -165,23 +161,4 @@ ini_options.addopts = [
 ini_options.markers = [
   "slow: integration tests that load real data and run models (use -m slow to include)",
   "accuracy_check: per-class model accuracy regression tests (use -m accuracy_check to run)",
-]
-
-[tool.coverage]
-run.omit = [
-  "*/test_*.py",
-  "*/tests/*",
-  "*/torchgeo_bench/datasets/_v1_webdataset.py",
-  "*/torchgeo_bench/datasets/geobench_v1.py",
-  "*/torchgeo_bench/segmentation_viz.py",
-]
-run.source = [ "torchgeo_bench" ]
-report.exclude_lines = [
-  "@abstractmethod",
-  "def __repr__",
-  "if __name__ == .__main__.:",
-  "if TYPE_CHECKING:",
-  "pragma: no cover",
-  "raise AssertionError",
-  "raise NotImplementedError",
 ]

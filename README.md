@@ -47,8 +47,8 @@ For GPU-accelerated KNN (Linux + CUDA 12 + glibc ≥ 2.28):
 pip install 'torchgeo-bench[cuda]'
 ```
 
-Requires Python 3.12+. Supported on **Linux** and **macOS**. Windows is not
-supported — on Windows, install inside [WSL2](https://learn.microsoft.com/windows/wsl/).
+Requires Python 3.12+. The default (CPU) install runs on **Linux**, **macOS**,
+and **Windows**; GPU-accelerated KNN (the `[cuda]` extra) is Linux-only.
 
 ## Download a dataset
 
@@ -73,8 +73,18 @@ torchgeo-bench run
 torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
 ```
 
-Results are appended to `results/all_results.csv`. Re-run with `resume=true`
-to skip already-completed rows.
+The default device is `cuda:0`. On a machine without a working CUDA GPU (or if
+a GPU run crashes — see [troubleshooting](https://torchgeo.org/torchgeo-bench/user/troubleshooting.html)),
+fall back to CPU:
+
+```bash
+torchgeo-bench run dataset.names=[m-eurosat] device=cpu
+```
+
+Results are appended to `results/all_results.csv`, which **ships pre-populated
+with reference results** — to start from a clean slate, write to your own file
+with `output=results/my_run.csv`. Re-run with `resume=true` to skip
+already-completed rows.
 
 <!-- skip-on-docs-landing-start -->
 ## Learn more
