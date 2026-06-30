@@ -184,6 +184,18 @@ The ``version`` parameter selects the weight family:
    GeoBench delivers Landsat as uint8 [0, 255] and the Landsat normalizer
    expects a different dynamic range.
 
+.. note::
+
+   **Per-model input resolution.**  A model config may set ``image_size`` to
+   override the global ``dataset.image_size`` (default ``224``).  OlmoEarth is
+   resolution-flexible, so its configs set ``image_size: null`` to evaluate at
+   each dataset's **native** resolution rather than upsampling to 224×224
+   (matching the reference OlmoEarth evals).  Models that omit the field
+   inherit ``dataset.image_size``.  To force a specific size for a run, pass
+   ``model.image_size=<int>`` (or ``~model.image_size`` to fall back to the
+   dataset default).  The effective size is recorded in the results CSV and
+   in the resume cache key.
+
 SAM 3 vision encoder
 ^^^^^^^^^^^^^^^^^^^^
 

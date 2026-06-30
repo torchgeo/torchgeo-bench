@@ -2,8 +2,9 @@ _target_: torchgeo_bench.models.OlmoEarthBenchModel
 model_size: nano
 patch_size: 8
 input_res: null
-time_steps: 3
+time_steps: 1
 std_multiplier: 2.0
 normalize: false
+image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
 sar_log_scale: true  # converts SAR intensity to dB: 10*log10(v), matching OlmoEarth S1 stats (VH mean≈-17.75dB)
 name: olmoearth_v1_nano_sar_db

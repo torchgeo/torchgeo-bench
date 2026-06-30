@@ -2,8 +2,9 @@ _target_: torchgeo_bench.models.OlmoEarthBenchModel
 model_size: nano
 patch_size: 8
 input_res: null
-time_steps: 3
+time_steps: 1
 std_multiplier: 2.0
 normalize: false
+image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
 landsat_scale_factor: 0.02550  # undoes the *(10000/255) so values stay as raw uint8 [0,255]
 name: olmoearth_v1_nano_lsat_raw

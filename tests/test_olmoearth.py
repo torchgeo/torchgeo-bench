@@ -334,6 +334,39 @@ def test_forestnet_landsat_imputes_missing_bands() -> None:
 
 
 @requires_olmoearth
+def test_landsat_dataset_stats_normalization() -> None:
+    """norm_from_pretrained=False normalizes each band with its BandSpec stats
+    (helios-style ±2σ no-clip), bypassing the DN rescale + pretrained
+    Normalizer — required for GeoBench's uint8 Landsat scale."""
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    names = ("blue", "green", "red", "nir", "swir_1", "swir_2")
+    bands = [
+        BandSpec(
+            sensor="landsat",
+            name=n,
+            source_name=n.upper(),
+            mean=80.0,
+            std=20.0,
+            min=0.0,
+            max=255.0,
+        )
+        for n in names
+    ]
+    model = OlmoEarthBenchModel(
+        bands=bands, model_size="nano", normalization="identity", norm_from_pretrained=False
+    )
+    assert model.norm_from_pretrained is False
+    g = model._sensor_groups[0]
+    assert len(g["src_means"]) == 6 and len(g["src_stds"]) == 6
+    model.eval()
+    x = torch.rand(2, 6, 64, 64) * 200.0  # uint8-scale Landsat
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
 @pytest.mark.parametrize("size", ["nano", "small"])
 def test_v1_2_variants_forward_pass(size: str) -> None:
     """OlmoEarth v1.2 (Nano/Tiny/Small/Base) must load and run; Small is the

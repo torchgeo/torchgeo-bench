@@ -957,6 +957,18 @@ def main(cfg: DictConfig) -> None:
     normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
+    # A model may declare its own input resolution, overriding the global
+    # ``dataset.image_size``.  Resolution-flexible backbones (e.g. OlmoEarth)
+    # set ``image_size: null`` to be evaluated at native resolution; fixed-grid
+    # ViTs omit the field and inherit ``dataset.image_size``.  The key is absent
+    # vs. present-but-null distinction, so a sentinel marks "inherit".
+    _model_image_size = OmegaConf.select(cfg, "model.image_size", default="__inherit__")
+    effective_image_size = (
+        getattr(cfg.dataset, "image_size", None)
+        if _model_image_size == "__inherit__"
+        else _model_image_size
+    )
+
     for ds_name in track(dataset_names, description="Datasets"):
         try:
             ds_cls = get_bench_dataset_class(ds_name)
@@ -968,7 +980,7 @@ def main(cfg: DictConfig) -> None:
             _canonical_key_cell(v)
             for v in (
                 normalization,
-                getattr(cfg.dataset, "image_size", None),
+                effective_image_size,
                 getattr(cfg.dataset, "interpolation", "bilinear"),
                 cfg.dataset.partition,
                 bands_value,
@@ -998,7 +1010,7 @@ def main(cfg: DictConfig) -> None:
                 batch_size=cfg.dataset.batch_size,
                 num_workers=int(cfg.dataset.get("num_workers", 8)),
                 return_val=True,
-                image_size=getattr(cfg.dataset, "image_size", None),
+                image_size=effective_image_size,
                 interpolation=getattr(cfg.dataset, "interpolation", "bilinear"),
                 bands=getattr(cfg.dataset, "bands", "rgb"),
             )
@@ -1060,7 +1072,7 @@ def main(cfg: DictConfig) -> None:
             "model": cfg.model._target_,
             "name": cfg.model.name,
             "normalization": normalization,
-            "image_size": getattr(cfg.dataset, "image_size", None),
+            "image_size": effective_image_size,
             "interpolation": getattr(cfg.dataset, "interpolation", "bilinear"),
             "partition": cfg.dataset.partition,
             "bands": bands_value,

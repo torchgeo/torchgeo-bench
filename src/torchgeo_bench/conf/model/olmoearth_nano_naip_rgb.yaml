@@ -2,9 +2,10 @@ _target_: torchgeo_bench.models.OlmoEarthBenchModel
 model_size: nano
 patch_size: 8
 input_res: 30
-time_steps: 3
+time_steps: 1
 std_multiplier: 2.0
 normalize: false
+image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
 sensor_remap:
   landsat: aerial  # treat as NAIP/aerial RGB+NIR through S2 path
 name: olmoearth_v1_nano_naip_rgb
