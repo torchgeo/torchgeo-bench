@@ -46,6 +46,17 @@ class CachedFeaturesDataset(Dataset):
     def __getitem__(self, i: int) -> tuple[list[torch.Tensor], torch.Tensor]:
         return [t[i] for t in self.layer_tensors], self.masks[i]
 
+    @classmethod
+    def merge(
+        cls, a: "CachedFeaturesDataset", b: "CachedFeaturesDataset"
+    ) -> "CachedFeaturesDataset":
+        """Concatenate two caches along the sample axis."""
+        layer_tensors = [
+            torch.cat([ta, tb], dim=0) for ta, tb in zip(a.layer_tensors, b.layer_tensors)
+        ]
+        masks = torch.cat([a.masks, b.masks], dim=0)
+        return cls(layer_tensors, masks)
+
 
 def _estimate_cache_bytes(cache: "CachedFeaturesDataset") -> int:
     """Estimate total bytes occupied by a CachedFeaturesDataset."""

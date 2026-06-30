@@ -109,6 +109,45 @@ selection semantics.
 Refer to :doc:`/api/eval` for the runtime functions that consume each
 sub-block.
 
+Hyperparameter search (segmentation)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Bayesian hyperparameter optimisation over learning rate and weight decay is
+available for the segmentation probe.  It requires Optuna:
+
+.. code-block:: console
+
+   $ pip install torchgeo-bench[hpo]
+
+Enable it via ``eval.segmentation.hparam_search=true``.  The full set of
+tunable options with their defaults:
+
+.. code-block:: yaml
+
+   eval:
+     segmentation:
+       hparam_search: false     # enable Bayesian HPO (requires torchgeo-bench[hpo])
+       n_trials: 10             # Optuna TPE trials
+       hpo_epochs: 5            # training epochs per trial
+       lr_min: 1e-5             # LR search lower bound (log-uniform)
+       lr_max: 1e-2             # LR search upper bound
+       wd_min: 1e-6             # weight-decay search lower bound (log-uniform)
+       wd_max: 1e-1             # weight-decay search upper bound
+
+Example CLI invocation:
+
+.. code-block:: console
+
+   $ torchgeo-bench run \
+       model=timm/resnet50 \
+       eval.segmentation.hparam_search=true \
+       eval.segmentation.n_trials=20
+
+After HPO the head is retrained from scratch on the merged train+val split
+using the best found parameters for the full ``epochs``.  The results CSV
+stores the winning values in the ``best_lr`` and ``best_weight_decay``
+columns; both are ``null`` when HPO is disabled.
+
 ``model`` block
 ---------------
 

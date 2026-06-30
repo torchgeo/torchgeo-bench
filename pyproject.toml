@@ -59,6 +59,7 @@ optional-dependencies.all = [
   "torchgeo-bench[cleanlab]",
   "torchgeo-bench[dev]",
   "torchgeo-bench[docs]",
+  "torchgeo-bench[hpo]",
   "torchgeo-bench[id]",
   "torchgeo-bench[sam3]",
   "torchgeo-bench[terratorch]",
@@ -89,6 +90,9 @@ optional-dependencies.docs = [
   "sphinx>=7",
   "sphinx-copybutton>=0.5",
   "sphinx-design>=0.5",
+]
+optional-dependencies.hpo = [
+  "optuna>=3",
 ]
 optional-dependencies.id = [
   "torchid>=0.3; python_version>='3.13'",

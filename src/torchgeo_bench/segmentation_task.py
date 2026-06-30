@@ -114,9 +114,6 @@ class SegmentationSolver:
             )
         if self.lr_scheduler_type == "none":
             return None
-        raise ValueError(
-            f"Unknown lr_scheduler {self.lr_scheduler_type!r}. Expected 'cosine' or 'none'."
-        )
 
     def fit(
         self,
