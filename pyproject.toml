@@ -164,22 +164,3 @@ ini_options.addopts = [
 ini_options.markers = [
   "slow: integration tests that load real data and run models (use -m slow to include)",
 ]
-
-[tool.coverage]
-run.omit = [
-  "*/test_*.py",
-  "*/tests/*",
-  "*/torchgeo_bench/datasets/_v1_webdataset.py",
-  "*/torchgeo_bench/datasets/geobench_v1.py",
-  "*/torchgeo_bench/segmentation_viz.py",
-]
-run.source = [ "torchgeo_bench" ]
-report.exclude_lines = [
-  "@abstractmethod",
-  "def __repr__",
-  "if __name__ == .__main__.:",
-  "if TYPE_CHECKING:",
-  "pragma: no cover",
-  "raise AssertionError",
-  "raise NotImplementedError",
-]
