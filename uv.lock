@@ -3884,8 +3884,8 @@ wheels = [
 
 [[package]]
 name = "torchgeo"
-version = "0.10.0.dev0"
-source = { git = "https://github.com/microsoft/torchgeo.git?rev=e585e2c07f7a#e585e2c07f7a1d5716f50b36c1fcf659eac26f93" }
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
     { name = "geopandas" },
@@ -3899,14 +3899,17 @@ dependencies = [
     { name = "pillow" },
     { name = "pyproj" },
     { name = "rasterio" },
-    { name = "requests" },
     { name = "segmentation-models-pytorch" },
     { name = "shapely" },
     { name = "timm" },
     { name = "torch" },
-    { name = "torchmetrics", extra = ["detection"] },
+    { name = "torchmetrics" },
     { name = "torchvision" },
     { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4b/16/608c60bd2601a37b97e434ddbf1a1988b03ff9efc1a4fadd237225aace7d/torchgeo-0.9.0.tar.gz", hash = "sha256:93858ccd1cd9cc25b022572dabcd94a024160529a3bd7fc75dc28e995240ca6c", size = 440221, upload-time = "2026-02-14T15:34:40.835Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/9f/bf115a4153cf0006e4120045477d0366b5a7a3f311a74b160ad06a431ba3/torchgeo-0.9.0-py3-none-any.whl", hash = "sha256:3e05cd85352a2b357c611c6eb44540680f21017d5da4af9d8c9d18bfca791a05", size = 688086, upload-time = "2026-02-14T15:34:39.209Z" },
 ]
 
 [[package]]
@@ -3941,6 +3944,7 @@ all = [
     { name = "matplotlib" },
     { name = "mdformat" },
     { name = "myst-parser" },
+    { name = "olmoearth-pretrain-minimal" },
     { name = "pillow" },
     { name = "pre-commit" },
     { name = "pydata-sphinx-theme" },
@@ -4036,11 +4040,12 @@ requires-dist = [
     { name = "terratorch", marker = "extra == 'terratorch'", specifier = ">=1" },
     { name = "timm", specifier = ">=0.9" },
     { name = "torch", specifier = ">=2" },
-    { name = "torchgeo", git = "https://github.com/microsoft/torchgeo.git?rev=e585e2c07f7a" },
+    { name = "torchgeo", specifier = ">=0.9" },
     { name = "torchgeo-bench", extras = ["cleanlab"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["dev"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["docs"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["id"], marker = "extra == 'all'" },
+    { name = "torchgeo-bench", extras = ["olmoearth"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["sam3"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["terratorch"], marker = "extra == 'all'" },
     { name = "torchgeo-bench", extras = ["viz"], marker = "extra == 'all'" },
@@ -4080,12 +4085,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/81/34/39b8b749333db56c0585d7a11fa62a283c087bb1dfc897d69fb8cedbefb1/torchmetrics-1.9.0.tar.gz", hash = "sha256:a488609948600df52d3db4fcdab02e62aab2a85ef34da67037dc3e65b8512faa", size = 581765, upload-time = "2026-03-09T17:41:22.443Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c3/a2/c7f6ebf546f8f644edf0f999aa98ece106986a77a7b922316bf6414ff825/torchmetrics-1.9.0-py3-none-any.whl", hash = "sha256:bfdcbff3dd1d96b3374bb2496eb39f23c4b28b8a845b6a18c313688e0d2d9ca1", size = 983384, upload-time = "2026-03-09T17:41:19.756Z" },
-]
-
-[package.optional-dependencies]
-detection = [
-    { name = "pycocotools" },
-    { name = "torchvision" },
 ]
 
 [[package]]
