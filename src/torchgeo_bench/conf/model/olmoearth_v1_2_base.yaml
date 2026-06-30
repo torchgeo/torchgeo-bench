@@ -1,0 +1,17 @@
+# OlmoEarth-v1.2-Base (AI2 geospatial foundation model)
+# Feature dimension: 768
+# v1.2 ships Nano/Tiny/Small/Base with RoPE position encoding (~114M params).
+# Multi-modal: auto-routes S2/SAR/Landsat/NAIP bands to the correct modality.
+
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
+model_size: base
+version: v1_2
+patch_size: 8
+input_res: null
+time_steps: 3
+std_multiplier: 2.0
+normalize: false
+sensor_remap:
+  landsat: landsat_as_s2
+min_image_size: 64
+name: olmoearth_v1_2_base

@@ -94,6 +94,21 @@ _MODALITY_INFO: dict[str, dict] = {
             "swir_cirrus": None,
             "b10": None,
         },
+        # Impute missing channels from the most spectrally-similar present
+        # band (matches helios' per-band imputation; see configs.py imputes).
+        # Each (src, dst) is an OlmoEarth channel index: dst is filled with a
+        # copy of src when dst is absent from the input and src is present.
+        # Wavelengths (um): B01 0.443, B02 0.49, B04 0.665, B05 0.705,
+        # B06 0.74, B07 0.783, B08 0.842, B8A 0.865, B09 0.945.
+        # GeoBench forestnet ships only B02/B03/B04/B8A/B11/B12.
+        "imputes": [
+            (7, 3),  # B08 NIR        <- B8A (0.842 -> 0.865)
+            (2, 4),  # B05 RedEdge1   <- B04 red (0.705 -> 0.665)
+            (2, 5),  # B06 RedEdge2   <- B04 red (0.74 -> 0.665)
+            (7, 6),  # B07 RedEdge3   <- B8A (0.783 -> 0.865)
+            (0, 10),  # B01 Coastal   <- B02 blue (0.443 -> 0.49)
+            (7, 11),  # B09 WaterVap  <- B8A (0.945 -> 0.865)
+        ],
     },
     "landsat": {
         "modality_name": "LANDSAT",
@@ -131,6 +146,18 @@ _MODALITY_INFO: dict[str, dict] = {
             "thermal_2": 10,
             "b11": 10,
         },
+        # Impute missing channels from the most spectrally-similar present
+        # band — mirrors helios m-forestnet exactly (configs.py imputes +
+        # the B8->Green band-name conversion). GeoBench m-forestnet ships
+        # only B2/B3/B4/B5/B6/B7 (blue/green/red/nir/swir1/swir2).
+        # (src, dst) are OlmoEarth LANDSAT channel indices.
+        "imputes": [
+            (3, 0),  # B8  Panchromatic <- B3 green (helios band-name map)
+            (2, 1),  # B1  Coastal      <- B2 blue
+            (7, 8),  # B9  Cirrus       <- B7 swir2
+            (7, 9),  # B10 TIRS-1       <- B7 swir2
+            (7, 10),  # B11 TIRS-2      <- B7 swir2 (helios B11->Tirs1->swir2)
+        ],
     },
     # Sentinel-1 SAR: two channels — vv (0) and vh (1).  OlmoEarth
     # BandSet(["vv", "vh"], 16) with is_multitemporal=True.
@@ -182,6 +209,17 @@ _MODALITY_INFO: dict[str, dict] = {
             "swir_2": 9,
             "b7": 9,
         },
+        # Landsat routed through the S2 layout: present positions are B02/
+        # B03/B04/B08(nir)/B11/B12; impute the S2-only slots from the nearest
+        # present Landsat band. (src, dst) are S2 channel indices.
+        "imputes": [
+            (2, 4),  # B05 RedEdge1  <- red
+            (2, 5),  # B06 RedEdge2  <- red
+            (3, 6),  # B07 RedEdge3  <- nir
+            (3, 7),  # B8A           <- nir
+            (0, 10),  # B01 Coastal  <- blue
+            (3, 11),  # B09 WaterVap <- nir
+        ],
     },
     # NAIP / aerial: no dedicated OlmoEarth modality, route RGB through
     # the S2 path with non-RGB positions zero-filled.
@@ -272,6 +310,25 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
         input_unit: InputUnit | None = (
             None if sensor in _PASSTHROUGH_SENSORS else _detect_band_group_unit(group_bands)
         )
+        # Resolve which imputations actually apply for this input: fill a
+        # missing OlmoEarth channel from the most-similar present band so the
+        # encoder never sees fabricated zeros (matches helios). Only fire when
+        # the target channel is absent and the source channel is present.
+        filled = set(dst_indices)
+        impute_ops: list[tuple[int, int]] = []
+        for src_dst, tgt_dst in info.get("imputes", []):
+            if tgt_dst in filled:
+                continue  # real band present — never overwrite it
+            if src_dst not in filled:
+                logger.warning(
+                    "OlmoEarth %s: cannot impute channel %d (source channel %d "
+                    "is also missing); leaving it zero-filled.",
+                    sensor,
+                    tgt_dst,
+                    src_dst,
+                )
+                continue
+            impute_ops.append((src_dst, tgt_dst))
         result.append(
             {
                 "sensor": sensor,
@@ -282,6 +339,7 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
                 "src_indices": src_indices,
                 "dst_indices": dst_indices,
                 "input_unit": input_unit,
+                "impute_ops": impute_ops,
             }
         )
     return result
@@ -328,9 +386,14 @@ class OlmoEarthBenchModel(BenchModel):
     building separate tensor branches and populating multiple
     ``MaskedOlmoEarthSample`` fields simultaneously.
 
-    Channels missing from the input are zero-filled at the corresponding
-    OlmoEarth position; the mask stays all-visible so ``pool_spatially``
-    can still produce embeddings.
+    Channels missing from the input are imputed from the most spectrally
+    similar band that *is* present (e.g. Landsat cirrus <- swir2), matching
+    helios' per-dataset imputation.  Imputation is applied after
+    normalization so the imputed channel carries its source band's
+    normalized value rather than a fabricated ``(0 - mean) / std`` constant.
+    A missing channel with no present source band stays zero-filled.  The
+    mask stays all-visible so ``pool_spatially`` can still produce
+    embeddings.
 
     The wrapper overrides ``normalize_inputs`` to identity — OlmoEarth's
     internal ``Normalizer`` consumes raw values directly.  Input scale
@@ -343,11 +406,13 @@ class OlmoEarthBenchModel(BenchModel):
 
     Args:
         bands: Ordered ``BandSpec`` list describing the input channels.
-        model_size: One of ``"nano"``, ``"tiny"``, ``"base"``, ``"large"``.
-            ``"large"`` is only available for ``version="v1"``.
-        version: Model version — ``"v1"`` (default) or ``"v1_1"``.  v1.1
-            ships Nano/Tiny/Base with improved accuracy and ~25% more
-            parameters; no Large variant yet.
+        model_size: One of ``"nano"``, ``"tiny"``, ``"small"``, ``"base"``,
+            ``"large"``.  ``"large"`` is only available for ``version="v1"``;
+            ``"small"`` is only available for ``version="v1_2"``.
+        version: Model version — ``"v1"`` (default), ``"v1_1"`` or
+            ``"v1_2"``.  v1.1 ships Nano/Tiny/Base with improved accuracy and
+            ~25% more parameters.  v1.2 ships Nano/Tiny/Small/Base (RoPE
+            position encoding); no Large variant for v1.1/v1.2.
         patch_size: Patch size for the encoder (default 8).
         input_res: Input resolution in meters.  ``None`` (default) lets
             the wrapper auto-detect from the primary sensor GSD.
@@ -374,8 +439,8 @@ class OlmoEarthBenchModel(BenchModel):
         self,
         bands: list[BandSpec],
         *,
-        model_size: Literal["nano", "tiny", "base", "large"] = "base",
-        version: Literal["v1", "v1_1"] = "v1",
+        model_size: Literal["nano", "tiny", "small", "base", "large"] = "base",
+        version: Literal["v1", "v1_1", "v1_2"] = "v1",
         patch_size: int = 4,
         input_res: int | None = None,
         time_steps: int = 1,
@@ -532,6 +597,15 @@ class OlmoEarthBenchModel(BenchModel):
             if self.time_steps > 1:
                 g_nhwtc = np.repeat(g_nhwtc, self.time_steps, axis=3)
             g_nhwtc = self.normalizer.normalize(group["modality"], g_nhwtc)
+
+            # Impute missing channels *after* normalization so each imputed
+            # channel carries the normalized value of its source band. Doing
+            # it post-norm avoids applying the wrong per-band statistics to a
+            # borrowed band (the issue helios works around by re-imputing
+            # after normalization); the result is that the imputed channel is
+            # statistically identical to its source in normalized space.
+            for src_dst, tgt_dst in group["impute_ops"]:
+                g_nhwtc[..., tgt_dst] = g_nhwtc[..., src_dst]
 
             field = group["sample_field"]
             mask = self._build_mask(B, H, W, group["num_band_sets"], device)
