@@ -105,6 +105,7 @@ data/
 !**/band_stats.json
 !**/normalizer.json
 !docs/_static/_results_snapshots/*.json
+!slides/package.json
 
 # Logs
 *.log
