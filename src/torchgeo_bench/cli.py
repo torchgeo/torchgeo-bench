@@ -6,6 +6,8 @@ Two subcommands:
 - ``torchgeo-bench uq [hydra overrides...]`` — runs UQ benchmark via Hydra.
 - ``torchgeo-bench nf [hydra overrides...]`` — runs NF stage-1 pipeline via Hydra.
 - ``torchgeo-bench sample-size [hydra overrides...]`` — runs sample-size calibration sweep.
+- ``torchgeo-bench seg-viz [hydra overrides...]`` — generates qualitative UQ grids for seg subsample sweep.
+- ``torchgeo-bench seg-corruption [hydra overrides...]`` — runs segmentation corruption robustness sweep.
 - ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`` — fetches data.
 
 The ``run``, ``uq``, ``nf``, and ``sample-size`` subcommands forward every remaining
@@ -93,6 +95,40 @@ def nf(ctx: typer.Context) -> None:
 def sample_size(ctx: typer.Context) -> None:
     """Run sample-size calibration sweep; extra args are forwarded to Hydra."""
     from torchgeo_bench.sample_size_pipeline import main as hydra_main
+
+    saved = sys.argv[:]
+    try:
+        sys.argv = [saved[0], *ctx.args]
+        hydra_main()
+    finally:
+        sys.argv = saved
+
+
+@app.command(
+    name="seg-viz",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Generate qualitative UQ grids for the segmentation subsample sweep (extra args forwarded to Hydra).",
+)
+def seg_viz(ctx: typer.Context) -> None:
+    """Generate qualitative UQ grids; extra args are forwarded to Hydra."""
+    from torchgeo_bench.seg_viz_pipeline import main as hydra_main
+
+    saved = sys.argv[:]
+    try:
+        sys.argv = [saved[0], *ctx.args]
+        hydra_main()
+    finally:
+        sys.argv = saved
+
+
+@app.command(
+    name="seg-corruption",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Run segmentation corruption robustness sweep (extra args forwarded to Hydra).",
+)
+def seg_corruption(ctx: typer.Context) -> None:
+    """Run segmentation corruption sweep; extra args are forwarded to Hydra."""
+    from torchgeo_bench.seg_corruption_pipeline import main as hydra_main
 
     saved = sys.argv[:]
     try:

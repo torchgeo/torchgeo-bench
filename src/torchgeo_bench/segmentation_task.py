@@ -137,18 +137,20 @@ def _compute_segmentation_image_stats_row(
     if valid_pixel_count >= 2 and np.unique(error_labels).size == 2:
         one_minus_max_prob_np = one_minus_max_prob.to(torch.float64).cpu().numpy()
         entropy_np = entropy.to(torch.float64).cpu().numpy()
-        one_minus_max_metrics = compute_error_pr(
-            is_error=error_labels,
-            uncertainty=one_minus_max_prob_np,
-        )
-        entropy_metrics = compute_error_pr(
-            is_error=error_labels,
-            uncertainty=entropy_np,
-        )
-        row["pixel_error_aupr_1mp"] = float(one_minus_max_metrics["aupr"])
-        row["pixel_error_auroc_1mp"] = float(one_minus_max_metrics["auroc"])
-        row["pixel_error_aupr_entropy"] = float(entropy_metrics["aupr"])
-        row["pixel_error_auroc_entropy"] = float(entropy_metrics["auroc"])
+        if np.isfinite(one_minus_max_prob_np).all():
+            one_minus_max_metrics = compute_error_pr(
+                is_error=error_labels,
+                uncertainty=one_minus_max_prob_np,
+            )
+            row["pixel_error_aupr_1mp"] = float(one_minus_max_metrics["aupr"])
+            row["pixel_error_auroc_1mp"] = float(one_minus_max_metrics["auroc"])
+        if np.isfinite(entropy_np).all():
+            entropy_metrics = compute_error_pr(
+                is_error=error_labels,
+                uncertainty=entropy_np,
+            )
+            row["pixel_error_aupr_entropy"] = float(entropy_metrics["aupr"])
+            row["pixel_error_auroc_entropy"] = float(entropy_metrics["auroc"])
 
     return row
 

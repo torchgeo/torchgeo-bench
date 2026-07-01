@@ -1478,7 +1478,11 @@ def main(cfg: DictConfig) -> None:
                     resume=bool(cfg.resume),
                 )
             if save_viz and preds is not None:
-                rgb_indices = ds_cls().rgb_indices or [0, 1, 2]
+                _bench = ds_cls()
+                _loaded_names = [s.name for s in bands_list]
+                rgb_indices = [_loaded_names.index(n) for n in _bench.rgb_bands if n in _loaded_names]
+                if len(rgb_indices) != 3:
+                    rgb_indices = [0, 1, 2]
                 # Collect images and GT masks from test_loader (cheap pass, no backbone)
                 test_imgs, test_gts = [], []
                 for _batch in test_loader:

@@ -207,6 +207,9 @@ _MODALITY_INFO["naip"] = _MODALITY_INFO["aerial"]
 # PlanetScope (spacenet7) is high-res RGB optical with no dedicated OlmoEarth
 # modality; route it through the aerial RGB layout like NAIP.
 _MODALITY_INFO["planet"] = _MODALITY_INFO["aerial"]
+# WorldView (spacenet2) is high-res multispectral; no dedicated OlmoEarth
+# modality, route RGB bands through aerial layout like NAIP/Planet.
+_MODALITY_INFO["worldview"] = _MODALITY_INFO["aerial"]
 
 
 # Canonical GSD (meters) per sensor for OlmoEarth's positional encodings.

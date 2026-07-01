@@ -1,0 +1,40 @@
+defaults:
+  - model: ???
+  - _self_
+
+device: cuda
+seed: 0
+verbose: false
+
+dataset:
+  names: []
+  partition: default
+  batch_size: 64
+  num_workers: 4
+  normalization: bandspec_zscore
+  bands: rgb
+  image_size: 224
+  interpolation: bilinear
+
+seg_viz:
+  fractions: [0.01, 0.10, 0.25, 0.50, 0.75]
+  seed: 0          # probe training seed
+  n_samples: 8     # rows in output grid (highest-entropy test images)
+  out_dir: viz/subsample
+
+eval:
+  segmentation:
+    layers: []
+    head_type: fpn
+    lr: 1.0e-3
+    weight_decay: 0.0
+    batch_size: 64
+    lr_scheduler: cosine
+    criterion:
+      _target_: torch.nn.CrossEntropyLoss
+      ignore_index: 255
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

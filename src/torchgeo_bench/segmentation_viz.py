@@ -286,6 +286,132 @@ def render_confusion_matrix(
     return arr
 
 
+def _entropy_to_rgb(entropy: np.ndarray) -> np.ndarray:
+    """Map a (H, W) float32 normalized-entropy map to (H, W, 3) uint8 via plasma colormap."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        raise ImportError(
+            "matplotlib is required for segmentation visualization. "
+            "Install it with: pip install torchgeo-bench[viz]"
+        ) from e
+
+    cmap = plt.get_cmap("plasma")
+    rgba = cmap(np.clip(entropy, 0.0, 1.0))  # (H, W, 4) float64
+    return (rgba[:, :, :3] * 255).astype(np.uint8)
+
+
+def render_uq_subsample_grid(
+    images: "torch.Tensor",
+    gt_masks: "torch.Tensor",
+    fraction_results: list[dict],
+    num_classes: int,
+    rgb_indices: list[int],
+    ignore_index: int = 255,
+) -> np.ndarray:
+    """Build a UQ subsample grid comparing predictions across training fractions.
+
+    Layout (one row per image):
+      [RGB image | GT mask] | [Pred_f1 / Entropy_f1] | [Pred_f2 / Entropy_f2] | ...
+
+    The RGB image and GT mask appear once on the left; each fraction column
+    stacks the predicted mask above the normalized-entropy heatmap (plasma).
+    Column headers label the fraction percentage.
+
+    Args:
+        images: (N, C, H, W) float tensor of the selected test images.
+        gt_masks: (N, H, W) int64 ground-truth masks.
+        fraction_results: List of dicts, one per fraction, each with keys:
+            ``fraction`` (float), ``preds`` (N, H, W int64 Tensor),
+            ``entropy`` (N, H, W float32 Tensor, normalized to [0, 1]).
+        num_classes: Number of segmentation classes.
+        rgb_indices: Channel indices [R, G, B] into the C dimension.
+        ignore_index: Label value rendered as white.
+
+    Returns:
+        (H_grid, W_grid, 3) uint8 numpy array.
+    """
+    n = len(images)
+    h, w = images.shape[-2], images.shape[-1]
+    sep = 2  # 2-pixel separator between pred and entropy sub-panels
+
+    # Pre-render left block panels (image + GT) for each sample row
+    left_panels: list[np.ndarray] = []
+    for i in range(n):
+        img = images[i].cpu().numpy()
+        gt = gt_masks[i].cpu().numpy()
+        ri = [min(c, img.shape[0] - 1) for c in rgb_indices]
+        rgb_u8 = _denorm_image(img[ri, :, :].transpose(1, 2, 0))
+        gt_u8 = colorize_mask(gt, num_classes, ignore_index)
+        left_panels.append(np.concatenate([rgb_u8, gt_u8], axis=1))  # (H, 2W, 3)
+
+    # Build fraction column headers
+    left_header_w = 2 * w
+    frac_labels = [f"{int(round(fr['fraction'] * 100))}% train" for fr in fraction_results]
+    col_labels = ["Image", "GT"] + frac_labels
+
+    # Pre-render per-fraction panels for each sample
+    frac_panels: list[list[np.ndarray]] = []  # [fraction_idx][sample_idx]
+    for fr in fraction_results:
+        preds = fr["preds"]
+        entropy = fr["entropy"]
+        col: list[np.ndarray] = []
+        for i in range(n):
+            pred_u8 = colorize_mask(preds[i].cpu().numpy(), num_classes, ignore_index)
+            ent_u8 = _entropy_to_rgb(entropy[i].cpu().numpy())
+            sep_bar = np.full((sep, w, 3), 40, dtype=np.uint8)
+            col.append(np.concatenate([pred_u8, sep_bar, ent_u8], axis=0))  # (2H+sep, W, 3)
+        frac_panels.append(col)
+
+    # Build rows: left block (H tall) + fraction columns (2H+sep tall) — pad left to match
+    rows: list[np.ndarray] = []
+    frac_col_h = 2 * h + sep
+    for i in range(n):
+        left = left_panels[i]  # (H, 2W, 3)
+        # Pad left block to match fraction column height
+        pad = np.full((frac_col_h - h, 2 * w, 3), 20, dtype=np.uint8)
+        left_padded = np.concatenate([left, pad], axis=0)  # (2H+sep, 2W, 3)
+        frac_cols = [fp[i] for fp in frac_panels]  # each (2H+sep, W, 3)
+        row = np.concatenate([left_padded, *frac_cols], axis=1)
+        rows.append(row)
+
+    grid = np.concatenate(rows, axis=0)
+
+    # Prepend column header row
+    total_w = 2 * w + len(fraction_results) * w
+    num_cols = 2 + len(fraction_results)
+    col_widths = [w, w] + [w] * len(fraction_results)
+    header = _make_variable_header_row(col_widths, col_labels)
+    return np.concatenate([header, grid], axis=0)
+
+
+def _make_variable_header_row(col_widths: list[int], labels: list[str], height: int = 24) -> np.ndarray:
+    """Return a header banner with per-column widths."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as e:
+        raise ImportError(
+            "Pillow is required for segmentation visualization. "
+            "Install it with: pip install torchgeo-bench[viz]"
+        ) from e
+
+    total_w = sum(col_widths)
+    header_pil = Image.new("RGB", (total_w, height), color=(40, 40, 40))
+    draw = ImageDraw.Draw(header_pil)
+    x_offset = 0
+    for cw, label in zip(col_widths, labels):
+        bbox = draw.textbbox((0, 0), label)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        x = x_offset + cw // 2 - tw // 2
+        y = height // 2 - th // 2
+        draw.text((x, y), label, fill=(220, 220, 220))
+        x_offset += cw
+    return np.asarray(header_pil)
+
+
 def save_segmentation_viz(
     out_dir: str,
     model_name: str,

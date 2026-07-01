@@ -1,0 +1,44 @@
+defaults:
+  - model: ???
+  - _self_
+
+seed: 42
+device: cuda
+verbose: false
+resume: true
+
+output: results/seg_corruption_results.csv
+
+dataset:
+  names: [cloudsen12, fotw, dynamic_earthnet, flair2, spacenet2, spacenet7]
+  partition: default
+  batch_size: 32
+  num_workers: 4
+  normalization: bandspec_zscore
+  bands: rgb
+  image_size: 224
+  interpolation: bilinear
+
+corruption:
+  types: [clean, poisson_gaussian, motion_blur]
+  severities: [1, 2, 3, 4, 5]
+
+eval:
+  segmentation:
+    layers: []
+    head_type: fpn
+    lr: 1.0e-3
+    weight_decay: 0.0
+    batch_size: 64
+    epochs: 10
+    lr_scheduler: cosine
+    cache_features: true
+    cache_dtype: float16
+    criterion:
+      _target_: torch.nn.CrossEntropyLoss
+      ignore_index: 255
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

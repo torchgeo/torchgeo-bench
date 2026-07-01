@@ -82,14 +82,45 @@ NOISE_SENSOR_CALIBRATIONS: dict[str, _NoiseSensorCalibration] = {
             )
         )
     ),
+    # Aerial (0–255 DN, e.g. FLAIR-2).  Old ladder had a 17× noise jump between
+    # severity 1 and 2 (read_std_frac 0.0018 → 0.1514) that destroyed all models
+    # at sev2+ and made the severity axis uninformative.  New ladder targets a
+    # smooth ~2.7× noise-std increase per step (measured on real FLAIR-2 images):
+    #   sev1≈2.7 DN  sev2≈7.3 DN  sev3≈17.5 DN  sev4≈37 DN  sev5≈64 DN (SNR ~32→1.4).
     "aerial": _NoiseSensorCalibration(
         severity_presets=_build_noise_severity_presets(
             (
-                (3600.0, 0.0018),
-                (826.47, 0.15135),
-                (189.74, 0.30090),
-                (43.56, 0.45045),
-                (10.0, 0.60000),
+                (4000.0, 0.005),
+                (800.0,  0.020),
+                (200.0,  0.055),
+                (60.0,   0.130),
+                (20.0,   0.260),
+            )
+        )
+    ),
+    # PlanetScope DN range ~10–10051 (~39× aerial 0–255 range).
+    # Photon counts scaled proportionally; read noise kept low (shot-noise dominant).
+    "planet": _NoiseSensorCalibration(
+        severity_presets=_build_noise_severity_presets(
+            (
+                (140000.0, 0.0018),
+                (32000.0, 0.0600),
+                (7400.0, 0.1200),
+                (1700.0, 0.1800),
+                (390.0, 0.2400),
+            )
+        )
+    ),
+    # WorldView DN range ~0–2047 (~8× aerial 0–255 range).
+    # Photon counts scaled proportionally from aerial presets.
+    "worldview": _NoiseSensorCalibration(
+        severity_presets=_build_noise_severity_presets(
+            (
+                (28800.0, 0.0018),
+                (6600.0, 0.0750),
+                (1520.0, 0.1500),
+                (348.0, 0.2250),
+                (80.0, 0.3000),
             )
         )
     ),

@@ -73,19 +73,32 @@ def _estimate_cache_bytes(cache: "CachedFeaturesDataset") -> int:
     )
 
 
-class GPUTensorCache:
-    """All cached features pre-stacked and moved to GPU as contiguous tensors.
+# GPU memory budget for the feature cache. If the total feature size exceeds
+# this threshold, tensors are kept on CPU and moved per-batch instead of being
+# pre-loaded entirely onto the GPU. 4 GiB leaves headroom for the model and
+# activations on a 40 GiB A100.
+_GPU_CACHE_BUDGET_BYTES = 4 * 1024**3
 
-    Eliminates per-batch CPU→GPU transfers and per-batch ``torch.stack`` calls
-    in the training loop.  Use :meth:`from_cached` to build from a
-    :class:`CachedFeaturesDataset`, then iterate with :meth:`shuffled_batches`
-    (training) or :meth:`ordered_batches` (evaluation).
+
+class GPUTensorCache:
+    """Cached features with optional GPU pre-loading.
+
+    When the total feature size fits within ``_GPU_CACHE_BUDGET_BYTES`` the
+    tensors are moved to the target device once in :meth:`from_cached` and
+    batch iteration is zero-copy. When the cache is too large, tensors stay on
+    CPU and each batch slice is moved to the device on demand — slower but
+    avoids OOM on large datasets (e.g. clay on spacenet2).
+
+    Use :meth:`from_cached` to build from a :class:`CachedFeaturesDataset`,
+    then iterate with :meth:`shuffled_batches` (training) or
+    :meth:`ordered_batches` (evaluation).
 
     Args:
-        layer_tensors: One ``(N, C, H, W)`` float16 tensor per hooked layer,
-            already on the target device.
-        masks: ``(N, H, W)`` long tensor on the target device.
-        device: The device these tensors live on.
+        layer_tensors: One ``(N, C, H, W)`` float16/float32 tensor per hooked
+            layer. May be on CPU or the target device.
+        masks: ``(N, H, W)`` long tensor. May be on CPU or the target device.
+        device: The target compute device.
+        on_device: Whether the tensors are already resident on *device*.
     """
 
     def __init__(
@@ -93,10 +106,12 @@ class GPUTensorCache:
         layer_tensors: list[torch.Tensor],
         masks: torch.Tensor,
         device: torch.device | str,
+        on_device: bool = True,
     ) -> None:
         self.layer_tensors = layer_tensors
         self.masks = masks
-        self.device = device
+        self.device = torch.device(device)
+        self._on_device = on_device
 
     def __len__(self) -> int:
         return self.masks.shape[0]
@@ -107,39 +122,65 @@ class GPUTensorCache:
         cache: "CachedFeaturesDataset",
         device: torch.device | str,
     ) -> "GPUTensorCache":
-        """Stack and move all features + masks to *device* in one shot.
+        """Build a cache, pre-loading to *device* only when memory allows.
 
         Args:
             cache: CPU-resident cached features.
             device: Target device (must be CUDA for the speedup to be useful).
 
         Returns:
-            A :class:`GPUTensorCache` with all data on *device*.
+            A :class:`GPUTensorCache` with tensors on *device* if they fit
+            within the GPU memory budget, otherwise kept on CPU.
         """
         target_device = torch.device(device)
         # Keep float32 on CPU (no autocast); use float16 on CUDA for AMP efficiency.
         dtype = torch.float16 if target_device.type == "cuda" else torch.float32
+
+        cache_bytes = _estimate_cache_bytes(cache)
+        if target_device.type == "cuda" and cache_bytes > _GPU_CACHE_BUDGET_BYTES:
+            cache_gb = cache_bytes / 1024**3
+            logger.info(
+                f"Feature cache ({cache_gb:.1f} GiB) exceeds GPU budget "
+                f"({_GPU_CACHE_BUDGET_BYTES / 1024**3:.0f} GiB); "
+                "keeping tensors on CPU and streaming per batch."
+            )
+            # Cast to target dtype but keep on CPU.
+            layer_tensors = [t.to(dtype=dtype) for t in cache.layer_tensors]
+            masks = cache.masks.to(dtype=torch.long)
+            return cls(layer_tensors, masks, target_device, on_device=False)
+
         layer_tensors = [t.to(target_device, dtype=dtype) for t in cache.layer_tensors]
         masks = cache.masks.to(target_device, dtype=torch.long)
-        return cls(layer_tensors, masks, target_device)
+        return cls(layer_tensors, masks, target_device, on_device=True)
+
+    def _to_device(self, tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+        if self._on_device:
+            return tensors
+        return [t.to(self.device, non_blocking=True) for t in tensors]
+
+    def _masks_to_device(self, masks: torch.Tensor) -> torch.Tensor:
+        if self._on_device:
+            return masks
+        return masks.to(self.device, non_blocking=True)
 
     def shuffled_batches(
         self, batch_size: int
     ) -> Iterator[tuple[list[torch.Tensor], torch.Tensor]]:
-        """Yield *(features, masks)* mini-batches in random order.
-
-        All tensors are already on the GPU — zero host→device transfer per batch.
-        """
-        idx = torch.randperm(len(self), device=self.device)
+        """Yield *(features, masks)* mini-batches in random order."""
+        idx = torch.randperm(len(self))
         for start in range(0, len(self), batch_size):
             b = idx[start : start + batch_size]
-            yield [t[b] for t in self.layer_tensors], self.masks[b]
+            yield self._to_device([t[b] for t in self.layer_tensors]), self._masks_to_device(
+                self.masks[b]
+            )
 
     def ordered_batches(self, batch_size: int) -> Iterator[tuple[list[torch.Tensor], torch.Tensor]]:
         """Yield *(features, masks)* mini-batches in sequential order."""
         for start in range(0, len(self), batch_size):
             s = slice(start, start + batch_size)
-            yield [t[s] for t in self.layer_tensors], self.masks[s]
+            yield self._to_device([t[s] for t in self.layer_tensors]), self._masks_to_device(
+                self.masks[s]
+            )
 
 
 class SegmentationProbe(nn.Module):
@@ -328,6 +369,7 @@ class SegmentationProbe(nn.Module):
         self,
         dataloader: "torch.utils.data.DataLoader",
         cache_dtype: torch.dtype = torch.float16,
+        transform: object | None = None,
     ) -> "CachedFeaturesDataset":
         """Run the frozen backbone once over *dataloader* and cache features.
 
@@ -353,6 +395,9 @@ class SegmentationProbe(nn.Module):
                 masks = batch["mask"]
             else:
                 images, masks = batch[0].to(device), batch[1]
+
+            if transform is not None:
+                images = transform(images)
 
             if masks.ndim == 4:
                 masks = masks.squeeze(1)
