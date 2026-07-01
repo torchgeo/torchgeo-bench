@@ -376,7 +376,9 @@ def test_auto_normalization_default_per_sensor() -> None:
 
     # Landsat (uint8) — 'auto' should pick dataset stats.
     ls = [
-        BandSpec(sensor="landsat", name=n, source_name=n.upper(), mean=80.0, std=20.0, min=0.0, max=255.0)
+        BandSpec(
+            sensor="landsat", name=n, source_name=n.upper(), mean=80.0, std=20.0, min=0.0, max=255.0
+        )
         for n in ("blue", "green", "red", "nir", "swir_1", "swir_2")
     ]
     ls_model = OlmoEarthBenchModel(bands=ls, model_size="nano", normalization="identity")
@@ -388,7 +390,9 @@ def test_auto_normalization_default_per_sensor() -> None:
 
     # S2 (DN) — 'auto' should keep the pretrained normalizer (rescale to DN).
     s2 = [
-        BandSpec(sensor="s2", name=n, source_name=n.upper(), mean=1500.0, std=600.0, min=0.0, max=10000.0)
+        BandSpec(
+            sensor="s2", name=n, source_name=n.upper(), mean=1500.0, std=600.0, min=0.0, max=10000.0
+        )
         for n in ("red", "green", "blue")
     ]
     s2_model = OlmoEarthBenchModel(bands=s2, model_size="nano", normalization="identity")
