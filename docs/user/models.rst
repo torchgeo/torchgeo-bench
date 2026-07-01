@@ -178,11 +178,13 @@ The ``version`` parameter selects the weight family:
    wrappers that declare pretrained input units / statistics, or ``identity``
    when a backbone owns all normalization internally.
 
-   For datasets using Landsat imagery (e.g. ``m-forestnet``), all OlmoEarth
-   configs route Landsat through the Sentinel-2 normalizer via
-   ``sensor_remap: {landsat: landsat_as_s2}``; this is required because
-   GeoBench delivers Landsat as uint8 [0, 255] and the Landsat normalizer
-   expects a different dynamic range.
+   GeoBench delivers Landsat imagery (e.g. ``m-forestnet``) as uint8
+   [0, 255], a scale OlmoEarth's pretrained Landsat statistics (fit on real
+   DN) can't match.  OlmoEarth therefore selects normalization per sensor
+   (``norm_from_pretrained="auto"``, the default): Landsat is normalized with
+   dataset-specific ``BandSpec`` stats while Sentinel-2 / SAR use the
+   pretrained normalizer.  Pass ``model.norm_from_pretrained=true`` (or
+   ``false``) to force one path for all sensors.
 
 .. note::
 

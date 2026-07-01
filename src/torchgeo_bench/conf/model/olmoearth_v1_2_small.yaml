@@ -11,7 +11,5 @@ time_steps: 1
 std_multiplier: 2.0
 normalize: false
 image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
-sensor_remap:
-  landsat: landsat_as_s2
 min_image_size: 64
 name: olmoearth_v1_2_small

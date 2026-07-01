@@ -187,40 +187,6 @@ _MODALITY_INFO: dict[str, dict] = {
             "vh_lee_imag": 1,
         },
     },
-    # Landsat routed through the S2 normalizer.  Wavelengths align well:
-    # B-G-R-NIR-SWIR1-SWIR2 ↔ B02-B03-B04-B08-B11-B12.  Use via
-    # sensor_remap={"landsat": "landsat_as_s2"}.
-    "landsat_as_s2": {
-        "modality_name": "SENTINEL2_L2A",
-        "sample_field": "sentinel2_l2a",
-        "channels": 12,
-        "num_band_sets": 3,
-        "name_to_idx": {
-            "blue": 0,
-            "b2": 0,
-            "green": 1,
-            "b3": 1,
-            "red": 2,
-            "b4": 2,
-            "nir": 3,
-            "b5": 5,
-            "swir_1": 8,
-            "b6": 8,
-            "swir_2": 9,
-            "b7": 9,
-        },
-        # Landsat routed through the S2 layout: present positions are B02/
-        # B03/B04/B08(nir)/B11/B12; impute the S2-only slots from the nearest
-        # present Landsat band. (src, dst) are S2 channel indices.
-        "imputes": [
-            (2, 4),  # B05 RedEdge1  <- red
-            (2, 5),  # B06 RedEdge2  <- red
-            (3, 6),  # B07 RedEdge3  <- nir
-            (3, 7),  # B8A           <- nir
-            (0, 10),  # B01 Coastal  <- blue
-            (3, 11),  # B09 WaterVap <- nir
-        ],
-    },
     # NAIP / aerial: no dedicated OlmoEarth modality, route RGB through
     # the S2 path with non-RGB positions zero-filled.
     "aerial": {
@@ -260,6 +226,14 @@ _SENSOR_INPUT_RES: dict[str, int] = {
 # detect_input_unit returns S2_DN for them, making to_s2_dn a no-op anyway,
 # but being explicit avoids surprises if the heuristic ever changes.
 _PASSTHROUGH_SENSORS: frozenset[str] = frozenset({"sar"})
+
+# Sensors normalized with dataset (BandSpec) stats rather than OlmoEarth's
+# pretrained normalizer when ``norm_from_pretrained="auto"`` (the default).
+# GeoBench Landsat (m-forestnet) ships as uint8 [0, 255], a scale the
+# pretrained Landsat stats (fit on real DN) can't match — so it needs its own
+# stats.  S2/SAR ship values that rescale cleanly to the pretraining range and
+# keep the pretrained normalizer.
+_DATASET_STATS_SENSORS: frozenset[str] = frozenset({"landsat"})
 
 
 def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
@@ -400,13 +374,13 @@ class OlmoEarthBenchModel(BenchModel):
     embeddings.
 
     The wrapper overrides ``normalize_inputs`` to identity and normalizes
-    internally.  With ``norm_from_pretrained=True`` (default) the input scale
-    (DN / reflectance / uint8) is auto-detected per sensor group, rescaled to
-    S2 DN, and passed to OlmoEarth's pretrained per-modality ``Normalizer``
-    (SAR is passed as-is).  With ``norm_from_pretrained=False`` each band is
-    normalized with its own ``BandSpec`` stats instead — use this when the
-    input scale can't be matched to the pretraining range (e.g. GeoBench's
-    uint8 Landsat).
+    internally.  Normalization is chosen per sensor group by
+    ``norm_from_pretrained`` (default ``"auto"``): Sentinel-2 / SAR are
+    rescaled to S2 DN and passed to OlmoEarth's pretrained per-modality
+    ``Normalizer`` (SAR as-is), while Landsat — delivered by GeoBench as uint8
+    that can't be matched to the pretrained Landsat range — is normalized with
+    its own ``BandSpec`` stats.  Pass ``True``/``False`` to force one path for
+    all groups.
 
     ``input_res`` is auto-detected from the primary sensor's GSD: 10 m
     for S2/SAR, 30 m for Landsat.  Pass ``input_res`` explicitly to
@@ -439,20 +413,26 @@ class OlmoEarthBenchModel(BenchModel):
             composites and OlmoEarth's pretraining DN range (~10 000).
             Only applies on the pretrained-normalizer path
             (``norm_from_pretrained=True``).
-        norm_from_pretrained: If True (default), rescale inputs to S2 DN and
-            apply OlmoEarth's pretrained per-modality ``Normalizer`` (correct
-            when the input can be matched to the pretraining scale, e.g. S2).
-            If False, normalize each band with its own ``BandSpec`` mean/std
-            using the same ``±std_multiplier·σ`` no-clip mapping OlmoEarth saw
-            in pretraining — i.e. dataset-specific stats.  This is required
-            when the input scale doesn't match the pretrained normalizer (e.g.
-            GeoBench's uint8 Landsat, where the pretrained Landsat stats assume
-            real DN), and matches helios' ``norm_stats_from_pretrained=False`` /
-            ``NORM_NO_CLIP_2_STD``.  Supersedes ``landsat_scale_factor`` for
-            that case (the DN rescale is skipped entirely).
-        sensor_remap: Optional dict mapping sensor names to alternate
-            routing keys, e.g. ``{"landsat": "landsat_as_s2"}`` to route
-            Landsat bands through the S2 normalizer (+6.6 pp on m-forestnet).
+        norm_from_pretrained: ``"auto"`` (default), ``True`` or ``False``,
+            selecting how each sensor group is normalized:
+
+            * ``True`` — rescale to S2 DN and apply OlmoEarth's pretrained
+              per-modality ``Normalizer`` (correct when the input matches the
+              pretraining scale, e.g. S2/SAR).
+            * ``False`` — normalize each band with its own ``BandSpec``
+              mean/std via the same ``±std_multiplier·σ`` no-clip mapping
+              OlmoEarth saw in pretraining (dataset-specific stats).  Required
+              when the input scale can't match the pretrained normalizer (e.g.
+              GeoBench's uint8 Landsat, whose pretrained stats assume real DN);
+              matches helios' ``norm_stats_from_pretrained=False`` /
+              ``NORM_NO_CLIP_2_STD`` and supersedes ``landsat_scale_factor``
+              (the DN rescale is skipped).
+            * ``"auto"`` — decide per sensor group: dataset stats for sensors
+              in ``_DATASET_STATS_SENSORS`` (Landsat), pretrained for the rest.
+              A single shared config is then correct for both Landsat and S2.
+        sensor_remap: Optional dict mapping sensor names to alternate routing
+            keys before modality resolution, e.g. ``{"landsat": "aerial"}`` to
+            route Landsat RGB+NIR through the aerial/S2 path.
         min_image_size: If set, upsample inputs smaller than this value
             to ``min_image_size × min_image_size`` via bilinear interpolation.
             Useful for datasets with small native images (e.g. m-so2sat at
@@ -472,7 +452,7 @@ class OlmoEarthBenchModel(BenchModel):
         normalize: bool = False,
         sar_log_scale: bool = False,
         landsat_scale_factor: float | None = None,
-        norm_from_pretrained: bool = True,
+        norm_from_pretrained: bool | Literal["auto"] = "auto",
         sensor_remap: dict[str, str] | None = None,
         min_image_size: int | None = None,
         **_kwargs,
@@ -637,7 +617,15 @@ class OlmoEarthBenchModel(BenchModel):
             # Extract this sensor's channels from the full input tensor.
             g_images = images[:, group["src_indices"]]  # (B, Csensor, H, W)
 
-            if self.norm_from_pretrained:
+            # Pick the normalization path for this sensor group.  "auto" uses
+            # dataset stats for uint8-scale sensors (Landsat) and the pretrained
+            # normalizer for the rest (S2/SAR); True/False force one path.
+            if self.norm_from_pretrained == "auto":
+                use_pretrained = group["sensor"] not in _DATASET_STATS_SENSORS
+            else:
+                use_pretrained = self.norm_from_pretrained
+
+            if use_pretrained:
                 # Rescale to S2 DN unless the sensor is a passthrough type, then
                 # apply OlmoEarth's pretrained per-modality Normalizer.
                 input_unit = group["input_unit"]

@@ -12,7 +12,5 @@ time_steps: 1
 std_multiplier: 2.0
 normalize: false
 image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
-sensor_remap:
-  landsat: landsat_as_s2  # route Landsat through S2 normalizer (+6.6pp on m-forestnet)
 min_image_size: 64  # upsample 32-px datasets (e.g. m-so2sat) for denser patch grids
 name: olmoearth_v1_large

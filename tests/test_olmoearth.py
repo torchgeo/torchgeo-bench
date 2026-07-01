@@ -367,6 +367,40 @@ def test_landsat_dataset_stats_normalization() -> None:
 
 
 @requires_olmoearth
+def test_auto_normalization_default_per_sensor() -> None:
+    """Default norm_from_pretrained='auto' routes Landsat to dataset stats and
+    S2 to the pretrained normalizer, so one shared config is correct for both.
+    Both must produce finite embeddings without an explicit override."""
+    from torchgeo_bench.models._input_units import InputUnit
+    from torchgeo_bench.models.olmoearth import _DATASET_STATS_SENSORS, OlmoEarthBenchModel
+
+    # Landsat (uint8) — 'auto' should pick dataset stats.
+    ls = [
+        BandSpec(sensor="landsat", name=n, source_name=n.upper(), mean=80.0, std=20.0, min=0.0, max=255.0)
+        for n in ("blue", "green", "red", "nir", "swir_1", "swir_2")
+    ]
+    ls_model = OlmoEarthBenchModel(bands=ls, model_size="nano", normalization="identity")
+    assert ls_model.norm_from_pretrained == "auto"  # default
+    assert ls_model._sensor_groups[0]["sensor"] in _DATASET_STATS_SENSORS
+    ls_model.eval()
+    ls_out = ls_model.forward_patch_features(torch.rand(2, 6, 64, 64) * 200.0)
+    assert ls_out.shape == (2, EXPECTED_DIM["nano"]) and torch.isfinite(ls_out).all()
+
+    # S2 (DN) — 'auto' should keep the pretrained normalizer (rescale to DN).
+    s2 = [
+        BandSpec(sensor="s2", name=n, source_name=n.upper(), mean=1500.0, std=600.0, min=0.0, max=10000.0)
+        for n in ("red", "green", "blue")
+    ]
+    s2_model = OlmoEarthBenchModel(bands=s2, model_size="nano", normalization="identity")
+    assert s2_model._sensor_groups[0]["sensor"] not in _DATASET_STATS_SENSORS
+    s2_model.eval()
+    s2_out = s2_model.forward_patch_features(torch.rand(2, 3, 64, 64) * 3000.0)
+    assert s2_out.shape == (2, EXPECTED_DIM["nano"]) and torch.isfinite(s2_out).all()
+    # sanity: input-unit detection still runs on the S2 (pretrained) path
+    assert s2_model._sensor_groups[0]["input_unit"] == InputUnit.S2_DN
+
+
+@requires_olmoearth
 @pytest.mark.parametrize("size", ["nano", "small"])
 def test_v1_2_variants_forward_pass(size: str) -> None:
     """OlmoEarth v1.2 (Nano/Tiny/Small/Base) must load and run; Small is the
