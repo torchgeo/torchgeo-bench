@@ -95,7 +95,7 @@ optional-dependencies.id = [
   "torchid>=0.3; python_version>='3.13'",
 ]
 optional-dependencies.olmoearth = [
-  "olmoearth-pretrain-minimal>=0.0.5",
+  "olmoearth-pretrain-minimal>=0.0.6",  # 0.0.6 adds OlmoEarth v1.2 (ModelID.OLMOEARTH_V1_2_*)
 ]
 optional-dependencies.sam3 = [
   "transformers>=4.50",
