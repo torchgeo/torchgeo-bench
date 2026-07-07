@@ -374,6 +374,73 @@ def plot_tau_vs_fraction(
     return path
 
 
+def tau_seed_band(
+    df_raw: pd.DataFrame, metric: str, fractions: list[float], models: list[str]
+) -> pd.DataFrame:
+    """Per-seed aggregate tau (vs. full-data ranking), then mean/std across seeds.
+
+    df_raw must NOT be seed-averaged (unlike everywhere else in this script) --
+    call tau_vs_reference once per seed so the across-seed spread of the
+    *aggregate* tau curve is visible, distinct from the existing per-dataset
+    spread already shown by plot_tau_vs_fraction.
+    """
+    seeds = sorted(df_raw["seed"].unique())
+    rows = []
+    for s in seeds:
+        df_s = df_raw[df_raw["seed"] == s]
+        tau_df = tau_vs_reference(df_s, metric, fractions, models)
+        for _, r in tau_df.iterrows():
+            rows.append({"seed": s, "fraction": r["fraction"], "tau_aggregate": r["tau_aggregate"]})
+    per_seed = pd.DataFrame(rows)
+    band = per_seed.groupby("fraction")["tau_aggregate"].agg(["mean", "std"]).reset_index()
+    band.columns = ["fraction", "tau_mean", "tau_std"]
+    return band
+
+
+def plot_tau_vs_fraction_band(
+    tau_df: pd.DataFrame, band_df: pd.DataFrame, task: str, metric: str, out_dir: Path,
+    xscale: str, n_seeds: int
+) -> Path:
+    """Clean line plot: the official aggregate tau (computed on seed-averaged
+    data, matching every tau number already reported in the paper text) with
+    a +/-1 std band showing the spread of per-seed aggregate tau around it.
+
+    Note the two are NOT the same quantity -- Kendall tau is nonlinear, so
+    tau-of-the-mean != mean-of-tau. We plot the official tau-of-the-mean line
+    (so this figure's line matches the paper's existing prose numbers exactly)
+    and use the per-seed values only for the band width, centered on that line.
+
+    Also overlays the per-dataset tau lines (thin, from tau_df's tau[dataset]
+    columns) underneath the aggregate+band, same as plot_tau_vs_fraction --
+    unlike the crowded per-model figures (Fig 13/15), this is only 4-6 lines
+    (one per dataset), so it stays readable while keeping the seed-noise band.
+    """
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    t = tau_df.sort_values("fraction")
+    b = band_df.sort_values("fraction")
+    x = t["fraction"].to_numpy()
+    line = t["tau_aggregate"].to_numpy()
+    std = b.set_index("fraction").reindex(t["fraction"])["tau_std"].fillna(0.0).to_numpy()
+    for col in t.columns:
+        if col.startswith("tau[") and col.endswith("]"):
+            ax.plot(x, t[col], marker=".", lw=0.9, alpha=0.55, label=col[4:-1])
+    ax.fill_between(x, line - std, line + std, color="k", alpha=0.15,
+                     label=f"$\\pm$1 std across {n_seeds} seeds")
+    ax.plot(x, line, marker="o", lw=2.2, color="k", label="aggregate")
+    style_fraction_axis(ax, t["fraction"].tolist(), xscale)
+    ax.set_ylabel("Kendall tau vs. full data")
+    ax.set_ylim(-1.05, 1.05)
+    ax.axhline(1.0, ls=":", c="grey", alpha=0.5)
+    ax.set_title(f"Rank stability — {task} / {metric}", fontsize=10)
+    ax.grid(True, ls=":", alpha=0.4)
+    ax.legend(fontsize=7, ncol=2)
+    fig.tight_layout()
+    path = out_dir / f"tau_vs_fraction_{TASK_SLUG[task]}_{metric}_band.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
 def plot_tau_matrix(
     df: pd.DataFrame, task: str, metric: str, fractions: list[float], models: list[str], out_dir: Path
 ) -> Path:
@@ -413,7 +480,8 @@ def plot_tau_matrix(
 
 
 def analyze_task(
-    df_task: pd.DataFrame, task: str, out_dir: Path, x_mode: str, xscale: str
+    df_task: pd.DataFrame, df_task_raw: pd.DataFrame, task: str, out_dir: Path, x_mode: str,
+    xscale: str
 ) -> list[str]:
     """Run all analyses for one task; return markdown blocks for summary.md."""
     slug = TASK_SLUG[task]
@@ -447,10 +515,15 @@ def analyze_task(
         tau_png = plot_tau_vs_fraction(tau_df, task, metric, out_dir, xscale)
         mat_png = plot_tau_matrix(df_task, task, metric, fractions, models, out_dir)
 
+        n_seeds = df_task_raw["seed"].nunique()
+        band_df = tau_seed_band(df_task_raw, metric, fractions, models)
+        band_df.to_csv(out_dir / f"tau_vs_fraction_{slug}_{metric}_band.csv", index=False)
+        band_png = plot_tau_vs_fraction_band(tau_df, band_df, task, metric, out_dir, xscale, n_seeds)
+
         md.append(f"### {metric}\n")
         md.append("Aggregate rank (rank 1 = best) by fraction:\n")
         md.append(df_to_md(rt) + "\n")
-        md.append(f"![tau]({tau_png.name}) ![tau matrix]({mat_png.name})\n")
+        md.append(f"![tau]({tau_png.name}) ![tau matrix]({mat_png.name}) ![tau band]({band_png.name})\n")
 
     return md
 
@@ -471,15 +544,16 @@ def main() -> None:
         raise SystemExit(f"CSV not found: {args.csv}")
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = load(args.csv)
-    df = seed_mean(df)
+    df_raw = load(args.csv)
+    df = seed_mean(df_raw)
 
     summary: list[str] = ["# Sample-size sweep analysis\n", f"Source: `{args.csv}`\n"]
     for task in ("classification", "segmentation"):
         df_task = df[df["metric_name"].isin(TASK_METRICS[task])]
+        df_task_raw = df_raw[df_raw["metric_name"].isin(TASK_METRICS[task])]
         if df_task.empty:
             continue
-        summary += analyze_task(df_task, task, args.out_dir, args.x, args.xscale)
+        summary += analyze_task(df_task, df_task_raw, task, args.out_dir, args.x, args.xscale)
 
     (args.out_dir / "summary.md").write_text("\n".join(summary))
     print(f"Wrote figures and summary to {args.out_dir}")

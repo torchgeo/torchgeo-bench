@@ -520,7 +520,6 @@ def _run_uq_block(
         }
         if trace_ctx and bool(trace_ctx.get("include_conformal", False)):
             trace_block_key = build_trace_block_key(
-                run_id=str(trace_ctx["run_id"]),
                 common_meta=common_meta,
                 uq_method=method_name,
                 corruption_type=corruption_type,
@@ -565,7 +564,6 @@ def _run_uq_block(
         }
         if trace_ctx:
             trace_block_key = build_trace_block_key(
-                run_id=str(trace_ctx["run_id"]),
                 common_meta=common_meta,
                 uq_method=method_name,
                 corruption_type=corruption_type,
@@ -1003,7 +1001,6 @@ def main(cfg: DictConfig) -> None:
                     if cfg.resume and key in completed:
                         if trace_ctx:
                             trace_block_key = build_trace_block_key(
-                                run_id=str(trace_ctx["run_id"]),
                                 common_meta=common_meta,
                                 uq_method=str(method_name),
                                 corruption_type=str(corruption_type),
