@@ -21,6 +21,7 @@ and models, and interpreting the results.
    configuration
    results-format
    results-explorer
+   ranking_explorer
    methodology
    segmentation-layers
 
