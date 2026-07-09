@@ -6,6 +6,7 @@ in ``test_geofm_cka_prototypes_smoke.py``. Tests that need evaluma skip
 gracefully when it is not installed.
 """
 
+import json
 import re
 import subprocess
 import sys
@@ -24,28 +25,49 @@ import regen_leaderboard as rl  # noqa: E402
 SINGLE_LABEL = ["m-eurosat", "m-so2sat", "m-pv4ger"]  # metric accuracy
 MULTI_LABEL = ["m-bigearthnet", "treesatai"]  # metric micro_mAP
 DATASETS = SINGLE_LABEL + MULTI_LABEL
+NORMALIZATIONS = ("bandspec_zscore", "model_native")
 
-# base quality per model; higher = better. baselines sit at the bottom.
+# Base quality per model; higher = better. Baselines sit at the bottom.
 BASE_SCORE = {"good": 0.90, "mid": 0.80, "low": 0.70, "rcf": 0.45, "imagestats": 0.40}
 CLS_MODELS = {"good", "mid", "low"}
 MS_BANDS_A = "blue,green,red,nir,swir_1,swir_2"
-MS_BANDS_B = "b02,b03,b04,b08,b05,b06"
+
+# Make the normalization axis materially reorder the board.
+NORM_OFFSET = {
+    "bandspec_zscore": {"good": 0.03, "mid": 0.00, "low": -0.01, "rcf": 0.00, "imagestats": 0.00},
+    "model_native": {"good": -0.04, "mid": 0.05, "low": 0.01, "rcf": 0.00, "imagestats": 0.00},
+}
 
 
 def _metric_for(dataset: str) -> str:
     return "accuracy" if dataset in SINGLE_LABEL else "micro_mAP"
 
 
-def _score(base: str, dataset: str, probe: str, bandclass: str, pooling: str) -> float:
+def _score(
+    base: str,
+    dataset: str,
+    probe: str,
+    bandclass: str,
+    pooling: str,
+    normalization: str,
+) -> float:
     s = BASE_SCORE[base]
     s += 0.0 if probe == "linear" else -0.03
     s += 0.02 if bandclass == "Multispectral" else 0.0
     s += -0.01 if pooling == "cls-token" else 0.0
+    s += NORM_OFFSET[normalization][base]
     s += 0.001 * DATASETS.index(dataset)  # deterministic per-dataset jitter
     return round(s, 4)
 
 
-def _row(name: str, dataset: str, probe: str, bands: str, score: float) -> dict[str, object]:
+def _row(
+    name: str,
+    dataset: str,
+    probe: str,
+    bands: str,
+    score: float,
+    normalization: str,
+) -> dict[str, object]:
     return {
         "name": name,
         "dataset": dataset,
@@ -53,6 +75,7 @@ def _row(name: str, dataset: str, probe: str, bands: str, score: float) -> dict[
         "metric_name": _metric_for(dataset),
         "metric_value": score,
         "bands": bands,
+        "normalization": normalization,
     }
 
 
@@ -61,88 +84,117 @@ def _raw_rows() -> list[dict[str, object]]:
     for base in BASE_SCORE:
         for dataset in DATASETS:
             for probe in ("linear", "knn5"):
-                # patch-mean RGB + Multispectral
-                rows.append(
-                    _row(
-                        base,
-                        dataset,
-                        probe,
-                        "rgb",
-                        _score(base, dataset, probe, "RGB", "patch-mean"),
-                    )
-                )
-                rows.append(
-                    _row(
-                        base,
-                        dataset,
-                        probe,
-                        MS_BANDS_A,
-                        _score(base, dataset, probe, "Multispectral", "patch-mean"),
-                    )
-                )
-                # cls-token readout for dual-readout backbones
-                if base in CLS_MODELS:
+                for normalization in NORMALIZATIONS:
                     rows.append(
                         _row(
-                            f"{base}_cls",
+                            base,
                             dataset,
                             probe,
                             "rgb",
-                            _score(base, dataset, probe, "RGB", "cls-token"),
+                            _score(base, dataset, probe, "RGB", "patch-mean", normalization),
+                            normalization,
                         )
                     )
                     rows.append(
                         _row(
-                            f"{base}_cls",
+                            base,
                             dataset,
                             probe,
                             MS_BANDS_A,
-                            _score(base, dataset, probe, "Multispectral", "cls-token"),
+                            _score(
+                                base,
+                                dataset,
+                                probe,
+                                "Multispectral",
+                                "patch-mean",
+                                normalization,
+                            ),
+                            normalization,
                         )
                     )
+                    if base in CLS_MODELS:
+                        rows.append(
+                            _row(
+                                f"{base}_cls",
+                                dataset,
+                                probe,
+                                "rgb",
+                                _score(base, dataset, probe, "RGB", "cls-token", normalization),
+                                normalization,
+                            )
+                        )
+                        rows.append(
+                            _row(
+                                f"{base}_cls",
+                                dataset,
+                                probe,
+                                MS_BANDS_A,
+                                _score(
+                                    base,
+                                    dataset,
+                                    probe,
+                                    "Multispectral",
+                                    "cls-token",
+                                    normalization,
+                                ),
+                                normalization,
+                            )
+                        )
 
-    # a second Multispectral band-list row for one cell (max-collapse fixture):
-    # higher score, should win the collapse.
-    rows.append(_row("good", "m-eurosat", "linear", MS_BANDS_B, 0.99))
-
-    # a probe-asymmetric model: complete under RGB/linear/patch-mean but with no
+    # A probe-asymmetric model: complete under RGB/linear/patch-mean but with no
     # knn5 rows, so the probe-axis intersection is strictly smaller than the
     # linear roster.
     for dataset in DATASETS:
-        rows.append(
-            _row(
-                "lin_only",
-                dataset,
-                "linear",
-                "rgb",
-                _score("mid", dataset, "linear", "RGB", "patch-mean"),
+        for normalization in NORMALIZATIONS:
+            rows.append(
+                _row(
+                    "lin_only",
+                    dataset,
+                    "linear",
+                    "rgb",
+                    _score("mid", dataset, "linear", "RGB", "patch-mean", normalization),
+                    normalization,
+                )
             )
-        )
 
     # OlmoEarth-style single-dataset ablation rows — must be dropped.
     for suffix in ("model_lsat_x100", "model_naip_rgb", "model_sar_db"):
-        rows.append(_row(suffix, "m-eurosat", "linear", "rgb", 0.5))
+        rows.append(
+            _row(suffix, "m-eurosat", "linear", "rgb", 0.5, "bandspec_zscore")
+        )
 
-    # a partial-coverage model: present in every RGB linear patch-mean dataset
+    # A partial-coverage model: present in every RGB linear patch-mean dataset
     # except one — should be excluded from that slice, not seated.
     for dataset in DATASETS:
         if dataset == "treesatai":
             continue
-        rows.append(
-            _row(
-                "partial",
-                dataset,
-                "linear",
-                "rgb",
-                _score("mid", dataset, "linear", "RGB", "patch-mean"),
+        for normalization in NORMALIZATIONS:
+            rows.append(
+                _row(
+                    "partial",
+                    dataset,
+                    "linear",
+                    "rgb",
+                    _score("mid", dataset, "linear", "RGB", "patch-mean", normalization),
+                    normalization,
+                )
             )
-        )
 
     return rows
 
 
 def _raw_df() -> pd.DataFrame:
     return pd.DataFrame(_raw_rows())
+
+
+def _axes() -> dict[str, tuple[str, str, str]]:
+    return rl.sensitivity_axes(list(NORMALIZATIONS))
+
+
+def _slice_block(rankings: dict, slice_key: dict) -> dict:
+    return rankings[slice_key["task"]][slice_key["probe"]][slice_key["bandclass"]][
+        slice_key["pooling"]
+    ][slice_key["normalization"]]
 
 
 # --- Slice 1 tests ---------------------------------------------------------
@@ -167,9 +219,13 @@ def test_derives_pooling_and_base_model():
 def test_derives_bandclass():
     out = rl.harmonize(_raw_df())
     assert set(out["bandclass"].unique()) == {"RGB", "Multispectral"}
-    # only bands == "rgb" maps to RGB
     rgb = out[out["bandclass"] == "RGB"]
     assert not rgb.empty
+
+
+def test_harmonize_keeps_normalization_axis():
+    out = rl.harmonize(_raw_df())
+    assert set(out["normalization"].unique()) == set(NORMALIZATIONS)
 
 
 def test_canonical_metric_map():
@@ -177,17 +233,23 @@ def test_canonical_metric_map():
     assert set(out["metric"].unique()) == {"accuracy", "map"}
 
 
-def test_max_score_per_cell():
+def test_does_not_collapse_across_normalization():
     out = rl.harmonize(_raw_df())
     cell = out[
         (out["base_model"] == "good")
         & (out["dataset"] == "m-eurosat")
         & (out["probe"] == "linear")
-        & (out["bandclass"] == "Multispectral")
+        & (out["bandclass"] == "RGB")
         & (out["pooling"] == "patch-mean")
     ]
-    assert len(cell) == 1
-    assert cell["score"].iloc[0] == pytest.approx(0.99)
+    assert len(cell) == 2
+    by_norm = {row.normalization: row.score for row in cell.itertuples(index=False)}
+    assert by_norm["bandspec_zscore"] == pytest.approx(
+        _score("good", "m-eurosat", "linear", "RGB", "patch-mean", "bandspec_zscore")
+    )
+    assert by_norm["model_native"] == pytest.approx(
+        _score("good", "m-eurosat", "linear", "RGB", "patch-mean", "model_native")
+    )
 
 
 def test_model_meta_resolver():
@@ -211,6 +273,7 @@ def _params_row(name: str, value: float) -> dict[str, object]:
         "metric_name": "params_m",
         "metric_value": value,
         "bands": "rgb",
+        "normalization": "bandspec_zscore",
     }
 
 
@@ -227,7 +290,7 @@ def test_extract_params_collapses_strips_cls_and_drops_ablations():
     params = rl.extract_params(raw)
     assert params["good"] == pytest.approx(304.3)
     assert params["rcf"] == pytest.approx(0.0)
-    assert not any("_lsat_" in m for m in params)
+    assert not any("_lsat_" in model for model in params)
     assert "good_cls" not in params
 
 
@@ -240,9 +303,10 @@ def test_model_meta_carries_params_m():
     )
     harmonized = rl.harmonize(raw)
     params = rl.extract_params(raw)
-    _r, _s, meta, _d = rl.assemble(harmonized, n_bootstrap=50, params=params)
+    _rankings, _sensitivity, meta, _default = rl.assemble(
+        harmonized, n_bootstrap=50, params=params, random_state=0
+    )
     assert meta["good"]["params_m"] == pytest.approx(304.3)
-    # a seated model with no recorded params row stays None (renders as em-dash)
     assert meta["low"]["params_m"] is None
 
 
@@ -253,6 +317,7 @@ DEFAULT_SLICE_KEY = {
     "probe": "linear",
     "bandclass": "RGB",
     "pooling": "patch-mean",
+    "normalization": "bandspec_zscore",
 }
 
 
@@ -260,6 +325,7 @@ def test_build_slice_complete_matrix():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
     bench, _excluded = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
+    assert bench is not None
     scores = bench.scores_
     assert not scores.isna().to_numpy().any()
     assert set(bench.datasets_) == set(DATASETS)
@@ -269,6 +335,7 @@ def test_build_slice_records_excluded():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
     bench, excluded = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
+    assert bench is not None
     assert "partial" not in set(bench.models_)
     entry = next(e for e in excluded if e["model"] == "partial")
     assert entry["n_tasks"] == len(DATASETS) - 1
@@ -278,7 +345,50 @@ def test_build_slice_keeps_baselines():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
     bench, _excluded = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
+    assert bench is not None
     assert {"rcf", "imagestats"}.issubset(set(bench.models_))
+
+
+def test_build_slice_uses_requested_normalization():
+    pytest.importorskip("evaluma")
+    harmonized = rl.harmonize(_raw_df())
+    bench_z, _ = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
+    bench_native, _ = rl.build_slice(
+        harmonized, **{**DEFAULT_SLICE_KEY, "normalization": "model_native"}
+    )
+    assert bench_z is not None and bench_native is not None
+    assert bench_z._raw.loc["good", "m-eurosat"] == pytest.approx(
+        _score("good", "m-eurosat", "linear", "RGB", "patch-mean", "bandspec_zscore")
+    )
+    assert bench_native._raw.loc["good", "m-eurosat"] == pytest.approx(
+        _score("good", "m-eurosat", "linear", "RGB", "patch-mean", "model_native")
+    )
+    assert bench_z._raw.loc["good", "m-eurosat"] != bench_native._raw.loc["good", "m-eurosat"]
+
+
+def test_build_slice_rejects_duplicate_seated_cells():
+    pytest.importorskip("evaluma")
+    raw = pd.concat(
+        [
+            _raw_df(),
+            pd.DataFrame(
+                [
+                    _row(
+                        "good",
+                        "m-eurosat",
+                        "linear",
+                        "rgb",
+                        0.1234,
+                        "bandspec_zscore",
+                    )
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    harmonized = rl.harmonize(raw)
+    with pytest.raises(ValueError, match="Duplicate seated leaderboard cells"):
+        rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
 
 
 def _bench_from_scores(score_map: dict[str, dict[str, float]], metric: str = "accuracy"):
@@ -308,18 +418,18 @@ def test_avg_rank_values():
         }
     )
     ranked = rl.avg_rank(bench)
-    # d1 ranks: a=1,b=2,c=3 ; d2 ranks: b=1,c=2,a=3 -> means a=2.0,b=1.5,c=2.5
-    by_model = {r["model"]: r["overall"] for r in ranked}
+    by_model = {row["model"]: row["overall"] for row in ranked}
     assert by_model["a"] == pytest.approx(2.0)
     assert by_model["b"] == pytest.approx(1.5)
     assert by_model["c"] == pytest.approx(2.5)
-    assert [r["model"] for r in ranked] == ["b", "a", "c"]  # ascending, best first
+    assert [row["model"] for row in ranked] == ["b", "a", "c"]
 
 
 def test_avg_rank_baselines_bottom():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
     bench, _excluded = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
+    assert bench is not None
     ranked = rl.avg_rank(bench)
     bottom = {ranked[-1]["model"], ranked[-2]["model"]}
     assert bottom == {"rcf", "imagestats"}
@@ -332,19 +442,31 @@ def test_elo_table_shape():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
     bench, _excluded = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
-    ranked = rl.elo(bench, n_bootstrap=200)
-    overalls = [r["overall"] for r in ranked]
-    assert overalls == sorted(overalls, reverse=True)  # ELO descending
-    for r in ranked:
-        low, high = r["overall_ci"]
-        assert low <= r["overall"] <= high
+    assert bench is not None
+    ranked = rl.elo(bench, n_bootstrap=200, random_state=123)
+    overalls = [row["overall"] for row in ranked]
+    assert overalls == sorted(overalls, reverse=True)
+    for row in ranked:
+        low, high = row["overall_ci"]
+        assert low <= row["overall"] <= high
+
+
+def test_elo_bootstrap_is_seeded():
+    pytest.importorskip("evaluma")
+    harmonized = rl.harmonize(_raw_df())
+    bench, _excluded = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
+    assert bench is not None
+    a = rl.elo(bench, n_bootstrap=200, random_state=7)
+    b = rl.elo(bench, n_bootstrap=200, random_state=7)
+    assert a == b
 
 
 def test_elo_baselines_bottom():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
     bench, _excluded = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
-    ranked = rl.elo(bench, n_bootstrap=200)
+    assert bench is not None
+    ranked = rl.elo(bench, n_bootstrap=200, random_state=123)
     bottom = {ranked[-1]["model"], ranked[-2]["model"]}
     assert bottom == {"rcf", "imagestats"}
 
@@ -356,15 +478,15 @@ def test_improvability_best_is_zero():
     pytest.importorskip("evaluma")
     bench = _bench_from_scores(
         {
-            "a": {"d1": 0.90, "d2": 0.90},  # best on both datasets
+            "a": {"d1": 0.90, "d2": 0.90},
             "b": {"d1": 0.80, "d2": 0.70},
             "c": {"d1": 0.70, "d2": 0.60},
         }
     )
     ranked = rl.improvability(bench)
-    by_model = {r["model"]: r["overall"] for r in ranked}
+    by_model = {row["model"]: row["overall"] for row in ranked}
     assert by_model["a"] == pytest.approx(0.0)
-    assert ranked[0]["model"] == "a"  # ascending, 0 = best
+    assert ranked[0]["model"] == "a"
 
 
 def test_improvability_metric_mapping():
@@ -380,14 +502,15 @@ def test_improvability_metric_mapping():
         ]
     )
     bench = evaluma.load_df(frame, metric_type_bounds=rl.METRIC_BOUNDS, drop_incomplete=True)
-    ranked = rl.improvability(bench)  # must not raise on the mixed metrics
-    assert {r["model"] for r in ranked} == {"a", "b"}
+    ranked = rl.improvability(bench)
+    assert {row["model"] for row in ranked} == {"a", "b"}
 
 
 def test_improvability_baselines_bottom():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
     bench, _excluded = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
+    assert bench is not None
     ranked = rl.improvability(bench)
     bottom = {ranked[-1]["model"], ranked[-2]["model"]}
     assert bottom == {"rcf", "imagestats"}
@@ -401,20 +524,32 @@ def test_sensitivity_intersection():
     harmonized = rl.harmonize(_raw_df())
     bench_lin, _ = rl.build_slice(harmonized, **DEFAULT_SLICE_KEY)
     bench_knn, _ = rl.build_slice(harmonized, **{**DEFAULT_SLICE_KEY, "probe": "knn5"})
+    assert bench_lin is not None and bench_knn is not None
     exp_models = set(bench_lin.models_) & set(bench_knn.models_)
     exp_datasets = set(bench_lin.datasets_) & set(bench_knn.datasets_)
 
-    sens = rl.axis_sensitivity(harmonized, DEFAULT_SLICE_KEY, axis="probe", aggregation="avg_rank")
+    sens = rl.axis_sensitivity(
+        harmonized,
+        DEFAULT_SLICE_KEY,
+        axis="probe",
+        aggregation="avg_rank",
+        axes=_axes(),
+    )
     assert sens["n_models"] == len(exp_models)
     assert sens["n_datasets"] == len(exp_datasets)
-    # intersection is strictly smaller than the (larger) linear roster
     assert sens["n_models"] < max(len(bench_lin.models_), len(bench_knn.models_))
 
 
 def test_sensitivity_tau_range():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
-    sens = rl.axis_sensitivity(harmonized, DEFAULT_SLICE_KEY, axis="probe", aggregation="avg_rank")
+    sens = rl.axis_sensitivity(
+        harmonized,
+        DEFAULT_SLICE_KEY,
+        axis="probe",
+        aggregation="avg_rank",
+        axes=_axes(),
+    )
     assert -1.0 <= sens["tau"] <= 1.0
     assert (sens["cond_a"], sens["cond_b"]) == ("linear", "knn5")
 
@@ -422,20 +557,32 @@ def test_sensitivity_tau_range():
 def test_sensitivity_identical_flip():
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
-    # pooling flip on the RGB slice: patch-mean vs cls-token share good/mid/low
-    # with the same ordering -> tau == 1.0 on a tiny (small-N) intersection.
     sens = rl.axis_sensitivity(
-        harmonized, DEFAULT_SLICE_KEY, axis="pooling", aggregation="avg_rank"
+        harmonized,
+        DEFAULT_SLICE_KEY,
+        axis="pooling",
+        aggregation="avg_rank",
+        axes=_axes(),
     )
     assert sens["tau"] == pytest.approx(1.0)
     assert sens["small_n"] is True
 
 
+def test_sensitivity_normalization_axis_present():
+    pytest.importorskip("evaluma")
+    harmonized = rl.harmonize(_raw_df())
+    sens = rl.axis_sensitivity(
+        harmonized,
+        DEFAULT_SLICE_KEY,
+        axis="normalization",
+        aggregation="avg_rank",
+        axes=_axes(),
+    )
+    assert (sens["cond_a"], sens["cond_b"]) == NORMALIZATIONS
+    assert sens["tau"] is not None
+
+
 def test_avg_rank_ranker_matches_regen():
-    # Open-Questions guard: evaluma's "avg_rank" ranker (drives SENSITIVITY) and
-    # the script's own avg_rank (drives RANKINGS rows) must agree on ordering, or
-    # the tau panel and the table tell different stories. Tie-free fixture so the
-    # ordering is unambiguous.
     pytest.importorskip("evaluma")
     bench = _bench_from_scores(
         {
@@ -444,7 +591,7 @@ def test_avg_rank_ranker_matches_regen():
             "c": {"d1": 0.7, "d2": 0.7},
         }
     )
-    order_regen = [r["model"] for r in rl.avg_rank(bench)]
+    order_regen = [row["model"] for row in rl.avg_rank(bench)]
     ranker = bench._rank_vector("avg_rank")
     order_evaluma = ranker.sort_values(kind="stable").index.tolist()
     assert order_regen == order_evaluma
@@ -469,14 +616,12 @@ def assembled():
     """Assemble the full ranking cube once (small bootstrap) and share it."""
     pytest.importorskip("evaluma")
     harmonized = rl.harmonize(_raw_df())
-    return rl.assemble(harmonized, n_bootstrap=100)
+    return rl.assemble(harmonized, n_bootstrap=100, random_state=0)
 
 
 def test_assemble_default_slice_json(assembled):
-    import json
-
     rankings, _sensitivity, _meta, _default = assembled
-    slice_block = rankings["classification"]["linear"]["RGB"]["patch-mean"]
+    slice_block = _slice_block(rankings, DEFAULT_SLICE_KEY)
     assert set(slice_block) == {"avg_rank", "elo", "improvability"}
     for agg in ("avg_rank", "elo", "improvability"):
         rows = slice_block[agg]["rows"]
@@ -484,41 +629,39 @@ def test_assemble_default_slice_json(assembled):
         for row in rows:
             assert set(row) == ROW_KEYS
             assert isinstance(row["per_task"], dict) and row["per_task"]
-    # valid JSON, no NaN/inf
     json.dumps(rankings, allow_nan=False)
 
 
 def test_default_slice_baselines_bottom(assembled):
     rankings, _sensitivity, _meta, _default = assembled
-    slice_block = rankings["classification"]["linear"]["RGB"]["patch-mean"]
+    slice_block = _slice_block(rankings, DEFAULT_SLICE_KEY)
     for agg in ("avg_rank", "elo", "improvability"):
-        models = [r["model"] for r in slice_block[agg]["rows"]]
+        models = [row["model"] for row in slice_block[agg]["rows"]]
         assert {models[-1], models[-2]} == {"rcf", "imagestats"}
 
 
 def test_sensitivity_tau_bounds_in_output(assembled):
     _rankings, sensitivity, _meta, _default = assembled
-    for by_probe in sensitivity.values():
-        for by_band in by_probe.values():
-            for by_pool in by_band.values():
-                for by_agg in by_pool.values():
-                    for axis_block in by_agg.values():
-                        for entry in axis_block.values():
-                            if entry["tau"] is not None:
-                                assert -1.0 <= entry["tau"] <= 1.0
+    for by_task in sensitivity.values():
+        for by_probe in by_task.values():
+            for by_band in by_probe.values():
+                for by_pool in by_band.values():
+                    for by_norm in by_pool.values():
+                        for by_axis in by_norm.values():
+                            for entry in by_axis.values():
+                                if entry["tau"] is not None:
+                                    assert -1.0 <= entry["tau"] <= 1.0
 
 
 def test_sensitivity_has_aggregation_dimension(assembled):
     _rankings, sensitivity, _meta, _default = assembled
-    node = sensitivity["classification"]["linear"]["RGB"]["patch-mean"]
+    node = sensitivity["classification"]["linear"]["RGB"]["patch-mean"]["bandspec_zscore"]
     assert set(node) == {"avg_rank", "elo", "improvability"}
     for agg_block in node.values():
-        assert set(agg_block) == {"probe", "bands", "pooling"}
+        assert set(agg_block) == {"probe", "bands", "pooling", "normalization"}
 
 
 def test_inline_replaces_constants():
-    import json
-
     stub = (
         "<script>\n"
         "const RANKINGS = {};\n"
@@ -535,9 +678,9 @@ def test_inline_replaces_constants():
     }
     out = rl.inline_into_html(stub, blocks)
     for name, obj in blocks.items():
-        m = re.search(rf"const {name} = (.*?);", out, re.DOTALL)
-        assert m is not None
-        assert json.loads(m.group(1)) == obj
+        match = re.search(rf"const {name} = (.*?);", out, re.DOTALL)
+        assert match is not None
+        assert json.loads(match.group(1)) == obj
 
 
 # --- Slice 8 tests ---------------------------------------------------------
@@ -554,6 +697,7 @@ def test_html_has_inline_anchors():
         'id="sel-probe"',
         'id="sel-bands"',
         'id="sel-pooling"',
+        'id="sel-normalization"',
         'id="sel-aggregation"',
         'id="sel-flow-axis"',
         'id="insights"',
@@ -565,7 +709,6 @@ def test_html_has_inline_anchors():
 
 
 def test_generator_writes_html(tmp_path):
-    import json
     import shutil
 
     pytest.importorskip("evaluma")
@@ -584,6 +727,8 @@ def test_generator_writes_html(tmp_path):
             str(html_path),
             "--bootstrap",
             "50",
+            "--seed",
+            "13",
         ],
         capture_output=True,
         text=True,
@@ -593,7 +738,9 @@ def test_generator_writes_html(tmp_path):
 
     text = html_path.read_text()
     assert text.strip()
-    m = re.search(r"const RANKINGS = (.*?);", text, re.DOTALL)
-    assert m is not None
-    rankings = json.loads(m.group(1))
-    assert rankings["classification"]["linear"]["RGB"]["patch-mean"]["avg_rank"]["rows"]
+    match = re.search(r"const RANKINGS = (.*?);", text, re.DOTALL)
+    assert match is not None
+    rankings = json.loads(match.group(1))
+    assert rankings["classification"]["linear"]["RGB"]["patch-mean"]["bandspec_zscore"][
+        "avg_rank"
+    ]["rows"]

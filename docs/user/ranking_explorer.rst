@@ -14,9 +14,11 @@ Ranking explorer
 
 A methodology-aware, TabArena-style leaderboard of frozen geospatial foundation
 models. One aggregation selector (average rank, ELO, improvability) re-ranks the
-same backbones; four condition selectors (task, probe, bands, pooling) redefine
-the score matrix underneath. A pairwise Kendall τ-b readout quantifies how much
-the ranking reorders when a single condition flips.
+same backbones; five condition selectors (task, probe, bands, pooling,
+normalization) redefine the score matrix underneath. The normalization selector
+keeps dataset-side z-scoring and model-native preprocessing as distinct ranking
+conditions rather than collapsing across them. A pairwise Kendall τ-b readout
+quantifies how much the ranking reorders when a single condition flips.
 
 The committed page is regenerated from ``results/all_results.csv`` with
 :file:`experiments/scripts/regen_leaderboard.py`, which precomputes every
