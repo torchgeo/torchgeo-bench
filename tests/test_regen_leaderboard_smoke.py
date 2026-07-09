@@ -159,9 +159,7 @@ def _raw_rows() -> list[dict[str, object]]:
 
     # OlmoEarth-style single-dataset ablation rows — must be dropped.
     for suffix in ("model_lsat_x100", "model_naip_rgb", "model_sar_db"):
-        rows.append(
-            _row(suffix, "m-eurosat", "linear", "rgb", 0.5, "bandspec_zscore")
-        )
+        rows.append(_row(suffix, "m-eurosat", "linear", "rgb", 0.5, "bandspec_zscore"))
 
     # A partial-coverage model: present in every RGB linear patch-mean dataset
     # except one — should be excluded from that slice, not seated.
@@ -741,6 +739,6 @@ def test_generator_writes_html(tmp_path):
     match = re.search(r"const RANKINGS = (.*?);", text, re.DOTALL)
     assert match is not None
     rankings = json.loads(match.group(1))
-    assert rankings["classification"]["linear"]["RGB"]["patch-mean"]["bandspec_zscore"][
-        "avg_rank"
-    ]["rows"]
+    assert rankings["classification"]["linear"]["RGB"]["patch-mean"]["bandspec_zscore"]["avg_rank"][
+        "rows"
+    ]

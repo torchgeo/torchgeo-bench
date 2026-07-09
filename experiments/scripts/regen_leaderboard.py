@@ -147,9 +147,9 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
     df["normalization"] = df["normalization"].astype("string").str.strip()
     missing_norm = df["normalization"].isna() | (df["normalization"] == "")
     if missing_norm.any():
-        preview = df.loc[
-            missing_norm, ["name", "dataset", "method", "bands", "metric_name"]
-        ].head(10)
+        preview = df.loc[missing_norm, ["name", "dataset", "method", "bands", "metric_name"]].head(
+            10
+        )
         raise ValueError(
             "Ranking explorer quality rows must record `normalization`. "
             f"Found {int(missing_norm.sum())} missing rows.\n"
@@ -324,9 +324,9 @@ def elo(
         Rows ``{"model", "overall", "overall_ci": (low, high)}`` sorted by ELO
         descending (rank 1 = best).
     """
-    table = bench.elo_ranking(
-        n_bootstrap=n_bootstrap, random_state=random_state
-    ).table.sort_values("ELO", ascending=False)
+    table = bench.elo_ranking(n_bootstrap=n_bootstrap, random_state=random_state).table.sort_values(
+        "ELO", ascending=False
+    )
     return [
         {
             "model": row.model,
