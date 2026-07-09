@@ -75,7 +75,7 @@ optional-dependencies.cuda = [
   "faissknn[cuda]>=0.3",
 ]
 optional-dependencies.dev = [
-  "evaluma>=0.1.1", # methodology-aware ranking backend for experiments/scripts/regen_leaderboard.py
+  "evaluma>=0.1.1",      # methodology-aware ranking backend for experiments/scripts/regen_leaderboard.py
   "mdformat>=0.7.22",
   "pre-commit>=4.3",
   "pyproject-fmt>=2.21",
