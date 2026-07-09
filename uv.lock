@@ -726,7 +726,7 @@ wheels = [
 
 [[package]]
 name = "evaluma"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "baycomp" },
@@ -739,9 +739,9 @@ dependencies = [
     { name = "scikit-posthocs" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/fb/0b36acd8a6a1934d4dcdf255e419d9dbae8fce70c49ad887b96b15fb6550/evaluma-0.2.0.tar.gz", hash = "sha256:67b8e4884273a6b9f7d56bbc2e91b9d009f66c24ff5a1b9812c92e4e588eefc2", size = 584557, upload-time = "2026-06-12T11:50:40.571Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/cc/30d7d2a19ebbfc0bbab4d73d529c4ce2892dc35a0349b9aafe032837c9c8/evaluma-0.3.0.tar.gz", hash = "sha256:71c22d8f265ad6fa3dfdbf643fc618c3e96420152afea17eae8f66baa7af824a", size = 600611, upload-time = "2026-07-09T10:06:24.492Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/8c/ef079b13b29fcccdf3a9c418b46f113ec1eefdeef7c1adaacfb09caf55fe/evaluma-0.2.0-py3-none-any.whl", hash = "sha256:f702c1f2282173fefcb2cc70386d2c0b1e9f0ac1f7d52eacd3a41902cf19ed58", size = 44475, upload-time = "2026-06-12T11:50:39.337Z" },
+    { url = "https://files.pythonhosted.org/packages/71/de/1a10c1758d8c4bef9706deeb3f946507db0ce8c8e0535be0fba56386aa0c/evaluma-0.3.0-py3-none-any.whl", hash = "sha256:5f3c677407dbe267c794aa54d42e3699e3a0d824f22568d1f77c333be4e786cb", size = 51493, upload-time = "2026-07-09T10:06:22.916Z" },
 ]
 
 [[package]]
@@ -4115,7 +4115,7 @@ viz = [
 [package.metadata]
 requires-dist = [
     { name = "cleanlab", marker = "extra == 'cleanlab'", specifier = ">=2.7" },
-    { name = "evaluma", marker = "extra == 'dev'", specifier = ">=0.1.1" },
+    { name = "evaluma", marker = "extra == 'dev'", specifier = ">=0.3" },
     { name = "faissknn", extras = ["cpu"], specifier = ">=0.3" },
     { name = "faissknn", extras = ["cuda"], marker = "extra == 'cuda'", specifier = ">=0.3" },
     { name = "filelock", specifier = ">=3.12" },
