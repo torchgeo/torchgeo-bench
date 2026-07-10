@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.main import main
 
-from .test_main_fast import _compose_cfg
+from .test_main_fast import _chainable_model_mock, _compose_cfg
 
 
 class _SegmentationDataset(Dataset):
@@ -140,15 +140,17 @@ def test_segmentation_resume_skips_complete_run(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _cfg_for_segmentation(out, overrides=["resume=true"])
     pd.DataFrame([_seg_resume_row(cfg)]).to_csv(out, index=False)
+    model = _chainable_model_mock()
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
-        ),
+        mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
+        mock.patch("torchgeo_bench.main.instantiate", return_value=model) as instantiate_mock,
         mock.patch("torchgeo_bench.main._build_seg_probe_and_solver") as build_mock,
     ):
         main.__wrapped__(cfg)
 
+    data_mock.assert_not_called()
+    instantiate_mock.assert_not_called()
     build_mock.assert_not_called()
     df = pd.read_csv(out)
     assert int((df["method"] == "seg-fpn").sum()) == 1
