@@ -1,6 +1,8 @@
 """Timm backbone wrapper for patch-level feature extraction."""
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import timm
 import torch
@@ -14,6 +16,54 @@ from .interface import BenchModel
 logger = logging.getLogger(__name__)
 
 _VALID_INPUT_NORMALIZATIONS = ("bands_zscore", "imagenet", "timm_default", "none")
+_HF_HUB_UNAUTHENTICATED_WARNING_FRAGMENTS = (
+    "unauthenticated requests to the hf hub",
+    "hf_token",
+    "higher rate limits",
+    "faster downloads",
+)
+
+
+def _is_hf_hub_unauthenticated_warning(message: str) -> bool:
+    """Return whether a log message matches HF Hub's unauthenticated-download warning."""
+    normalized = " ".join(message.lower().split())
+    if normalized.startswith("warning: "):
+        normalized = normalized.removeprefix("warning: ")
+    return all(fragment in normalized for fragment in _HF_HUB_UNAUTHENTICATED_WARNING_FRAGMENTS)
+
+
+class _HfHubUnauthenticatedWarningFilter(logging.Filter):
+    """Drop only the noisy HF Hub warning about missing ``HF_TOKEN``."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Return ``False`` only for the specific unauthenticated-download warning."""
+        return not _is_hf_hub_unauthenticated_warning(record.getMessage())
+
+
+@contextmanager
+def _suppress_hf_hub_unauthenticated_warning() -> Iterator[None]:
+    """Suppress only the duplicated HF Hub unauthenticated-download warning."""
+    warning_filter = _HfHubUnauthenticatedWarningFilter()
+    source_logger = logging.getLogger("huggingface_hub.utils._http")
+    source_logger.addFilter(warning_filter)
+
+    filtered_handlers: list[logging.Handler] = []
+    seen_handler_ids: set[int] = set()
+    for logger_name in ("", "huggingface_hub"):
+        for handler in logging.getLogger(logger_name).handlers:
+            handler_id = id(handler)
+            if handler_id in seen_handler_ids:
+                continue
+            handler.addFilter(warning_filter)
+            filtered_handlers.append(handler)
+            seen_handler_ids.add(handler_id)
+
+    try:
+        yield
+    finally:
+        source_logger.removeFilter(warning_filter)
+        for handler in filtered_handlers:
+            handler.removeFilter(warning_filter)
 
 
 class TimmPatchBenchModel(BenchModel):
@@ -103,13 +153,23 @@ class TimmPatchBenchModel(BenchModel):
         if self.use_cls_token and global_pool != "":
             global_pool = ""
 
-        self.backbone = timm.create_model(
-            model_name,
-            pretrained=pretrained,
-            in_chans=self.num_channels,
-            num_classes=0,
-            global_pool=global_pool,
-        )
+        if pretrained:
+            with _suppress_hf_hub_unauthenticated_warning():
+                self.backbone = timm.create_model(
+                    model_name,
+                    pretrained=pretrained,
+                    in_chans=self.num_channels,
+                    num_classes=0,
+                    global_pool=global_pool,
+                )
+        else:
+            self.backbone = timm.create_model(
+                model_name,
+                pretrained=pretrained,
+                in_chans=self.num_channels,
+                num_classes=0,
+                global_pool=global_pool,
+            )
 
         # Determine default input size from timm config; store square size.
         default_cfg = getattr(self.backbone, "default_cfg", {}) or {}
