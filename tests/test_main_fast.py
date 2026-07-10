@@ -109,6 +109,14 @@ def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, 
     }
 
 
+def _chainable_model_mock() -> mock.Mock:
+    """Return a mock model whose ``to().eval()`` chain returns itself."""
+    model = mock.Mock()
+    model.to.return_value = model
+    model.eval.return_value = model
+    return model
+
+
 def test_knn_row_emitted(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
@@ -175,6 +183,148 @@ def test_resume_skips_completed_knn_row(tmp_path: Path):
     knn_mock.assert_not_called()
     df = pd.read_csv(out)
     assert int((df["method"] == "knn5").sum()) == 1
+
+
+def test_resume_complete_preflight_skips_data_loading_and_model_init(tmp_path: Path):
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(out, overrides=["resume=true"])
+    pd.DataFrame(
+        [
+            _resume_row(cfg, method="knn5", metric_name="accuracy"),
+            _resume_row(cfg, method="linear", metric_name="accuracy"),
+        ]
+    ).to_csv(out, index=False)
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets") as get_datasets_mock,
+        mock.patch("torchgeo_bench.main.instantiate") as instantiate_mock,
+    ):
+        main.__wrapped__(cfg)
+
+    get_datasets_mock.assert_not_called()
+    instantiate_mock.assert_not_called()
+    assert len(pd.read_csv(out)) == 2
+
+
+def test_resume_partial_completion_still_runs_missing_work(tmp_path: Path):
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(out, overrides=["resume=true"])
+    pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
+    model = _chainable_model_mock()
+
+    with (
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
+        ) as data_mock,
+        mock.patch("torchgeo_bench.main.instantiate", return_value=model) as instantiate_mock,
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
+        mock.patch(
+            "torchgeo_bench.main.evaluate_logistic",
+            return_value=(
+                0.6,
+                0.52,
+                0.66,
+                0.1,
+                {"ece": 0.04, "rms_ce": 0.06, "mce": 0.09},
+                {"ece_ts": 0.04, "rms_ce_ts": 0.06, "mce_ts": 0.09, "temperature": 0.8},
+            ),
+        ) as linear_mock,
+    ):
+        main.__wrapped__(cfg)
+
+    data_mock.assert_called_once()
+    instantiate_mock.assert_called_once()
+    knn_mock.assert_not_called()
+    linear_mock.assert_called_once()
+    df = pd.read_csv(out)
+    assert int((df["method"] == "knn5").sum()) == 1
+    assert int((df["method"] == "linear").sum()) == 1
+
+
+def test_non_resume_still_runs_even_with_matching_existing_rows(tmp_path: Path):
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
+    pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
+    model = _chainable_model_mock()
+
+    with (
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
+        ) as data_mock,
+        mock.patch("torchgeo_bench.main.instantiate", return_value=model) as instantiate_mock,
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ) as knn_mock,
+    ):
+        main.__wrapped__(cfg)
+
+    data_mock.assert_called_once()
+    instantiate_mock.assert_called_once()
+    knn_mock.assert_called_once()
+    assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 2
+
+
+def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_path: Path):
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(
+        out,
+        overrides=[
+            "resume=true",
+            "model=timm/resnet50",
+            "eval.knn_device=cpu",
+            "eval.merge_val=false",
+            "eval.calibration.n_bins_linear=15",
+            "+model.eval.knn_k=7",
+            "+model.eval.skip_linear=true",
+            "+model.eval.bootstrap=99",
+            "+model.eval.merge_val=true",
+            "+model.eval.knn_device=meta-device",
+            "+model.eval.calibration.n_bins_linear=99",
+        ],
+    )
+    pd.DataFrame([_resume_row(cfg, method="knn7", metric_name="accuracy")]).to_csv(out, index=False)
+    model = _chainable_model_mock()
+
+    with (
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
+        ) as data_mock,
+        mock.patch("torchgeo_bench.main.instantiate", return_value=model) as instantiate_mock,
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
+        mock.patch(
+            "torchgeo_bench.main.evaluate_logistic",
+            return_value=(
+                0.6,
+                0.52,
+                0.66,
+                0.1,
+                {"ece": 0.04, "rms_ce": 0.06, "mce": 0.09},
+                {"ece_ts": 0.04, "rms_ce_ts": 0.06, "mce_ts": 0.09, "temperature": 0.8},
+            ),
+        ) as linear_mock,
+    ):
+        main.__wrapped__(cfg)
+
+    data_mock.assert_called_once()
+    instantiate_mock.assert_called_once()
+    knn_mock.assert_not_called()
+    linear_mock.assert_called_once()
+
+    linear_call = linear_mock.call_args
+    assert linear_call.args[8] == cfg.eval.bootstrap
+    assert linear_call.args[9] is cfg.eval.merge_val
+    assert linear_call.kwargs["calibration_n_bins"] == cfg.eval.calibration.n_bins_linear
+
+    df = pd.read_csv(out)
+    linear_row = df[df["method"] == "linear"].iloc[0]
+    assert linear_row["bootstrap"] == cfg.eval.bootstrap
+    assert bool(linear_row["merge_val"]) is bool(cfg.eval.merge_val)
+    assert int((df["method"] == "knn7").sum()) == 1
+    assert int((df["method"] == "linear").sum()) == 1
 
 
 def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
