@@ -63,6 +63,13 @@ same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download
 eurosat`). See the [documentation](https://torchgeo.org/torchgeo-bench/user/datasets.html)
 for all options.
 
+For GeoBench V1, the full download command writes the legacy HDF5 layout to
+`data/classification_v1.0/`. If you skip that command and request a single V1
+dataset at runtime, torchgeo-bench may instead auto-download a sharded
+WebDataset mirror under `data/classification_v1.0_wds/`. Those layouts are
+intentionally distinct; the runtime loader reuses `classification_v1.0/` when
+present and does not convert between formats automatically.
+
 ## Run a basic experiment
 
 ```bash

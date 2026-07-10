@@ -1,7 +1,10 @@
 """Unit tests for dataset classes that don't require real data on disk."""
 
+from unittest import mock
+
 import torch
 
+from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.eurosat import EuroSAT, EuroSATSpatial
 from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
 
@@ -105,3 +108,29 @@ class TestEuroSATSpatialMeta:
         ds_inst = EuroSATSpatial.__new__(EuroSATSpatial)
         ds_inst.get_dataset("test", bands=None)
         assert captured["split"] == "test"
+
+
+class TestGeoBenchV1BackendSelection:
+    def test_hdf5_layout_skips_sharded_auto_download(self, monkeypatch, tmp_path):
+        import torchgeo_bench.datasets._v1_webdataset as wds_mod
+        import torchgeo_bench.datasets.geobench_v1 as v1_mod
+
+        bench = get_bench_dataset_class("m-eurosat")()
+        hdf5_root = tmp_path / "classification_v1.0"
+        (hdf5_root / bench.name).mkdir(parents=True, exist_ok=True)
+        sharded_root = tmp_path / "classification_v1.0_wds"
+
+        sentinel = object()
+        geo_mock = mock.Mock(return_value=sentinel)
+        ensure_mock = mock.Mock()
+
+        monkeypatch.setattr(v1_mod, "V1_ROOT", hdf5_root)
+        monkeypatch.setattr(v1_mod, "V1_SHARDED_ROOT", sharded_root)
+        monkeypatch.setattr(v1_mod, "GeoBenchv1", geo_mock)
+        monkeypatch.setattr(wds_mod, "ensure_sharded_root", ensure_mock)
+
+        dataset = bench.get_dataset("train", bands=tuple(bench.rgb_bands))
+
+        assert dataset is sentinel
+        ensure_mock.assert_not_called()
+        geo_mock.assert_called_once()
