@@ -12,11 +12,47 @@ from torchgeo_bench.download import (
     EUROSAT_ARCHIVE_NAME,
     EUROSAT_BASE_DIR,
     EUROSAT_SPLIT_FILENAMES,
+    _cleanup_eurosat_archive,
     _decompress_zip_with_progress,
     download_eurosat,
     download_geobench_v1,
     download_geobench_v2,
 )
+
+
+def _eurosat_members() -> dict[str, bytes]:
+    return {
+        (EUROSAT_BASE_DIR / "AnnualCrop" / "sample-1.tif").as_posix(): b"abcd",
+        (EUROSAT_BASE_DIR / "Forest" / "sample-2.tif").as_posix(): b"efghij",
+    }
+
+
+def _create_eurosat_archive(target: Path, members: dict[str, bytes] | None = None) -> Path:
+    archive = target / EUROSAT_ARCHIVE_NAME
+    with zipfile.ZipFile(archive, "w") as zf:
+        for relative_path, payload in (members or _eurosat_members()).items():
+            zf.writestr(relative_path, payload)
+    return archive
+
+
+def _write_eurosat_split_files(target: Path) -> None:
+    for split_filename in EUROSAT_SPLIT_FILENAMES:
+        (target / split_filename).write_text(split_filename)
+
+
+def _write_extracted_members(
+    target: Path,
+    members: dict[str, bytes] | None = None,
+    *,
+    skip: set[str] | None = None,
+    overrides: dict[str, bytes] | None = None,
+) -> None:
+    for relative_path, payload in (members or _eurosat_members()).items():
+        if skip and relative_path in skip:
+            continue
+        output_path = target / relative_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(overrides.get(relative_path, payload) if overrides else payload)
 
 
 def test_decompress_zip_with_progress_removes_archive_and_logs_cleanup(
@@ -72,23 +108,113 @@ def test_download_geobench_v2_defaults_to_registry_list(tmp_path: Path) -> None:
     assert dl_mock.call_count == len(DEFAULT_V2_DATASETS)
 
 
+def test_cleanup_eurosat_archive_keeps_archive_for_empty_extraction(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    target = tmp_path / "eurosat"
+    target.mkdir(parents=True, exist_ok=True)
+    archive = _create_eurosat_archive(target)
+    (target / EUROSAT_BASE_DIR).mkdir(parents=True, exist_ok=True)
+    _write_eurosat_split_files(target)
+
+    caplog.set_level(logging.INFO, logger="torchgeo_bench.download")
+    _cleanup_eurosat_archive(target)
+
+    assert archive.exists()
+    assert any("member is missing" in message for message in caplog.messages)
+
+
+def test_cleanup_eurosat_archive_keeps_archive_for_partial_extraction(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    target = tmp_path / "eurosat"
+    target.mkdir(parents=True, exist_ok=True)
+    members = _eurosat_members()
+    archive = _create_eurosat_archive(target, members)
+    missing_member = next(reversed(members))
+    _write_extracted_members(target, members, skip={missing_member})
+    _write_eurosat_split_files(target)
+
+    caplog.set_level(logging.INFO, logger="torchgeo_bench.download")
+    _cleanup_eurosat_archive(target)
+
+    assert archive.exists()
+    assert any(missing_member in message for message in caplog.messages)
+
+
+def test_cleanup_eurosat_archive_keeps_archive_when_member_is_missing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    target = tmp_path / "eurosat"
+    target.mkdir(parents=True, exist_ok=True)
+    members = _eurosat_members()
+    archive = _create_eurosat_archive(target, members)
+    _write_extracted_members(target, members)
+    missing_member = next(iter(members))
+    (target / missing_member).unlink()
+    _write_eurosat_split_files(target)
+
+    caplog.set_level(logging.INFO, logger="torchgeo_bench.download")
+    _cleanup_eurosat_archive(target)
+
+    assert archive.exists()
+    assert any(missing_member in message for message in caplog.messages)
+
+
+def test_cleanup_eurosat_archive_keeps_archive_when_member_size_mismatches(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    target = tmp_path / "eurosat"
+    target.mkdir(parents=True, exist_ok=True)
+    members = _eurosat_members()
+    archive = _create_eurosat_archive(target, members)
+    mismatch_member = next(iter(members))
+    _write_extracted_members(
+        target,
+        members,
+        overrides={mismatch_member: members[mismatch_member] + b"extra"},
+    )
+    _write_eurosat_split_files(target)
+
+    caplog.set_level(logging.INFO, logger="torchgeo_bench.download")
+    _cleanup_eurosat_archive(target)
+
+    assert archive.exists()
+    assert any("size mismatched" in message for message in caplog.messages)
+
+
+def test_cleanup_eurosat_archive_keeps_corrupt_archive(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    target = tmp_path / "eurosat"
+    target.mkdir(parents=True, exist_ok=True)
+    archive = target / EUROSAT_ARCHIVE_NAME
+    archive.write_bytes(b"not-a-zip")
+    _write_eurosat_split_files(target)
+
+    caplog.set_level(logging.INFO, logger="torchgeo_bench.download")
+    _cleanup_eurosat_archive(target)
+
+    assert archive.exists()
+    assert any("verification failed" in message for message in caplog.messages)
+
+
 def test_download_eurosat_cleans_archive_after_success(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     out = tmp_path / "data"
     target = out / "eurosat"
     target.mkdir(parents=True, exist_ok=True)
-    archive = target / EUROSAT_ARCHIVE_NAME
-    archive.write_bytes(b"archive-bytes")
+    members = _eurosat_members()
+    archive = _create_eurosat_archive(target, members)
     called_splits: list[str] = []
 
     def _fake_eurosat(*, root: str, split: str, download: bool) -> None:
         assert download is True
         called_splits.append(split)
         dataset_root = Path(root)
-        (dataset_root / EUROSAT_BASE_DIR).mkdir(parents=True, exist_ok=True)
-        for split_filename in EUROSAT_SPLIT_FILENAMES:
-            (dataset_root / split_filename).write_text(split_filename)
+        _write_extracted_members(dataset_root, members)
+        _write_eurosat_split_files(dataset_root)
 
     caplog.set_level(logging.INFO, logger="torchgeo_bench.download")
     with mock.patch("torchgeo_bench.download.EuroSAT", side_effect=_fake_eurosat):
@@ -106,13 +232,14 @@ def test_download_eurosat_keeps_archive_when_split_setup_fails(tmp_path: Path) -
     out = tmp_path / "data"
     target = out / "eurosat"
     target.mkdir(parents=True, exist_ok=True)
-    archive = target / EUROSAT_ARCHIVE_NAME
-    archive.write_bytes(b"archive-bytes")
+    archive = _create_eurosat_archive(target)
+    members = _eurosat_members()
+    missing_member = next(iter(members))
 
     def _fake_eurosat(*, root: str, split: str, download: bool) -> None:
         assert download is True
         dataset_root = Path(root)
-        (dataset_root / EUROSAT_BASE_DIR).mkdir(parents=True, exist_ok=True)
+        _write_extracted_members(dataset_root, members, skip={missing_member})
         (dataset_root / f"partial-{split}.txt").write_text(split)
         if split == "val":
             raise RuntimeError("split setup failed")
@@ -129,9 +256,9 @@ def test_download_eurosat_keeps_archive_when_split_setup_fails(tmp_path: Path) -
 def test_download_eurosat_is_idempotent_when_archive_is_missing(tmp_path: Path) -> None:
     out = tmp_path / "data"
     target = out / "eurosat"
-    (target / EUROSAT_BASE_DIR).mkdir(parents=True, exist_ok=True)
-    for split_filename in EUROSAT_SPLIT_FILENAMES:
-        (target / split_filename).write_text(split_filename)
+    members = _eurosat_members()
+    _write_extracted_members(target, members)
+    _write_eurosat_split_files(target)
 
     with mock.patch("torchgeo_bench.download.EuroSAT") as eurosat_mock:
         download_eurosat(out)
@@ -144,11 +271,10 @@ def test_download_eurosat_is_idempotent_when_archive_is_missing(tmp_path: Path) 
 def test_download_eurosat_cleans_stale_archive_when_already_extracted(tmp_path: Path) -> None:
     out = tmp_path / "data"
     target = out / "eurosat"
-    (target / EUROSAT_BASE_DIR).mkdir(parents=True, exist_ok=True)
-    for split_filename in EUROSAT_SPLIT_FILENAMES:
-        (target / split_filename).write_text(split_filename)
-    archive = target / EUROSAT_ARCHIVE_NAME
-    archive.write_bytes(b"archive-bytes")
+    members = _eurosat_members()
+    _write_extracted_members(target, members)
+    _write_eurosat_split_files(target)
+    archive = _create_eurosat_archive(target, members)
 
     with mock.patch("torchgeo_bench.download.EuroSAT"):
         download_eurosat(out)

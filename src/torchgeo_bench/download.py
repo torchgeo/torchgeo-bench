@@ -81,11 +81,50 @@ def _decompress_zip_with_progress(zip_path: Path, extract_to: Path) -> None:
     _remove_download_artifact(zip_path, reason=f"successfully extracting {zip_path.name}")
 
 
-def _eurosat_is_ready(target: Path) -> bool:
-    """Return whether EuroSAT extraction and split setup are complete."""
-    image_dir = target / EUROSAT_BASE_DIR
-    split_files = [target / split_filename for split_filename in EUROSAT_SPLIT_FILENAMES]
-    return image_dir.is_dir() and all(split_file.is_file() for split_file in split_files)
+def _eurosat_archive_matches_extracted_data(target: Path, archive: Path) -> bool:
+    """Return whether the extracted EuroSAT tree fully matches ``archive``."""
+    missing_split_files = [
+        split_filename
+        for split_filename in EUROSAT_SPLIT_FILENAMES
+        if not (target / split_filename).is_file()
+    ]
+    if missing_split_files:
+        logger.info(
+            "Keeping %s because EuroSAT split setup is incomplete: missing %s",
+            archive,
+            ", ".join(missing_split_files),
+        )
+        return False
+
+    try:
+        with zipfile.ZipFile(archive, "r") as zf:
+            for member in zf.infolist():
+                if member.is_dir():
+                    continue
+                extracted_path = target / member.filename
+                if not extracted_path.is_file():
+                    logger.info(
+                        "Keeping %s because extracted EuroSAT member is missing: %s",
+                        archive,
+                        member.filename,
+                    )
+                    return False
+                extracted_size = extracted_path.stat().st_size
+                if extracted_size != member.file_size:
+                    logger.info(
+                        "Keeping %s because extracted EuroSAT member size mismatched for %s "
+                        "(expected %s, found %s)",
+                        archive,
+                        member.filename,
+                        member.file_size,
+                        extracted_size,
+                    )
+                    return False
+    except zipfile.BadZipFile as error:
+        logger.info("Keeping %s because EuroSAT archive verification failed: %s", archive, error)
+        return False
+
+    return True
 
 
 def _cleanup_eurosat_archive(target: Path) -> None:
@@ -93,8 +132,7 @@ def _cleanup_eurosat_archive(target: Path) -> None:
     archive = target / EUROSAT_ARCHIVE_NAME
     if not archive.exists():
         return
-    if not _eurosat_is_ready(target):
-        logger.info("Keeping %s because EuroSAT extraction or split setup is incomplete.", archive)
+    if not _eurosat_archive_matches_extracted_data(target, archive):
         return
     _remove_download_artifact(
         archive,
