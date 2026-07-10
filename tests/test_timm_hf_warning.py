@@ -84,7 +84,9 @@ def test_hf_warning_matcher_is_specific():
     assert not _is_hf_hub_unauthenticated_warning(HF_HTTP_WARNING)
 
 
-def test_pretrained_timm_suppresses_only_unauthenticated_hf_warning(monkeypatch: pytest.MonkeyPatch):
+def test_pretrained_timm_suppresses_only_unauthenticated_hf_warning(
+    monkeypatch: pytest.MonkeyPatch,
+):
     import timm
 
     from torchgeo_bench.models.timm import TimmPatchBenchModel
