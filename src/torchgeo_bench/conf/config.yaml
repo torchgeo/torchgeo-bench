@@ -30,7 +30,7 @@ eval:
   merge_val: true          # merge train+val for final logistic training
   skip_linear: false       # if true, skip LogisticRegression evaluation
   knn_k: 5                 # number of neighbours for KNN evaluation
-  knn_device: null         # null = inherit cfg.device; set "cpu" to force faiss-cpu KNN
+  knn_device: null         # null = use GPU FAISS if available, otherwise CPU; set explicitly to require a device
 
   # Calibration metrics (ECE / RMS-CE / MCE) reported per classification row.
   # KNN probabilities are quantized to (knn_k + 1) levels, so its default

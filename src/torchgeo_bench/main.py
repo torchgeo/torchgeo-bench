@@ -31,7 +31,7 @@ from torchgeo_bench.datasets import (
     list_datasets,
 )
 from torchgeo_bench.intrinsic_dim import DegenerateManifoldError, compute_intrinsic_dim
-from torchgeo_bench.knn import KNNClassifier
+from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import measure_profile
 from torchgeo_bench.models.interface import BenchModel
@@ -1231,6 +1231,8 @@ def main(cfg: DictConfig) -> None:
         else:
             # Classification (single-label or multi-label)
             metric_name = plan.metric_name
+            if not plan.skip_knn:
+                knn_device = resolve_knn_device(cfg.eval.get("knn_device"), cfg.device)
             x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
             x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
             x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
@@ -1242,7 +1244,6 @@ def main(cfg: DictConfig) -> None:
             cal_temp_scale = bool(cal_cfg.get("temp_scale", True))
 
             if not plan.skip_knn:
-                knn_device = cfg.eval.get("knn_device") or cfg.device
                 knn_score, knn_lo, knn_hi, knn_cal, knn_n_bins = evaluate_knn(
                     x_train,
                     y_train,

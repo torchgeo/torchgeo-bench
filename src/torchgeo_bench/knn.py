@@ -2,10 +2,10 @@
 
 Single-label and multi-label k-nearest neighbours backed by FAISS.
 
-CPU path uses ``faiss-cpu`` with ``IndexFlatL2`` (or ``faiss-cuda-cu128``'s
-CPU index when the ``cuda`` extra is installed). GPU path (opt-in via the
-``cuda`` extra: ``pip install -e ".[cuda]"``) delegates to :mod:`faissknn`.
-The two paths produce identical predictions modulo float-precision noise.
+The CPU path uses the selected FAISS backend's ``IndexFlatL2`` implementation.
+The GPU path delegates to :mod:`faissknn` when that backend provides CUDA
+resources. The two paths produce identical predictions modulo float-precision
+noise.
 """
 
 import logging
@@ -32,6 +32,37 @@ def _is_cpu_device(device: str) -> bool:
     return str(device).lower() == "cpu"
 
 
+def gpu_faiss_available() -> bool:
+    """Return whether the installed FAISS package provides CUDA resources."""
+    return hasattr(faiss, "StandardGpuResources")
+
+
+def resolve_knn_device(requested_device: str | None, model_device: str) -> str:
+    """Resolve the KNN device, falling back for an implicit CUDA request.
+
+    Args:
+        requested_device: Explicit KNN device, or ``None`` to follow the model.
+        model_device: Device used by the feature extractor.
+
+    Returns:
+        Device to use for KNN evaluation.
+    """
+    device = requested_device if requested_device is not None else model_device
+    if _is_cpu_device(device) or gpu_faiss_available():
+        return device
+    if requested_device is not None:
+        raise RuntimeError(
+            f"GPU-enabled FAISS is unavailable for explicit KNN device {requested_device!r}. "
+            "Set eval.knn_device=cpu or install a GPU-enabled FAISS backend."
+        )
+    logger.warning(
+        "GPU-enabled FAISS is unavailable; using CPU for KNN while the model remains on %s. "
+        "Set eval.knn_device=cpu to make this choice explicit.",
+        model_device,
+    )
+    return "cpu"
+
+
 class KNNClassifier:
     """FAISS-backed KNN classifier with single- and multi-label support.
 
@@ -43,8 +74,8 @@ class KNNClassifier:
             on the CPU path; faissknn does not clamp internally.
         device: ``"cpu"`` (default) → the FAISS CPU index. Anything else
             (``"cuda"``, ``"cuda:0"``) requires ``faissknn`` with a GPU FAISS
-            backend (installed automatically on Linux x86_64); raises
-            :class:`ImportError` if missing.
+            backend (installed automatically on Linux x86_64); raises an
+            actionable error if unavailable.
         metric: Distance metric — ``"l2"`` (default), ``"ip"`` (inner
             product), or ``"cosine"`` (cosine similarity; auto-normalizes
             inputs). GPU path only; CPU path always uses L2.
@@ -146,6 +177,12 @@ class KNNClassifier:
                 "GPU KNN requires Linux x86_64, where it installs automatically; "
                 'otherwise request device="cpu".'
             ) from exc
+
+        if not gpu_faiss_available():
+            raise RuntimeError(
+                f"KNNClassifier(device={self.device!r}): GPU-enabled FAISS is unavailable. "
+                "Set eval.knn_device=cpu for CLI runs or request device='cpu'."
+            )
 
         kwargs = {
             "n_neighbors": self.n_neighbors,

@@ -64,6 +64,10 @@ The default device is ``cuda:0``.  On a machine without a working CUDA GPU
 
    $ torchgeo-bench run dataset.names=[m-eurosat] device=cpu
 
+When the selected FAISS backend has no GPU resources, the runner evaluates KNN
+on CPU while keeping feature extraction on the configured accelerator. It logs
+this fallback; use ``eval.knn_device=cpu`` to select it explicitly.
+
 Resume mode
 -----------
 
