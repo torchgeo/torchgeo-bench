@@ -276,8 +276,6 @@ class EvaluationResult:
 class DatasetRunPlan:
     """Resume-aware execution plan for one dataset/config combination."""
 
-    eval_cfg: DictConfig
-    is_segmentation: bool
     metric_name: str
     knn_k: int
     seg_method: str
@@ -286,37 +284,24 @@ class DatasetRunPlan:
     skip_linear: bool
     skip_id: bool
     skip_profile: bool
-    id_cfg: DictConfig | None = None
-    profile_cfg: DictConfig | None = None
-
-
-def _merged_eval_cfg(cfg: DictConfig) -> DictConfig:
-    """Return the global eval config with model-specific overrides applied."""
-    return OmegaConf.merge(
-        cfg.eval,
-        cfg.model.eval if "eval" in cfg.model and cfg.model.eval is not None else {},
-    )
 
 
 def _plan_dataset_run(
     cfg: DictConfig,
     ds_name: str,
     ds_cls: type,
-    eval_cfg: DictConfig,
+    knn_k: int,
+    seg_method: str,
     config_tuple: tuple[str, ...],
     completed_runs: set[tuple[str, ...]],
     completed_metrics: dict[str, set[tuple[str, ...]]],
 ) -> DatasetRunPlan:
     """Plan which work remains for a dataset before loading data or a model."""
-    knn_k = int(getattr(eval_cfg, "knn_k", 5))
-    seg_method = f"seg-{eval_cfg.segmentation.head_type}"
     model_key = (cfg.model._target_, cfg.model.name, *config_tuple)
 
     if ds_cls.task == "segmentation":
         seg_key = (ds_name, seg_method, *model_key)
         return DatasetRunPlan(
-            eval_cfg=eval_cfg,
-            is_segmentation=True,
             metric_name="mIoU",
             knn_k=knn_k,
             seg_method=seg_method,
@@ -333,9 +318,9 @@ def _plan_dataset_run(
     profile_key = (ds_name, "profile", *model_key)
 
     skip_knn = bool(cfg.resume and knn_key in completed_runs)
-    skip_linear = bool((cfg.resume and linear_key in completed_runs) or eval_cfg.get("skip_linear"))
+    skip_linear = bool((cfg.resume and linear_key in completed_runs) or cfg.eval.skip_linear)
 
-    id_cfg = getattr(eval_cfg, "intrinsic_dim", None)
+    id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
     id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
     id_metric_names = (
         [f"id_{est}_{split}" for split in id_cfg.splits for est in id_cfg.estimators]
@@ -348,7 +333,7 @@ def _plan_dataset_run(
         and all(id_key in completed_metrics.get(metric, set()) for metric in id_metric_names)
     )
 
-    profile_cfg = getattr(eval_cfg, "profile", None)
+    profile_cfg = getattr(cfg.eval, "profile", None)
     profile_enabled = bool(profile_cfg and profile_cfg.get("enabled", False))
     profile_metric_names = _profile_metric_names(profile_cfg) if profile_enabled else []
     skip_profile = (not profile_enabled) or (
@@ -360,8 +345,6 @@ def _plan_dataset_run(
     )
 
     return DatasetRunPlan(
-        eval_cfg=eval_cfg,
-        is_segmentation=False,
         metric_name="micro_mAP" if ds_cls.multilabel else "accuracy",
         knn_k=knn_k,
         seg_method=seg_method,
@@ -370,8 +353,6 @@ def _plan_dataset_run(
         skip_linear=skip_linear,
         skip_id=skip_id,
         skip_profile=skip_profile,
-        id_cfg=id_cfg,
-        profile_cfg=profile_cfg,
     )
 
 
@@ -1020,8 +1001,11 @@ def main(cfg: DictConfig) -> None:
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     all_rows: list[dict] = []
-    eval_cfg_merged = _merged_eval_cfg(cfg)
-    c_start, c_stop, c_num = eval_cfg_merged.c_range
+    model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
+    if model_eval is not None and model_eval.get("c_range", None) is not None:
+        c_start, c_stop, c_num = model_eval.c_range
+    else:
+        c_start, c_stop, c_num = cfg.eval.c_range
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
 
@@ -1086,11 +1070,15 @@ def main(cfg: DictConfig) -> None:
                 bands_value,
             )
         )
+        eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
+        knn_k = int(getattr(eval_cfg_merged, "knn_k", 5))
+        seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
         plan = _plan_dataset_run(
             cfg=cfg,
             ds_name=ds_name,
             ds_cls=ds_cls,
-            eval_cfg=eval_cfg_merged,
+            knn_k=knn_k,
+            seg_method=seg_method,
             config_tuple=config_tuple,
             completed_runs=completed_runs,
             completed_metrics=completed_metrics,
@@ -1169,8 +1157,8 @@ def main(cfg: DictConfig) -> None:
             "c_range_start": c_start,
             "c_range_stop": c_stop,
             "c_range_num": c_num,
-            "merge_val": eval_cfg_merged.merge_val,
-            "bootstrap": eval_cfg_merged.bootstrap,
+            "merge_val": cfg.eval.merge_val,
+            "bootstrap": cfg.eval.bootstrap,
         }
 
         if is_segmentation:
@@ -1248,20 +1236,20 @@ def main(cfg: DictConfig) -> None:
             x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
             feature_dim = x_train.shape[1]
 
-            cal_cfg = eval_cfg_merged.get("calibration", {}) or {}
+            cal_cfg = cfg.eval.get("calibration", {}) or {}
             cal_n_bins_knn = cal_cfg.get("n_bins_knn", None)
             cal_n_bins_linear = int(cal_cfg.get("n_bins_linear", 15))
             cal_temp_scale = bool(cal_cfg.get("temp_scale", True))
 
             if not plan.skip_knn:
-                knn_device = eval_cfg_merged.get("knn_device") or cfg.device
+                knn_device = cfg.eval.get("knn_device") or cfg.device
                 knn_score, knn_lo, knn_hi, knn_cal, knn_n_bins = evaluate_knn(
                     x_train,
                     y_train,
                     x_test,
                     y_test,
                     cfg.seed,
-                    eval_cfg_merged.bootstrap,
+                    cfg.eval.bootstrap,
                     verbose=cfg.verbose,
                     device=knn_device,
                     n_neighbors=plan.knn_k,
@@ -1299,8 +1287,8 @@ def main(cfg: DictConfig) -> None:
                     y_test,
                     c_values_list,
                     cfg.seed,
-                    eval_cfg_merged.bootstrap,
-                    eval_cfg_merged.merge_val,
+                    cfg.eval.bootstrap,
+                    cfg.eval.merge_val,
                     cfg.device,
                     cfg.verbose,
                     calibration_n_bins=cal_n_bins_linear,
@@ -1331,10 +1319,8 @@ def main(cfg: DictConfig) -> None:
                         calibration_n_bins=cal_n_bins_linear,
                     ).to_row()
                 )
-
             if not plan.skip_id:
-                id_cfg = plan.id_cfg
-                assert id_cfg is not None
+                id_cfg = cfg.eval.intrinsic_dim
                 id_rows = evaluate_intrinsic_dim(
                     splits={"train": x_train, "val": x_val, "test": x_test},
                     estimators=list(id_cfg.estimators),
@@ -1356,8 +1342,7 @@ def main(cfg: DictConfig) -> None:
                 all_rows.extend(id_rows)
 
             if not plan.skip_profile:
-                profile_cfg = plan.profile_cfg
-                assert profile_cfg is not None
+                profile_cfg = cfg.eval.profile
                 cpu_cfg = profile_cfg.get("cpu_throughput", {}) if profile_cfg else {}
                 profile_rows = evaluate_profile(
                     model=model,
