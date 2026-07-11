@@ -37,7 +37,8 @@ classifiers = [
   "Topic :: Scientific/Engineering :: GIS",
 ]
 dependencies = [
-  "faissknn[cpu]>=0.3",
+  "faissknn[cpu]>=0.4; sys_platform!='linux' or platform_machine!='x86_64'",
+  "faissknn[cuda]>=0.4; sys_platform=='linux' and platform_machine=='x86_64'",
   "filelock>=3.12",
   "geobenchv2>=0.9",
   "h5py>=3.8",
@@ -71,8 +72,9 @@ optional-dependencies.cleanlab = [
   "matplotlib>=3.5",
   "pillow>=9",
 ]
+# Deprecated no-op alias, the base install already selects the CUDA backend.
 optional-dependencies.cuda = [
-  "faissknn[cuda]>=0.3",
+  "faissknn[cuda]>=0.4; sys_platform=='linux' and platform_machine=='x86_64'",
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
