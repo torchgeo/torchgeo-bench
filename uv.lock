@@ -761,15 +761,15 @@ wheels = [
 
 [[package]]
 name = "faissknn"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/5a/d59a520c655328e1bb4223b8d730f7a6663300d8af283c5b12cef861a2bf/faissknn-0.4.0.tar.gz", hash = "sha256:52fed6164004952bf7865a358059b125e916e7e8f67c1c7dfb3745932b27f8cd", size = 7381, upload-time = "2026-07-11T20:27:43.317Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/16/2fcf9012f001c2a06c4cb930a129fbc62939c8574350a62e0d7ae8478c30/faissknn-0.4.1.tar.gz", hash = "sha256:d029125355814fda99789862d3c8d32c79a326415c5349fd10cc5f26b291d6e8", size = 7613, upload-time = "2026-07-11T21:42:03.958Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/5c/a24089a4945348dd2037f7841484ac0d3a03adbc4ebf5bb220c3f90504b4/faissknn-0.4.0-py3-none-any.whl", hash = "sha256:2a7bca36c40d3bd6460d471426d0e2422077590fdf447903da446062cef28a6d", size = 7074, upload-time = "2026-07-11T20:27:42.539Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/1a/07caa3dd83111d8d28cf23d4153f96386d241026e7c71c8ee6fd116c159a/faissknn-0.4.1-py3-none-any.whl", hash = "sha256:3f1c4429c8900ca3dd4d7c0af42add1cebec76d113e5adf77929ab42b6816543", size = 7324, upload-time = "2026-07-11T21:42:03.1Z" },
 ]
 
 [package.optional-dependencies]
