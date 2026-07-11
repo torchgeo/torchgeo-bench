@@ -745,7 +745,7 @@ wheels = [
 
 [[package]]
 name = "faiss-cuda"
-version = "1.14.3"
+version = "1.14.3.post0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -754,9 +754,9 @@ dependencies = [
     { name = "packaging", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/06/a0/03a0067f6678684e673be4285c3ebc837afcdd97fada1ccb3d6cbeacc7e8/faiss_cuda-1.14.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:db5a321c590be2bd5286dd8dc3d68f5279ebd5f23f0d35f4d57fbf904d87fb5c", size = 106476517, upload-time = "2026-07-11T20:22:19.884Z" },
-    { url = "https://files.pythonhosted.org/packages/3b/d3/690fab2ebb739d61749b3c245621b969af656e21fb3adc97064be885ecd1/faiss_cuda-1.14.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:46b62de62e5b66fd528f1c87ca6f079bb5442f85645d49c05d158b777a016697", size = 106475799, upload-time = "2026-07-11T20:22:31.079Z" },
-    { url = "https://files.pythonhosted.org/packages/32/3a/49f1c7d85223c1d72955ffabed93c48ad75fa3b78b2de7af8cbe4095a54b/faiss_cuda-1.14.3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e0e1bc92d8e1abf95abf14ab9699e664d289aa5155a3564223dbdfdcf1052401", size = 106475046, upload-time = "2026-07-11T20:22:41.186Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/d9/ff4dc8cbae70a4f5c76a953ac1e189044940be7a22808b1c3ff865a2a1e6/faiss_cuda-1.14.3.post0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d83e92f341a1f79b5ab52fa0982eab3fe80428fcb1a69591ab2021b95f568f33", size = 106476496, upload-time = "2026-07-11T21:36:01.577Z" },
+    { url = "https://files.pythonhosted.org/packages/63/2d/df6e0ec234d342d92a326db38e5b9f3d4c04bb88510609676ccd986252e4/faiss_cuda-1.14.3.post0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7c16bcd2338d880cd8f355c8c5b0cc3995693c75aee698a224168f7039b18423", size = 106476519, upload-time = "2026-07-11T21:36:07.536Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/15/2b689760abf1531b32ae6452267a05e66bb4388b289b8f5560deebee0b17/faiss_cuda-1.14.3.post0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:973f14c1cd9528c60764aa5e32a7aadba22c2ecf9bd50fb206bf55010a7504d5", size = 106476833, upload-time = "2026-07-11T21:36:13.095Z" },
 ]
 
 [[package]]
