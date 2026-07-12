@@ -41,14 +41,10 @@ cd torchgeo-bench
 uv sync --extra dev
 ```
 
-For GPU-accelerated KNN (Linux + CUDA 12 + glibc ≥ 2.28):
-
-```bash
-pip install 'torchgeo-bench[cuda]'
-```
-
-Requires Python 3.12+. The default (CPU) install runs on **Linux**, **macOS**,
-and **Windows**; GPU-accelerated KNN (the `[cuda]` extra) is Linux-only.
+Requires Python 3.12+ and runs on **Linux**, **macOS**, and **Windows**. On
+Linux x86_64 the install automatically includes GPU-accelerated FAISS KNN
+(CUDA 12, driver R525+, also works on GPU-less machines); other platforms get
+CPU FAISS.
 
 ## Download a dataset
 

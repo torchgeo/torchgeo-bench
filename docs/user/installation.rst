@@ -9,8 +9,9 @@ canonical workflow.
 
 .. note::
 
-   The default (CPU) install runs on **Linux**, **macOS**, and **Windows**.
-   GPU-accelerated KNN (the ``[cuda]`` extra) is Linux-only.
+   The install runs on **Linux**, **macOS**, and **Windows**. On Linux
+   x86_64 it automatically includes GPU-accelerated FAISS KNN (CUDA 12,
+   driver R525+); other platforms get CPU FAISS.
 
 uv (recommended)
 ----------------
@@ -24,13 +25,8 @@ development dependencies:
    $ cd torchgeo-bench
    $ uv sync --extra dev
 
-The default install pulls in ``faissknn[cpu]`` (CPU FAISS), which works on
-all three platforms.  For GPU-accelerated KNN (Linux + CUDA 12 + glibc ≥ 2.28),
-which swaps in ``faissknn[cuda]``:
-
-.. code-block:: console
-
-   $ pip install 'torchgeo-bench[cuda]'
+The install pulls in ``faissknn[cuda]`` (GPU FAISS) on Linux x86_64 and
+``faissknn[cpu]`` everywhere else — no extra needed.
 
 The ``torchgeo-bench`` console script is then available via ``uv run``:
 
