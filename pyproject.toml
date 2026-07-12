@@ -72,10 +72,6 @@ optional-dependencies.cleanlab = [
   "matplotlib>=3.5",
   "pillow>=9",
 ]
-# Deprecated no-op alias, the base install already selects the CUDA backend.
-optional-dependencies.cuda = [
-  "faissknn[cuda]>=0.4; sys_platform=='linux' and platform_machine=='x86_64'",
-]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
   "pre-commit>=4.3",

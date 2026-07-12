@@ -3965,9 +3965,6 @@ cleanlab = [
     { name = "matplotlib" },
     { name = "pillow" },
 ]
-cuda = [
-    { name = "faissknn", extra = ["cuda"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-]
 dev = [
     { name = "mdformat" },
     { name = "pre-commit" },
@@ -4007,7 +4004,6 @@ requires-dist = [
     { name = "cleanlab", marker = "extra == 'cleanlab'", specifier = ">=2.7" },
     { name = "faissknn", extras = ["cpu"], marker = "platform_machine != 'x86_64' or sys_platform != 'linux'", specifier = ">=0.4" },
     { name = "faissknn", extras = ["cuda"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.4" },
-    { name = "faissknn", extras = ["cuda"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'cuda'", specifier = ">=0.4" },
     { name = "filelock", specifier = ">=3.12" },
     { name = "geobenchv2", specifier = ">=0.9" },
     { name = "h5py", specifier = ">=3.8" },
@@ -4055,7 +4051,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'sam3'", specifier = ">=4.50" },
     { name = "typer", specifier = ">=0.9" },
 ]
-provides-extras = ["all", "cleanlab", "cuda", "dev", "docs", "id", "olmoearth", "sam3", "terratorch", "viz"]
+provides-extras = ["all", "cleanlab", "dev", "docs", "id", "olmoearth", "sam3", "terratorch", "viz"]
 
 [[package]]
 name = "torchid"
