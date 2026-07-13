@@ -19,7 +19,7 @@ from .base import BenchDataset
 
 logger = logging.getLogger(__name__)
 
-V2_ROOT = Path(os.environ.get("GEOBENCH_V2_ROOT", "data/geobenchv2"))
+V2_ROOT = Path("data/geobenchv2")
 
 
 # Map dataset name → upstream class name on ``geobench_v2.datasets``.

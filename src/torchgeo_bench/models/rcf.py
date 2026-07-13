@@ -154,16 +154,15 @@ class RCF(nn.Module):
         # Make features unit norm
         patches = patches / patch_norms[:, np.newaxis]
 
-        patchesCovMat = 1.0 / n_patches * patches.T.dot(patches)
+        patches_cov = 1.0 / n_patches * patches.T.dot(patches)
+        eigenvalues, eigenvectors = np.linalg.eigh(patches_cov)
 
-        (E, V) = np.linalg.eig(patchesCovMat)
-
-        E += zca_bias
-        sqrt_zca_eigs = np.sqrt(E)
+        eigenvalues += zca_bias
+        sqrt_zca_eigs = np.sqrt(eigenvalues)
         inv_sqrt_zca_eigs = np.diag(np.power(sqrt_zca_eigs, -1))
-        global_ZCA = V.dot(inv_sqrt_zca_eigs).dot(V.T)
-        patches_normalized: np.typing.NDArray[np.float32] = (
-            (patches).dot(global_ZCA).dot(global_ZCA.T)
+        global_zca = eigenvectors.dot(inv_sqrt_zca_eigs).dot(eigenvectors.T)
+        patches_normalized: np.typing.NDArray[np.float32] = patches.dot(global_zca).dot(
+            global_zca.T
         )
 
         return patches_normalized.reshape(orig_shape).astype("float32")

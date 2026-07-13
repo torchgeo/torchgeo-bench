@@ -1,11 +1,39 @@
 """Unit tests for dataset classes that don't require real data on disk."""
 
+import pickle
+from pathlib import Path
+
+import pytest
 import torch
 
+from torchgeo_bench.datasets._metadata import unpickle_metadata
 from torchgeo_bench.datasets.eurosat import EuroSAT, EuroSATSpatial
 from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
+from torchgeo_bench.datasets.geobench_v2 import _V2Dataset
 from torchgeo_bench.datasets.spacenet2 import SpaceNet2
 from torchgeo_bench.datasets.spacenet7 import SpaceNet7
+
+
+def test_unpickle_metadata_accepts_bytes_and_repr() -> None:
+    metadata = {"label": 3, "bands_order": ["red", "green", "blue"]}
+    payload = pickle.dumps(metadata)
+
+    assert unpickle_metadata(payload) == metadata
+    assert unpickle_metadata(repr(payload)) == metadata
+
+
+def test_unpickle_metadata_rejects_python_expressions() -> None:
+    with pytest.raises((SyntaxError, ValueError)):
+        unpickle_metadata("__import__('os').system('echo unsafe')")
+
+
+def test_v2_data_root_is_fixed() -> None:
+    assert _V2Dataset.data_root() == Path("data/geobenchv2")
+
+
+# ---------------------------------------------------------------------------
+# FOTW.canonicalize_sample
+# ---------------------------------------------------------------------------
 
 
 class TestFOTWCanonicalize:

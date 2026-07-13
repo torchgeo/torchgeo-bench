@@ -20,30 +20,15 @@ from huggingface_hub import snapshot_download
 from rich.progress import track
 from torchgeo.datasets import EuroSAT
 
+from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
+
 logger = logging.getLogger(__name__)
 
 GEOBENCH_V1_REPO = "recursix/geo-bench-1.0"
 GEOBENCH_V1_SHARDED_REPO = "isaaccorley/geobenchv1-webdataset"
 GEOBENCH_V2_REPO_PREFIX = "aialliance"
 
-# Default V2 datasets to download — only those the benchmark runner knows about.
-# Sourced from torchgeo_bench.datasets.geobench_v2._V2_REGISTRY at module load.
-DEFAULT_V2_DATASETS: tuple[str, ...] = (
-    "benv2",
-    "burn_scars",
-    "caffe",
-    "cloudsen12",
-    "dynamic_earthnet",
-    "flair2",
-    "forestnet",
-    "fotw",
-    "kuro_siwo",
-    "pastis",
-    "so2sat",
-    "spacenet2",
-    "spacenet7",
-    "treesatai",
-)
+DEFAULT_V2_DATASETS: tuple[str, ...] = tuple(list_v2_datasets())
 
 
 def _decompress_zip_with_progress(zip_path: Path, extract_to: Path) -> None:
@@ -127,9 +112,19 @@ def download_geobench_v2(output_dir: Path, datasets: list[str] | None = None) ->
     """
     v2_root = Path(output_dir) / "geobenchv2"
     v2_root.mkdir(parents=True, exist_ok=True)
-    if datasets is not None and not datasets:
-        raise ValueError("datasets must contain at least one GeoBench V2 dataset name")
-    names = list(DEFAULT_V2_DATASETS) if datasets is None else datasets
+    if datasets is None:
+        names = list(DEFAULT_V2_DATASETS)
+    elif not datasets:
+        raise ValueError("datasets must contain at least one GeoBench V2 dataset name.")
+    else:
+        names = list(dict.fromkeys(datasets))
+
+    unknown = sorted(set(names) - set(DEFAULT_V2_DATASETS))
+    if unknown:
+        raise ValueError(
+            f"Unknown GeoBench V2 dataset(s): {', '.join(unknown)}. "
+            f"Available: {', '.join(DEFAULT_V2_DATASETS)}"
+        )
     logger.info("Downloading %d GeoBench v2 dataset(s) to %s", len(names), v2_root)
     for name in names:
         download_geobench_v2_dataset(name, v2_root)

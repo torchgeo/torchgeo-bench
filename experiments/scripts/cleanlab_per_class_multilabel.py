@@ -118,11 +118,6 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
     df = pd.DataFrame(rows)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = (
-        out_dir
-        / f"perclass_{npz_path.stem.replace('__', '_').rsplit('_', 1)[0]}_{npz_path.stem.rsplit('_', 1)[1]}.csv"
-    )
-    # Above messes up; do it cleaner:
     stem = npz_path.stem  # e.g. benv2__tt_terramind_v1_large_test
     dataset, rest = stem.split("__", 1)
     split = rest.rsplit("_", 1)[1]  # train|test
@@ -177,10 +172,7 @@ def main() -> None:
                 logger.warning("No probs for %s/%s", ds, split)
                 continue
             for p in cands:
-                try:
-                    report_dataset(p, args.out_dir, top_k=args.top_k)
-                except Exception:
-                    logger.exception("[%s] failed", p)
+                report_dataset(p, args.out_dir, top_k=args.top_k)
 
 
 if __name__ == "__main__":

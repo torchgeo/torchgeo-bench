@@ -84,6 +84,11 @@ selection semantics.
      skip_linear: false            # skip the (slower) linear probe entirely
      knn_device: null              # inherit device; fall back to CPU if FAISS lacks GPU support
 
+     calibration:
+       n_bins_knn: null             # null = knn_k + 1
+       n_bins_linear: 15
+       temp_scale: false            # requires merge_val=false (held-out validation logits)
+
      intrinsic_dim:                # optional ID metrics on extracted embeddings
        enabled: false
        estimators: [TwoNN, MLE, lPCA]

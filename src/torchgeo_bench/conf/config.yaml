@@ -60,7 +60,7 @@ eval:
   calibration:
     n_bins_knn: null       # null = knn_k + 1
     n_bins_linear: 15
-    temp_scale: true       # adds ece_ts/rms_ce_ts/mce_ts/temperature columns
+    temp_scale: false      # requires merge_val=false so validation remains held out
 
   # Optional intrinsic dimension (ID) metrics on extracted embeddings.
   # Computed alongside KNN/linear probing when enabled. Adds rows with

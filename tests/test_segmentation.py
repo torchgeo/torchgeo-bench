@@ -717,7 +717,20 @@ def test_extract_segmentation_features_dict_batches(mock_backbone, dummy_data):
     assert len(cache) == len(images)
 
 
+def test_extract_segmentation_features_restores_backbone_mode(mock_backbone, dummy_data):
+    """Feature extraction preserves the caller's backbone train/eval state."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1"])
+    probe.backbone.train()
+
+    probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+
+    assert probe.backbone.training
+
+# ---------------------------------------------------------------------------
 # GPUTensorCache
+# ---------------------------------------------------------------------------
 
 
 def _make_cpu_cache(mock_backbone, dummy_data):
@@ -765,3 +778,43 @@ def test_gpu_tensor_cache_ordered_batches(mock_backbone, dummy_data):
     for _feats, masks in gpu_cache.ordered_batches(batch_size=1):
         total += masks.shape[0]
     assert total == len(cache)
+
+
+def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
+    """fit_cached falls back gracefully to DataLoader path on CPU (no CUDA available in CI)."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+
+    # On CPU, use_amp=False so GPUTensorCache path is skipped; DataLoader fallback runs.
+    val_miou = solver.fit_cached(
+        train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
+    )
+    assert isinstance(val_miou, float)
+    assert 0.0 <= val_miou <= 1.0
+
+
+def test_solver_fit_cached_builds_missing_validation_gpu_cache(mock_backbone, dummy_data):
+    """A supplied training GPU cache must not disable validation caching."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    gpu_train = GPUTensorCache.from_cached(train_cache, device="cpu")
+
+    val_miou = solver.fit_cached(
+        train_cache,
+        val_cache=val_cache,
+        batch_size=2,
+        epochs=1,
+        verbose=False,
+        gpu_train=gpu_train,
+    )
+
+    assert isinstance(val_miou, float)

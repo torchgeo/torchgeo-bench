@@ -398,7 +398,7 @@ class TestUnifiedEvaluateLogistic:
             c_values=[0.1, 1.0],
             seed=42,
             n_bootstrap=50,
-            merge_val=True,
+            merge_val=False,
             device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
@@ -423,9 +423,10 @@ class TestUnifiedEvaluateLogistic:
             n_bootstrap=50,
             merge_val=True,
             device="cpu",
+            verbose=True,
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert best_c in [0.01, 0.1, 1.0]
         assert set(cal) == {"ece", "rms_ce", "mce"}
         assert set(cal_ts) == {"ece_ts", "rms_ce_ts", "mce_ts", "temperature"}
-        assert cal_ts["temperature"] is not None and cal_ts["temperature"] > 0
+        assert all(value is None for value in cal_ts.values())

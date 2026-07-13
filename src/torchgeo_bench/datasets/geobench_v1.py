@@ -5,10 +5,8 @@ package. Loads samples directly from ``classification_v1.0/<dataset>/``
 HDF5 files using the partition JSON files distributed alongside them.
 """
 
-import io
 import json
 import os
-import pickle
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -18,6 +16,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from ._metadata import unpickle_metadata
 from .base import BenchDataset
 
 V1_ROOT = Path("data/classification_v1.0")
@@ -84,20 +83,7 @@ class GeoBenchv1(Dataset):
         """Load pickled metadata from HDF5 attributes."""
         sample_path = self.dataset_dir / f"{sample_id}.hdf5"
         with h5py.File(sample_path, "r") as f:
-            pickle_str = f.attrs["pickle"]
-            try:
-                metadata = pickle.loads(eval(pickle_str))  # type: ignore[arg-type]
-            except (ModuleNotFoundError, AttributeError):
-                # Pickle references geobench module classes we don't need.
-                # Use a restricted unpickler that stubs them out.
-                class _RestrictedUnpickler(pickle.Unpickler):
-                    def find_class(self, module: str, name: str) -> type:  # type: ignore[override]
-                        if module == "geobench.dataset":
-                            return type(name, (), {})
-                        return super().find_class(module, name)
-
-                metadata = _RestrictedUnpickler(io.BytesIO(eval(pickle_str))).load()  # type: ignore[arg-type]
-        return metadata
+            return unpickle_metadata(f.attrs["pickle"])
 
     def __len__(self) -> int:
         return len(self.sample_ids)

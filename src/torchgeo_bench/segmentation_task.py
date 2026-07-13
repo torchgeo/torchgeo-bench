@@ -150,11 +150,9 @@ class SegmentationSolver:
             if self.model.freeze_backbone:
                 self.model.backbone.eval()
 
-            total_loss = 0.0
-
             desc = f"Epoch {epoch + 1}/{epochs}"
             batches = track(train_loader, description=desc) if verbose else train_loader
-            for _num_batches, batch in enumerate(batches, start=1):
+            for batch in batches:
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
                     masks = batch["mask"].to(self.device).long()
@@ -172,8 +170,6 @@ class SegmentationSolver:
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
-
-                total_loss += loss.item()
 
             if scheduler is not None:
                 scheduler.step()
@@ -283,8 +279,8 @@ class SegmentationSolver:
         """
         if gpu_train is None:
             gpu_train = GPUTensorCache.from_cached(train_cache, self.device)
-            if val_cache is not None:
-                gpu_val = GPUTensorCache.from_cached(val_cache, self.device)
+        if gpu_val is None and val_cache is not None:
+            gpu_val = GPUTensorCache.from_cached(val_cache, self.device)
 
         # Fast path: GPU tensor cache — no DataLoader, no host→device transfer per batch
         scheduler = self._make_scheduler(epochs)
@@ -299,7 +295,6 @@ class SegmentationSolver:
             if self.model.freeze_backbone:
                 self.model.backbone.eval()
 
-            total_loss = 0.0
             desc = f"Epoch {epoch + 1}/{epochs}"
             batches = gpu_train.shuffled_batches(batch_size)
             batches = track(batches, total=num_batches, description=desc) if verbose else batches
@@ -312,8 +307,6 @@ class SegmentationSolver:
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
-
-                total_loss += loss.item()
 
             if scheduler is not None:
                 scheduler.step()

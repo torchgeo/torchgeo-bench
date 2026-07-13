@@ -262,10 +262,8 @@ def evaluate_logistic(
         "mce_ts": None,
         "temperature": None,
     }
-    if temp_scale:
+    if temp_scale and not merge_val:
         # Fit T on val logits, apply to test logits, recompute calibration.
-        # When merge_val=True the final model has seen val during training, but
-        # T is a single scalar so the resulting leakage is minimal.
         val_logits = final_model.decision_function(x_val_tensor)
         test_logits = final_model.decision_function(x_test_tensor)
         temperature = fit_temperature(val_logits, y_val, multi_label=multi_label)
@@ -279,6 +277,12 @@ def evaluate_logistic(
             "mce_ts": cal_ts["mce"],
             "temperature": temperature,
         }
+    elif temp_scale and merge_val:
+        logger.warning(
+            "[%s] Skipping temperature scaling because merge_val=true leaves no held-out "
+            "calibration split.",
+            label_tag,
+        )
 
     if verbose:
         logger.info(
@@ -290,7 +294,7 @@ def evaluate_logistic(
             f"ECE={calibration['ece']:.4f} "
             f"RMS-CE={calibration['rms_ce']:.4f} MCE={calibration['mce']:.4f}"
         )
-        if temp_scale:
+        if calibration_ts["temperature"] is not None:
             logger.info(
                 f"[{label_tag}] Post-TS T={calibration_ts['temperature']:.3f} "
                 f"ECE={calibration_ts['ece_ts']:.4f} "
