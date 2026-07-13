@@ -178,9 +178,15 @@ class _V2Dataset(BenchDataset):
                     # (image_aerial / image_s2 / image_s1) *before* stacking, so
                     # the framework's resize transform must operate on each
                     # modality independently here.
-                    for key in [k for k in sample if k.startswith("image_")]:
-                        wrapped = transform({"image": sample[key]})
+                    image_keys = [k for k in sample if k.startswith("image_")]
+                    for index, key in enumerate(image_keys):
+                        wrapped = {"image": sample[key]}
+                        if index == 0 and "mask" in sample:
+                            wrapped["mask"] = sample["mask"]
+                        wrapped = transform(wrapped)
                         sample[key] = wrapped["image"]
+                        if "mask" in wrapped:
+                            sample["mask"] = wrapped["mask"]
             return sample
 
         kwargs: dict[str, object] = {

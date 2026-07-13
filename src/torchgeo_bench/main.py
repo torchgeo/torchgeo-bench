@@ -886,6 +886,7 @@ def evaluate_segmentation(
 
     seg_cfg = eval_cfg.segmentation
     epochs = seg_cfg.epochs
+    probe_batch_size = int(seg_cfg.get("batch_size", 64))
     use_cache = seg_cfg.get("cache_features", True)
     cache_dtype_str = seg_cfg.get("cache_dtype", "float16")
     cache_dtype = torch.float16 if cache_dtype_str == "float16" else torch.float32
@@ -899,13 +900,13 @@ def evaluate_segmentation(
         solver.fit_cached(
             train_cache=train_cache,
             val_cache=val_cache,
-            batch_size=seg_cfg.get("batch_size", 64),
+            batch_size=probe_batch_size,
             epochs=epochs,
             verbose=cfg.verbose,
         )
         eval_result = solver.evaluate_cached(
             test_cache,
-            batch_size=seg_cfg.get("batch_size", 64),
+            batch_size=probe_batch_size,
             collect_preds=collect_preds,
         )
     else:
@@ -913,12 +914,17 @@ def evaluate_segmentation(
             train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=cfg.verbose
         )
         eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
+    actual_batch_size = (
+        probe_batch_size
+        if use_cache and probe.freeze_backbone
+        else int(train_loader.batch_size or 1)
+    )
 
     if collect_preds:
         metrics, preds = eval_result
     else:
         metrics, preds = eval_result, None
-    return metrics, sum(probe.channels_list), None, None, preds
+    return metrics, sum(probe.channels_list), float(seg_cfg.lr), actual_batch_size, preds
 
 
 # ---------------------------------------------------------------------------

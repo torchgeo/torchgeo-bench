@@ -37,6 +37,21 @@ def test_invalid_interpolation_raises_instead_of_falling_back() -> None:
         _make_resize_transform(224, "bilnear")
 
 
+def test_resize_handles_temporal_images_and_singleton_channel_masks() -> None:
+    transform = _make_resize_transform(4, "bilinear")
+    assert transform is not None
+
+    sample = {
+        "image": torch.zeros(2, 3, 8, 8),
+        "mask": torch.zeros(1, 8, 8, dtype=torch.long),
+    }
+    result = transform(sample)
+
+    assert result["image"].shape == (2, 3, 4, 4)
+    assert result["mask"].shape == (1, 4, 4)
+    assert result["mask"].dtype == torch.long
+
+
 def test_mixed_scale_unit_detection_raises() -> None:
     bands = [
         BandSpec("s2", "red", "red", mean=0.1, std=0.1, min=0.0, max=1.0, wavelength_um=0.665),

@@ -254,14 +254,16 @@ class _TorchGeoBackboneBench(BenchModel):
         return _resolve_torchgeo_factory(factory)(weights=weights)
 
     def _tiled_normalize(self, in_chans: int) -> nn.Sequential | None:
-        """Build a Normalize whose mean/std are the pretrained RGB stats tiled to ``in_chans``.
+        """Build the pretrained normalization chain for ``in_chans`` channels.
 
         Matches ``adapt_input_conv``'s tiling pattern: for ``in_chans=7``
         with 3-channel pretrain stats ``[r, g, b]``, the result is
         ``[r, g, b, r, g, b, r]``.  This keeps the input conv (which was
         also tiled) and the normalize statistically consistent — both
         layers "see" each input channel as belonging to the corresponding
-        RGB slot of the pretrained model.
+        RGB slot of the pretrained model. Every normalization stage is
+        preserved; this matters for pipelines such as ScaleMAE's
+        ``/255 -> ImageNet z-score`` chain.
 
         Cached on ``self`` so we don't rebuild per batch.
         """
@@ -271,32 +273,37 @@ class _TorchGeoBackboneBench(BenchModel):
             return cached
         if self._weights_normalize is None:
             return None
-        # Find the inner Normalize that carries mean/std.
         from torchvision.transforms import Normalize as _N1
         from torchvision.transforms.v2 import Normalize as _N2
 
-        inner: NormalizeV1 | NormalizeV2 | None = None
-        for m in self._weights_normalize.modules():
-            if isinstance(m, (_N1, _N2)):
-                inner = m
-                break
-        if inner is None:
+        layers: list[nn.Module] = []
+        for inner in self._weights_normalize:
+            if not isinstance(inner, (_N1, _N2)):
+                continue
+            mean = inner.mean
+            std = inner.std
+            if isinstance(mean, torch.Tensor):
+                mean = mean.tolist()
+            if isinstance(std, torch.Tensor):
+                std = std.tolist()
+            mean = list(mean)
+            std = list(std)
+            source_channels = len(mean)
+            if source_channels == 0:
+                return None
+            if source_channels not in (1, in_chans):
+                mean = [mean[i % source_channels] for i in range(in_chans)]
+                std = [std[i % source_channels] for i in range(in_chans)]
+            layers.append(
+                type(inner)(
+                    mean=mean,
+                    std=std,
+                    inplace=getattr(inner, "inplace", False),
+                )
+            )
+        if not layers:
             return None
-        mean = inner.mean
-        std = inner.std
-        if isinstance(mean, torch.Tensor):
-            mean = mean.tolist()
-        if isinstance(std, torch.Tensor):
-            std = std.tolist()
-        mean = list(mean)
-        std = list(std)
-        rgb_c = len(mean)
-        if rgb_c == 0:
-            return None
-        # Tile: e.g. rgb_c=3, in_chans=7 -> [r,g,b,r,g,b,r]
-        tiled_mean = [mean[i % rgb_c] for i in range(in_chans)]
-        tiled_std = [std[i % rgb_c] for i in range(in_chans)]
-        tiled = nn.Sequential(type(inner)(mean=tiled_mean, std=tiled_std))
+        tiled = nn.Sequential(*layers)
         # Cache on the same device the next forward will use; Normalize is
         # parameter-less so no .to() needed for tensors-on-Tensor input.
         object.__setattr__(self, cache_key, tiled)
@@ -339,18 +346,17 @@ class _TorchGeoBackboneBench(BenchModel):
         if _need_unit_conv:
             images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
         if weights_norm is not None:
-            expected_c = None
+            channel_counts: list[int] = []
             for m in weights_norm.modules():
                 mean = getattr(m, "mean", None)
                 if mean is None:
                     continue
                 if isinstance(mean, torch.Tensor):
-                    expected_c = mean.shape[-1] if mean.ndim else mean.numel()
+                    channel_counts.append(mean.shape[-1] if mean.ndim else mean.numel())
                 else:
-                    expected_c = len(mean)
-                break
+                    channel_counts.append(len(mean))
             in_chans = images.shape[1]
-            if expected_c is None or expected_c == in_chans:
+            if not channel_counts or all(count in (1, in_chans) for count in channel_counts):
                 return weights_norm(images)
             # Channel count mismatch: build a tiled Normalize to match.
             tiled = self._tiled_normalize(in_chans)
