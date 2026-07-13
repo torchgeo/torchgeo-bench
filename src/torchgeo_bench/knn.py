@@ -41,10 +41,10 @@ class KNNClassifier:
     Args:
         n_neighbors: Number of neighbours (k). Clamped to ``min(k, n_train)``
             on the CPU path; faissknn does not clamp internally.
-        device: ``"cpu"`` (default) → ``faiss-cpu`` (or ``faiss-cuda-cu128``'s CPU
-            index when the ``cuda`` extra is installed). Anything else (``"cuda"``,
-            ``"cuda:0"``) requires the ``cuda`` extra (``faissknn``); raises
-            :class:`ImportError` if not installed.
+        device: ``"cpu"`` (default) → the FAISS CPU index. Anything else
+            (``"cuda"``, ``"cuda:0"``) requires ``faissknn`` with a GPU FAISS
+            backend (installed automatically on Linux x86_64); raises
+            :class:`ImportError` if missing.
         metric: Distance metric — ``"l2"`` (default), ``"ip"`` (inner
             product), or ``"cosine"`` (cosine similarity; auto-normalizes
             inputs). GPU path only; CPU path always uses L2.
@@ -142,9 +142,9 @@ class KNNClassifier:
             from faissknn import FaissKNNClassifier, FaissKNNMultilabelClassifier
         except ImportError as exc:  # pragma: no cover — covered by env, not unit tests
             raise ImportError(
-                f"KNNClassifier(device={self.device!r}): the 'cuda' extra is not installed "
-                "(faissknn missing). Install with "
-                '`pip install -e ".[cuda]"` to enable GPU KNN, or request device="cpu".'
+                f"KNNClassifier(device={self.device!r}): faissknn is not installed. "
+                "GPU KNN requires Linux x86_64, where it installs automatically; "
+                'otherwise request device="cpu".'
             ) from exc
 
         kwargs = {

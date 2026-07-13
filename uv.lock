@@ -4,13 +4,16 @@ requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "(python_full_version >= '3.14' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version >= '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "(python_full_version == '3.13.*' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version == '3.13.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
     "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version < '3.13' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "(python_full_version < '3.13' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
 
 [[package]]
@@ -727,8 +730,8 @@ name = "faiss-cpu"
 version = "1.14.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
-    { name = "packaging" },
+    { name = "numpy", marker = "platform_machine != 'x86_64' or sys_platform != 'linux'" },
+    { name = "packaging", marker = "platform_machine != 'x86_64' or sys_platform != 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/8b/5d2cd7c9fd60bc4d1ca6e9f5e8b0eb57254a7b301daaa12d5853fdf48afe/faiss_cpu-1.14.2-cp310-abi3-macosx_14_0_arm64.whl", hash = "sha256:a20011b8a97318e6d5e29143a773277ca71f1c33140024aeec91f05ad56cdd04", size = 4621203, upload-time = "2026-05-22T19:58:27.415Z" },
@@ -741,40 +744,40 @@ wheels = [
 ]
 
 [[package]]
-name = "faiss-cuda-cu128"
-version = "1.14.1.post3"
+name = "faiss-cuda"
+version = "1.14.3.post0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
-    { name = "nvidia-cublas-cu12" },
-    { name = "nvidia-cuda-runtime-cu12" },
-    { name = "packaging" },
+    { name = "numpy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cuda-runtime-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "packaging", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/d4/e9fd2fcdeb7dc4aea8fba69d4a63b37b88cdc9820c1d44afcba9580d8e6f/faiss_cuda_cu128-1.14.1.post3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4a9f6bcb7d6a7faeb4b09b0859d28681edf658e66d4eddacc0fe8c9613f2d18a", size = 88839581, upload-time = "2026-05-20T02:24:14.159Z" },
-    { url = "https://files.pythonhosted.org/packages/08/72/b558461d476731c8e3c95de303e5e3b8848d7fef515678844c83cf11c946/faiss_cuda_cu128-1.14.1.post3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5debb2f2cb97787d76eadd4f8cdbd8067bfc680daf49a30becc854e4994c1060", size = 88839500, upload-time = "2026-05-20T02:24:20.42Z" },
-    { url = "https://files.pythonhosted.org/packages/b7/73/0d000d3e56d493110d75dccf307e7439f42de0578509c57396a5f3c90415/faiss_cuda_cu128-1.14.1.post3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7b723df18622242bb993f9c004e32f2fbed2a8070ccc0b0f67761f34331eb34b", size = 88840308, upload-time = "2026-05-20T02:24:26.099Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/d9/ff4dc8cbae70a4f5c76a953ac1e189044940be7a22808b1c3ff865a2a1e6/faiss_cuda-1.14.3.post0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d83e92f341a1f79b5ab52fa0982eab3fe80428fcb1a69591ab2021b95f568f33", size = 106476496, upload-time = "2026-07-11T21:36:01.577Z" },
+    { url = "https://files.pythonhosted.org/packages/63/2d/df6e0ec234d342d92a326db38e5b9f3d4c04bb88510609676ccd986252e4/faiss_cuda-1.14.3.post0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7c16bcd2338d880cd8f355c8c5b0cc3995693c75aee698a224168f7039b18423", size = 106476519, upload-time = "2026-07-11T21:36:07.536Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/15/2b689760abf1531b32ae6452267a05e66bb4388b289b8f5560deebee0b17/faiss_cuda-1.14.3.post0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:973f14c1cd9528c60764aa5e32a7aadba22c2ecf9bd50fb206bf55010a7504d5", size = 106476833, upload-time = "2026-07-11T21:36:13.095Z" },
 ]
 
 [[package]]
 name = "faissknn"
-version = "0.3.0"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1d/fd/40f72308cc258b784ac530b0d3202a10b4e028190ecf5906d4a8f1fcd396/faissknn-0.3.0.tar.gz", hash = "sha256:e571593b8afde29f3397469aff6eab1f63f9f7f6e8280f53e1e316647e3dae31", size = 7671, upload-time = "2026-06-18T01:57:01.644Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/16/2fcf9012f001c2a06c4cb930a129fbc62939c8574350a62e0d7ae8478c30/faissknn-0.4.1.tar.gz", hash = "sha256:d029125355814fda99789862d3c8d32c79a326415c5349fd10cc5f26b291d6e8", size = 7613, upload-time = "2026-07-11T21:42:03.958Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/26/ec40a4513fdaad8d4e48764d47001dd6cfaa1b778cbcd98c22eaf940fae8/faissknn-0.3.0-py3-none-any.whl", hash = "sha256:91e6b514405f3870985654533b2cfefe77fb47873987f6d152f1d8b8e0a3c548", size = 7200, upload-time = "2026-06-18T01:57:02.515Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/1a/07caa3dd83111d8d28cf23d4153f96386d241026e7c71c8ee6fd116c159a/faissknn-0.4.1-py3-none-any.whl", hash = "sha256:3f1c4429c8900ca3dd4d7c0af42add1cebec76d113e5adf77929ab42b6816543", size = 7324, upload-time = "2026-07-11T21:42:03.1Z" },
 ]
 
 [package.optional-dependencies]
 cpu = [
-    { name = "faiss-cpu" },
+    { name = "faiss-cpu", marker = "platform_machine != 'x86_64' or sys_platform != 'linux'" },
 ]
 cuda = [
-    { name = "faiss-cuda-cu128" },
+    { name = "faiss-cuda", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
 [[package]]
@@ -1903,12 +1906,10 @@ name = "nvidia-cublas-cu12"
 version = "12.9.2.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cuda-nvrtc-cu12" },
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f7/a2/c96163a0fff1839c0c9548bbdeae7b853b867009e33b9b9264adc238b1cf/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:5572131a59c3eebeeb1c4c8144f772d49372c20124916e072a0e3fc30df421d5", size = 575012079, upload-time = "2026-04-08T18:51:47.303Z" },
     { url = "https://files.pythonhosted.org/packages/cb/c0/0a517bfe63ccd3b92eb254d264e28fca3c7cab75d07daea315250fb1bf73/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:e4f53a8ca8c5d6e8c492d0d0a3d565ecb59a751b19cfdaa4f6da0ab2104c1702", size = 581240110, upload-time = "2026-04-08T18:52:31.532Z" },
-    { url = "https://files.pythonhosted.org/packages/20/e2/fc9a0e985249d873150276d5afb02e39a66817fedbf1a385724393e505ed/nvidia_cublas_cu12-12.9.2.10-py3-none-win_amd64.whl", hash = "sha256:623f43027d40d44ceadf0043f002bd25cf353e8f13ce90b9a87057019f560661", size = 553162896, upload-time = "2026-04-08T18:53:10.035Z" },
 ]
 
 [[package]]
@@ -1935,8 +1936,6 @@ version = "12.9.86"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b8/85/e4af82cc9202023862090bfca4ea827d533329e925c758f0cde964cb54b7/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:210cf05005a447e29214e9ce50851e83fc5f4358df8b453155d5e1918094dcb4", size = 89568129, upload-time = "2025-06-05T20:02:41.973Z" },
-    { url = "https://files.pythonhosted.org/packages/64/eb/c2295044b8f3b3b08860e2f6a912b702fc92568a167259df5dddb78f325e/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:096d4de6bda726415dfaf3198d4f5c522b8e70139c97feef5cd2ca6d4cd9cead", size = 44528905, upload-time = "2025-06-05T20:02:29.754Z" },
-    { url = "https://files.pythonhosted.org/packages/52/de/823919be3b9d0ccbf1f784035423c5f18f4267fb0123558d58b813c6ec86/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-win_amd64.whl", hash = "sha256:72972ebdcf504d69462d3bcd67e7b81edd25d0fb85a2c46d3ea3517666636349", size = 76408187, upload-time = "2025-06-05T20:12:27.819Z" },
 ]
 
 [[package]]
@@ -1953,9 +1952,7 @@ name = "nvidia-cuda-runtime-cu12"
 version = "12.9.79"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/e0/0279bd94539fda525e0c8538db29b72a5a8495b0c12173113471d28bce78/nvidia_cuda_runtime_cu12-12.9.79-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:83469a846206f2a733db0c42e223589ab62fd2fabac4432d2f8802de4bded0a4", size = 3515012, upload-time = "2025-06-05T20:00:35.519Z" },
     { url = "https://files.pythonhosted.org/packages/bc/46/a92db19b8309581092a3add7e6fceb4c301a3fd233969856a8cbf042cd3c/nvidia_cuda_runtime_cu12-12.9.79-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:25bba2dfb01d48a9b59ca474a1ac43c6ebf7011f1b0b8cc44f54eb6ac48a96c3", size = 3493179, upload-time = "2025-06-05T20:00:53.735Z" },
-    { url = "https://files.pythonhosted.org/packages/59/df/e7c3a360be4f7b93cee39271b792669baeb3846c58a4df6dfcf187a7ffab/nvidia_cuda_runtime_cu12-12.9.79-py3-none-win_amd64.whl", hash = "sha256:8e018af8fa02363876860388bd10ccb89eb9ab8fb0aa749aaf58430a9f7c4891", size = 3591604, upload-time = "2025-06-05T20:11:17.036Z" },
 ]
 
 [[package]]
@@ -3917,7 +3914,9 @@ name = "torchgeo-bench"
 version = "0.4.0"
 source = { editable = "." }
 dependencies = [
-    { name = "faissknn", extra = ["cpu"] },
+    { name = "faissknn" },
+    { name = "faissknn", extra = ["cpu"], marker = "platform_machine != 'x86_64' or sys_platform != 'linux'" },
+    { name = "faissknn", extra = ["cuda"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "filelock" },
     { name = "geobenchv2" },
     { name = "h5py" },
@@ -3966,9 +3965,6 @@ cleanlab = [
     { name = "matplotlib" },
     { name = "pillow" },
 ]
-cuda = [
-    { name = "faissknn", extra = ["cuda"] },
-]
 dev = [
     { name = "mdformat" },
     { name = "pre-commit" },
@@ -4006,8 +4002,8 @@ viz = [
 [package.metadata]
 requires-dist = [
     { name = "cleanlab", marker = "extra == 'cleanlab'", specifier = ">=2.7" },
-    { name = "faissknn", extras = ["cpu"], specifier = ">=0.3" },
-    { name = "faissknn", extras = ["cuda"], marker = "extra == 'cuda'", specifier = ">=0.3" },
+    { name = "faissknn", extras = ["cpu"], marker = "platform_machine != 'x86_64' or sys_platform != 'linux'", specifier = ">=0.4" },
+    { name = "faissknn", extras = ["cuda"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.4" },
     { name = "filelock", specifier = ">=3.12" },
     { name = "geobenchv2", specifier = ">=0.9" },
     { name = "h5py", specifier = ">=3.8" },
@@ -4055,7 +4051,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'sam3'", specifier = ">=4.50" },
     { name = "typer", specifier = ">=0.9" },
 ]
-provides-extras = ["all", "cleanlab", "cuda", "dev", "docs", "id", "olmoearth", "sam3", "terratorch", "viz"]
+provides-extras = ["all", "cleanlab", "dev", "docs", "id", "olmoearth", "sam3", "terratorch", "viz"]
 
 [[package]]
 name = "torchid"
