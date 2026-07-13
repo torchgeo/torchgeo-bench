@@ -74,6 +74,7 @@ class KNNClassifier:
             on the CPU path; faissknn does not clamp internally.
         device: ``"cpu"`` (default) → the FAISS CPU index. Anything else
             (``"cuda"``, ``"cuda:0"``) requires ``faissknn`` with a GPU FAISS
+<<<<<<< HEAD
             backend (installed automatically on Linux x86_64); raises an
             actionable error if unavailable.
         metric: Distance metric — ``"l2"`` (default), ``"ip"`` (inner
