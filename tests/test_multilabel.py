@@ -1,12 +1,14 @@
 """Tests for multi-label support and KNNClassifier."""
 
 import builtins
+import logging
 
 import numpy as np
 import pytest
 import torch
 
-from torchgeo_bench.knn import KNNClassifier
+import torchgeo_bench.knn as knn
+from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.linear import LogisticRegression
 
 
@@ -218,8 +220,8 @@ _cuda_available = pytest.mark.skipif(
     not __import__("torch").cuda.is_available(), reason="CUDA not available"
 )
 _faissknn_available = pytest.mark.skipif(
-    __import__("importlib").util.find_spec("faissknn") is None,
-    reason="faissknn not installed (pip install torchgeo-bench[cuda])",
+    not knn.gpu_faiss_available(),
+    reason="GPU-enabled FAISS is not installed",
 )
 
 
@@ -349,6 +351,39 @@ class TestKNNGPUPath:
         clf = KNNClassifier(n_neighbors=5, device="cuda")
         with pytest.raises(ImportError, match='request device="cpu"'):
             clf.fit(d["x_train"], d["y_train"])
+
+    def test_explicit_gpu_with_cpu_faiss_raises_actionable_error(
+        self, singlelabel_data, monkeypatch
+    ):
+        monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
+        d = singlelabel_data
+        clf = KNNClassifier(n_neighbors=5, device="cuda")
+        with pytest.raises(RuntimeError, match="eval.knn_device=cpu"):
+            clf.fit(d["x_train"], d["y_train"])
+
+
+class TestResolveKNNDevice:
+    def test_implicit_gpu_falls_back_to_cpu(self, monkeypatch, caplog: pytest.LogCaptureFixture):
+        monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
+
+        with caplog.at_level(logging.WARNING):
+            device = resolve_knn_device(None, "cuda:0")
+
+        assert device == "cpu"
+        assert "using CPU for KNN" in caplog.text
+
+    def test_implicit_gpu_uses_available_gpu_faiss(self, monkeypatch):
+        monkeypatch.setattr(knn, "gpu_faiss_available", lambda: True)
+        assert resolve_knn_device(None, "cuda:1") == "cuda:1"
+
+    def test_explicit_gpu_requires_gpu_faiss(self, monkeypatch):
+        monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
+        with pytest.raises(RuntimeError, match="explicit KNN device 'cuda:1'"):
+            resolve_knn_device("cuda:1", "cuda:0")
+
+    def test_explicit_cpu_is_preserved(self, monkeypatch):
+        monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
+        assert resolve_knn_device("cpu", "cuda:0") == "cpu"
 
 
 # ---- Unified evaluate_knn / evaluate_logistic tests ----
