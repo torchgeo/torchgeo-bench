@@ -1088,6 +1088,10 @@ def main(cfg: DictConfig) -> None:
                 logger.info(f"[{ds_name}] Resume preflight: all requested work already complete")
             continue
 
+        knn_device: str | None = None
+        if ds_cls.task != "segmentation" and not plan.skip_knn:
+            knn_device = resolve_knn_device(cfg.eval.get("knn_device"), cfg.device)
+
         try:
             result = get_datasets(
                 dataset_name=ds_name,
@@ -1231,8 +1235,6 @@ def main(cfg: DictConfig) -> None:
         else:
             # Classification (single-label or multi-label)
             metric_name = plan.metric_name
-            if not plan.skip_knn:
-                knn_device = resolve_knn_device(cfg.eval.get("knn_device"), cfg.device)
             x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
             x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
             x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
@@ -1244,6 +1246,7 @@ def main(cfg: DictConfig) -> None:
             cal_temp_scale = bool(cal_cfg.get("temp_scale", True))
 
             if not plan.skip_knn:
+                assert knn_device is not None
                 knn_score, knn_lo, knn_hi, knn_cal, knn_n_bins = evaluate_knn(
                     x_train,
                     y_train,
