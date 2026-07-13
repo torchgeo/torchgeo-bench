@@ -1,0 +1,111 @@
+{
+  "cache_dtype": "float16",
+  "cache_features": true,
+  "datasets": [
+    {
+      "bands": "all",
+      "name": "burn_scars"
+    },
+    {
+      "bands": "rgb",
+      "name": "cloudsen12"
+    },
+    {
+      "bands": "rgb",
+      "name": "dynamic_earthnet"
+    },
+    {
+      "bands": "rgb",
+      "name": "pastis"
+    }
+  ],
+  "head_type": "fpn",
+  "image_size": 224,
+  "models": [
+    {
+      "config": "timm/convnext_large_dinov3",
+      "loader_batch_size": 8,
+      "name": "convnext_large_dinov3",
+      "probe_batch_size": 8
+    },
+    {
+      "config": "timm/resnet50",
+      "loader_batch_size": 32,
+      "name": "resnet50",
+      "probe_batch_size": 8
+    },
+    {
+      "config": "timm/efficientnet_b0",
+      "loader_batch_size": 32,
+      "name": "efficientnet_b0",
+      "probe_batch_size": 8
+    },
+    {
+      "config": "timm/densenet121",
+      "loader_batch_size": 16,
+      "name": "densenet121",
+      "probe_batch_size": 8
+    },
+    {
+      "config": "timm/maxvit_tiny_tf_224",
+      "loader_batch_size": 12,
+      "name": "maxvit_tiny_tf_224",
+      "probe_batch_size": 8
+    },
+    {
+      "config": "torchgeo/scalemae_large_fmow",
+      "loader_batch_size": 8,
+      "name": "tgeo_scalemae_large_fmow",
+      "probe_batch_size": 8
+    },
+    {
+      "config": "torchgeo/swinv2b_s2rgb_satlas_mi",
+      "loader_batch_size": 8,
+      "name": "tgeo_swinv2b_s2rgb_satlas_mi",
+      "probe_batch_size": 8
+    }
+  ],
+  "normalization": "bandspec_zscore",
+  "partition": "default",
+  "schema_version": 1,
+  "seed": 0,
+  "source_hash": "b25f85595a14ae09cb00a1c94ee8a5a4adf5419c2340ff7d59e696c45c2d74bc",
+  "variants": [
+    {
+      "epochs": 10,
+      "lr": 0.001,
+      "name": "baseline_10ep_cosine_1e-3",
+      "scheduler": "cosine"
+    },
+    {
+      "epochs": 30,
+      "lr": 0.001,
+      "name": "long_30ep_cosine_1e-3",
+      "scheduler": "cosine"
+    },
+    {
+      "epochs": 50,
+      "lr": 0.001,
+      "name": "long_50ep_cosine_1e-3",
+      "scheduler": "cosine"
+    },
+    {
+      "epochs": 30,
+      "lr": 0.0003,
+      "name": "low_lr_30ep_cosine_3e-4",
+      "scheduler": "cosine"
+    },
+    {
+      "epochs": 30,
+      "lr": 0.003,
+      "name": "high_lr_30ep_cosine_3e-3",
+      "scheduler": "cosine"
+    },
+    {
+      "epochs": 30,
+      "lr": 0.001,
+      "name": "constant_30ep_1e-3",
+      "scheduler": "none"
+    }
+  ]
+}
