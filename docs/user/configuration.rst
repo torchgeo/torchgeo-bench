@@ -77,7 +77,7 @@ selection semantics.
      c_range: [-6, 4, 40]          # log10 sweep start, stop, num samples for linear probe
      merge_val: true               # merge train+val before training the final logistic head
      skip_linear: false            # skip the (slower) linear probe entirely
-     knn_device: null              # auto: GPU FAISS when available, otherwise CPU
+     knn_device: null              # inherit device; fall back to CPU if FAISS lacks GPU support
 
      intrinsic_dim:                # optional ID metrics on extracted embeddings
        enabled: false
