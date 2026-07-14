@@ -1,0 +1,13 @@
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
+model_size: nano
+version: v1_2
+patch_size: 8
+input_res: null
+time_steps: 1
+std_multiplier: 2.0
+normalize: false
+image_size: null
+min_image_size: 64
+sensor_remap:
+  landsat: s2  # m-forestnet's uint8 composites do better through the S2 normalizer
+name: olmoearth_v1_2_nano_landsat_as_s2

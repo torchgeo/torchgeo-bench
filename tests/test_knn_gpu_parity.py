@@ -8,10 +8,11 @@ import numpy as np
 import pytest
 import torch
 
-from torchgeo_bench.knn import KNNClassifier
+from torchgeo_bench.knn import KNNClassifier, gpu_faiss_available
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="requires CUDA for cpu/cuda parity"
+    not torch.cuda.is_available() or not gpu_faiss_available(),
+    reason="requires torch CUDA and GPU-enabled FAISS for cpu/cuda parity",
 )
 
 N_TRAIN, N_TEST, DIM, K, N_CLASSES = 2000, 500, 64, 5, 10
