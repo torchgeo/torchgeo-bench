@@ -1,6 +1,5 @@
 # GeoCLIP location encoder (Equal-Earth + RFF) -> 512-d.
 # Requires the `coordbench` extra: pip install -e ".[coordbench]"
-# Best-effort rshf wrapper; verify outputs against upstream before citing numbers.
 _target_: torchgeo_bench.coordbench.models.GeoCLIPLocationEncoder
-repo: MVRL/geoclip-location-encoder
+repo: rshf/geoclip
 name: geoclip

@@ -225,18 +225,17 @@ class SINRLocationEncoder(_RSHFEncoder):
 
 
 class GeoCLIPLocationEncoder(_RSHFEncoder):
-    """GeoCLIP location encoder (Equal-Earth + RFF) -> 512-d. Input order (lat, lon).
+    """GeoCLIP location encoder (Equal-Earth + RFF) -> 512-d. Input order (lon, lat).
 
-    Requires the ``coordbench`` extra (``rshf``). Best-effort wrapper: verify the
-    output against the upstream model before relying on published numbers.
+    Requires the ``coordbench`` extra (``rshf``).
     """
 
     name = "geoclip"
-    coord_order = "latlon"
+    coord_order = "lonlat"
 
     def __init__(
         self,
-        repo: str = "MVRL/geoclip-location-encoder",
+        repo: str = "rshf/geoclip",
         device: str = "cpu",
         batch_size: int = 8192,
     ) -> None:
@@ -249,8 +248,8 @@ class GeoCLIPLocationEncoder(_RSHFEncoder):
 class SatCLIPLocationEncoder(_RSHFEncoder):
     """SatCLIP location encoder (spherical harmonics + SirenNet). Input order (lon, lat).
 
-    Requires the ``coordbench`` extra (``rshf``). Best-effort wrapper: verify the
-    output against the upstream model before relying on published numbers.
+    Runs in float64 (the released weights are double precision). Requires the
+    ``coordbench`` extra (``rshf``).
     """
 
     name = "satclip"
@@ -259,11 +258,11 @@ class SatCLIPLocationEncoder(_RSHFEncoder):
 
     def __init__(
         self,
-        repo: str = "MVRL/satclip-vit16-l40",
+        repo: str = "MVRL/satclip-loc-enc-vit16-l40",
         device: str = "cpu",
         batch_size: int = 8192,
     ) -> None:
         super().__init__(device=device, batch_size=batch_size)
         from rshf.satclip import SatClip
 
-        self.model = SatClip.from_pretrained(repo).to(self.device).eval()
+        self.model = SatClip.from_pretrained(repo).double().to(self.device).eval()
