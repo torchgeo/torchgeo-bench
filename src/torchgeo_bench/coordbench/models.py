@@ -235,14 +235,30 @@ class GeoCLIPLocationEncoder(_RSHFEncoder):
 
     def __init__(
         self,
-        repo: str = "rshf/geoclip",
+        repo: str = "MVRL/geoclip-location-encoder",
         device: str = "cpu",
         batch_size: int = 8192,
     ) -> None:
         super().__init__(device=device, batch_size=batch_size)
-        from rshf.geoclip import GeoCLIP
+        import json
+        from pathlib import Path
 
-        self.model = GeoCLIP.from_pretrained(repo).to(self.device).eval()
+        from huggingface_hub import hf_hub_download
+        from rshf.geoclip import GeoCLIP, GeoCLIPConfig
+        from safetensors.torch import load_file
+
+        # Build from config + weights explicitly: PyTorchModelHubMixin.from_pretrained
+        # no longer reconstructs the GeoCLIPConfig under recent huggingface_hub.
+        cfg = json.loads(Path(hf_hub_download(repo, "config.json")).read_text())
+        config = GeoCLIPConfig(
+            sigma=cfg["sigma"],
+            input_size=cfg["input_size"],
+            encoded_size=cfg["encoded_size"],
+            dim=cfg["dim"],
+        )
+        model = GeoCLIP(config)
+        model.load_state_dict(load_file(hf_hub_download(repo, "model.safetensors")))
+        self.model = model.to(self.device).eval()
 
 
 class SatCLIPLocationEncoder(_RSHFEncoder):
