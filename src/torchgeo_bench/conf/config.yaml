@@ -9,6 +9,19 @@ device: cuda:0
 output: results/all_results.csv
 verbose: false
 resume: false  # if true, skip dataset+method combinations already in output CSV
+mode: image    # image (default GeoBench pipeline) | coord (CoordBench location-encoder track)
+
+# CoordBench location-encoder track (used only when mode=coord).
+# Point (lon, lat) -> label benchmarks from taylor-geospatial/coordbench, probed
+# with a frozen coordinate encoder (model=sincos|climplicit|sinr|geoclip|satclip).
+coord:
+  output: results/coordbench_results.csv
+  names: all               # all | comma-separated families (pdfm,satclip,...) or benchmark names
+  methods: [knn, linear]   # subset of {knn, linear}; knn is classification-only
+  split: random            # random | spatial | both (block-CV holdout)
+  folds: 5
+  cell_deg: 10.0           # spatial-block grid-cell size in degrees
+  knn_k: 5
 
 # Dataset settings
 # Set names: all  OR a list of dataset identifiers

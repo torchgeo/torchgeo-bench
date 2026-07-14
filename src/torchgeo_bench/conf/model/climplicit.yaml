@@ -1,0 +1,5 @@
+# Climplicit climate-specialist location encoder (CHELSA, ReSIREN) -> 1024-d.
+# Requires the `coordbench` extra: pip install -e ".[coordbench]"
+_target_: torchgeo_bench.coordbench.models.ClimplicitLocationEncoder
+repo: Jobedo/climplicit
+name: climplicit
