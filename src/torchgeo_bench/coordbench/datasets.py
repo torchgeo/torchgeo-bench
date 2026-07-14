@@ -489,7 +489,13 @@ def load_deepmind() -> list[CoordBenchmark]:
         label = df["label"].to_numpy()
         integral = np.all(np.isfinite(label)) and np.allclose(label, np.round(label))
         is_clf = bool(integral and np.unique(label).size <= 100)
-        year = pd.to_datetime(df[ts_col], unit="ms").dt.year.to_numpy() if ts_col else None
+        # CoordBench always carries a `timestamp` column, all-null when the source has no
+        # per-point time; keep year None in that case rather than an all-NaN array.
+        year = None
+        if ts_col is not None:
+            yr = pd.to_datetime(df[ts_col], unit="ms").dt.year
+            if yr.notna().any():
+                year = yr.to_numpy()
         out.append(
             CoordBenchmark(
                 name=f"dm-{stem}",
