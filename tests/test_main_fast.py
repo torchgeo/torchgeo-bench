@@ -6,6 +6,7 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 from hydra import compose, initialize_config_module
 from omegaconf import DictConfig
@@ -136,6 +137,50 @@ def test_knn_row_emitted(tmp_path: Path):
     row = df[df["method"] == "knn5"].iloc[0]
     assert row["metric_name"] == "accuracy"
     assert row["dataset"] == "m-eurosat"
+
+
+def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monkeypatch):
+    import torchgeo_bench.knn as knn
+
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(
+        out,
+        overrides=["device=cuda:0", "eval.knn_device=null", "eval.skip_linear=true"],
+    )
+    model = _chainable_model_mock()
+    monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.instantiate", return_value=model),
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ) as knn_mock,
+    ):
+        main.__wrapped__(cfg)
+
+    assert knn_mock.call_args.kwargs["device"] == "cpu"
+
+
+def test_explicit_gpu_knn_without_gpu_faiss_fails_before_data_loading(tmp_path: Path, monkeypatch):
+    import torchgeo_bench.knn as knn
+
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(
+        out,
+        overrides=["device=cuda:0", "eval.knn_device=cuda", "eval.skip_linear=true"],
+    )
+    monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
+        pytest.raises(RuntimeError, match="explicit KNN device 'cuda'"),
+    ):
+        main.__wrapped__(cfg)
+
+    data_mock.assert_not_called()
 
 
 def test_linear_row_emitted(tmp_path: Path):

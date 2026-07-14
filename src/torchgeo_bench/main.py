@@ -31,7 +31,7 @@ from torchgeo_bench.datasets import (
     list_datasets,
 )
 from torchgeo_bench.intrinsic_dim import DegenerateManifoldError, compute_intrinsic_dim
-from torchgeo_bench.knn import KNNClassifier
+from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import measure_profile
 from torchgeo_bench.models.interface import BenchModel
@@ -1088,6 +1088,10 @@ def main(cfg: DictConfig) -> None:
                 logger.info(f"[{ds_name}] Resume preflight: all requested work already complete")
             continue
 
+        knn_device: str | None = None
+        if ds_cls.task != "segmentation" and not plan.skip_knn:
+            knn_device = resolve_knn_device(cfg.eval.get("knn_device"), cfg.device)
+
         try:
             result = get_datasets(
                 dataset_name=ds_name,
@@ -1242,7 +1246,7 @@ def main(cfg: DictConfig) -> None:
             cal_temp_scale = bool(cal_cfg.get("temp_scale", True))
 
             if not plan.skip_knn:
-                knn_device = cfg.eval.get("knn_device") or cfg.device
+                assert knn_device is not None
                 knn_score, knn_lo, knn_hi, knn_cal, knn_n_bins = evaluate_knn(
                     x_train,
                     y_train,
