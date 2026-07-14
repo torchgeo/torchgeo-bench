@@ -91,18 +91,21 @@ is probed with **KNN** and a **ridge linear** head under **random** or
 **spatial-block** cross-validation (regression → R², classification → accuracy).
 
 ```bash
-# Trivial sin/cos baseline on the whole suite, random + spatial CV
-torchgeo-bench run mode=coord model=sincos coord.split=both
+# MIND location encoder on the whole suite, random + spatial CV
+torchgeo-bench run mode=coord model=mind coord.split=both
 
-# One family, linear probe only
+# One family, linear probe only, trivial sin/cos baseline
 torchgeo-bench run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
 ```
 
-Pretrained encoders (SatCLIP / GeoCLIP / Climplicit / SINR, via `rshf`) need the
-`coordbench` extra: `pip install -e ".[coordbench]"`, then `model=climplicit`
-(etc.). Results land in `results/coordbench_results.csv`. Add your own encoder
-by subclassing `LocationEncoder` (implement `_encode`) and pointing a Hydra
-`model` config's `_target_` at it.
+`model=mind` and `model=mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),
+distilled from AlphaEarth/Climplicit/GeoCLIP/SINR) and `model=sincos` work with
+the base install. The other pretrained encoders (SatCLIP / GeoCLIP / Climplicit /
+SINR, via `rshf`) need the `coordbench` extra: `pip install -e ".[coordbench]"`,
+then `model=climplicit` (etc.). Results land in
+`results/coordbench_results.csv`. Add your own encoder by subclassing
+`LocationEncoder` (implement `_encode`) and pointing a Hydra `model` config's
+`_target_` at it.
 
 <!-- skip-on-docs-landing-start -->
 

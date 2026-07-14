@@ -7,9 +7,10 @@ as a frozen black box. Adding a new model means subclassing
 :class:`LocationEncoder`, implementing :meth:`_encode`, and pointing a Hydra
 ``model`` config's ``_target_`` at it.
 
-The trivial :class:`SinCosLocationEncoder` ships in the base install. The
-pretrained reference encoders (SatCLIP / GeoCLIP / Climplicit / SINR) are thin
-wrappers over the ``rshf`` package and require the ``coordbench`` extra
+The trivial :class:`SinCosLocationEncoder` and the pretrained
+:class:`MINDLocationEncoder` ship in the base install. The other pretrained
+reference encoders (SatCLIP / GeoCLIP / Climplicit / SINR) are thin wrappers
+over the ``rshf`` package and require the ``coordbench`` extra
 (``pip install -e ".[coordbench]"``).
 """
 
@@ -87,6 +88,58 @@ class SinCosLocationEncoder(LocationEncoder):
         return np.stack(
             [np.sin(lat_r), np.cos(lat_r), np.sin(lon_r), np.cos(lon_r)], axis=1
         ).astype(np.float32)
+
+
+class MINDLocationEncoder(LocationEncoder):
+    """MIND location encoder (distilled from AlphaEarth/Climplicit/GeoCLIP/SINR).
+
+    Loads a released checkpoint from the HuggingFace Hub. Two configs ship:
+    ``mind`` (the 64-d Matryoshka deploy prefix of the pooled trunk) and
+    ``mind_small`` (the distilled student's 128-d head output). ``feature`` picks
+    the trunk (``pooled``) or the projected head (``head``); ``dim`` truncates the
+    Matryoshka embedding.
+
+    Args:
+        repo: HuggingFace repo id holding the weights.
+        filename: Checkpoint file within the repo (``.safetensors`` or ``.pt``).
+        dim: Embedding width to keep (Matryoshka prefix).
+        feature: ``"pooled"`` (trunk) or ``"head"`` (projected output).
+        default_year: Year supplied to year-conditioned checkpoints when a
+            benchmark carries no per-point year.
+    """
+
+    name = "mind"
+
+    def __init__(
+        self,
+        repo: str = "isaaccorley/MIND",
+        filename: str = "mind.safetensors",
+        dim: int = 64,
+        feature: str = "pooled",
+        default_year: int = 2021,
+        device: str = "cpu",
+        batch_size: int = 8192,
+    ) -> None:
+        super().__init__(device=device, batch_size=batch_size)
+        from huggingface_hub import hf_hub_download
+
+        from torchgeo_bench.coordbench.mind import load_mind
+
+        self.model = load_mind(hf_hub_download(repo, filename), device=self.device)
+        self.dim = int(dim)
+        self.feature = feature
+        self.default_year = default_year
+
+    @torch.no_grad()
+    def _encode(self, lon: np.ndarray, lat: np.ndarray, year: np.ndarray | None) -> np.ndarray:
+        latlon = torch.stack([torch.as_tensor(lat), torch.as_tensor(lon)], dim=1).float()
+        yr = None
+        if self.model.use_year:
+            y = self.default_year if year is None else year
+            yr = torch.as_tensor(np.broadcast_to(y, (len(lat),)), dtype=torch.float32)
+            yr = yr.to(self.device)
+        emb = self.model(latlon.to(self.device), yr, return_features=(self.feature == "pooled"))
+        return emb.float().cpu().numpy()[:, : self.dim]
 
 
 class _RSHFEncoder(LocationEncoder):

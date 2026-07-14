@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 from omegaconf import OmegaConf
 
 from torchgeo_bench.coordbench import (
@@ -184,6 +185,41 @@ def test_load_benchmarks_selection(monkeypatch) -> None:
     assert [b.name for b in single] == ["worldclim-bio1"]
 
     assert "pdfm" in cb_datasets.list_families()
+
+
+def test_mind_load_roundtrip(tmp_path) -> None:
+    from safetensors.torch import save_file
+
+    from torchgeo_bench.coordbench.mind import ReSIRENLocationEncoder, load_mind
+
+    torch.manual_seed(0)
+    model = ReSIRENLocationEncoder(embed_dim=16, out_dim=8, depth=2)
+    path = tmp_path / "m.safetensors"
+    save_file(model.state_dict(), str(path))
+
+    loaded = load_mind(str(path))
+    assert loaded.embed_dim == 16
+    assert len(loaded.blocks) == 2
+    assert not loaded.use_year  # in_dim == 2 -> coordinate-only
+
+    latlon = torch.tensor([[37.77, -122.42], [51.51, -0.13]], dtype=torch.float32)
+    assert loaded(latlon, return_features=True).shape == (2, 16)  # pooled trunk
+    assert loaded(latlon).shape == (2, 8)  # head output
+
+
+def test_mind_encoder_dim_slice(monkeypatch) -> None:
+    from torchgeo_bench.coordbench import mind as mind_mod
+    from torchgeo_bench.coordbench.models import MINDLocationEncoder
+
+    torch.manual_seed(0)
+    model = mind_mod.ReSIRENLocationEncoder(embed_dim=32, out_dim=32, depth=2).eval()
+    monkeypatch.setattr(mind_mod, "load_mind", lambda path, device="cpu": model)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda *a, **k: "dummy")
+
+    enc = MINDLocationEncoder(dim=8, feature="pooled", device="cpu")
+    out = enc.encode(np.array([1.0, 2.0]), np.array([37.0, 51.0]))
+    assert out.shape == (2, 8)  # Matryoshka prefix of the 32-d trunk
+    assert out.dtype == np.float32
 
 
 def test_family_index_matches_loaders() -> None:

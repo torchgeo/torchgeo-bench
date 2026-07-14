@@ -1,0 +1,8 @@
+# MIND-small: the distilled 6.4M student (18x smaller), 128-d head output.
+# https://huggingface.co/isaaccorley/MIND
+_target_: torchgeo_bench.coordbench.models.MINDLocationEncoder
+repo: isaaccorley/MIND
+filename: mind_small.safetensors
+feature: head
+dim: 128
+name: mind-small
