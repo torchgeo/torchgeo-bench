@@ -22,6 +22,7 @@ coord:
   folds: 5
   cell_deg: 10.0           # spatial-block grid-cell size in degrees
   knn_k: 5
+  knn_device: cpu          # faiss device for KNN; cpu avoids needing GPU faiss (encoder+linear still use `device`)
 
 # Dataset settings
 # Set names: all  OR a list of dataset identifiers

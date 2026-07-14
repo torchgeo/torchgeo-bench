@@ -121,6 +121,7 @@ def _score_one(
     folds: int,
     seed: int,
     device: str,
+    knn_device: str,
     knn_k: int,
     test_mask: np.ndarray | None,
     fold_assign: np.ndarray | None,
@@ -132,7 +133,7 @@ def _score_one(
             folds=folds,
             seed=seed,
             k=knn_k,
-            device=device,
+            device=knn_device,
             test_mask=test_mask,
             fold_assign=fold_assign,
         )
@@ -158,6 +159,7 @@ def run_coordbench(cfg: DictConfig) -> None:
     folds = int(coord.folds)
     cell_deg = float(coord.cell_deg)
     knn_k = int(coord.knn_k)
+    knn_device = str(coord.get("knn_device") or "cpu")
     methods = list(coord.methods)
     splits = _resolve_splits(str(coord.split))
 
@@ -184,6 +186,7 @@ def run_coordbench(cfg: DictConfig) -> None:
             folds=folds,
             cell_deg=cell_deg,
             knn_k=knn_k,
+            knn_device=knn_device,
             seed=seed,
             device=device,
             model_name=model_name,
@@ -205,6 +208,7 @@ def _evaluate_benchmark(
     folds: int,
     cell_deg: float,
     knn_k: int,
+    knn_device: str,
     seed: int,
     device: str,
     model_name: str,
@@ -249,6 +253,7 @@ def _evaluate_benchmark(
                     folds=folds,
                     seed=seed,
                     device=device,
+                    knn_device=knn_device,
                     knn_k=knn_k,
                     test_mask=test_mask,
                     fold_assign=fold_assign,
