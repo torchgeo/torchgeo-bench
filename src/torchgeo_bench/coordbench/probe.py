@@ -1,20 +1,12 @@
 """Frozen-encoder probes for the CoordBench location-encoder track.
 
-The standard location-encoder protocol (SatCLIP, GeoCLIP, UniGeoCLIP/PDFM):
-freeze the encoder, embed the ``(lon, lat)`` of a labeled dataset, fit a simple
-head on top, and report a held-out score. Two heads are supported:
+Freeze the encoder, embed a labeled dataset's ``(lon, lat)``, fit a head, report a
+held-out score. Two heads: ``linear`` (closed-form ridge in torch, CV-selected L2;
+R^2 for regression, one-hot-ridge accuracy for classification) and ``knn`` (FAISS
+k-NN on standardized features, classification only).
 
-* **linear** — closed-form ridge regression in torch (regression R^2; one-hot
-  ridge accuracy for classification), with the L2 penalty selected by
-  cross-validation. This is the headline probe.
-* **knn** — a k-nearest-neighbour classifier (FAISS, via
-  :class:`~torchgeo_bench.knn.KNNClassifier`) on standardized features
-  (classification only).
-
-Splits, in precedence order: an official held-out ``test_mask`` (e.g.
-UniGeoCLIP/PDFM, SustainBench); otherwise a ``fold_assign`` for spatial-block
-cross-validation (train/test geographically disjoint); otherwise a random
-k-fold partition.
+Split precedence: official ``test_mask``, else ``fold_assign`` spatial-block CV, else
+random k-fold.
 """
 
 import logging
@@ -28,9 +20,8 @@ from torchgeo_bench.knn import KNNClassifier
 
 logger = logging.getLogger(__name__)
 
-# Half-decade L2 grid spanning 1e-4..1e6, CV-selected per fold. The wide high end
-# matters for standardized high-dim embeddings (optimum sits at strong
-# regularization); the low end covers near-linear targets that want almost none.
+# Half-decade L2 grid (1e-4..1e6), CV-selected per fold; spans high-dim embeddings
+# (strong reg) and near-linear targets (almost none).
 RIDGE_ALPHAS = tuple(float(10.0**e) for e in np.arange(-4.0, 6.5, 0.5))
 
 

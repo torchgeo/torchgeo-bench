@@ -226,9 +226,7 @@ def _evaluate_benchmark(
 
     rows: list[dict] = []
     for split in splits:
-        # Official held-out split wins when a benchmark ships one; otherwise pick the
-        # requested CV mode. A benchmark with a test_mask reports "official" for both
-        # split settings (random/spatial CV does not apply to it).
+        # Official held-out split wins when present; else the requested CV mode.
         if bench.test_mask is not None:
             test_mask, fold_assign, split_label = bench.test_mask, None, "official"
         elif split == "spatial":

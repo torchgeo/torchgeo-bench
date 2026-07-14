@@ -1,11 +1,9 @@
 """Coordinate-only encoders for the CoordBench location-encoder track.
 
 A :class:`LocationEncoder` maps points ``(lon, lat[, year])`` to a fixed-length
-feature vector, one row per point. That is the entire contract: the probes
-(KNN / ridge linear) and cross-validation live downstream and treat the encoder
-as a frozen black box. Adding a new model means subclassing
-:class:`LocationEncoder`, implementing :meth:`_encode`, and pointing a Hydra
-``model`` config's ``_target_`` at it.
+feature vector, one row per point; the probes and cross-validation live downstream.
+Add a model by subclassing :class:`LocationEncoder`, implementing :meth:`_encode`,
+and pointing a Hydra ``model`` config's ``_target_`` at it.
 
 The trivial :class:`SinCosLocationEncoder` and the pretrained
 :class:`MINDLocationEncoder` ship in the base install. The other pretrained
@@ -75,11 +73,7 @@ class LocationEncoder(ABC):
 
 
 class SinCosLocationEncoder(LocationEncoder):
-    """Trivial dependency-free baseline: ``[sin(lat), cos(lat), sin(lon), cos(lon)]``.
-
-    A sanity floor for the suite — any learned encoder should beat it on all but
-    the most trivially location-smooth targets.
-    """
+    """Dependency-free baseline: ``[sin(lat), cos(lat), sin(lon), cos(lon)]``."""
 
     name = "sincos"
 

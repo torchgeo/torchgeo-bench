@@ -1,21 +1,10 @@
 """Aggregate a CoordBench results CSV into per-family mean-rank leaderboards.
 
-Proper aggregation for a benchmark suite whose datasets live on wildly different
-scales and reward different specialties:
-
-1. **Mean rank, not mean metric.** Within each benchmark, models are ranked
-   (1 = best); the reported number is the mean of those ranks. This is robust to
-   datasets with very different metric ranges (a single high-variance R² can't
-   dominate a raw mean).
-2. **By task family.** Benchmarks are grouped into ``socio`` / ``env`` / ``land``
-   (see :mod:`torchgeo_bench.coordbench.taxonomy`) because location encoders
-   specialize; one macro number hides that.
-3. **By holdout.** ``random`` and ``spatial`` cross-validation are reported
-   separately (spatial is the harder, geographically-disjoint test). Benchmarks
-   with an official fixed split contribute to both views.
-
-Multi-task benchmarks are collapsed to one score (mean over tasks, R² floored)
-before ranking, so each benchmark counts once.
+Ranks models within each benchmark (1 = best) and reports the mean rank, robust to
+datasets on different metric scales. Grouped by task family (``socio``/``env``/``land``,
+see :mod:`torchgeo_bench.coordbench.taxonomy`) and by holdout (``random``/``spatial``
+reported separately; official-split benchmarks contribute to both). Multi-task
+benchmarks collapse to one score (mean over tasks, R² floored) before ranking.
 
 Usage: ``python -m torchgeo_bench.coordbench.leaderboard <results.csv> [--method linear|knn]``
 """

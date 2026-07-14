@@ -1,20 +1,16 @@
-"""Semantic task families for aggregating CoordBench results.
+"""Task families for aggregating CoordBench results, keyed by benchmark name.
 
-Location encoders tend to specialize: a model strong on climate/elevation may be
-weak on socioeconomic targets and vice versa. Averaging one number over the whole
-suite hides that, so benchmarks are grouped into families and reported per family.
+Encoders specialize, so results are grouped into three families and reported per
+family:
 
-Three families, keyed by benchmark name:
-
-* ``socio`` — socioeconomic / health / human-activity targets (income, population,
-  DHS indices, CDC health prevalences, nightlights, roads).
-* ``env`` — physical-environment targets (climate, elevation, soil, biomass,
+* ``socio`` — socioeconomic / health / human-activity (income, population, DHS
+  indices, CDC health prevalences, nightlights, roads).
+* ``env`` — physical environment (climate, elevation, soil, biomass,
   evapotranspiration, tree cover).
-* ``land`` — land-cover / land-use / crop-type and biome/ecoregion/country
+* ``land`` — land cover / land use / crop type + biome/ecoregion/country
   classification.
 
-Regression scores are floored at :data:`R2_FLOOR` before averaging: R² values far
-below zero are numerically unstable, not informative.
+Regression scores are floored at :data:`R2_FLOOR` before averaging.
 """
 
 # Socioeconomic / health / human-activity.
@@ -105,11 +101,7 @@ R2_FLOOR = -1.0
 
 
 def family_of(name: str) -> str:
-    """Return the family (``socio`` / ``env`` / ``land``) for a benchmark name.
-
-    Unknown names return ``"other"`` so they surface rather than silently joining a
-    family.
-    """
+    """Return the family (``socio``/``env``/``land``) for a benchmark name, or ``"other"``."""
     if name in SOCIO:
         return "socio"
     if name in ENV:

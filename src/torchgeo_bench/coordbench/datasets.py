@@ -25,9 +25,7 @@ logger = logging.getLogger(__name__)
 # https://huggingface.co/datasets/taylor-geospatial/coordbench
 COORDBENCH_REPO = os.environ.get("COORDBENCH_REPO", "taylor-geospatial/coordbench")
 
-# CoordBench's canonical schema (lon, lat, timestamp, timestamp_end, split, id) never
-# carries a benchmark's own task/label data -- only these need excluding when scanning
-# a table for task columns.
+# canonical (non-task) schema columns, excluded when scanning for task columns
 _CANONICAL_EXTRA = frozenset({"timestamp", "timestamp_end", "split", "id"})
 
 DEEPMIND_EVAL_CONFIGS = (
@@ -523,9 +521,8 @@ FAMILY_LOADERS: dict[str, Callable[[], list[CoordBenchmark]]] = {
 }
 
 
-# Static index of the benchmark names each family emits. Lets a selection resolve
-# to just the family that owns a name (one download) instead of loading everything,
-# and lets callers enumerate the suite without touching the network.
+# Benchmark names each family emits; lets a selection load only the needed family,
+# and lets callers enumerate the suite without a download.
 FAMILY_BENCHMARKS: dict[str, tuple[str, ...]] = {
     "pdfm": ("pdfm-conus27",),
     "air_temp": ("satclip-air-temp",),
