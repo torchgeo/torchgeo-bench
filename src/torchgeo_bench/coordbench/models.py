@@ -225,13 +225,14 @@ class SINRLocationEncoder(_RSHFEncoder):
 
 
 class GeoCLIPLocationEncoder(_RSHFEncoder):
-    """GeoCLIP location encoder (Equal-Earth + RFF) -> 512-d. Input order (lon, lat).
+    """GeoCLIP location encoder (Equal-Earth + RFF) -> 512-d. Input order (lat, lon).
 
-    Requires the ``coordbench`` extra (``rshf``).
+    Requires the ``coordbench`` extra (``rshf``). Note the weights expect (lat, lon)
+    despite the upstream docstring's "Lon/Lat" example.
     """
 
     name = "geoclip"
-    coord_order = "lonlat"
+    coord_order = "latlon"
 
     def __init__(
         self,
