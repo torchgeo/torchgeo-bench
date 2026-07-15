@@ -115,27 +115,38 @@ def _make_resize_transform(
         img: torch.Tensor = sample["image"]
         h, w = img.shape[-2], img.shape[-1]
         if h != image_size or w != image_size:
+            squeeze_batch = img.ndim == 3
+            resize_input = img.unsqueeze(0) if squeeze_batch else img
             img = F.interpolate(
-                img.unsqueeze(0),
+                resize_input,
                 size=(image_size, image_size),
                 mode=interp_mode,
                 align_corners=align_corners,
-            ).squeeze(0)
+            )
+            if squeeze_batch:
+                img = img.squeeze(0)
             sample["image"] = img
         if "mask" in sample:
             mask: torch.Tensor = sample["mask"].float()
             h_m, w_m = mask.shape[-2], mask.shape[-1]
             if h_m != image_size or w_m != image_size:
-                mask = (
-                    F.interpolate(
-                        mask.unsqueeze(0).unsqueeze(0),
-                        size=(image_size, image_size),
-                        mode="nearest",
-                    )
-                    .squeeze(0)
-                    .squeeze(0)
-                    .long()
+                if mask.ndim == 2:
+                    resize_mask = mask.unsqueeze(0).unsqueeze(0)
+                    squeeze_dims = 2
+                elif mask.ndim == 3:
+                    resize_mask = mask.unsqueeze(0)
+                    squeeze_dims = 1
+                else:
+                    resize_mask = mask
+                    squeeze_dims = 0
+                mask = F.interpolate(
+                    resize_mask,
+                    size=(image_size, image_size),
+                    mode="nearest",
                 )
+                for _ in range(squeeze_dims):
+                    mask = mask.squeeze(0)
+                mask = mask.long()
                 sample["mask"] = mask
         return sample
 

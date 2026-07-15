@@ -77,6 +77,7 @@ eval:
     layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10
+    batch_size: 64
     criterion:
       _target_: torch.nn.CrossEntropyLoss
       ignore_index: 255

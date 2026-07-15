@@ -1,0 +1,105 @@
+{
+  "bands": [
+    "rgb",
+    "all"
+  ],
+  "cache_dtype": "float16",
+  "cache_features": true,
+  "datasets": [
+    "burn_scars",
+    "caffe",
+    "cloudsen12",
+    "dynamic_earthnet",
+    "flair2",
+    "fotw",
+    "kuro_siwo",
+    "pastis",
+    "spacenet2",
+    "spacenet7"
+  ],
+  "epochs": 10,
+  "heads": [
+    "linear",
+    "conv_block",
+    "fpn",
+    "dpt"
+  ],
+  "image_size": 224,
+  "interpolation": "bilinear",
+  "models": [
+    {
+      "config": "timm/resnet50",
+      "loader_batch_size": 32,
+      "name": "resnet50",
+      "probe_batch_size": 16
+    },
+    {
+      "config": "timm/convnext_tiny",
+      "loader_batch_size": 24,
+      "name": "convnext_tiny",
+      "probe_batch_size": 16
+    },
+    {
+      "config": "timm/convnext_large_dinov3",
+      "loader_batch_size": 8,
+      "name": "convnext_large_dinov3",
+      "probe_batch_size": 8
+    },
+    {
+      "config": "timm/efficientnet_b0",
+      "loader_batch_size": 32,
+      "name": "efficientnet_b0",
+      "probe_batch_size": 16
+    },
+    {
+      "config": "timm/densenet121",
+      "loader_batch_size": 16,
+      "name": "densenet121",
+      "probe_batch_size": 16
+    },
+    {
+      "config": "timm/maxvit_tiny_tf_224",
+      "loader_batch_size": 12,
+      "name": "maxvit_tiny_tf_224",
+      "probe_batch_size": 12
+    },
+    {
+      "config": "torchgeo/scalemae_large_fmow",
+      "loader_batch_size": 8,
+      "name": "tgeo_scalemae_large_fmow",
+      "probe_batch_size": 8
+    },
+    {
+      "config": "torchgeo/swinv2b_s2rgb_satlas_mi",
+      "loader_batch_size": 8,
+      "name": "tgeo_swinv2b_s2rgb_satlas_mi",
+      "probe_batch_size": 8
+    }
+  ],
+  "normalization": "bandspec_zscore",
+  "partition": "default",
+  "schema_version": 1,
+  "seed": 0,
+  "unsupported_inputs": [
+    [
+      "torchgeo/scalemae_large_fmow",
+      "caffe",
+      "all"
+    ],
+    [
+      "torchgeo/scalemae_large_fmow",
+      "caffe",
+      "rgb"
+    ],
+    [
+      "torchgeo/scalemae_large_fmow",
+      "pastis",
+      "all"
+    ],
+    [
+      "torchgeo/swinv2b_s2rgb_satlas_mi",
+      "pastis",
+      "all"
+    ]
+  ]
+}
