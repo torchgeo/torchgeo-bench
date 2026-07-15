@@ -44,6 +44,7 @@ from torchgeo_bench.resume import (  # noqa: F401  (re-exported for back-compat)
     _normalize_bands_value,
     _plan_dataset_run,
     _profile_metric_names,
+    _resume_config_hash,
     _row_key,
     load_completed,
 )
@@ -562,6 +563,7 @@ def main(cfg: DictConfig) -> None:
     # ablations across strategies are distinguishable.
     normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
+    config_hash = _resume_config_hash(cfg)
 
     for ds_name in track(dataset_names, description="Datasets"):
         try:
@@ -590,6 +592,7 @@ def main(cfg: DictConfig) -> None:
                 ds_cls.num_classes,
                 model_res,
                 model_pool,
+                config_hash,
             )
         )
         eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
@@ -674,6 +677,7 @@ def main(cfg: DictConfig) -> None:
             "partition": cfg.dataset.partition,
             "bands": bands_value,
             "num_classes": num_classes,
+            "config_hash": config_hash,
             "c_range_start": c_start,
             "c_range_stop": c_stop,
             "c_range_num": c_num,

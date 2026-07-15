@@ -5,12 +5,14 @@ Resume keys are assembled from two sources that format values differently
 :func:`_canonical_key_cell` before comparison.
 """
 
+import hashlib
+import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pandas as pd
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,10 @@ KEY_COLS = (
     # silently skipped.
     "res",
     "pool",
+    # Fingerprint of the full config (seed, device, dataset, eval, model) so a
+    # changed setting that doesn't show up in the other key columns can't be
+    # mistaken for an already-completed run.
+    "config_hash",
 )
 
 
@@ -50,6 +56,27 @@ def _normalize_bands_value(bands: object) -> str:
     except TypeError:
         return str(bands)
     return ",".join(items)
+
+
+def _resume_config_hash(cfg: DictConfig) -> str:
+    """Return a stable fingerprint of settings that can change a result row.
+
+    Resume must not treat a row from a different model/evaluation setup as
+    complete merely because its display metadata happens to match.
+    """
+    dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
+    assert isinstance(dataset_cfg, dict)
+    dataset_cfg.pop("names", None)
+    payload = {
+        "version": 1,
+        "seed": cfg.seed,
+        "device": cfg.device,
+        "dataset": dataset_cfg,
+        "eval": OmegaConf.to_container(cfg.eval, resolve=True),
+        "model": OmegaConf.to_container(cfg.model, resolve=True),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
 def _canonical_key_cell(value: object) -> str:
