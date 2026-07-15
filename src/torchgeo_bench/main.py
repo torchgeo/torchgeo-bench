@@ -686,6 +686,7 @@ def main(cfg: DictConfig) -> None:
         if is_segmentation:
             seg_cfg_merged = eval_cfg_merged.segmentation
             save_viz = seg_cfg_merged.get("save_viz", False)
+            segmentation_meta = {**common_meta, "merge_val": False}
             metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
                 model,
                 train_loader,
@@ -699,7 +700,7 @@ def main(cfg: DictConfig) -> None:
             )
             all_rows.append(
                 metric_row(
-                    common_meta,
+                    segmentation_meta,
                     method=seg_method,
                     metric_name="mIoU",
                     metric_value=metrics.get("mIoU", float("nan")),
