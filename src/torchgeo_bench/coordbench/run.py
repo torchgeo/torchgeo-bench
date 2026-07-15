@@ -257,11 +257,12 @@ def _evaluate_benchmark(
                     fold_assign=fold_assign,
                 )
                 std = float(np.std(fold_scores)) if len(fold_scores) > 1 else 0.0
-                n_test = (
-                    int(np.isfinite(np.asarray(labels, dtype=np.float64)).sum())
-                    if (bench.task_type == "regression")
-                    else int(len(labels))
-                )
+                if test_mask is not None:
+                    n_test = int(np.asarray(test_mask, dtype=bool).sum())
+                elif bench.task_type == "regression":
+                    n_test = int(np.isfinite(np.asarray(labels, dtype=np.float64)).sum())
+                else:
+                    n_test = int(len(labels))
                 rows.append(
                     CoordResult(
                         dataset=bench.name,

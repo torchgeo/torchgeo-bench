@@ -163,6 +163,21 @@ def test_run_coordbench_resume_skips(tmp_path, monkeypatch) -> None:
     assert len(pd.read_csv(cfg.coord.output)) == n_first  # nothing re-appended
 
 
+def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> None:
+    bench = _synthetic_benchmarks()[0]
+    test_mask = np.zeros(len(bench.lat), dtype=bool)
+    test_mask[::3] = True
+    bench.test_mask = test_mask
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.load_benchmarks", lambda names: [bench])
+
+    cfg = _coord_cfg(tmp_path, split="both")
+    run_coordbench(cfg)
+
+    df = pd.read_csv(cfg.coord.output)
+    assert set(df.split) == {"official"}
+    assert set(df.n_test) == {int(test_mask.sum())}
+
+
 def test_load_benchmarks_selection(monkeypatch) -> None:
     # Stub the parquet fetch so family loaders work offline.
     tables = {
