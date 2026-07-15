@@ -221,6 +221,8 @@ class _TorchGeoBackboneBench(BenchModel):
         weights_member: str,
         auto_resize: bool,
         target_size: int | None,
+        normalization_input_unit: str | None = None,
+        skip_weight_normalize: int = 0,
         input_unit_check: str = "warn",
         factory_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -233,18 +235,50 @@ class _TorchGeoBackboneBench(BenchModel):
             if derived is not None:
                 type(self).expected_input_unit = derived
         super().__init__(bands=bands, **kwargs)
+        if normalization_input_unit is not None:
+            if normalization_input_unit not in _UNIT_EXPECTED_SOURCE:
+                raise ValueError(
+                    "normalization_input_unit must be one of "
+                    f"{tuple(_UNIT_EXPECTED_SOURCE)}, got {normalization_input_unit!r}."
+                )
+            self.normalization_input_unit = normalization_input_unit
+        else:
+            self.normalization_input_unit = self.weights_input_unit
+        if (
+            isinstance(skip_weight_normalize, bool)
+            or not isinstance(skip_weight_normalize, int)
+            or skip_weight_normalize < 0
+        ):
+            raise ValueError(
+                "skip_weight_normalize must be a non-negative integer, "
+                f"got {skip_weight_normalize!r}."
+            )
         weights = _resolve_torchgeo_weights(weights_class, weights_member)
         self.weights = weights
         model_factory = _resolve_torchgeo_factory(factory)
         self.backbone = model_factory(weights=weights, **(factory_kwargs or {}))
         self.auto_resize = auto_resize
         self.target_size = target_size
-        self._weights_normalize = _extract_normalize_transforms(weights)
+        weights_normalize = _extract_normalize_transforms(weights)
+        if weights_normalize is not None:
+            if skip_weight_normalize > len(weights_normalize):
+                raise ValueError(
+                    f"skip_weight_normalize={skip_weight_normalize} exceeds the "
+                    f"{len(weights_normalize)} Normalize layers supplied by {weights_member}."
+                )
+            self._weights_normalize = nn.Sequential(
+                *list(weights_normalize)[skip_weight_normalize:]
+            )
+        else:
+            self._weights_normalize = None
         if input_unit_check not in ("warn", "ignore", "error"):
             raise ValueError(
                 f"input_unit_check must be one of warn|ignore|error, got {input_unit_check!r}."
             )
-        _warn_unit_mismatch(type(self).__name__, self.weights_input_unit, bands, input_unit_check)
+        if normalization_input_unit is None:
+            _warn_unit_mismatch(
+                type(self).__name__, self.weights_input_unit, bands, input_unit_check
+            )
 
         # Pre-compute the unit conversion needed to bring dataset inputs
         # into the scale the weights' Normalize was calibrated for.  No-op
@@ -255,7 +289,7 @@ class _TorchGeoBackboneBench(BenchModel):
         # values, producing near-zero inputs.
         self._dataset_input_unit = detect_input_unit(self.bands)
         self._weights_target_unit: InputUnit | None = _UNIT_EXPECTED_SOURCE.get(
-            self.weights_input_unit or ""
+            self.normalization_input_unit or ""
         )
 
     def _tiled_normalize(self, in_chans: int) -> nn.Sequential | None:
@@ -401,6 +435,8 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
         weights_member: str = "SENTINEL2_RGB_MOCO",
         auto_resize: bool = False,
         target_size: int | None = 224,
+        normalization_input_unit: str | None = None,
+        skip_weight_normalize: int = 0,
         input_unit_check: str = "warn",
         **_kwargs: Any,
     ) -> None:
@@ -411,6 +447,8 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=target_size,
+            normalization_input_unit=normalization_input_unit,
+            skip_weight_normalize=skip_weight_normalize,
             input_unit_check=input_unit_check,
             **_kwargs,
         )
