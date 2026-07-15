@@ -1,6 +1,7 @@
 """Benchmark script for torchgeo-bench."""
 
 import logging
+import math
 import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -295,6 +296,37 @@ def evaluate_logistic(
     return metric, lo, hi, float(best_c), calibration, calibration_ts
 
 
+def _resolve_segmentation_runtime_config(
+    seg_cfg: DictConfig,
+) -> tuple[int, int, float, bool, torch.dtype]:
+    """Validate and normalize the segmentation settings used during a run.
+
+    Configuration mistakes should fail before feature extraction or training,
+    rather than being silently coerced or failing after an expensive GPU job
+    has started.
+    """
+    epochs = seg_cfg.get("epochs", 10)
+    batch_size = seg_cfg.get("batch_size", 64)
+    lr = seg_cfg.get("lr", 1e-3)
+    use_cache = seg_cfg.get("cache_features", True)
+    cache_dtype_name = seg_cfg.get("cache_dtype", "float16")
+
+    for name, value in (("epochs", epochs), ("batch_size", batch_size)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"eval.segmentation.{name} must be a positive integer, got {value!r}.")
+    if isinstance(lr, bool) or not isinstance(lr, (int, float)) or not math.isfinite(lr) or lr <= 0:
+        raise ValueError(f"eval.segmentation.lr must be a finite positive number, got {lr!r}.")
+    if not isinstance(use_cache, bool):
+        raise ValueError(f"eval.segmentation.cache_features must be a boolean, got {use_cache!r}.")
+    cache_dtypes = {"float16": torch.float16, "float32": torch.float32}
+    if cache_dtype_name not in cache_dtypes:
+        raise ValueError(
+            "eval.segmentation.cache_dtype must be one of "
+            f"{tuple(cache_dtypes)}, got {cache_dtype_name!r}."
+        )
+    return epochs, batch_size, float(lr), use_cache, cache_dtypes[cache_dtype_name]
+
+
 def evaluate_intrinsic_dim(
     splits: dict[str, np.ndarray],
     estimators: Sequence[str],
@@ -461,13 +493,11 @@ def evaluate_segmentation(
         raise ValueError("Segmentation evaluation config missing for the model.")
 
     seg_cfg = eval_cfg.segmentation
-    epochs = seg_cfg.epochs
-    probe_batch_size = int(seg_cfg.get("batch_size", 64))
-    use_cache = seg_cfg.get("cache_features", True)
-    cache_dtype_str = seg_cfg.get("cache_dtype", "float16")
-    cache_dtype = torch.float16 if cache_dtype_str == "float16" else torch.float32
+    epochs, probe_batch_size, lr, use_cache, cache_dtype = _resolve_segmentation_runtime_config(
+        seg_cfg
+    )
 
-    probe, solver = build_seg_probe_and_solver(model, num_classes, eval_cfg, device, seg_cfg.lr)
+    probe, solver = build_seg_probe_and_solver(model, num_classes, eval_cfg, device, lr)
     if use_cache and probe.freeze_backbone:
         logger.info("Caching backbone features for train and val splits...")
         train_cache = probe.extract_segmentation_features(train_loader, cache_dtype=cache_dtype)
@@ -498,7 +528,7 @@ def evaluate_segmentation(
         metrics, preds = eval_result
     else:
         metrics, preds = eval_result, None
-    return metrics, sum(probe.channels_list), float(seg_cfg.lr), actual_batch_size, preds
+    return metrics, sum(probe.channels_list), lr, actual_batch_size, preds
 
 
 def _resolve_output_path(cfg: DictConfig) -> str:
@@ -644,10 +674,11 @@ def main(cfg: DictConfig) -> None:
             else tuple(cfg.dataset.bands)
         )
         bands_list = bench.select_band_specs(bands_resolved)
-        assert len(bands_list) == num_channels, (
-            f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
-            f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
-        )
+        if len(bands_list) != num_channels:
+            raise ValueError(
+                f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
+                f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
+            )
 
         # `bands` is passed as a kwarg (not via the config) so the BandSpec
         # dataclasses reach the constructor intact.
