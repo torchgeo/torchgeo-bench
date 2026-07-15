@@ -222,10 +222,18 @@ class _TorchGeoBackboneBench(BenchModel):
         weights_member: str,
         auto_resize: bool,
         target_size: int | None,
+        weights_input_unit: str | None = None,
         input_unit_check: str = "warn",
         **kwargs: Any,
     ) -> None:
         super().__init__(bands=bands, **kwargs)
+        if weights_input_unit is not None:
+            if weights_input_unit not in _UNIT_EXPECTED_SOURCE:
+                raise ValueError(
+                    "weights_input_unit must be one of "
+                    f"{tuple(_UNIT_EXPECTED_SOURCE)}, got {weights_input_unit!r}."
+                )
+            self.weights_input_unit = weights_input_unit
         weights = _resolve_torchgeo_weights(weights_class, weights_member)
         self.weights = weights
         self.backbone = self._load_backbone(weights, factory)
@@ -393,6 +401,7 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
         weights_member: str = "SENTINEL2_RGB_MOCO",
         auto_resize: bool = False,
         target_size: int | None = 224,
+        weights_input_unit: str | None = None,
         input_unit_check: str = "warn",
         **_kwargs: Any,
     ) -> None:
@@ -403,6 +412,7 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=target_size,
+            weights_input_unit=weights_input_unit,
             input_unit_check=input_unit_check,
             **_kwargs,
         )

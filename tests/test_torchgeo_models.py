@@ -425,6 +425,49 @@ def test_channel_mismatch_preserves_tiled_normalize_chain(
     assert torch.allclose(normalized[:, 3:], expected.expand(1, 3, 8, 8))
 
 
+def test_resnet_weight_input_unit_can_override_sentinel2_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RGB checkpoints must not inherit the Sentinel-2 DN preprocessing default."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 4, 1)
+            self.fc = nn.Identity()
+
+    class _FakeWeights:
+        transforms = nn.Sequential(
+            Normalize(mean=[0.0], std=[255.0]),
+            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        )
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: _FakeWeights(),
+    )
+    uint8_bands = [
+        BandSpec("aerial", name, name, mean=120.0, std=30.0, min=0.0, max=255.0)
+        for name in ("red", "green", "blue")
+    ]
+
+    model = TorchGeoResNetBench(
+        bands=uint8_bands,
+        normalization="identity",
+        weights_input_unit="uint8_div255",
+        input_unit_check="error",
+    )
+
+    normalized = model.normalize_inputs(torch.full((1, 3, 2, 2), 255.0))
+    expected = torch.tensor([(1.0 - 0.485) / 0.229, (1.0 - 0.456) / 0.224, (1.0 - 0.406) / 0.225])
+    assert torch.allclose(normalized[0, :, 0, 0], expected)
+
+
 # ---------------------------------------------------------------------------
 # _warn_unit_mismatch
 # ---------------------------------------------------------------------------
