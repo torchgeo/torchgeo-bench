@@ -237,6 +237,9 @@ Training & evaluation (all heads)
   ``torchmetrics.MulticlassJaccardIndex``.  Frequency-weighted IoU plus
   macro precision / recall / F1 are also reported in the result row
   (see :doc:`results-format`).
+* **Uncertainty:** 95% bootstrap confidence intervals resample held-out
+  images and recompute dataset-level mIoU from their aggregated confusion
+  matrices.
 
 Segmentation knobs
 ------------------

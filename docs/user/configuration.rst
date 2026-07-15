@@ -78,7 +78,7 @@ selection semantics.
 .. code-block:: yaml
 
    eval:
-     bootstrap: 200                # bootstrap resamples for KNN/linear CIs
+     bootstrap: 200                # bootstrap resamples for KNN/linear/segmentation CIs
      c_range: [-6, 4, 40]          # log10 sweep start, stop, num samples for linear probe
      merge_val: true               # merge train+val before training the final logistic head
      skip_linear: false            # skip the (slower) linear probe entirely

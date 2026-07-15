@@ -88,13 +88,25 @@ def _mock_probe_and_solver():
     probe.channels_list = [16, 32]
     solver = mock.Mock()
     solver.fit.return_value = None
-    solver.evaluate.return_value = {
+    metrics = {
         "mIoU": 0.42,
         "fw_IoU": 0.55,
         "precision": 0.6,
         "recall": 0.7,
         "f1": 0.65,
     }
+    confusions = torch.tensor([[[0, 4], [0, 0]], [[0, 0], [0, 4]]])
+
+    def evaluate(*_args, collect_preds: bool = False, collect_confusions: bool = False, **_kwargs):
+        if collect_preds and collect_confusions:
+            return metrics, torch.zeros(2, 64, 64, dtype=torch.long), confusions
+        if collect_preds:
+            return metrics, torch.zeros(2, 64, 64, dtype=torch.long)
+        if collect_confusions:
+            return metrics, confusions
+        return metrics
+
+    solver.evaluate.side_effect = evaluate
     return probe, solver
 
 
@@ -119,6 +131,7 @@ def test_segmentation_row_emitted(tmp_path: Path):
     assert df.loc[0, "best_lr"] == 1e-3
     assert df.loc[0, "best_batch_size"] == 2
     assert not df.loc[0, "merge_val"]
+    assert df.loc[0, "ci_lower"] < df.loc[0, "ci_upper"]
 
 
 def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
@@ -209,6 +222,7 @@ def test_segmentation_viz_called_when_enabled(tmp_path: Path):
     )
     probe, solver = _mock_probe_and_solver()
     preds = torch.zeros(4, 64, 64, dtype=torch.long)
+    solver.evaluate.side_effect = None
     solver.evaluate.return_value = (
         {
             "mIoU": 0.42,
@@ -218,6 +232,7 @@ def test_segmentation_viz_called_when_enabled(tmp_path: Path):
             "f1": 0.65,
         },
         preds,
+        torch.tensor([[[0, 4], [0, 0]], [[0, 0], [0, 4]]]),
     )
 
     with (

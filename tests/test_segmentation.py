@@ -4,6 +4,7 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
+from torchgeo_bench.results import bootstrap_miou
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
     GPUTensorCache,
@@ -13,6 +14,15 @@ from torchgeo_bench.segmentation_probe import (
 from torchgeo_bench.segmentation_task import SegmentationSolver, build_seg_probe_and_solver
 
 NUM_CLASSES = 5
+
+
+def test_bootstrap_miou_uses_per_image_resampling() -> None:
+    """Bootstrap intervals reflect variation across held-out images."""
+    confusions = torch.tensor([[[0, 4], [0, 0]], [[0, 0], [0, 4]]])
+
+    lower, upper = bootstrap_miou(confusions, n_boot=200, seed=7)
+
+    assert 0.0 <= lower < upper <= 1.0
 
 
 class MockBackbone(nn.Module):

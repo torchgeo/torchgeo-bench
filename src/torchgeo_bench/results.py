@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,46 @@ def bootstrap_map(
     lower = float(np.percentile(maps, lo))
     upper = float(np.percentile(maps, hi))
     return map_mean, lower, upper
+
+
+def bootstrap_miou(
+    confusion_matrices: torch.Tensor,
+    n_boot: int = 1000,
+    ci: float = 95.0,
+    seed: int | None = None,
+) -> tuple[float, float]:
+    """Bootstrap interval for dataset-level mIoU from per-image confusion matrices.
+
+    ``confusion_matrices`` holds one ``(C, C)`` matrix per test image. Each
+    resample draws images with replacement, sums their confusion matrices,
+    and recomputes mIoU from the summed matrix -- mirroring how the metric is
+    computed over the whole test set rather than averaging a per-image score.
+    """
+    if n_boot < 1:
+        return float("nan"), float("nan")
+    if confusion_matrices.ndim != 3 or confusion_matrices.shape[0] == 0:
+        raise ValueError("Expected non-empty per-image confusion matrices with shape (N, C, C).")
+    if confusion_matrices.shape[1] != confusion_matrices.shape[2]:
+        raise ValueError("Confusion matrices must be square.")
+
+    confusions = confusion_matrices.to(dtype=torch.float64, device="cpu")
+    generator = torch.Generator().manual_seed(seed if seed is not None else 0)
+    n_samples = len(confusions)
+    scores = torch.empty(n_boot, dtype=torch.float64)
+    for index in range(n_boot):
+        sample = torch.randint(n_samples, (n_samples,), generator=generator)
+        confusion = confusions[sample].sum(dim=0)
+        intersection = confusion.diagonal()
+        union = confusion.sum(dim=0) + confusion.sum(dim=1) - intersection
+        present = union > 0
+        scores[index] = (
+            (intersection[present] / union[present]).mean() if present.any() else float("nan")
+        )
+
+    lower = (100.0 - ci) / 2.0
+    return float(torch.nanquantile(scores, lower / 100.0)), float(
+        torch.nanquantile(scores, 1 - lower / 100.0)
+    )
 
 
 @dataclass
