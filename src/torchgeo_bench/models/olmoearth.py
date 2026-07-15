@@ -320,6 +320,16 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
                 "src_stds": [b.std for b in group_bands],
             }
         )
+    fields: dict[str, str] = {}
+    for group in result:
+        field = group["sample_field"]
+        previous_sensor = fields.setdefault(field, group["sensor"])
+        if previous_sensor != group["sensor"]:
+            raise ValueError(
+                "OlmoEarth cannot route multiple input sensors to the same sample field: "
+                f"{previous_sensor!r} and {group['sensor']!r} both map to {field!r}. "
+                "Select one sensor or add an explicit fusion policy."
+            )
     return result
 
 

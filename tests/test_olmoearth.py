@@ -53,6 +53,19 @@ def _s2_bands() -> list[BandSpec]:
     ]
 
 
+def test_rejects_sensor_groups_that_share_an_olmoearth_sample_field() -> None:
+    """Aerial and S2 data cannot both occupy ``sentinel2_l2a`` without fusion."""
+    from torchgeo_bench.models.olmoearth import _build_sensor_groups
+
+    bands = [
+        BandSpec("aerial", "red", "red", mean=120.0, std=30.0, min=0.0, max=255.0),
+        BandSpec("s2", "red", "B04", mean=1500.0, std=600.0, min=0.0, max=10000.0),
+    ]
+
+    with pytest.raises(ValueError, match="multiple input sensors"):
+        _build_sensor_groups(bands)
+
+
 # Map variant -> expected embedding dim (from the HF weights configs).
 EXPECTED_DIM = {"nano": 128, "tiny": 192, "small": 384, "base": 768, "large": 1024}
 
