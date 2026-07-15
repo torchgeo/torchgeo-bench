@@ -22,7 +22,7 @@ import regen_leaderboard as rl  # noqa: E402
 
 # --- synthetic raw frame ---------------------------------------------------
 
-SINGLE_LABEL = ["m-eurosat", "m-so2sat", "m-pv4ger"]  # metric accuracy
+SINGLE_LABEL = ["m-eurosat", "m-so2sat", "m-forestnet"]  # metric accuracy
 MULTI_LABEL = ["m-bigearthnet", "treesatai"]  # metric micro_mAP
 DATASETS = SINGLE_LABEL + MULTI_LABEL
 NORMALIZATIONS = ("bandspec_zscore", "model_native")
@@ -202,6 +202,15 @@ def test_drops_ablation_rows():
     out = rl.harmonize(_raw_df())
     for tag in ("_lsat_", "_naip_", "_sar_"):
         assert not out["base_model"].astype(str).str.contains(tag).any()
+
+
+def test_harmonize_drops_excluded_datasets():
+    raw = _raw_df()
+    dropped = next(iter(rl.DROPPED_DATASETS))
+    extra = _row("good", dropped, "linear", "rgb", 0.99, "bandspec_zscore")
+    raw = pd.concat([raw, pd.DataFrame([extra])], ignore_index=True)
+    out = rl.harmonize(raw)
+    assert rl.DROPPED_DATASETS.isdisjoint(set(out["dataset"].unique()))
 
 
 def test_derives_pooling_and_base_model():

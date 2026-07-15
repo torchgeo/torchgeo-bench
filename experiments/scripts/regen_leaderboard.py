@@ -29,6 +29,18 @@ HTML_PATH = ROOT / "docs" / "_static" / "ranking_explorer.html"
 # OlmoEarth ablations, not benchmark entries.
 ABLATION_TAGS = ("_lsat_", "_naip_", "_sar_")
 
+# ``<base>_landsat_as_s2`` rows feed a Landsat dataset's bands through the
+# S2-pretrained model (the correct full-MSI reading for the Landsat-native
+# ``m-forestnet`` dataset). They are folded back onto the base model, and where
+# they collide with the base model's plain reading the landsat reading is the
+# canonical multispectral cell and wins.
+LANDSAT_SUB_SUFFIX = "_landsat_as_s2"
+
+# Datasets excluded from the leaderboard only (all_results.csv is untouched).
+# ``m-pv4ger`` blocks the OlmoEarth family from the multispectral board;
+# ``m-brick-kiln`` is a near-saturated task dropped as a poor discriminator.
+DROPPED_DATASETS = frozenset({"m-pv4ger", "m-brick-kiln"})
+
 # Raw metric name -> canonical name registered in the evaluma metric registry.
 METRIC_MAP = {"accuracy": "accuracy", "micro_mAP": "map"}
 
@@ -52,6 +64,10 @@ MODEL_META: dict[str, tuple[str, str, bool]] = {
     "olmoearth_v1_1_nano": ("OlmoEarth v1.1 nano", "OlmoEarth", False),
     "olmoearth_v1_1_tiny": ("OlmoEarth v1.1 tiny", "OlmoEarth", False),
     "olmoearth_v1_1_base": ("OlmoEarth v1.1 base", "OlmoEarth", False),
+    "olmoearth_v1_2_nano": ("OlmoEarth v1.2 nano", "OlmoEarth", False),
+    "olmoearth_v1_2_tiny": ("OlmoEarth v1.2 tiny", "OlmoEarth", False),
+    "olmoearth_v1_2_small": ("OlmoEarth v1.2 small", "OlmoEarth", False),
+    "olmoearth_v1_2_base": ("OlmoEarth v1.2 base", "OlmoEarth", False),
     # CROMA
     "tgeo_croma_base": ("CROMA base", "CROMA", False),
     "tgeo_croma_large": ("CROMA large", "CROMA", False),
@@ -107,19 +123,23 @@ def ordered_values(values: pd.Series, preferred: list[str]) -> list[str]:
 def harmonize(df: pd.DataFrame) -> pd.DataFrame:
     """Turn raw ``all_results.csv`` rows into a canonical long-format frame.
 
-    Drops OlmoEarth ablation rows and non-quality metrics; derives ``pooling``
+    Drops leaderboard-excluded datasets (:data:`DROPPED_DATASETS`), OlmoEarth
+    ablation rows and non-quality metrics; derives ``pooling``
     (``cls-token`` for ``_cls``-suffixed names, else ``patch-mean``) and a base
-    model name; derives the semantic ``bandclass`` (``RGB`` if ``bands == "rgb"``
-    else ``Multispectral``); canonicalizes the metric name; and keeps
-    ``normalization`` explicit as a first-class condition axis. Does not
-    collapse duplicate score cells: ambiguous source rows remain present so the
-    slice builder can reject seated duplicates loudly.
+    model name; folds ``_landsat_as_s2`` sensor-substitution rows onto their base
+    model (the landsat reading wins any resulting cell collision); derives the
+    semantic ``bandclass`` (``RGB`` if ``bands == "rgb"`` else ``Multispectral``);
+    canonicalizes the metric name; and keeps ``normalization`` explicit as a
+    first-class condition axis. Apart from the landsat fold, it does not collapse
+    duplicate score cells: ambiguous source rows remain present so the slice
+    builder can reject seated duplicates loudly.
 
     Returns:
         DataFrame with columns ``base_model, dataset, task, probe, bandclass,
         pooling, normalization, metric, score`` — one row per evaluated result.
     """
     df = df.copy()
+    df = df[~df["dataset"].isin(DROPPED_DATASETS)]
     name = df["name"].astype(str)
 
     # drop single-dataset ablation rows
@@ -137,7 +157,13 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
     name = df["name"].astype(str)
     is_cls = name.str.endswith("_cls")
     df["pooling"] = is_cls.map({True: "cls-token", False: "patch-mean"})
-    df["base_model"] = name.where(~is_cls, name.str.slice(0, -4))
+    base = name.where(~is_cls, name.str.slice(0, -4))
+
+    # fold ``_landsat_as_s2`` sensor-substitution rows onto their base model
+    df["is_landsat_sub"] = base.str.endswith(LANDSAT_SUB_SUFFIX)
+    df["base_model"] = base.where(
+        ~df["is_landsat_sub"], base.str.removesuffix(LANDSAT_SUB_SUFFIX)
+    )
 
     # semantic band class
     df["bandclass"] = (df["bands"].astype(str) == "rgb").map({True: "RGB", False: "Multispectral"})
@@ -169,6 +195,14 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
         "normalization",
         "metric",
     ]
+
+    # Where a landsat-as-s2 row and a plain reading land on the same cell
+    # (``m-forestnet`` multispectral), keep the landsat reading as the canonical
+    # full-MSI cell. Cells without a landsat row are untouched, so any genuine
+    # non-landsat duplicate still reaches the seated-duplicate guard.
+    has_landsat = df.groupby(keys)["is_landsat_sub"].transform("any")
+    df = df[~(has_landsat & ~df["is_landsat_sub"])]
+
     return df[keys + ["score"]].reset_index(drop=True)
 
 
