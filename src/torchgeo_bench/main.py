@@ -1000,6 +1000,15 @@ def main(cfg: DictConfig) -> None:
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
 
+    # Coordinate location-encoder track: a distinct data/probe path (point
+    # (lon, lat) -> label, ridge/KNN, k-fold CV) that does not touch the image
+    # pipeline below. Dispatched by `mode=coord`.
+    if str(cfg.get("mode", "image")) == "coord":
+        from torchgeo_bench.coordbench.run import run_coordbench
+
+        run_coordbench(cfg)
+        return
+
     dataset_names = _expand_dataset_list(cfg.dataset.names)
     device = torch.device(cfg.device)
 

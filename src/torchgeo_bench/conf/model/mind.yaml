@@ -1,0 +1,8 @@
+# MIND location encoder (distilled from AlphaEarth/Climplicit/GeoCLIP/SINR).
+# 64-d Matryoshka deploy prefix of the pooled trunk. https://huggingface.co/isaaccorley/MIND
+_target_: torchgeo_bench.coordbench.models.MINDLocationEncoder
+repo: isaaccorley/MIND
+filename: mind.safetensors
+feature: pooled
+dim: 64
+name: mind

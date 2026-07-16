@@ -134,3 +134,6 @@ site/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# tracked benchmark results
+!coordbench-results.csv

@@ -1,0 +1,5 @@
+# SatCLIP location encoder (spherical harmonics + SirenNet), float64.
+# Requires the `coordbench` extra: pip install -e ".[coordbench]"
+_target_: torchgeo_bench.coordbench.models.SatCLIPLocationEncoder
+repo: MVRL/satclip-loc-enc-vit16-l40
+name: satclip

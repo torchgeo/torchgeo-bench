@@ -17,8 +17,7 @@ configured through Hydra.
   full multispectral / multi-modal stacks.
 - **Hydra-driven** — sweep models, datasets, partitions, image sizes, and
   bands without code changes.
-- **Resumable** — `resume=true` skips already-computed `(dataset, method,
-  model, …)` rows. Atomic CSV appends are safe across parallel jobs.
+- **Resumable** — `resume=true` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
 - **Bring your own model** — copy
   [`contrib_template.py`](src/torchgeo_bench/models/contrib_template.py),
   implement `_forward_patch_features`, and add a one-file Hydra config.
@@ -55,8 +54,7 @@ torchgeo-bench download geobench_v1
 ```
 
 V2 (classification + segmentation) and torchgeo's EuroSAT downloader work the
-same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download
-eurosat`). See the [documentation](https://torchgeo.org/torchgeo-bench/user/datasets.html)
+same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download eurosat`). See the [documentation](https://torchgeo.org/torchgeo-bench/user/datasets.html)
 for all options.
 
 ## Run a basic experiment
@@ -82,7 +80,35 @@ with reference results** — to start from a clean slate, write to your own file
 with `output=results/my_run.csv`. Re-run with `resume=true` to skip
 already-completed rows.
 
+## CoordBench — location encoders
+
+`mode=coord` swaps the image pipeline for a **coordinate-only** track: point
+`(lon, lat)` in, a downstream label out. Benchmarks are streamed directly from
+the unified [`taylor-geospatial/coordbench`](https://huggingface.co/datasets/taylor-geospatial/coordbench)
+HuggingFace dataset (PDFM, SatCLIP, SustainBench, CDC PLACES, MOSAIKS/USAVars,
+the DeepMind/AlphaEarth suite, and more — no local download). A frozen encoder
+is probed with **KNN** and a **ridge linear** head under **random** or
+**spatial-block** cross-validation (regression → R², classification → accuracy).
+
+```bash
+# MIND location encoder on the whole suite, random + spatial CV
+torchgeo-bench run mode=coord model=mind coord.split=both
+
+# One family, linear probe only, trivial sin/cos baseline
+torchgeo-bench run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
+```
+
+`model=mind` and `model=mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),
+distilled from AlphaEarth/Climplicit/GeoCLIP/SINR) and `model=sincos` work with
+the base install. The other pretrained encoders (SatCLIP / GeoCLIP / Climplicit /
+SINR, via `rshf`) need the `coordbench` extra: `pip install -e ".[coordbench]"`,
+then `model=climplicit` (etc.). Results land in
+`results/coordbench_results.csv`. Add your own encoder by subclassing
+`LocationEncoder` (implement `_encode`) and pointing a Hydra `model` config's
+`_target_` at it.
+
 <!-- skip-on-docs-landing-start -->
+
 ## Learn more
 
 - **[Documentation](https://torchgeo.org/torchgeo-bench/)** — full
@@ -91,6 +117,7 @@ already-completed rows.
   workflow, and troubleshooting.
 - **[AGENTS.md](https://github.com/torchgeo/torchgeo-bench/blob/main/AGENTS.md)**
   — contributor guide and house style.
+
 <!-- skip-on-docs-landing-end -->
 
 ## Citation
