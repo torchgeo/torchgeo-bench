@@ -4,7 +4,8 @@ Three targets:
 
 - ``geobench_v1`` — full GeoBench V1 classification suite from
   ``recursix/geo-bench-1.0``. Downloads to ``<output>/`` (the HF repo already
-  contains a top-level ``classification_v1.0/`` directory).
+  contains a top-level ``classification_v1.0/`` directory). Selected datasets
+  use the sharded mirror under ``<output>/classification_v1.0_wds/``.
 - ``geobench_v2`` — selected GeoBench V2 datasets from ``aialliance/<name>``
   HF repos. Defaults to the benchmark-supported datasets; override with
   ``--datasets``. Each dataset goes to ``<output>/geobenchv2/<name>``.
@@ -22,6 +23,7 @@ from torchgeo.datasets import EuroSAT
 logger = logging.getLogger(__name__)
 
 GEOBENCH_V1_REPO = "recursix/geo-bench-1.0"
+GEOBENCH_V1_SHARDED_REPO = "isaaccorley/geobenchv1-webdataset"
 GEOBENCH_V2_REPO_PREFIX = "aialliance"
 
 # Default V2 datasets to download — only those the benchmark runner knows about.
@@ -53,10 +55,35 @@ def _decompress_zip_with_progress(zip_path: Path, extract_to: Path) -> None:
     logger.info("Removed zip file: %s", zip_path)
 
 
-def download_geobench_v1(output_dir: Path) -> None:
-    """Download GeoBench V1 to ``output_dir`` (creates ``classification_v1.0/`` inside)."""
+def download_geobench_v1(output_dir: Path, datasets: list[str] | None = None) -> None:
+    """Download GeoBench V1 datasets to ``output_dir``.
+
+    Args:
+        output_dir: Benchmark data root (typically ``data/``).
+        datasets: Specific dataset names to fetch from the sharded mirror.
+            ``None`` downloads the full legacy HDF5 collection.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if datasets:
+        sharded_root = output_dir / "classification_v1.0_wds"
+        sharded_root.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "Downloading %d GeoBench v1 dataset(s) from %s -> %s",
+            len(datasets),
+            GEOBENCH_V1_SHARDED_REPO,
+            sharded_root,
+        )
+        snapshot_download(
+            repo_id=GEOBENCH_V1_SHARDED_REPO,
+            repo_type="dataset",
+            local_dir=sharded_root,
+            allow_patterns=[f"{name}/*" for name in datasets],
+        )
+        logger.info("GeoBench v1 subset download complete.")
+        return
+
     logger.info("Downloading GeoBench v1 from %s -> %s", GEOBENCH_V1_REPO, output_dir)
 
     snapshot_download(

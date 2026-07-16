@@ -32,6 +32,19 @@ def test_download_geobench_v1_creates_output_and_decompresses(tmp_path: Path) ->
     decompress_mock.assert_called_once()
 
 
+def test_download_geobench_v1_subset_uses_sharded_mirror(tmp_path: Path) -> None:
+    out = tmp_path / "data"
+    with mock.patch("torchgeo_bench.download.snapshot_download") as download_mock:
+        download_geobench_v1(out, datasets=["m-eurosat", "m-forestnet"])
+
+    download_mock.assert_called_once_with(
+        repo_id="isaaccorley/geobenchv1-webdataset",
+        repo_type="dataset",
+        local_dir=out / "classification_v1.0_wds",
+        allow_patterns=["m-eurosat/*", "m-forestnet/*"],
+    )
+
+
 def test_download_geobench_v2_subset(tmp_path: Path) -> None:
     out = tmp_path / "data"
     with mock.patch("torchgeo_bench.download.download_geobench_v2_dataset") as dl_mock:

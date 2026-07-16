@@ -54,6 +54,12 @@ The runner expects datasets under `./data/`. To grab GeoBench V1:
 torchgeo-bench download geobench_v1
 ```
 
+To download only the datasets needed for a run:
+
+```bash
+torchgeo-bench download geobench_v1 --datasets m-eurosat
+```
+
 V2 (classification + segmentation) and torchgeo's EuroSAT downloader work the
 same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download
 eurosat`). See the [documentation](https://torchgeo.org/torchgeo-bench/user/datasets.html)

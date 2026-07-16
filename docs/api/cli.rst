@@ -13,8 +13,8 @@ The ``torchgeo-bench`` console script exposes two subcommands:
 
 ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}``
     Downloads benchmark datasets into ``./data/`` (or a custom location with
-    ``--output-dir``). For GeoBench V2, individual datasets can be selected
-    with ``--datasets a,b,c``.
+    ``--output-dir``). For GeoBench V1 and V2, individual datasets can be
+    selected with ``--datasets a,b,c``.
 
 Hydra entry point
 -----------------
