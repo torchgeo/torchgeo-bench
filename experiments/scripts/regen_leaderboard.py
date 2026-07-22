@@ -161,9 +161,7 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
 
     # fold ``_landsat_as_s2`` sensor-substitution rows onto their base model
     df["is_landsat_sub"] = base.str.endswith(LANDSAT_SUB_SUFFIX)
-    df["base_model"] = base.where(
-        ~df["is_landsat_sub"], base.str.removesuffix(LANDSAT_SUB_SUFFIX)
-    )
+    df["base_model"] = base.where(~df["is_landsat_sub"], base.str.removesuffix(LANDSAT_SUB_SUFFIX))
 
     # semantic band class
     df["bandclass"] = (df["bands"].astype(str) == "rgb").map({True: "RGB", False: "Multispectral"})
