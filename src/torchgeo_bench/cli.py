@@ -8,6 +8,7 @@ Two subcommands:
 - ``torchgeo-bench sample-size [hydra overrides...]`` — runs sample-size calibration sweep.
 - ``torchgeo-bench seg-viz [hydra overrides...]`` — generates qualitative UQ grids for seg subsample sweep.
 - ``torchgeo-bench seg-corruption [hydra overrides...]`` — runs segmentation corruption robustness sweep.
+- ``torchgeo-bench robustness [hydra overrides...]`` — runs corruption-response-linearity ablation.
 - ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`` — fetches data.
 
 The ``run``, ``uq``, ``nf``, and ``sample-size`` subcommands forward every remaining
@@ -129,6 +130,23 @@ def seg_viz(ctx: typer.Context) -> None:
 def seg_corruption(ctx: typer.Context) -> None:
     """Run segmentation corruption sweep; extra args are forwarded to Hydra."""
     from torchgeo_bench.seg_corruption_pipeline import main as hydra_main
+
+    saved = sys.argv[:]
+    try:
+        sys.argv = [saved[0], *ctx.args]
+        hydra_main()
+    finally:
+        sys.argv = saved
+
+
+@app.command(
+    name="robustness",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Run corruption-response-linearity ablation (extra args forwarded to Hydra).",
+)
+def robustness(ctx: typer.Context) -> None:
+    """Run the corruption-response-linearity ablation; extra args are forwarded to Hydra."""
+    from torchgeo_bench.robustness.pipeline import main as hydra_main
 
     saved = sys.argv[:]
     try:

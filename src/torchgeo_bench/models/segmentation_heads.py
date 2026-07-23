@@ -241,13 +241,35 @@ class DPTHead(nn.Module):
     ResNet). The forward pass processes features from coarsest to finest
     through a cascade of :class:`FeatureFusionBlock` modules.
 
-    Upsampling chain (mirroring probe3d):
+    **Reassemble step**: the original DPT paper (Ranftl et al. 2021) taps an
+    isotropic ViT at 4 depths that all share the *same* spatial resolution,
+    then manufactures a pyramid by resampling each tap to a different
+    relative scale (``0.5×, 1×, 2×, 4×`` in this implementation) before
+    fusion. Without this step, same-resolution taps (every isotropic
+    backbone in this repo's model zoo — plain ViT-B/L, DOFA, Panopticon,
+    Clay, Prithvi, TerraMind, OlmoEarth) would stay at identical resolution
+    throughout, collapsing the fusion cascade into stacked same-resolution
+    residual convs with no actual cross-scale information to fuse.
+
+    This reassemble step is applied **only when all 4 input feature maps
+    share the same spatial resolution** (detected per forward call from the
+    actual tensor shapes). Genuine CNN/Swin pyramids (ResNet, ConvNeXt,
+    Swin), whose 4 levels already sit at different native resolutions,
+    instead keep the original uniform 2× upsample per level — applying the
+    reassemble scales there would compound with the backbone's own
+    resolution spread (e.g. ResNet-50's already-coarse 7×7 ``layer4`` would
+    be further downsampled to 3×3 by the 0.5× coarsest scale) and push the
+    finest level far beyond what the fusion cascade should see.
+
+    Upsampling chain:
       1. 1×1 project each map to ``hidden_dim``
-      2. 2× upsample all projected maps
+      2. Reassemble: if all 4 taps share one native resolution, resize level
+         *i* to ``reassemble_scales[i]`` relative to that resolution
+         (coarsest → 0.5×, finest → 4×); otherwise 2× upsample every level
+         (original behavior, for real pyramids)
       3. Top-down fusion cascade (coarse → fine)
-      4. 4× upsample the fused result
-      5. 3×3 → ReLU → 3×3 output conv to ``num_classes``
-      6. Final resize to input resolution
+      4. 3×3 → ReLU → 3×3 output conv to ``num_classes``
+      5. Final resize to input resolution
 
     Args:
         channels_list: Channel count for each hooked feature layer (coarse-to-fine).
@@ -255,6 +277,10 @@ class DPTHead(nn.Module):
         num_classes: Number of segmentation output classes.
         hidden_dim: Hidden channel dimension (default 256).
         kernel_size: Conv kernel size for residual units (default 3).
+        reassemble_scales: Per-level resize factor relative to each level's own
+            native resolution, coarse-to-fine, used only when all 4 taps are
+            same-resolution (default ``(0.5, 1.0, 2.0, 4.0)``, matching the
+            original DPT paper).
     """
 
     def __init__(
@@ -263,6 +289,7 @@ class DPTHead(nn.Module):
         num_classes: int,
         hidden_dim: int = 256,
         kernel_size: int = 3,
+        reassemble_scales: tuple[float, float, float, float] = (0.5, 1.0, 2.0, 4.0),
     ) -> None:
         super().__init__()
         if len(channels_list) != 4:
@@ -270,6 +297,7 @@ class DPTHead(nn.Module):
                 f"DPTHead requires exactly 4 feature layers, got {len(channels_list)}. "
                 "Specify exactly 4 layer names in coarse-to-fine order in the model config."
             )
+        self.reassemble_scales = reassemble_scales
         # Normalise ViT residual-stream features before projection. LayerNorm
         # over channels (per spatial position) matches the ViT's own internal
         # normalisation and is sample-wise — robust to the per-layer outlier
@@ -302,10 +330,17 @@ class DPTHead(nn.Module):
             input_h: Target output height.
             input_w: Target output width.
         """
-        # Normalise → project → 2× upsample
+        # Same-resolution taps (isotropic ViTs) get the paper's manufactured
+        # pyramid; already-distinct taps (CNN/Swin pyramids) keep the
+        # original uniform 2× upsample so their native resolution spread
+        # isn't further compounded.
+        native_shapes = {tuple(f.shape[-2:]) for f in features}
+        scales = self.reassemble_scales if len(native_shapes) == 1 else (2.0, 2.0, 2.0, 2.0)
+
+        # Normalise → project → reassemble each level to its target scale
         projected = [
-            F.interpolate(conv(norm(f)), scale_factor=2, mode="bilinear", align_corners=True)
-            for norm, conv, f in zip(self.input_norms, self.convs, features)
+            F.interpolate(conv(norm(f)), scale_factor=scale, mode="bilinear", align_corners=True)
+            for norm, conv, f, scale in zip(self.input_norms, self.convs, features, scales)
         ]
 
         # Top-down cascade: coarsest (0) → finest (3)
@@ -314,8 +349,7 @@ class DPTHead(nn.Module):
         out = self.ref[2](projected[2], out)
         out = self.ref[3](projected[3], out)
 
-        # 4× upsample → output conv → resize to input resolution
-        out = F.interpolate(out, scale_factor=4, mode="bilinear", align_corners=True)
+        # Output conv → resize to input resolution
         out = self.out_conv(out)
         if out.shape[-2:] != (input_h, input_w):
             out = F.interpolate(out, size=(input_h, input_w), mode="bilinear", align_corners=False)

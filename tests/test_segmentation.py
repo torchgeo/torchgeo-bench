@@ -722,6 +722,96 @@ def test_probe_dpt_wrong_num_layers():
         make_probe(backbone, layers=["layer1", "layer2"], head_type="dpt", hidden_dim=16)
 
 
+def test_dpt_head_reassembles_same_resolution_taps():
+    """DPTHead manufactures a real multiscale pyramid when all 4 taps share one resolution.
+
+    Isotropic ViT backbones (OlmoEarth, plain ViT-B/L, DOFA, Panopticon, Clay,
+    Prithvi, TerraMind) tap 4 depths that are all the same spatial resolution.
+    Without the reassemble step, every level stays at identical resolution and
+    the fusion cascade degenerates into stacked same-resolution residual convs
+    with nothing to fuse across scales.
+    """
+    from torchgeo_bench.models.segmentation_heads import DPTHead
+
+    head = DPTHead([32, 32, 32, 32], num_classes=NUM_CLASSES, hidden_dim=16)
+    feats = [torch.randn(2, 32, 8, 8) for _ in range(4)]
+
+    # Capture the reassembled (post-interpolate) resolution feeding into each
+    # fusion block, by hooking the ref[i] modules directly.
+    reassembled_shapes = []
+    hook_handles = [
+        ref.register_forward_pre_hook(
+            lambda module, args, i=i: reassembled_shapes.append((i, tuple(args[0].shape[-2:])))
+        )
+        for i, ref in enumerate(head.ref)
+    ]
+
+    out = head(feats, 64, 64)
+    for h in hook_handles:
+        h.remove()
+
+    assert out.shape == (2, NUM_CLASSES, 64, 64)
+    # Same-resolution 8x8 taps reassembled to 0.5x/1x/2x/4x -> 4/8/16/32, a
+    # real ascending pyramid where before the fix all 4 stayed at one size.
+    assert reassembled_shapes == [(0, (4, 4)), (1, (8, 8)), (2, (16, 16)), (3, (32, 32))]
+
+
+def test_dpt_head_skips_reassemble_for_real_pyramid():
+    """DPTHead keeps the uniform 2x upsample for genuinely multi-resolution taps.
+
+    Real CNN/Swin pyramids (ResNet, ConvNeXt, Swin) already have distinct
+    native resolutions per level; applying the isotropic-ViT reassemble
+    scales on top would compound with the backbone's own resolution spread
+    (e.g. an already-coarse 7x7 deepest layer downsampled further to 3x3).
+    """
+    from torchgeo_bench.models.segmentation_heads import DPTHead
+
+    head = DPTHead([64, 32, 16, 8], num_classes=NUM_CLASSES, hidden_dim=16)
+    feats = [
+        torch.randn(1, 64, 4, 4),
+        torch.randn(1, 32, 8, 8),
+        torch.randn(1, 16, 16, 16),
+        torch.randn(1, 8, 32, 32),
+    ]
+    out = head(feats, 64, 64)
+    assert out.shape == (1, NUM_CLASSES, 64, 64)
+
+
+def test_probe_dpt_head_forward_isotropic_backbone():
+    """DPTHead end-to-end through SegmentationProbe on an isotropic (ViT-like) backbone."""
+    from torchgeo_bench.models.segmentation_heads import DPTHead
+
+    class MockIsotropicBackbone(nn.Module):
+        """4 depths, all emitting the same 8x8 spatial resolution (like a ViT)."""
+
+        def __init__(self):
+            super().__init__()
+            self.block1 = nn.Sequential(nn.Conv2d(3, 16, kernel_size=16, stride=16), nn.ReLU())
+            self.block2 = nn.Sequential(nn.Conv2d(16, 16, kernel_size=3, padding=1), nn.ReLU())
+            self.block3 = nn.Sequential(nn.Conv2d(16, 16, kernel_size=3, padding=1), nn.ReLU())
+            self.block4 = nn.Sequential(nn.Conv2d(16, 16, kernel_size=3, padding=1), nn.ReLU())
+
+        def forward(self, x):
+            x = self.block1(x)
+            x = self.block2(x)
+            x = self.block3(x)
+            x = self.block4(x)
+            return x
+
+    backbone = MockIsotropicBackbone()
+    probe = make_probe(
+        backbone,
+        layers=["block4", "block3", "block2", "block1"],
+        head_type="dpt",
+        hidden_dim=16,
+    )
+    assert isinstance(probe.head, DPTHead)
+
+    images = torch.randn(2, 3, 128, 128)
+    logits = probe(images)
+    assert logits.shape == (2, NUM_CLASSES, 128, 128)
+
+
 # ---------------------------------------------------------------------------
 # Feature caching: extract_segmentation_features + CachedFeaturesDataset
 # ---------------------------------------------------------------------------
