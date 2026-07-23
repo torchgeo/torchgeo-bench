@@ -78,7 +78,7 @@ class NewModel(BenchModel):
         # Weight loading via HuggingFace Hub (recommended):
         #   from huggingface_hub import hf_hub_download
         #   ckpt = hf_hub_download(repo_id="my-org/my-model", filename="weights.pt")
-        #   self.backbone.load_state_dict(torch.load(ckpt, map_location="cpu"))
+        #   self.backbone.load_state_dict(torch.load(ckpt, map_location="cpu", weights_only=True))
         #
         self.backbone = nn.Identity()  # TODO: replace with your backbone
         logger.info(
