@@ -111,7 +111,7 @@ def load_mind(ckpt_path: str, device: str = "cpu") -> ReSIRENLocationEncoder:
 
         state = {k: v.float() for k, v in load_file(ckpt_path).items()}  # fp16 -> fp32
     else:
-        state = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
         if isinstance(state, dict) and "state_dict" in state:
             state = state["state_dict"]
     embed_dim, in_dim = state["first.linear.weight"].shape
