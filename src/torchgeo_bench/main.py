@@ -1009,6 +1009,15 @@ def main(cfg: DictConfig) -> None:
         run_coordbench(cfg)
         return
 
+    # Segmentation label-quality diagnostic: grouped-K-fold OOF predictions
+    # scored by Cleanlab + AER against the train masks. Dispatched by
+    # `mode=label_quality`; does not touch the image benchmark pipeline below.
+    if str(cfg.get("mode", "image")) == "label_quality":
+        from torchgeo_bench.label_quality.run import run_label_quality
+
+        run_label_quality(cfg)
+        return
+
     dataset_names = _expand_dataset_list(cfg.dataset.names)
     device = torch.device(cfg.device)
 

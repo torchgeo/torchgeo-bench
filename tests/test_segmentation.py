@@ -757,3 +757,61 @@ def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
     )
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Solver: differential LR param groups + fixed step budget
+# ---------------------------------------------------------------------------
+
+
+def test_solver_differential_lr_param_groups(mock_backbone, dummy_data):
+    """Passing backbone_lr and head_lr yields two param groups with those LRs."""
+    del dummy_data
+    probe = make_probe(mock_backbone, ["layer1", "layer2"], freeze=False)
+    solver = SegmentationSolver(
+        model=probe,
+        num_classes=NUM_CLASSES,
+        backbone_lr=1e-5,
+        head_lr=1e-3,
+        device="cpu",
+    )
+
+    groups = solver.optimizer.param_groups
+    assert len(groups) == 2
+    lrs = {g["lr"] for g in groups}
+    assert lrs == {1e-5, 1e-3}
+
+    backbone_params = {id(p) for p in probe.backbone.parameters()}
+    backbone_group = next(g for g in groups if g["lr"] == 1e-5)
+    assert backbone_group["params"], "backbone group must be non-empty"
+    assert all(id(p) in backbone_params for p in backbone_group["params"])
+
+
+def test_solver_fixed_step_budget(mock_backbone, dummy_data):
+    """fit(max_steps=N) runs exactly N optimizer steps regardless of epoch count."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)  # 2 samples, batch_size=2 -> 1 batch/epoch
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    step_count = 0
+    real_step = solver.optimizer.step
+
+    def counting_step(*args, **kwargs):
+        nonlocal step_count
+        step_count += 1
+        return real_step(*args, **kwargs)
+
+    solver.optimizer.step = counting_step
+    solver.fit(loader, max_steps=3, verbose=False)
+
+    assert step_count == 3
+
+
+def test_solver_single_lr_backward_compatible(mock_backbone, dummy_data):
+    """A single lr keeps the default single param-group optimizer."""
+    del dummy_data
+    probe = make_probe(mock_backbone, ["layer1", "layer2"], freeze=False)
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    assert len(solver.optimizer.param_groups) == 1
+    assert solver.optimizer.param_groups[0]["lr"] == 1e-3

@@ -157,12 +157,16 @@ class _V2Dataset(BenchDataset):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
+        metadata: list[str] | None = None,
     ) -> Dataset:
         """Return a :class:`GeoBenchv2` for the given split (raw values).
 
         Forces ``data_normalizer=nn.Identity`` so the upstream class emits
         raw sensor values; per-channel normalization belongs on
-        :class:`~torchgeo_bench.models.interface.BenchModel`.
+        :class:`~torchgeo_bench.models.interface.BenchModel`. When *metadata*
+        is given it is forwarded to the upstream loader so per-sample fields
+        (e.g. ``lat``/``lon``) appear in the sample dict; datasets lacking a
+        requested field ignore it upstream.
         """
         del partition
         band_order = self.build_band_order(bands)
@@ -198,6 +202,8 @@ class _V2Dataset(BenchDataset):
         }
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True
+        if metadata is not None:
+            kwargs["metadata"] = metadata
 
         return GeoBenchv2(
             root=self.data_root(),

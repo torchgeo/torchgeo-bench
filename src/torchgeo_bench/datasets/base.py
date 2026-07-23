@@ -127,6 +127,7 @@ class BenchDataset(ABC):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
+        metadata: list[str] | None = None,
     ) -> Dataset:
         """Return a PyTorch :class:`~torch.utils.data.Dataset` for a split.
 
@@ -140,6 +141,10 @@ class BenchDataset(ABC):
                 ``False``.
             bands: Tuple of canonical band names to load. ``None`` loads all.
             transform: Optional sample transform callable.
+            metadata: Optional per-sample metadata fields to request from the
+                upstream loader (e.g. ``["lat", "lon"]``). ``None`` requests
+                nothing; datasets that do not support a requested field ignore
+                it upstream.
         """
 
     def get_dataloader(

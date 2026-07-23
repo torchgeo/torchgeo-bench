@@ -2,6 +2,7 @@
 
 defaults:
   - model: rcf
+  - label_quality
   - _self_
 
 seed: 0

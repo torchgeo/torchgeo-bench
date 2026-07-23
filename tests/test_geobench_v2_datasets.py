@@ -336,3 +336,18 @@ class TestKuroSiwoLive:
         assert img.shape[0] == expected_channels, (
             f"expected {expected_channels} channels, got {img.shape[0]}"
         )
+
+
+@pytest.mark.slow
+def test_lat_lon_metadata_roundtrip(geobench_v2_root):
+    """A coordinate-bearing V2 dataset must expose finite lat/lon per sample."""
+    import math
+
+    del geobench_v2_root
+    bench = get_bench_dataset_class("flair2")()
+    ds = bench.get_dataset("train", metadata=["lat", "lon"])
+    sample = ds[0]
+    assert "lat" in sample and "lon" in sample, sample.keys()
+    lat = float(sample["lat"])
+    lon = float(sample["lon"])
+    assert math.isfinite(lat) and math.isfinite(lon)

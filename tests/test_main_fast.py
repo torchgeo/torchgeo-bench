@@ -426,3 +426,18 @@ def test_csv_row_has_required_columns(tmp_path: Path):
     df = pd.read_csv(out)
     required = {"dataset", "method", "model", "metric_name", "metric_value", "partition", "bands"}
     assert required.issubset(set(df.columns))
+
+
+def test_mode_label_quality_dispatch(monkeypatch):
+    """``mode=label_quality`` routes ``main`` to ``run_label_quality`` (no image pipeline)."""
+    from omegaconf import OmegaConf
+
+    import torchgeo_bench.label_quality.run as lq_run
+
+    called = {}
+    monkeypatch.setattr(lq_run, "run_label_quality", lambda cfg: called.setdefault("hit", True))
+
+    cfg = OmegaConf.create({"seed": 0, "device": "cpu", "mode": "label_quality"})
+    main.__wrapped__(cfg)
+
+    assert called.get("hit") is True

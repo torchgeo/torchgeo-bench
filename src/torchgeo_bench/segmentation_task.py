@@ -38,18 +38,26 @@ class SegmentationSolver:
         criterion: nn.Module | None = None,
         lr_scheduler: str = "cosine",
         ignore_index: int = 255,
+        backbone_lr: float | None = None,
+        head_lr: float | None = None,
     ) -> None:
         """Initialize the SegmentationSolver.
 
         Args:
             model: The SegmentationProbe model to train.
             num_classes: Number of segmentation classes.
-            lr: Learning rate for the optimizer.
+            lr: Learning rate for the optimizer. Ignored when both
+                ``backbone_lr`` and ``head_lr`` are given.
             weight_decay: Weight decay for the optimizer.
             device: Device to run training on ('cuda' or 'cpu').
             criterion: Loss module. Defaults to CrossEntropyLoss with ignore_index.
             lr_scheduler: LR schedule: "cosine" (CosineAnnealingLR) or "none" (constant LR).
             ignore_index: Label value to ignore in loss and metrics (default: 255).
+            backbone_lr: Learning rate for the backbone param group. When set
+                together with ``head_lr``, the optimizer is built with two
+                differential-LR param groups (backbone / head) instead of a
+                single ``lr`` group.
+            head_lr: Learning rate for the head param group; see ``backbone_lr``.
         """
         self.model = model.to(device)
         self.num_classes = num_classes
@@ -58,11 +66,7 @@ class SegmentationSolver:
         self.val_history: list[float] = []
 
         self.ignore_index = ignore_index
-        self.optimizer = torch.optim.AdamW(
-            filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=lr,
-            weight_decay=weight_decay,
-        )
+        self.optimizer = self._build_optimizer(lr, weight_decay, backbone_lr, head_lr)
 
         self.criterion = (
             criterion
@@ -107,6 +111,34 @@ class SegmentationSolver:
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         self.device_type = torch.device(device).type
 
+    def _build_optimizer(
+        self,
+        lr: float,
+        weight_decay: float,
+        backbone_lr: float | None,
+        head_lr: float | None,
+    ) -> torch.optim.Optimizer:
+        """Build the AdamW optimizer.
+
+        With both ``backbone_lr`` and ``head_lr`` set, two differential-LR param
+        groups (backbone / head) are created from the trainable parameters;
+        otherwise a single ``lr`` group over all trainable parameters is used.
+        """
+        if backbone_lr is not None and head_lr is not None:
+            backbone_params = [p for p in self.model.backbone.parameters() if p.requires_grad]
+            head_params = [p for p in self.model.head.parameters() if p.requires_grad]
+            param_groups = [
+                {"params": backbone_params, "lr": backbone_lr},
+                {"params": head_params, "lr": head_lr},
+            ]
+            return torch.optim.AdamW(param_groups, weight_decay=weight_decay)
+
+        return torch.optim.AdamW(
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=lr,
+            weight_decay=weight_decay,
+        )
+
     def _make_scheduler(self, epochs: int) -> torch.optim.lr_scheduler.LRScheduler | None:
         """Return a CosineAnnealingLR scheduler, or None for constant LR."""
         if self.lr_scheduler_type == "cosine":
@@ -125,18 +157,29 @@ class SegmentationSolver:
         val_loader: DataLoader | None = None,
         epochs: int = 10,
         verbose: bool = True,
+        max_steps: int | None = None,
+        epoch_cap: int = 1000,
     ) -> float | None:
         """Train the segmentation probe.
 
         Args:
             train_loader: Training data loader.
             val_loader: Optional validation data loader for per-epoch mIoU logging.
-            epochs: Number of training epochs.
+            epochs: Number of training epochs (epoch-based regime).
             verbose: Whether to show progress bars and epoch logs.
+            max_steps: If set, train for exactly this many optimizer steps
+                (fixed-budget regime), cycling through the loader across up to
+                ``epoch_cap`` epochs, with no validation, scheduling, or
+                early-stopping. Overrides ``epochs`` and ``val_loader``.
+            epoch_cap: Maximum number of loader passes when ``max_steps`` is set.
 
         Returns:
-            Val mIoU from the final epoch if val_loader is given, else None.
+            Val mIoU from the final epoch if val_loader is given (epoch-based
+            regime only), else None.
         """
+        if max_steps is not None:
+            return self._fit_fixed_budget(train_loader, max_steps, epoch_cap, verbose)
+
         scheduler = self._make_scheduler(epochs)
         last_val_miou: float | None = None
         self.val_history = []
@@ -150,26 +193,8 @@ class SegmentationSolver:
 
             desc = f"Epoch {epoch + 1}/{epochs}"
             batches = track(train_loader, description=desc) if verbose else train_loader
-            for _num_batches, batch in enumerate(batches, start=1):
-                if isinstance(batch, dict):
-                    images = batch["image"].to(self.device)
-                    masks = batch["mask"].to(self.device).long()
-                else:
-                    images, masks = batch[0].to(self.device), batch[1].to(self.device).long()
-
-                if masks.ndim == 4:
-                    masks = masks.squeeze(1)
-
-                self.optimizer.zero_grad()
-                with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
-                    logits = self.model(images)
-                    loss = self.criterion(logits, masks)
-
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-
-                total_loss += loss.item()
+            for batch in batches:
+                total_loss += self._train_on_batch(batch)
 
             if scheduler is not None:
                 scheduler.step()
@@ -182,6 +207,57 @@ class SegmentationSolver:
                     logger.info("Epoch %d Val mIoU: %.17g", epoch + 1, last_val_miou)
 
         return last_val_miou
+
+    def _train_on_batch(self, batch) -> float:
+        """Run one optimizer step on a single batch and return its loss value."""
+        if isinstance(batch, dict):
+            images = batch["image"].to(self.device)
+            masks = batch["mask"].to(self.device).long()
+        else:
+            images, masks = batch[0].to(self.device), batch[1].to(self.device).long()
+
+        if masks.ndim == 4:
+            masks = masks.squeeze(1)
+
+        self.optimizer.zero_grad()
+        with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+            logits = self.model(images)
+            loss = self.criterion(logits, masks)
+
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+
+        return loss.item()
+
+    def _fit_fixed_budget(
+        self,
+        train_loader: DataLoader,
+        max_steps: int,
+        epoch_cap: int,
+        verbose: bool,
+    ) -> None:
+        """Train for exactly ``max_steps`` optimizer steps (no validation).
+
+        Cycles through ``train_loader`` across up to ``epoch_cap`` passes,
+        stopping the moment ``max_steps`` steps have run. Learning rate is held
+        constant (no scheduler) and no early-stopping is applied.
+        """
+        self.val_history = []
+        steps = 0
+        for _ in range(epoch_cap):
+            self.model.train()
+            if self.model.freeze_backbone:
+                self.model.backbone.eval()
+
+            desc = f"Step {steps}/{max_steps}"
+            batches = track(train_loader, description=desc) if verbose else train_loader
+            for batch in batches:
+                self._train_on_batch(batch)
+                steps += 1
+                if steps >= max_steps:
+                    return None
+        return None
 
     @torch.no_grad()
     def evaluate(

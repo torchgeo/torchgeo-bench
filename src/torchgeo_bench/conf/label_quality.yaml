@@ -1,0 +1,24 @@
+# @package label_quality
+# Segmentation label-quality diagnostic (mode=label_quality): Cleanlab per-pixel
+# self-confidence + AER macro-IoU disagreement over a grouped-K-fold OOF
+# substrate. See prd_plans/2026-07-23-segmentation-label-quality.md.
+output: results/label_quality_results.csv
+k: 5                        # out-of-fold count
+n_members: 5               # reseeded ensemble members (distinct fold partitions)
+grid_cell_deg: 1.0         # lat/lon spatial-block cell size for the fold tier
+methods: [cleanlab, aer]   # subset of {cleanlab, aer}
+ignore_index: 255          # label value excluded from scoring
+# Fixed per-member training budget (no validation / early-stopping).
+max_steps: 2000
+epoch_cap: 1000            # max loader passes to reach max_steps
+# Differential fine-tuning learning rates (null -> single `lr` group).
+backbone_lr: 1.0e-5
+head_lr: 1.0e-3
+weight_decay: 0.0
+tta: true                  # dihedral (D4) TTA folded into the OOF substrate
+cleanlab_soft_min_temp: 0.1   # colder -> image score tracks the worst pixels
+low_capacity_threshold: 0.3   # OOF macro-mIoU below this annotates low_capacity
+batch_size: 8
+seeds: null                # null -> derived from cfg.seed as seed + member_idx
+over_regularized: false    # optional low-capacity member variant (annotation only)
+cleanup_checkpoints: false # delete fold checkpoints after a dataset completes
