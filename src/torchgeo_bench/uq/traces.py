@@ -185,15 +185,19 @@ def init_trace_run(
 
 def build_trace_block_key(
     *,
-    run_id: str,
     common_meta: Mapping[str, object],
     uq_method: str,
     corruption_type: str,
     severity: int,
 ) -> str:
-    """Return a deterministic block key for one trace-producing evaluation block."""
+    """Return a deterministic block key for one trace-producing evaluation block.
+
+    Deliberately excludes run_id/config_hash: the key must be a pure function of
+    the logical evaluation coordinate so that reruns of the same coordinate map
+    to the same file and overwrite via is_complete/overwrite, instead of each
+    invocation accumulating a new stale trace file alongside the old one.
+    """
     payload = {
-        "run_id": run_id,
         "model": str(common_meta.get("model", "")),
         "backbone": str(common_meta.get("backbone", common_meta.get("name", ""))),
         "dataset": str(common_meta.get("dataset", "")),

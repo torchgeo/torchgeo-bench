@@ -1,4 +1,4 @@
-paper/
+/paper/
 results/*
 !results/contributed/
 results/contributed/*.csv

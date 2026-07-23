@@ -272,6 +272,9 @@ def _write_sample_parquet(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if out_path.exists():
         prev = pd.read_parquet(out_path)
+        prev = prev[
+            ~((prev["corruption_type"] == str(corruption_type)) & (prev["severity"] == int(severity)))
+        ]
         frame = pd.concat([prev, frame], ignore_index=True)
     frame.to_parquet(out_path, compression="zstd", index=False)
 
