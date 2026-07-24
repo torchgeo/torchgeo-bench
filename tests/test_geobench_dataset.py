@@ -10,10 +10,11 @@ methods. They access band data via the per-dataset wrapper's
 
 import pytest
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset, RandomSampler, SequentialSampler
 
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
+from torchgeo_bench.datasets.loading import get_datasets
 
 # Source names recognized by m-eurosat HDF5 files (used by tests that need to
 # bypass the wrapper and instantiate ``GeoBenchv1`` directly).
@@ -275,3 +276,53 @@ class TestErrorHandling:
         bench = get_bench_dataset_class("m-eurosat")()
         with pytest.raises(ValueError, match="unknown band"):
             bench.get_dataset("train", partition=small_partition, bands=("nonexistent_band",))
+
+
+class _FixedOrderDataset(Dataset):
+    """Tiny synthetic classification dataset whose label equals its index."""
+
+    def __init__(self, n: int = 12) -> None:
+        self._n = n
+
+    def __len__(self) -> int:
+        return self._n
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        return {"image": torch.zeros(3, 4, 4), "label": torch.tensor(idx)}
+
+
+class _FakeBench:
+    """Fake BenchDataset stand-in for exercising ``get_datasets`` without data."""
+
+    supports_partitions = False
+    rgb_bands = ("red", "green", "blue")
+
+    def get_dataset(self, split, partition, bands, transform):
+        del split, partition, bands, transform
+        return _FixedOrderDataset()
+
+
+def test_train_loader_fixed_order_for_embedding(monkeypatch):
+    """The embedding train loader must iterate in stable, non-shuffled order."""
+    monkeypatch.setattr(
+        "torchgeo_bench.datasets.loading.get_bench_dataset_class",
+        lambda name: _FakeBench,
+    )
+    result = get_datasets(dataset_name="fake", return_val=True, num_workers=0, batch_size=4)
+    train_ds, train_loader, val_loader, test_loader = result
+
+    # Train loader used for embedding is sequential, not random.
+    assert isinstance(train_loader.sampler, SequentialSampler)
+    assert not isinstance(train_loader.sampler, RandomSampler)
+    # Val/test loaders remain sequential (unchanged behavior).
+    assert isinstance(val_loader.sampler, SequentialSampler)
+    assert isinstance(test_loader.sampler, SequentialSampler)
+
+    def _labels() -> list[int]:
+        return [int(v) for batch in train_loader for v in batch["label"].tolist()]
+
+    assert _labels() == _labels() == list(range(12))
+
+    # Tuple shape unchanged: return_val=False yields a 3-tuple.
+    three = get_datasets(dataset_name="fake", num_workers=0, batch_size=4)
+    assert len(three) == 3

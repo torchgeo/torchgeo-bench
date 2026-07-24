@@ -231,8 +231,13 @@ def get_datasets(
     val_ds = bench.get_dataset("val", partition="default", **common)
     test_ds = bench.get_dataset("test", partition="default", **common)
 
+    # Train loader is consumed only for frozen-backbone feature extraction, so
+    # it iterates in fixed dataset order (shuffle=False). This makes positional
+    # indices into the cached ``x_train`` deterministic and identical across
+    # models, which the label-budget subsampling relies on. Result-neutral for
+    # the full-data probe (order-invariant full-batch LBFGS).
     train_loader = _make_loader(
-        train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers
+        train_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers
     )
     val_loader = _make_loader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     test_loader = _make_loader(

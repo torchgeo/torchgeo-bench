@@ -40,7 +40,7 @@ from torchgeo_bench.segmentation_probe import (
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver, SegMetrics
 from torchgeo_bench.segmentation_viz import save_segmentation_viz
-from torchgeo_bench.utils import extract_features
+from torchgeo_bench.utils import extract_features, stratified_subsample_indices
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +159,51 @@ def _filter_completed_metric_rows(
     return filtered
 
 
+# Resume-key columns. ``train_fraction`` and ``subsample_seed`` carry the
+# label-budget axis; legacy rows lacking them normalize to the full-data point
+# (see ``_normalize_resume_fraction_columns``). ``seed`` is intentionally absent.
+_RESUME_KEY_COLS = (
+    "dataset",
+    "method",
+    "model",
+    "name",
+    "normalization",
+    "image_size",
+    "interpolation",
+    "partition",
+    "bands",
+    "train_fraction",
+    "subsample_seed",
+)
+
+
+def _normalize_resume_fraction_columns(df: pd.DataFrame, base_seed: int) -> pd.DataFrame:
+    """Backfill the label-budget key columns for legacy/partial result rows.
+
+    A pre-existing ``method="linear"`` row predates the label-budget axis, so it
+    has no ``train_fraction``/``subsample_seed`` columns (or empty cells). Such a
+    row is the full-data, base-seed point: ``train_fraction`` normalizes to
+    ``1.0`` and ``subsample_seed`` to ``base_seed`` so it matches a fresh
+    ``f=1.0`` resume key and is never recomputed.
+
+    Args:
+        df: The results DataFrame read back for resume.
+        base_seed: The run's ``cfg.seed``, used as the legacy subsample seed.
+
+    Returns:
+        A copy of ``df`` with both columns present and filled.
+    """
+    df = df.copy()
+    for col, default in (("train_fraction", 1.0), ("subsample_seed", base_seed)):
+        if col not in df.columns:
+            df[col] = default
+            continue
+        values = df[col]
+        is_empty = values.isna() | (values.astype(str).str.strip() == "")
+        df[col] = np.where(is_empty.to_numpy(), default, values.to_numpy())
+    return df
+
+
 def _profile_metric_names(profile_cfg: DictConfig | None) -> list[str]:
     """Return the required profile metrics for resume completeness checks."""
     names = [
@@ -266,6 +311,16 @@ class EvaluationResult:
     mce_ts: float | None = None
     temperature: float | None = None
     calibration_n_bins: int | None = None
+    # Label-budget axis (data-scaling curves). Defaults reproduce the full-data
+    # probe exactly: ``train_fraction=1.0`` and ``subsample_seed`` falling back
+    # to the row's ``seed``. ``n_train`` records the actual post-subsample count.
+    train_fraction: float = 1.0
+    subsample_seed: int | None = None
+
+    def __post_init__(self) -> None:
+        """Default ``subsample_seed`` to the run ``seed`` when unspecified."""
+        if self.subsample_seed is None:
+            self.subsample_seed = self.seed
 
     def to_row(self) -> dict:
         """Convert to a flat dictionary suitable for CSV/DataFrame export."""
@@ -284,6 +339,29 @@ class DatasetRunPlan:
     skip_linear: bool
     skip_id: bool
     skip_profile: bool
+    # Linear-probe (fraction, subsample_seed) pairs still to run for this
+    # dataset. Empty when the linear probe is skipped or every requested pair is
+    # already present in the results CSV.
+    linear_pairs_to_run: tuple[tuple[float, int], ...] = ()
+
+
+def _expand_fraction_seed_pairs(
+    label_fractions: Sequence[float], n_subsample_repeats: int, base_seed: int
+) -> list[tuple[float, int]]:
+    """Expand the label-budget config into concrete ``(fraction, seed)`` pairs.
+
+    ``f == 1.0`` is the full-data point: a single entry at ``base_seed``
+    regardless of ``n_subsample_repeats``. Each ``f < 1.0`` expands to
+    ``n_subsample_repeats`` independent nested draws seeded ``base_seed + i``.
+    """
+    pairs: list[tuple[float, int]] = []
+    for raw in label_fractions:
+        fraction = float(raw)
+        if fraction == 1.0:
+            pairs.append((1.0, int(base_seed)))
+        else:
+            pairs.extend((fraction, int(base_seed) + i) for i in range(int(n_subsample_repeats)))
+    return pairs
 
 
 def _plan_dataset_run(
@@ -313,12 +391,37 @@ def _plan_dataset_run(
         )
 
     knn_key = (ds_name, f"knn{knn_k}", *model_key)
-    linear_key = (ds_name, "linear", *model_key)
     id_key = (ds_name, "intrinsic_dim", *model_key)
     profile_key = (ds_name, "profile", *model_key)
 
     skip_knn = bool(cfg.resume and knn_key in completed_runs)
-    skip_linear = bool((cfg.resume and linear_key in completed_runs) or cfg.eval.skip_linear)
+
+    # The linear probe is swept over label-budget (fraction, subsample_seed)
+    # pairs. Its per-pair resume key reuses the shared config cells but replaces
+    # the base (train_fraction, subsample_seed) tail with the pair's own values.
+    base_model_key = (cfg.model._target_, cfg.model.name, *config_tuple[:-2])
+    requested_pairs = _expand_fraction_seed_pairs(
+        cfg.eval.label_fractions, cfg.eval.n_subsample_repeats, cfg.seed
+    )
+
+    def _linear_key(fraction: float, subsample_seed: int) -> tuple[str, ...]:
+        return (
+            ds_name,
+            "linear",
+            *base_model_key,
+            _canonical_key_cell(fraction),
+            _canonical_key_cell(subsample_seed),
+        )
+
+    if cfg.eval.skip_linear:
+        linear_pairs_to_run: list[tuple[float, int]] = []
+    elif cfg.resume:
+        linear_pairs_to_run = [
+            (f, s) for (f, s) in requested_pairs if _linear_key(f, s) not in completed_runs
+        ]
+    else:
+        linear_pairs_to_run = list(requested_pairs)
+    skip_linear = len(linear_pairs_to_run) == 0
 
     id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
     id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
@@ -353,6 +456,7 @@ def _plan_dataset_run(
         skip_linear=skip_linear,
         skip_id=skip_id,
         skip_profile=skip_profile,
+        linear_pairs_to_run=tuple(linear_pairs_to_run),
     )
 
 
@@ -569,6 +673,87 @@ def evaluate_logistic(
                 f"MCE={calibration_ts['mce_ts']:.4f}"
             )
     return metric, lo, hi, float(best_c), calibration, calibration_ts
+
+
+def _run_linear_fractions(
+    *,
+    pairs: Sequence[tuple[float, int]],
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_val: np.ndarray,
+    y_val: np.ndarray,
+    x_test: np.ndarray,
+    y_test: np.ndarray,
+    c_values: Sequence[float],
+    common_meta: dict,
+    metric_name: str,
+    feature_dim: int,
+    seed: int,
+    n_bootstrap: int,
+    device: str,
+    verbose: bool,
+    calibration_n_bins: int,
+    temp_scale: bool,
+) -> list[dict]:
+    """Fit the linear probe over label-budget ``(fraction, subsample_seed)`` pairs.
+
+    Train and val are subsampled by the *same* nested stratified draw at each
+    fraction (test stays full), the fit is forced train-only (``merge_val=False``)
+    so hyperparameter selection also degrades under scarcity, and one linear row
+    per pair is emitted carrying ``train_fraction``, ``subsample_seed``, and the
+    actual post-subsample ``n_train``.
+    """
+    # The final probe never merges a full val set into a tiny train subset in
+    # this mode; record that on the row rather than the config value.
+    meta = {**common_meta, "merge_val": False}
+    rows: list[dict] = []
+    for fraction, subsample_seed in pairs:
+        train_idx = stratified_subsample_indices(y_train, fraction, subsample_seed)
+        val_idx = stratified_subsample_indices(y_val, fraction, subsample_seed)
+        lin_score, lin_lo, lin_hi, best_c, lin_cal, lin_cal_ts = evaluate_logistic(
+            x_train[train_idx],
+            y_train[train_idx],
+            x_val[val_idx],
+            y_val[val_idx],
+            x_test,
+            y_test,
+            c_values,
+            seed,
+            n_bootstrap,
+            merge_val=False,
+            device=device,
+            verbose=verbose,
+            calibration_n_bins=calibration_n_bins,
+            temp_scale=temp_scale,
+        )
+        rows.append(
+            EvaluationResult(
+                **meta,
+                method="linear",
+                metric_name=metric_name,
+                metric_value=lin_score,
+                ci_lower=lin_lo,
+                ci_upper=lin_hi,
+                feature_dim=feature_dim,
+                best_c=best_c,
+                best_lr=None,
+                best_batch_size=None,
+                n_train=len(train_idx),
+                n_val=len(val_idx),
+                n_test=len(x_test),
+                ece=lin_cal["ece"],
+                rms_ce=lin_cal["rms_ce"],
+                mce=lin_cal["mce"],
+                ece_ts=lin_cal_ts["ece_ts"],
+                rms_ce_ts=lin_cal_ts["rms_ce_ts"],
+                mce_ts=lin_cal_ts["mce_ts"],
+                temperature=lin_cal_ts["temperature"],
+                calibration_n_bins=calibration_n_bins,
+                train_fraction=fraction,
+                subsample_seed=subsample_seed,
+            ).to_row()
+        )
+    return rows
 
 
 def _make_seg_dataloaders(
@@ -1024,21 +1209,14 @@ def main(cfg: DictConfig) -> None:
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
 
-    key_cols = (
-        "dataset",
-        "method",
-        "model",
-        "name",
-        "normalization",
-        "image_size",
-        "interpolation",
-        "partition",
-        "bands",
-    )
+    key_cols = _RESUME_KEY_COLS
     completed_runs: set[tuple[str, ...]] = set()
     completed_metrics: dict[str, set[tuple[str, ...]]] = {}
     if cfg.resume and os.path.exists(output_path):
         existing_df = pd.read_csv(cfg.output)
+        # Legacy rows predate the label-budget axis; treat them as the
+        # full-data, base-seed point so they are recognized and not recomputed.
+        existing_df = _normalize_resume_fraction_columns(existing_df, cfg.seed)
         for col in key_cols:
             if col not in existing_df.columns:
                 existing_df[col] = ""
@@ -1083,6 +1261,11 @@ def main(cfg: DictConfig) -> None:
                 getattr(cfg.dataset, "interpolation", "bilinear"),
                 cfg.dataset.partition,
                 bands_value,
+                # Base label-budget key cells shared by knn/id/profile (and the
+                # default full-data linear point). Per-pair linear keys override
+                # these two cells in ``_plan_dataset_run``.
+                1.0,
+                cfg.seed,
             )
         )
         eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
@@ -1297,46 +1480,29 @@ def main(cfg: DictConfig) -> None:
                 )
 
             if not plan.skip_linear:
-                lin_score, lin_lo, lin_hi, best_c, lin_cal, lin_cal_ts = evaluate_logistic(
-                    x_train,
-                    y_train,
-                    x_val,
-                    y_val,
-                    x_test,
-                    y_test,
-                    c_values_list,
-                    cfg.seed,
-                    cfg.eval.bootstrap,
-                    cfg.eval.merge_val,
-                    cfg.device,
-                    cfg.verbose,
-                    calibration_n_bins=cal_n_bins_linear,
-                    temp_scale=cal_temp_scale,
-                )
-                all_rows.append(
-                    EvaluationResult(
-                        **common_meta,
-                        method="linear",
+                # Sweep the linear probe over label-budget (fraction, seed) pairs.
+                # knn/intrinsic_dim/profile stay outside this loop and run once at
+                # full data, since they characterize the embedding, not the labels.
+                all_rows.extend(
+                    _run_linear_fractions(
+                        pairs=plan.linear_pairs_to_run,
+                        x_train=x_train,
+                        y_train=y_train,
+                        x_val=x_val,
+                        y_val=y_val,
+                        x_test=x_test,
+                        y_test=y_test,
+                        c_values=c_values_list,
+                        common_meta=common_meta,
                         metric_name=metric_name,
-                        metric_value=lin_score,
-                        ci_lower=lin_lo,
-                        ci_upper=lin_hi,
                         feature_dim=feature_dim,
-                        best_c=best_c,
-                        best_lr=None,
-                        best_batch_size=None,
-                        n_train=len(x_train),
-                        n_val=len(x_val),
-                        n_test=len(x_test),
-                        ece=lin_cal["ece"],
-                        rms_ce=lin_cal["rms_ce"],
-                        mce=lin_cal["mce"],
-                        ece_ts=lin_cal_ts["ece_ts"],
-                        rms_ce_ts=lin_cal_ts["rms_ce_ts"],
-                        mce_ts=lin_cal_ts["mce_ts"],
-                        temperature=lin_cal_ts["temperature"],
+                        seed=cfg.seed,
+                        n_bootstrap=cfg.eval.bootstrap,
+                        device=cfg.device,
+                        verbose=cfg.verbose,
                         calibration_n_bins=cal_n_bins_linear,
-                    ).to_row()
+                        temp_scale=cal_temp_scale,
+                    )
                 )
             if not plan.skip_id:
                 id_cfg = cfg.eval.intrinsic_dim

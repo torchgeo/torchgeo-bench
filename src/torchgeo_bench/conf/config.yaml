@@ -42,7 +42,18 @@ eval:
   bootstrap: 200          # number of bootstrap resamples
   c_range: [-6, 4, 40]      # log10 [start, stop, num_points]; per-model overrides allowed
   merge_val: true          # merge train+val for final logistic training
+                           # NOTE: ignored by the label-budget linear path below —
+                           # every fraction (including 1.0) is fit train-only so the
+                           # data-scaling curve is internally consistent. Linear rows
+                           # therefore record merge_val=false.
   skip_linear: false       # if true, skip LogisticRegression evaluation
+
+  # Label-budget axis (data-scaling curves). The linear probe is refit on
+  # stratified, nested, floor-1-per-class subsets of the cached train (and val)
+  # embeddings at each fraction; test stays full. Defaults reproduce today's
+  # single full-data point exactly.
+  label_fractions: [1.0]    # e.g. [0.01, 0.05, 0.1, 0.25, 1.0]
+  n_subsample_repeats: 1    # independent nested draws per f<1.0 (seed = cfg.seed + i)
   knn_k: 5                 # number of neighbours for KNN evaluation
   knn_device: null         # null = inherit device, falling back to CPU if FAISS lacks GPU support
 
