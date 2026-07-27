@@ -482,6 +482,7 @@ class MockBackbone4Layer(nn.Module):
 
 def test_probe_dpt_head_forward():
     """DPT head with 4 coarse-to-fine layers produces correct output shape."""
+    pytest.importorskip("transformers")
     from torchgeo_bench.models.segmentation_heads import DPTHead
 
     backbone = MockBackbone4Layer()
