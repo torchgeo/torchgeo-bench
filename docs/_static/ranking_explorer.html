@@ -22,6 +22,8 @@
       --ft-black: #000;
       --heat-lo: #f3ede4;
       --heat-hi: #0f5499;
+      --wr-lo: var(--ft-claret);
+      --wr-hi: var(--heat-hi);
     }
     * { box-sizing: border-box; }
     body {
@@ -256,19 +258,61 @@
     .profile-line.pinned { stroke-width: 3.3; opacity: 1; }
     .profile-guide { stroke: var(--ft-rule); stroke-width: 1; stroke-dasharray: 3 3; }
     .profile-dot { stroke: #fff; stroke-width: 1; }
+    .profile-body { display: flex; gap: 18px; align-items: flex-start; }
+    .profile-body .chart-shell { flex: 1 1 auto; min-width: 0; }
     .profile-legend {
-      display: flex; flex-wrap: wrap; gap: 7px 20px; margin-top: 12px;
+      flex: 0 0 180px; display: flex; flex-direction: column; gap: 12px; margin-top: 18px;
       font-family: "Inter", sans-serif; font-size: 12px;
     }
-    .profile-legend-row { display: flex; align-items: center; gap: 8px; cursor: default; }
+    .profile-legend-row { display: flex; flex-direction: column; gap: 4px; cursor: default; }
     .profile-legend-row.hovered .profile-legend-name { color: var(--ft-teal); font-weight: 700; }
     .profile-legend-row.pinned .profile-legend-name { color: var(--ft-claret); font-weight: 700; }
+    .profile-legend-head { display: flex; align-items: center; gap: 6px; }
     .profile-legend-swatch {
-      width: 15px; height: 3px; border-radius: 2px; display: inline-block; flex: none;
+      width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none;
     }
     .profile-legend-name { color: var(--ft-text); }
+    .profile-legend-bar-row { display: flex; align-items: center; gap: 6px; }
+    .profile-legend-bar-track {
+      flex: 1 1 auto; height: 8px; border-radius: 2px; background: var(--ft-rule-soft); overflow: hidden;
+    }
+    .profile-legend-bar-fill { display: block; height: 100%; }
     .profile-legend-aup {
-      color: var(--ft-muted); font-variant-numeric: tabular-nums; margin-left: 4px;
+      flex: none; width: 32px; text-align: right; color: var(--ft-muted); font-variant-numeric: tabular-nums;
+    }
+    .profile-legend-note {
+      color: var(--ft-muted); font-size: 11px;
+    }
+    .wr-swatch {
+      display: inline-block; width: 120px; height: 12px; border-radius: 2px; vertical-align: middle;
+      margin-right: 5px; border: 1px solid var(--ft-rule-soft);
+      background: linear-gradient(to right, var(--wr-lo), var(--heat-lo) 50%, var(--wr-hi));
+    }
+    .winrate-key {
+      font-family: "Inter", sans-serif; font-size: 11px; color: var(--ft-muted);
+      display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-bottom: 10px;
+    }
+    .winrate-scroll { overflow-x: auto; }
+    table.winrate-table { border-collapse: collapse; font-family: "Inter", sans-serif; font-size: 11px; }
+    table.winrate-table th, table.winrate-table td {
+      border: 1px solid var(--ft-rule-soft); padding: 4px 7px; text-align: center;
+    }
+    table.winrate-table th.wr-corner { border: none; }
+    table.winrate-table th.wr-row-head {
+      text-align: right; font-weight: 600; white-space: normal; max-width: 150px;
+    }
+    table.winrate-table th.wr-col-head {
+      height: 118px; vertical-align: bottom; padding: 0 4px 4px; font-weight: 600;
+    }
+    table.winrate-table th.wr-col-head span {
+      display: inline-block; transform: rotate(-45deg); transform-origin: left bottom;
+      white-space: nowrap;
+    }
+    table.winrate-table td.wr-cell {
+      cursor: default; font-variant-numeric: tabular-nums; min-width: 44px;
+    }
+    table.winrate-table td.wr-diag {
+      color: var(--ft-muted); background: var(--heat-lo) !important;
     }
   </style>
 </head>
@@ -321,19 +365,38 @@
         </div>
         <div id="table"></div>
         <div id="table-empty" class="empty" style="display:none;">No ranking available for this condition slice.</div>
+        <section class="insight-card" id="winrate-card">
+          <div class="insight-top">
+            <div>
+              <p class="insight-title">Head-to-head win rate</p>
+              <p class="insight-subtitle">For the top 10 models under the selected aggregation, cell (row, column) is the fraction of shared datasets on which the row model beats the column model (ties split 0.5/0.5). Read a row to see how often that model wins against everyone else in the roster &mdash; a model can lead the aggregate ranking while still losing most individual matchups to the runner-up. Hover a cell for the per-dataset breakdown.</p>
+            </div>
+          </div>
+          <div class="winrate-key">
+            <span><span class="wr-swatch"></span>column dominant &larr; 50/50 &rarr; row dominant</span>
+            <span>diagonal: &mdash; (self)</span>
+          </div>
+          <div class="chart-shell winrate-scroll">
+            <div id="winrate-chart"></div>
+            <div class="chart-tooltip" id="winrate-tooltip"></div>
+          </div>
+          <p class="chart-caption">Single-seed data: each win/loss is a point estimate with no resampling-based uncertainty, so a 0.001 score gap counts identically to a 0.1 gap in this fraction &mdash; hover a cell to read the actual signed margin per dataset. Both which 10 models appear and their row/column order re-select live with the aggregation dropdown, so switching aggregation can swap roster membership, not just reorder it.</p>
+        </section>
         <section class="insight-card" id="profile-card">
           <div class="insight-top">
             <div>
               <p class="insight-title">How close is the top</p>
-              <p class="insight-subtitle">Dolan&ndash;Mor&eacute; performance profiles for the top 5 models: each curve is the fraction of datasets on which a model comes within a factor &tau; of the best-of-five score. Curves bunched near &tau;=1 mean a near-tied top; a curve riding high above the rest marks a decisive leader.</p>
+              <p class="insight-subtitle">Compares the same per-dataset score as the table (top-1 accuracy, or micro-mAP for BigEarthNet). Each curve is one model's climb: at any point on the x-axis (a score as % of the best model's), its height is the share of datasets where that model's score is already at least that close to the best score among the top 5. Curves bunched near 100% mean a near-tied top; a curve riding high above the rest marks a decisive leader. Hover the chart to read exact values for all five models at any point. (Dolan&ndash;Mor&eacute; performance profiles.)</p>
             </div>
           </div>
-          <div class="chart-shell">
-            <div id="profile-chart"></div>
-            <div class="chart-tooltip" id="profile-tooltip"></div>
+          <div class="profile-body">
+            <div class="chart-shell">
+              <div id="profile-chart"></div>
+              <div class="chart-tooltip" id="profile-tooltip"></div>
+            </div>
+            <div class="profile-legend" id="profile-legend"></div>
           </div>
-          <div class="profile-legend" id="profile-legend"></div>
-          <p class="chart-caption">Higher AUP = closer to the best-of-five more often. Legend stays in table-rank order; AUP is a magnitude-of-gap annotation, not a re-ranking.</p>
+          <p class="chart-caption">X-axis is relative, not a percentage-point subtraction: e.g. if the best model scores 20% accuracy on a dataset, a point at &ldquo;91% of best&rdquo; is a score of about 18.2% (20 &times; 0.91), not 20&minus;9=11%. AUP: 1.0 = ties the best model in this setting on every dataset (not just the top 5 shown &mdash; a model ranked 6th or lower can still set the bar); lower means more distance from the leader, scaled to the spread within this top 5. Bars stay in table-rank order &mdash; a magnitude-of-gap annotation, not a re-ranking.</p>
         </section>
         <section id="insights" class="insights">
           <div class="insights-head">
@@ -345,7 +408,7 @@
             <div class="insight-top">
               <div>
                 <p class="insight-title">Rank flow</p>
-                <p class="insight-subtitle">Hold the current slice fixed, then flip exactly one condition family.</p>
+                <p class="insight-subtitle">Hold the current slice fixed, then flip exactly one condition family (right dropdown) and watch each model&rsquo;s rank move between the two states. A flat line means the flip didn&rsquo;t matter to that model; a steep one means it did. A crossed-out point means the model has no result under that state &mdash; it&rsquo;s excluded there, not ranked last.</p>
               </div>
               <div class="control">
                 <label for="sel-flow-axis">Compare condition</label>
@@ -362,6 +425,7 @@
               <div id="rank-flow-chart"></div>
               <div class="chart-tooltip" id="rank-flow-tooltip"></div>
             </div>
+            <p class="chart-caption">Each state&rsquo;s rank is computed only against the models with a result in that state, so the same rank number at two states isn&rsquo;t always the same competitive position if the roster differs. &tau; is Kendall&rsquo;s &tau;-b between the two full rankings (defined in Rank sensitivity, right); &ldquo;models move&rdquo; counts how many change rank at all; &ldquo;max |&Delta; rank|&rdquo; is the largest single-model rank swing across the compared states.</p>
           </section>
 
           <section class="insight-card" id="rank-flow-detail">
@@ -372,14 +436,14 @@
             <div class="insight-top">
               <div>
                 <p class="insight-title">Rank dispersion</p>
-                <p class="insight-subtitle">Aggregate rank on the x-axis, per-dataset rank spread on the y-axis.</p>
+                <p class="insight-subtitle">Each dot is one model: x-axis is its overall rank under the selected aggregation; y-axis is how much that rank swings from dataset to dataset. Bottom-left is the sweet spot &mdash; strong and consistent. Top-right is weak and volatile. Top-left is the quadrant worth a second look: a good aggregate rank propped up by wide dataset-to-dataset swings, not genuine consistency.</p>
               </div>
             </div>
             <div class="chart-shell">
               <div id="rank-dispersion-chart"></div>
               <div class="chart-tooltip" id="rank-dispersion-tooltip"></div>
             </div>
-            <p class="chart-caption">Left = stronger aggregate rank. Lower = more consistent dataset-by-dataset ranking.</p>
+            <p class="chart-caption">Rank IQR is the spread of a model&rsquo;s per-dataset ranks (Q3 minus Q1), computed only against the other models in the current slice &mdash; narrow the slice and the roster shrinks, which rescales this axis, so IQR values aren&rsquo;t comparable across different filter settings. Aggregate rank (x-axis) follows whichever method is selected above the table.</p>
           </section>
 
           <section class="insight-card" id="model-detail-card">
@@ -902,9 +966,13 @@
       const nShared = cols.length;
       if (nShared < 5) return { status: "insufficient", nShared };
 
+      // Best-per-dataset is the max over ALL models in this ranking node (every
+      // row, not just the drawn top 5) — otherwise a model ranked 6th+ that
+      // actually beats the top 5 on some dataset would be invisible, letting a
+      // top-5 model's AUP hit 1.0 while a real leader sits just outside the cut.
       const best = {};
       cols.forEach((ds) => {
-        best[ds] = Math.max(...top.map((row) => row.per_task[ds]));
+        best[ds] = Math.max(...(rows || []).map((row) => row.per_task[ds]).filter((v) => v > 0));
       });
 
       let globalMax = 1;
@@ -1122,6 +1190,8 @@
       $("model-detail-body").innerHTML = "Pin a model to keep its dispersion profile visible while you compare conditions.";
       $("profile-chart").innerHTML = `<div class="insight-empty">No ranking is active, so there is no top-5 profile to draw.</div>`;
       $("profile-legend").innerHTML = "";
+      $("winrate-chart").innerHTML = `<div class="insight-empty">No ranking is active, so there is no head-to-head matrix to draw.</div>`;
+      clearTooltip("winrate-tooltip");
     }
 
     function renderFlowSummary(flowSeries) {
@@ -1144,7 +1214,7 @@
 
       const width = Math.max(wrap.getBoundingClientRect().width || 640, 320);
       const height = 320;
-      const margin = { top: 26, right: 180, bottom: 44, left: 52 };
+      const margin = { top: 26, right: 180, bottom: 44, left: 180 };
       const naY = height - margin.bottom + 14;
       const maxRank = Math.max(...flowSeries.states.map((state) => Math.max(state.rows.length, 1)));
       const innerW = width - margin.left - margin.right;
@@ -1168,6 +1238,10 @@
       const naTick = createSvgEl("text", { x: margin.left - 10, y: naY + 4, "text-anchor": "end", class: "tick-label" });
       naTick.textContent = "n/a";
       svg.appendChild(naTick);
+      const rankAxisMid = margin.top + innerH / 2;
+      const yAxis = createSvgEl("text", { x: 16, y: rankAxisMid, transform: `rotate(-90 16 ${rankAxisMid})`, "text-anchor": "middle", class: "axis-label" });
+      yAxis.textContent = "Rank (1 = best)";
+      svg.appendChild(yAxis);
 
       flowSeries.states.forEach((state, idx) => {
         const x = xFor(idx);
@@ -1271,9 +1345,11 @@
         const lastPoint = [...segment.points].reverse().find((point) => point.available);
         if (!lastPoint) return;
         const idx = segment.points.findIndex((point) => point.stateKey === lastPoint.stateKey);
+        const isLeftmost = idx === 0 && flowSeries.states.length > 1;
         const label = createSvgEl("text", {
-          x: xFor(idx) + 12,
+          x: isLeftmost ? xFor(idx) - 34 : xFor(idx) + 12,
           y: yFor(lastPoint.rank) + 4,
+          "text-anchor": isLeftmost ? "end" : "start",
           class: "point-label",
         });
         label.textContent = (MODEL_META[segment.model] && MODEL_META[segment.model].display) || segment.model;
@@ -1399,6 +1475,149 @@
       wrap.appendChild(svg);
     }
 
+    // Diverging color for the win-rate matrix: claret (column-model dominant)
+    // through a cream midpoint at 0.5 to teal (row-model dominant), mirroring
+    // heatColor's sequential ramp but with a fixed neutral center.
+    function winrateColor(t) {
+      const lo = [153, 15, 61];
+      const mid = [243, 237, 228];
+      const hi = [15, 84, 153];
+      let mix;
+      if (t <= 0.5) {
+        const frac = t / 0.5;
+        mix = lo.map((c, i) => Math.round(c + (mid[i] - c) * frac));
+      } else {
+        const frac = (t - 0.5) / 0.5;
+        mix = mid.map((c, i) => Math.round(c + (hi[i] - c) * frac));
+      }
+      const lum = 0.299 * mix[0] + 0.587 * mix[1] + 0.114 * mix[2];
+      return { bg: `rgb(${mix[0]},${mix[1]},${mix[2]})`, fg: lum < 140 ? "#fff" : "#262a33" };
+    }
+
+    // Pairwise win-rate over shared datasets, matching
+    // evaluma.methods.elo.compute_winrate_matrix: diff>0 is a full win for the
+    // row model, diff<0 a full win for the column model, diff==0 a 0.5/0.5
+    // split, denominator is the count of datasets both models have a score for.
+    function computeWinrateMatrix(rows) {
+      const roster = (rows || []).slice(0, 10);
+      const n = roster.length;
+      const matrix = roster.map(() => new Array(n).fill(null));
+      const breakdowns = roster.map(() => new Array(n).fill(null));
+      for (let i = 0; i < n; i += 1) {
+        for (let j = 0; j < n; j += 1) {
+          if (i === j) continue;
+          const perA = roster[i].per_task || {};
+          const perB = roster[j].per_task || {};
+          const datasets = Object.keys(perA)
+            .filter((ds) => perA[ds] != null && perB[ds] != null)
+            .sort();
+          let wins = 0;
+          const detail = datasets.map((ds) => {
+            const diff = perA[ds] - perB[ds];
+            if (diff > 0) wins += 1;
+            else if (diff === 0) wins += 0.5;
+            return { dataset: ds, diff };
+          });
+          matrix[i][j] = datasets.length ? wins / datasets.length : null;
+          breakdowns[i][j] = detail;
+        }
+      }
+      return { roster, matrix, breakdowns };
+    }
+
+    function renderWinrateChart(rows) {
+      const wrap = $("winrate-chart");
+      wrap.innerHTML = "";
+      clearTooltip("winrate-tooltip");
+      const roster = (rows || []).slice(0, 10);
+      if (roster.length < 2) {
+        wrap.innerHTML = `<div class="insight-empty">Not enough models in this slice to compare head-to-head.</div>`;
+        return;
+      }
+      const { matrix, breakdowns } = computeWinrateMatrix(roster);
+      const n = roster.length;
+
+      const table = document.createElement("table");
+      table.className = "winrate-table";
+
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      headRow.appendChild(document.createElement("th")).className = "wr-corner";
+      roster.forEach((model) => {
+        const th = document.createElement("th");
+        th.className = "wr-col-head";
+        const span = document.createElement("span");
+        span.textContent = model.display;
+        th.appendChild(span);
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      roster.forEach((rowModel, i) => {
+        const tr = document.createElement("tr");
+        const rowHead = document.createElement("th");
+        rowHead.className = "wr-row-head";
+        rowHead.textContent = rowModel.display;
+        tr.appendChild(rowHead);
+
+        roster.forEach((colModel, j) => {
+          const td = document.createElement("td");
+          td.className = "wr-cell";
+          if (i === j) {
+            td.className += " wr-diag";
+            td.textContent = "—";
+            tr.appendChild(td);
+            return;
+          }
+          const value = matrix[i][j];
+          if (value == null) {
+            td.textContent = "—";
+            tr.appendChild(td);
+            return;
+          }
+          const { bg, fg } = winrateColor(value);
+          td.style.backgroundColor = bg;
+          td.style.color = fg;
+          td.textContent = `${Math.round(value * 100)}%`;
+
+          const detail = breakdowns[i][j];
+          const tooltipHtml =
+            `<b>${rowModel.display} vs ${colModel.display}</b><br>` +
+            `Row wins ${Math.round(value * 100)}% of ${detail.length} shared dataset${detail.length === 1 ? "" : "s"}` +
+            `<ul class="dataset-list">` +
+            detail
+              .map((d) => {
+                const sign = d.diff > 0 ? "+" : "";
+                const winner = d.diff > 0 ? "row" : d.diff < 0 ? "col" : "tie";
+                return `<li>${d.dataset}: ${sign}${d.diff.toFixed(3)} (${winner})</li>`;
+              })
+              .join("") +
+            `</ul>`;
+          td.addEventListener("mouseenter", (event) => {
+            showTooltip("winrate-tooltip", tooltipHtml, event.offsetX, event.offsetY);
+          });
+          td.addEventListener("mousemove", (event) => {
+            showTooltip("winrate-tooltip", tooltipHtml, event.offsetX, event.offsetY);
+          });
+          td.addEventListener("mouseleave", () => clearTooltip("winrate-tooltip"));
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+
+      if (n < 10) {
+        const note = document.createElement("p");
+        note.className = "chart-caption";
+        note.style.marginTop = "6px";
+        note.textContent = `(${n} models in this slice)`;
+        wrap.appendChild(note);
+      }
+    }
+
     function renderPinnedModelDetail(dispersionRows) {
       const body = $("model-detail-body");
       if (!uiState.pinnedModel) {
@@ -1426,6 +1645,24 @@
         `<div><div class="k">Top 3 strongest datasets</div><ul class="dataset-list">${row.top_datasets.map((entry) => `<li>${entry.dataset} (rank ${entry.rank.toFixed(1)})</li>`).join("")}</ul></div>` +
         `<div><div class="k">Top 3 weakest datasets</div><ul class="dataset-list">${row.bottom_datasets.map((entry) => `<li>${entry.dataset} (rank ${entry.rank.toFixed(1)})</li>`).join("")}</ul></div>` +
         `</div>`;
+    }
+
+    // Legend row markup shared by the all-tied and normal profile-chart branches:
+    // color swatch + name on one line, an AUP bar (fixed 0-1 domain) with its
+    // value printed to the right on the next.
+    function profileLegendRowHtml(model) {
+      const pct = Math.max(0, Math.min(100, model.aup * 100));
+      return (
+        `<div class="profile-legend-head">` +
+        `<span class="profile-legend-swatch" style="background:${model.color};"></span>` +
+        `<span class="profile-legend-name">${model.display}</span>` +
+        `</div>` +
+        `<div class="profile-legend-bar-row">` +
+        `<span class="profile-legend-bar-track"><span class="profile-legend-bar-fill" ` +
+        `style="width:${pct.toFixed(1)}%;background:${model.color};"></span></span>` +
+        `<span class="profile-legend-aup">${model.aup.toFixed(2)}</span>` +
+        `</div>`
+      );
     }
 
     function renderProfileChart(activeState, meta) {
@@ -1470,10 +1707,7 @@
           const legendRow = document.createElement("div");
           legendRow.className = "profile-legend-row";
           legendRow.setAttribute("data-model", model.model);
-          legendRow.innerHTML =
-            `<span class="profile-legend-swatch" style="background:${model.color};"></span>` +
-            `<span class="profile-legend-name">${model.display}</span>` +
-            `<span class="profile-legend-aup">AUP ${model.aup.toFixed(2)}</span>`;
+          legendRow.innerHTML = profileLegendRowHtml(model);
           legend.appendChild(legendRow);
         });
         return;
@@ -1497,17 +1731,22 @@
       svg.appendChild(createSvgEl("line", { x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, class: "axis-rule" }));
       svg.appendChild(createSvgEl("line", { x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, class: "axis-rule" }));
 
-      // x ticks in ratio space, evenly spaced on the log axis.
+      // x ticks in ratio space, evenly spaced on the log axis, printed as
+      // "% of best" (tau=1 -> 100%) rather than a subtracted percentage —
+      // scores here are themselves percentages (accuracy/mAP), so a
+      // "worse than" percentage reads as ambiguous between a relative ratio
+      // and a percentage-point subtraction. "% of best" is unambiguously
+      // multiplicative: model_score = best_score * (this tick / 100).
       [0, 0.5, 1].forEach((frac) => {
         const tau = Math.pow(10, xMax * frac);
         const x = xFor(tau);
         const tick = createSvgEl("text", { x, y: height - margin.bottom + 16, "text-anchor": "middle", class: "tick-label" });
-        tick.textContent = `${tau.toFixed(2)}×`;
+        tick.textContent = `${(100 / tau).toFixed(0)}% of best`;
         svg.appendChild(tick);
       });
 
       const xAxis = createSvgEl("text", { x: width / 2, y: height - 10, "text-anchor": "middle", class: "axis-label" });
-      xAxis.textContent = "τ = best-of-5 / model (log)";
+      xAxis.textContent = "score as % of the best model (log scale)";
       svg.appendChild(xAxis);
       const yAxis = createSvgEl("text", { x: 16, y: height / 2, transform: `rotate(-90 16 ${height / 2})`, "text-anchor": "middle", class: "axis-label" });
       yAxis.textContent = "Fraction within τ";
@@ -1545,7 +1784,7 @@
         guide.setAttribute("x1", xCoord);
         guide.setAttribute("x2", xCoord);
         guide.style.display = "";
-        const pct = ((tau - 1) * 100).toFixed(1);
+        const pctOfBest = (100 / tau).toFixed(1);
         const lines = profiles.models
           .map((model) => {
             const within = model.ratios.filter((r) => r <= tau + 1e-12).length / model.ratios.length;
@@ -1554,7 +1793,7 @@
           .join("");
         showTooltip(
           "profile-tooltip",
-          `<b>τ = ${tau.toFixed(3)}× &middot; within ${pct}% of best</b>${lines}`,
+          `<b>Share of datasets where each model's score is at least ${pctOfBest}% of the best model's score:</b>${lines}`,
           event.offsetX,
           event.offsetY
         );
@@ -1567,19 +1806,17 @@
 
       wrap.appendChild(svg);
 
-      // Legend in aggregation-rank order: swatch, display, right-aligned AUP.
-      // Hover/pin reuse the shared highlight path so the curve thickens in step
-      // with the table and the other charts.
+      // Legend in aggregation-rank order: swatch + name, then an AUP bar
+      // (fixed 0-1 domain) with its value printed to the right. Hover/pin
+      // reuse the shared highlight path so the curve thickens in step with
+      // the table and the other charts.
       profiles.models.forEach((model) => {
         const row = document.createElement("div");
         row.className =
           `profile-legend-row${uiState.hoveredModel === model.model ? " hovered" : ""}` +
           `${uiState.pinnedModel === model.model ? " pinned" : ""}`;
         row.setAttribute("data-model", model.model);
-        row.innerHTML =
-          `<span class="profile-legend-swatch" style="background:${model.color};"></span>` +
-          `<span class="profile-legend-name">${model.display}</span>` +
-          `<span class="profile-legend-aup">AUP ${model.aup.toFixed(2)}</span>`;
+        row.innerHTML = profileLegendRowHtml(model);
         row.addEventListener("mouseenter", () => setHoveredModel(model.model));
         row.addEventListener("mouseleave", () => setHoveredModel(null));
         bindPinToggle(row, model.model);
@@ -1589,7 +1826,7 @@
       // Thin slices (e.g. cls-token) may seat fewer than five models.
       if (profiles.nModels < 5) {
         const note = document.createElement("span");
-        note.className = "profile-legend-aup";
+        note.className = "profile-legend-note";
         note.textContent = `(${profiles.nModels} models in this slice)`;
         legend.appendChild(note);
       }
@@ -1614,6 +1851,7 @@
       renderDispersionChart(dispersionRows);
       renderPinnedModelDetail(dispersionRows);
       renderProfileChart(activeState, meta);
+      renderWinrateChart(activeState.rows);
     }
 
     function refreshSelectionVisuals(options) {
@@ -1684,7 +1922,12 @@
     aggSel.addEventListener("change", render);
     flowSel.addEventListener("change", () => {
       uiState.flowAxis = flowSel.value;
-      refreshSelectionVisuals();
+      if (!uiState.activeState || !uiState.activeState.rows.length) return;
+      const flowSeries = getFlowSeries(uiState.activeState, uiState.flowAxis, uiState.activeState.aggregation);
+      uiState.flowSeries = flowSeries;
+      renderFlowSummary(flowSeries);
+      renderFlowChart(flowSeries, uiState.meta);
+      renderFlowDetail(flowSeries, uiState.meta);
     });
 
     function init() {
