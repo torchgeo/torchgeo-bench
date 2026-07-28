@@ -55,6 +55,7 @@ class SegmentationSolver:
         self.num_classes = num_classes
         self.device = device
         self.lr_scheduler_type = lr_scheduler
+        self.val_history: list[float] = []
 
         self.ignore_index = ignore_index
         self.optimizer = torch.optim.AdamW(
@@ -138,6 +139,7 @@ class SegmentationSolver:
         """
         scheduler = self._make_scheduler(epochs)
         last_val_miou: float | None = None
+        self.val_history = []
 
         for epoch in range(epochs):
             self.model.train()
@@ -175,8 +177,9 @@ class SegmentationSolver:
             if val_loader:
                 val_metrics = self.evaluate(val_loader)
                 last_val_miou = val_metrics["mIoU"]
+                self.val_history.append(last_val_miou)
                 if verbose:
-                    logger.info(f"Epoch {epoch + 1} Val mIoU: {last_val_miou:.4f}")
+                    logger.info("Epoch %d Val mIoU: %.17g", epoch + 1, last_val_miou)
 
         return last_val_miou
 
@@ -278,6 +281,7 @@ class SegmentationSolver:
 
         input_hw: tuple[int, int] = (gpu_train.masks.shape[-2], gpu_train.masks.shape[-1])
         last_val_miou: float | None = None
+        self.val_history = []
         num_batches = math.ceil(len(gpu_train) / batch_size)
 
         for epoch in range(epochs):
@@ -307,8 +311,9 @@ class SegmentationSolver:
             if gpu_val is not None:
                 val_metrics = self._evaluate_gpu_cache(gpu_val, batch_size)
                 last_val_miou = val_metrics["mIoU"]
+                self.val_history.append(last_val_miou)
                 if verbose:
-                    logger.info(f"Epoch {epoch + 1} Val mIoU: {last_val_miou:.4f}")
+                    logger.info("Epoch %d Val mIoU: %.17g", epoch + 1, last_val_miou)
 
         return last_val_miou
 

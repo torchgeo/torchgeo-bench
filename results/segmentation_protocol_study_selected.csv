@@ -1,0 +1,8 @@
+model,variant,mean_final_val_miou,mean_test_miou,mean_test_delta
+convnext_large_dinov3,baseline_10ep_cosine_1e-3,0.5028,0.5031828600913286,0.0
+densenet121,low_lr_30ep_cosine_3e-4,0.480826,0.478453129529953,-0.004504263401031477
+efficientnet_b0,low_lr_30ep_cosine_3e-4,0.4227325,0.4297076929360628,0.01470299251377584
+maxvit_tiny_tf_224,high_lr_30ep_cosine_3e-3,0.485202,0.4793265573680401,-0.0017783530056476801
+resnet50,baseline_10ep_cosine_1e-3,0.4638485,0.4732354171574116,0.0
+tgeo_scalemae_large_fmow,baseline_10ep_cosine_1e-3,0.4636225,0.4804014191031456,0.0
+tgeo_swinv2b_s2rgb_satlas_mi,high_lr_30ep_cosine_3e-3,0.459112,0.4468958377838135,0.0001591630280017818

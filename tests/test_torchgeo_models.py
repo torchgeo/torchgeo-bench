@@ -368,7 +368,9 @@ def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> N
     assert torch.isfinite(out).all()
 
 
-def test_channel_mismatch_uses_tiled_normalize(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_channel_mismatch_preserves_tiled_normalize_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _TinyResNet(nn.Module):
@@ -384,7 +386,10 @@ def test_channel_mismatch_uses_tiled_normalize(monkeypatch: pytest.MonkeyPatch) 
     class _FakeWeights:
         @staticmethod
         def transforms() -> nn.Sequential:
-            return nn.Sequential(Normalize(mean=[1.0, 2.0, 3.0], std=[4.0, 5.0, 6.0]))
+            return nn.Sequential(
+                Normalize(mean=[0.0], std=[2.0]),
+                Normalize(mean=[1.0, 2.0, 3.0], std=[4.0, 5.0, 6.0]),
+            )
 
     monkeypatch.setattr(
         tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
@@ -413,10 +418,11 @@ def test_channel_mismatch_uses_tiled_normalize(monkeypatch: pytest.MonkeyPatch) 
         input_unit_check="ignore",
     )
     normalized = model.normalize_inputs(torch.ones(1, 6, 8, 8))
-    expected = torch.tensor([(1.0 - 1.0) / 4.0, (1.0 - 2.0) / 5.0, (1.0 - 3.0) / 6.0]).view(
+    expected = torch.tensor([(0.5 - 1.0) / 4.0, (0.5 - 2.0) / 5.0, (0.5 - 3.0) / 6.0]).view(
         1, 3, 1, 1
     )
     assert torch.allclose(normalized[:, :3], expected.expand(1, 3, 8, 8))
+    assert torch.allclose(normalized[:, 3:], expected.expand(1, 3, 8, 8))
 
 
 # ---------------------------------------------------------------------------

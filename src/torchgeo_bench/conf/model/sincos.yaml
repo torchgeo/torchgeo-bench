@@ -1,0 +1,4 @@
+# Trivial coordinate baseline: [sin(lat), cos(lat), sin(lon), cos(lon)].
+# Dependency-free; the sanity floor for the CoordBench location-encoder track.
+_target_: torchgeo_bench.coordbench.models.SinCosLocationEncoder
+name: sincos

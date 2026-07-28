@@ -115,6 +115,8 @@ def test_segmentation_row_emitted(tmp_path: Path):
     df = pd.read_csv(out)
     assert df["method"].str.startswith("seg-").any()
     assert "miou" in set(df["metric_name"].str.lower())
+    assert df.loc[0, "best_lr"] == 1e-3
+    assert df.loc[0, "best_batch_size"] == 2
 
 
 def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):

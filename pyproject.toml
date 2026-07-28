@@ -47,7 +47,9 @@ dependencies = [
   "numpy>=1.24",
   "omegaconf>=2.3",
   "pandas>=2",
+  "pyarrow>=14",                                                               # read CoordBench parquet tables via pandas
   "rich>=13",
+  "safetensors>=0.4",                                                          # load MIND location-encoder weights
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
@@ -58,6 +60,7 @@ dependencies = [
 ]
 optional-dependencies.all = [
   "torchgeo-bench[cleanlab]",
+  "torchgeo-bench[coordbench]",
   "torchgeo-bench[dev]",
   "torchgeo-bench[docs]",
   "torchgeo-bench[id]",
@@ -71,6 +74,9 @@ optional-dependencies.cleanlab = [
   "imagehash>=4.3",
   "matplotlib>=3.5",
   "pillow>=9",
+]
+optional-dependencies.coordbench = [
+  "rshf>=0.2", # pretrained location encoders: SatCLIP/GeoCLIP/Climplicit/SINR
 ]
 optional-dependencies.dev = [
   "evaluma>=0.3",        # methodology-aware ranking backend for experiments/scripts/regen_leaderboard.py

@@ -450,6 +450,7 @@ def test_solver_fit_with_val_loader(mock_backbone, dummy_data):
     val_miou = solver.fit(train_loader, val_loader=val_loader, epochs=1, verbose=False)
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0
+    assert solver.val_history == [val_miou]
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +658,7 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
         train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
     )
     assert isinstance(val_miou, float)
+    assert solver.val_history == [val_miou]
     assert 0.0 <= val_miou <= 1.0
 
     metrics = solver.evaluate_cached(val_cache, batch_size=2)
