@@ -245,6 +245,31 @@
     .flow-label-muted { fill: rgba(38, 42, 51, 0.86); }
     .flow-label-hovered { fill: rgba(15, 84, 153, 0.98); font-weight: 700; }
     .flow-label-pinned { fill: rgba(153, 15, 61, 0.98); font-weight: 700; }
+    /* Top-5 performance-profile curves. Per-curve stroke color is set inline
+       (from PROFILE_COLORS); the state classes only thicken, mirroring the
+       .flow-line hovered/pinned idiom. */
+    .profile-line {
+      fill: none; stroke-width: 1.7; opacity: 0.9;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .profile-line.hovered { stroke-width: 2.9; opacity: 1; }
+    .profile-line.pinned { stroke-width: 3.3; opacity: 1; }
+    .profile-guide { stroke: var(--ft-rule); stroke-width: 1; stroke-dasharray: 3 3; }
+    .profile-dot { stroke: #fff; stroke-width: 1; }
+    .profile-legend {
+      display: flex; flex-wrap: wrap; gap: 7px 20px; margin-top: 12px;
+      font-family: "Inter", sans-serif; font-size: 12px;
+    }
+    .profile-legend-row { display: flex; align-items: center; gap: 8px; cursor: default; }
+    .profile-legend-row.hovered .profile-legend-name { color: var(--ft-teal); font-weight: 700; }
+    .profile-legend-row.pinned .profile-legend-name { color: var(--ft-claret); font-weight: 700; }
+    .profile-legend-swatch {
+      width: 15px; height: 3px; border-radius: 2px; display: inline-block; flex: none;
+    }
+    .profile-legend-name { color: var(--ft-text); }
+    .profile-legend-aup {
+      color: var(--ft-muted); font-variant-numeric: tabular-nums; margin-left: 4px;
+    }
   </style>
 </head>
 <body>
@@ -296,6 +321,20 @@
         </div>
         <div id="table"></div>
         <div id="table-empty" class="empty" style="display:none;">No ranking available for this condition slice.</div>
+        <section class="insight-card" id="profile-card">
+          <div class="insight-top">
+            <div>
+              <p class="insight-title">How close is the top</p>
+              <p class="insight-subtitle">Dolan&ndash;Mor&eacute; performance profiles for the top 5 models: each curve is the fraction of datasets on which a model comes within a factor &tau; of the best-of-five score. Curves bunched near &tau;=1 mean a near-tied top; a curve riding high above the rest marks a decisive leader.</p>
+            </div>
+          </div>
+          <div class="chart-shell">
+            <div id="profile-chart"></div>
+            <div class="chart-tooltip" id="profile-tooltip"></div>
+          </div>
+          <div class="profile-legend" id="profile-legend"></div>
+          <p class="chart-caption">Higher AUP = closer to the best-of-five more often. Legend stays in table-rank order; AUP is a magnitude-of-gap annotation, not a re-ranking.</p>
+        </section>
         <section id="insights" class="insights">
           <div class="insights-head">
             <h2>Insights</h2>
@@ -415,6 +454,7 @@
       sensitivity: null,
       flowSeries: null,
       dispersionRows: [],
+      profileSeries: null,
     };
 
     let table = null;
@@ -832,6 +872,86 @@
       return el;
     }
 
+    // Categorical palette for the top-5 performance-profile curves. FT-compatible:
+    // claret + teal (matching the shared highlight system) plus gold/green/plum.
+    const PROFILE_COLORS = ["#990f3d", "#0f5499", "#b8860b", "#1a7a4c", "#7d3f98"];
+
+    // Dolan-Moré performance profiles over the top-5 rows of the active ranking.
+    // Pure data transform (no DOM): mirrors evaluma.compute_profiles' raw-score
+    // math on a best-of-five restricted reference. Returns either
+    // {status:"insufficient", nShared} or
+    // {status:"ok", models:[{model,display,color,rank,ratios,steps,aup}],
+    //  nShared, allTied, nModels}.
+    function computeTopProfiles(rows) {
+      const top = (rows || []).slice(0, Math.min(5, (rows || []).length));
+      const nModels = top.length;
+      if (!nModels) return { status: "insufficient", nShared: 0 };
+
+      // Shared dataset columns = intersection of per_task keys with present values.
+      let shared = null;
+      top.forEach((row) => {
+        const perTask = row.per_task || {};
+        const keys = new Set(Object.keys(perTask).filter((k) => perTask[k] != null));
+        shared = shared === null ? keys : new Set([...shared].filter((k) => keys.has(k)));
+      });
+      const sharedKeys = shared ? [...shared] : [];
+
+      // Drop columns where any of the five has a non-positive score (ratio would
+      // break); dropped columns count against the >=5 gate.
+      const cols = sharedKeys.filter((ds) => top.every((row) => row.per_task[ds] > 0));
+      const nShared = cols.length;
+      if (nShared < 5) return { status: "insufficient", nShared };
+
+      const best = {};
+      cols.forEach((ds) => {
+        best[ds] = Math.max(...top.map((row) => row.per_task[ds]));
+      });
+
+      let globalMax = 1;
+      const perModel = top.map((row, idx) => {
+        const ratios = cols.map((ds) => best[ds] / row.per_task[ds]).sort((a, b) => a - b);
+        globalMax = Math.max(globalMax, ratios[ratios.length - 1]);
+        return { row, idx, ratios };
+      });
+
+      const xMax = Math.log10(globalMax);
+      const allTied = globalMax <= 1 + 1e-12;
+
+      const models = perModel.map(({ row, idx, ratios }) => {
+        const n = ratios.length;
+        // ECDF as right-continuous step: cumulative fraction at each distinct ratio.
+        const steps = [];
+        for (let i = 0; i < n; i += 1) {
+          const tau = ratios[i];
+          const fraction = (i + 1) / n;
+          if (steps.length && Math.abs(steps[steps.length - 1].tau - tau) < 1e-12) {
+            steps[steps.length - 1].fraction = fraction;
+          } else {
+            steps.push({ tau, fraction });
+          }
+        }
+        // AUP: normalized area under the profile over log10(tau) in [0, xMax].
+        // = 1 - mean(log10 ratio) / xMax; 1 for a best-on-everything model, and
+        // 1 for the degenerate all-tied case.
+        let aup = 1;
+        if (xMax > 0) {
+          const meanLog = ratios.reduce((sum, r) => sum + Math.log10(r), 0) / n;
+          aup = 1 - meanLog / xMax;
+        }
+        return {
+          model: row.model,
+          display: row.display,
+          color: PROFILE_COLORS[idx % PROFILE_COLORS.length],
+          rank: idx + 1,
+          ratios,
+          steps,
+          aup,
+        };
+      });
+
+      return { status: "ok", models, nShared, allTied, nModels };
+    }
+
     function buildTableRows(agg) {
       return agg.rows.map((row, index) => ({ ...row, rank: index + 1 }));
     }
@@ -1000,6 +1120,8 @@
       $("rank-dispersion-chart").innerHTML = `<div class="insight-empty">The active roster is empty, so there is no dispersion to summarize.</div>`;
       $("model-detail-body").className = "insight-empty";
       $("model-detail-body").innerHTML = "Pin a model to keep its dispersion profile visible while you compare conditions.";
+      $("profile-chart").innerHTML = `<div class="insight-empty">No ranking is active, so there is no top-5 profile to draw.</div>`;
+      $("profile-legend").innerHTML = "";
     }
 
     function renderFlowSummary(flowSeries) {
@@ -1306,10 +1428,178 @@
         `</div>`;
     }
 
+    function renderProfileChart(activeState, meta) {
+      const wrap = $("profile-chart");
+      wrap.innerHTML = "";
+      const legend = $("profile-legend");
+      legend.innerHTML = "";
+      const rows = (activeState && activeState.rows) || [];
+      const profiles = computeTopProfiles(rows);
+
+      if (profiles.status === "insufficient") {
+        wrap.innerHTML =
+          `<div class="insight-empty">Too few shared datasets among the top 5 to form a ` +
+          `profile (${profiles.nShared} shared).</div>`;
+        return;
+      }
+
+      const width = Math.max(wrap.getBoundingClientRect().width || 640, 320);
+      const height = 300;
+      const margin = { top: 18, right: 26, bottom: 42, left: 52 };
+      const innerW = width - margin.left - margin.right;
+      const innerH = height - margin.top - margin.bottom;
+
+      // All-tied collapse: every ratio is 1, so the log axis degenerates. Draw a
+      // dot-stack at log10 tau = 0 instead of five overlapping vertical lines.
+      if (profiles.allTied) {
+        const svg = createSvgEl("svg", { viewBox: `0 0 ${width} ${height}`, class: "insight-svg" });
+        svg.appendChild(createSvgEl("line", { x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, class: "axis-rule" }));
+        const cx = margin.left;
+        profiles.models.forEach((model, idx) => {
+          const cy = margin.top + 14 + idx * 20;
+          svg.appendChild(createSvgEl("circle", { cx, cy, r: 6, fill: model.color, class: "profile-dot" }));
+          const label = createSvgEl("text", { x: cx + 14, y: cy + 4, class: "point-label" });
+          label.textContent = model.display;
+          svg.appendChild(label);
+        });
+        const note = createSvgEl("text", { x: cx, y: height - margin.bottom + 22, "text-anchor": "start", class: "tick-label" });
+        note.textContent = "Top 5 are tied to within measurement — identical best-of-five on every dataset.";
+        svg.appendChild(note);
+        wrap.appendChild(svg);
+        profiles.models.forEach((model) => {
+          const legendRow = document.createElement("div");
+          legendRow.className = "profile-legend-row";
+          legendRow.setAttribute("data-model", model.model);
+          legendRow.innerHTML =
+            `<span class="profile-legend-swatch" style="background:${model.color};"></span>` +
+            `<span class="profile-legend-name">${model.display}</span>` +
+            `<span class="profile-legend-aup">AUP ${model.aup.toFixed(2)}</span>`;
+          legend.appendChild(legendRow);
+        });
+        return;
+      }
+      const maxRatio = Math.max(...profiles.models.flatMap((m) => m.ratios), 1);
+      const xMax = Math.log10(maxRatio) || 1; // guard the all-tied degenerate axis
+      const xFor = (tau) => margin.left + (Math.log10(tau) / xMax) * innerW;
+      const yFor = (frac) => margin.top + innerH - frac * innerH;
+      const svg = createSvgEl("svg", { viewBox: `0 0 ${width} ${height}`, class: "insight-svg" });
+
+      // Horizontal grid + y ticks (fraction of datasets).
+      [0, 0.25, 0.5, 0.75, 1].forEach((frac) => {
+        const y = yFor(frac);
+        svg.appendChild(createSvgEl("line", { x1: margin.left, y1: y, x2: width - margin.right, y2: y, class: "grid-rule" }));
+        const label = createSvgEl("text", { x: margin.left - 10, y: y + 4, "text-anchor": "end", class: "tick-label" });
+        label.textContent = frac.toFixed(2);
+        svg.appendChild(label);
+      });
+
+      // Axes.
+      svg.appendChild(createSvgEl("line", { x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, class: "axis-rule" }));
+      svg.appendChild(createSvgEl("line", { x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, class: "axis-rule" }));
+
+      // x ticks in ratio space, evenly spaced on the log axis.
+      [0, 0.5, 1].forEach((frac) => {
+        const tau = Math.pow(10, xMax * frac);
+        const x = xFor(tau);
+        const tick = createSvgEl("text", { x, y: height - margin.bottom + 16, "text-anchor": "middle", class: "tick-label" });
+        tick.textContent = `${tau.toFixed(2)}×`;
+        svg.appendChild(tick);
+      });
+
+      const xAxis = createSvgEl("text", { x: width / 2, y: height - 10, "text-anchor": "middle", class: "axis-label" });
+      xAxis.textContent = "τ = best-of-5 / model (log)";
+      svg.appendChild(xAxis);
+      const yAxis = createSvgEl("text", { x: 16, y: height / 2, transform: `rotate(-90 16 ${height / 2})`, "text-anchor": "middle", class: "axis-label" });
+      yAxis.textContent = "Fraction within τ";
+      svg.appendChild(yAxis);
+
+      // One step path per model (right-continuous ECDF, extended to xMax at 1).
+      profiles.models.forEach((model) => {
+        let d = `M ${xFor(1)} ${yFor(0)}`;
+        let prevFrac = 0;
+        model.steps.forEach((step) => {
+          const x = xFor(step.tau);
+          d += ` L ${x} ${yFor(prevFrac)} L ${x} ${yFor(step.fraction)}`;
+          prevFrac = step.fraction;
+        });
+        d += ` L ${xFor(maxRatio)} ${yFor(prevFrac)}`;
+        const cls =
+          `profile-line${uiState.hoveredModel === model.model ? " hovered" : ""}` +
+          `${uiState.pinnedModel === model.model ? " pinned" : ""}`;
+        const path = createSvgEl("path", { d, class: cls, stroke: model.color });
+        svg.appendChild(path);
+      });
+
+      // τ-guide: a vertical line following the cursor that reads all five curves
+      // at one tolerance, with each model's fraction-within-τ in the tooltip.
+      const guide = createSvgEl("line", { class: "profile-guide", x1: margin.left, x2: margin.left, y1: margin.top, y2: height - margin.bottom });
+      guide.style.display = "none";
+      svg.appendChild(guide);
+      const overlay = createSvgEl("rect", { x: margin.left, y: margin.top, width: innerW, height: innerH, fill: "transparent" });
+      overlay.addEventListener("mousemove", (event) => {
+        const box = svg.getBoundingClientRect();
+        const scale = width / (box.width || width);
+        let xCoord = (event.clientX - box.left) * scale;
+        xCoord = Math.min(Math.max(xCoord, margin.left), width - margin.right);
+        const tau = Math.pow(10, ((xCoord - margin.left) / innerW) * xMax);
+        guide.setAttribute("x1", xCoord);
+        guide.setAttribute("x2", xCoord);
+        guide.style.display = "";
+        const pct = ((tau - 1) * 100).toFixed(1);
+        const lines = profiles.models
+          .map((model) => {
+            const within = model.ratios.filter((r) => r <= tau + 1e-12).length / model.ratios.length;
+            return `<div><span class="profile-legend-swatch" style="background:${model.color};"></span> ${model.display}: ${(within * 100).toFixed(0)}%</div>`;
+          })
+          .join("");
+        showTooltip(
+          "profile-tooltip",
+          `<b>τ = ${tau.toFixed(3)}× &middot; within ${pct}% of best</b>${lines}`,
+          event.offsetX,
+          event.offsetY
+        );
+      });
+      overlay.addEventListener("mouseleave", () => {
+        clearTooltip("profile-tooltip");
+        guide.style.display = "none";
+      });
+      svg.appendChild(overlay);
+
+      wrap.appendChild(svg);
+
+      // Legend in aggregation-rank order: swatch, display, right-aligned AUP.
+      // Hover/pin reuse the shared highlight path so the curve thickens in step
+      // with the table and the other charts.
+      profiles.models.forEach((model) => {
+        const row = document.createElement("div");
+        row.className =
+          `profile-legend-row${uiState.hoveredModel === model.model ? " hovered" : ""}` +
+          `${uiState.pinnedModel === model.model ? " pinned" : ""}`;
+        row.setAttribute("data-model", model.model);
+        row.innerHTML =
+          `<span class="profile-legend-swatch" style="background:${model.color};"></span>` +
+          `<span class="profile-legend-name">${model.display}</span>` +
+          `<span class="profile-legend-aup">AUP ${model.aup.toFixed(2)}</span>`;
+        row.addEventListener("mouseenter", () => setHoveredModel(model.model));
+        row.addEventListener("mouseleave", () => setHoveredModel(null));
+        bindPinToggle(row, model.model);
+        legend.appendChild(row);
+      });
+
+      // Thin slices (e.g. cls-token) may seat fewer than five models.
+      if (profiles.nModels < 5) {
+        const note = document.createElement("span");
+        note.className = "profile-legend-aup";
+        note.textContent = `(${profiles.nModels} models in this slice)`;
+        legend.appendChild(note);
+      }
+    }
+
     function renderInsights(activeState, meta) {
       if (!activeState.rows.length) {
         uiState.flowSeries = null;
         uiState.dispersionRows = [];
+        uiState.profileSeries = null;
         renderEmptyInsights();
         return;
       }
@@ -1317,11 +1607,13 @@
       const dispersionRows = getRankDispersionRows(activeState.rows);
       uiState.flowSeries = flowSeries;
       uiState.dispersionRows = dispersionRows;
+      uiState.profileSeries = activeState;
       renderFlowSummary(flowSeries);
       renderFlowChart(flowSeries, meta);
       renderFlowDetail(flowSeries, meta);
       renderDispersionChart(dispersionRows);
       renderPinnedModelDetail(dispersionRows);
+      renderProfileChart(activeState, meta);
     }
 
     function refreshSelectionVisuals(options) {
@@ -1332,11 +1624,15 @@
       refreshTableSelection();
       clearTooltip("rank-flow-tooltip");
       clearTooltip("rank-dispersion-tooltip");
+      clearTooltip("profile-tooltip");
       if (redrawCharts && uiState.flowSeries && uiState.meta) {
         renderFlowChart(uiState.flowSeries, uiState.meta);
       }
       if (redrawCharts) {
         renderDispersionChart(uiState.dispersionRows);
+      }
+      if (redrawCharts && uiState.profileSeries && uiState.meta) {
+        renderProfileChart(uiState.profileSeries, uiState.meta);
       }
       if (uiState.flowSeries && uiState.meta) renderFlowDetail(uiState.flowSeries, uiState.meta);
       renderPinnedModelDetail(uiState.dispersionRows);

@@ -7,13 +7,18 @@ gracefully when it is not installed.
 """
 
 import json
+import math
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pandas as pd
 import pytest
+
+HAS_NODE = shutil.which("node") is not None
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "experiments" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -751,3 +756,316 @@ def test_generator_writes_html(tmp_path):
     assert rankings["classification"]["linear"]["RGB"]["patch-mean"]["bandspec_zscore"]["avg_rank"][
         "rows"
     ]
+
+
+# --- Slice 9: profile math -------------------------------------------------
+#
+# ``computeTopProfiles`` is pure JS with no DOM access, so we exercise it
+# through a node subprocess (mirrors the ``subprocess.run`` pattern in
+# ``test_generator_writes_html``). The helper regex-extracts the palette and
+# the function from the inlined HTML, wraps them in a tiny driver, and returns
+# the parsed JSON. Node-dependent tests skip gracefully when node is absent.
+
+pytestmark_note = "requires a `node` runtime for the client-side profile math"
+
+
+def _extract_js_block(text: str, pattern: str) -> str:
+    """Return the single-line JS statement matching ``pattern`` (incl. trailing ;)."""
+    match = re.search(pattern, text)
+    assert match is not None, f"could not find JS block: {pattern!r}"
+    return match.group(0)
+
+
+def _extract_js_function(text: str, name: str) -> str:
+    """Return the full source of ``function name(...) { ... }`` via brace matching."""
+    start = text.index(f"function {name}(")
+    brace = text.index("{", start)
+    depth = 0
+    for i in range(brace, len(text)):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    raise AssertionError(f"unbalanced braces extracting {name}")
+
+
+def _eval_profiles_js(rows: list[dict]) -> dict:
+    """Run ``computeTopProfiles(rows)`` in node and return the parsed result."""
+    if not HAS_NODE:
+        pytest.skip(pytestmark_note)
+    html = HTML_PATH.read_text()
+    palette = _extract_js_block(html, r"const PROFILE_COLORS = \[.*?\];")
+    fn = _extract_js_function(html, "computeTopProfiles")
+    script = (
+        f"{palette}\n{fn}\n"
+        "const rows = JSON.parse(process.argv[2]);\n"
+        "console.log(JSON.stringify(computeTopProfiles(rows)));\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            ["node", script_path, json.dumps(rows)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+    assert result.returncode == 0, result.stderr
+    # Guard the PRD "no NaN/Infinity" invariant at the JSON boundary.
+    assert "NaN" not in result.stdout and "Infinity" not in result.stdout, result.stdout
+    return json.loads(result.stdout)
+
+
+def _prow(model: str, per_task: dict[str, float]) -> dict:
+    """Minimal profile-input row: only the fields ``computeTopProfiles`` reads."""
+    return {
+        "model": model,
+        "display": model.upper(),
+        "family": "fam",
+        "is_baseline": False,
+        "per_task": per_task,
+    }
+
+
+def _matrix_rows(matrix: dict[str, dict[str, float]]) -> list[dict]:
+    return [_prow(model, per_task) for model, per_task in matrix.items()]
+
+
+def _expected_ratios(matrix: dict[str, dict[str, float]]) -> dict[str, list[float]]:
+    datasets = list(next(iter(matrix.values())).keys())
+    best = {ds: max(matrix[m][ds] for m in matrix) for ds in datasets}
+    return {m: sorted(best[ds] / matrix[m][ds] for ds in datasets) for m in matrix}
+
+
+def test_profiles_best_of_five_ratios():
+    # Five models, five datasets, distinct per-column maxima (no ties).
+    matrix = {
+        "a": {"d1": 0.90, "d2": 0.60, "d3": 0.80, "d4": 0.55, "d5": 0.70},
+        "b": {"d1": 0.80, "d2": 0.85, "d3": 0.70, "d4": 0.60, "d5": 0.65},
+        "c": {"d1": 0.70, "d2": 0.75, "d3": 0.90, "d4": 0.50, "d5": 0.60},
+        "d": {"d1": 0.60, "d2": 0.70, "d3": 0.65, "d4": 0.88, "d5": 0.55},
+        "e": {"d1": 0.65, "d2": 0.55, "d3": 0.60, "d4": 0.52, "d5": 0.92},
+    }
+    out = _eval_profiles_js(_matrix_rows(matrix))
+    assert out["status"] == "ok"
+    expected = _expected_ratios(matrix)
+    by_model = {m["model"]: m for m in out["models"]}
+    ones = 0
+    for model, exp in expected.items():
+        got = by_model[model]["ratios"]
+        assert got == pytest.approx(exp, rel=1e-9)
+        assert all(r >= 1.0 - 1e-9 for r in got)
+        ones += sum(1 for r in got if abs(r - 1.0) < 1e-9)
+    # exactly one best-of-five (ratio == 1) per column, no ties
+    assert ones == 5
+
+
+def test_profiles_ecdf_monotone_reaches_one():
+    matrix = {
+        "a": {"d1": 0.90, "d2": 0.60, "d3": 0.80, "d4": 0.55, "d5": 0.70},
+        "b": {"d1": 0.80, "d2": 0.85, "d3": 0.70, "d4": 0.60, "d5": 0.65},
+        "c": {"d1": 0.70, "d2": 0.75, "d3": 0.90, "d4": 0.50, "d5": 0.60},
+        "d": {"d1": 0.60, "d2": 0.70, "d3": 0.65, "d4": 0.88, "d5": 0.55},
+        "e": {"d1": 0.65, "d2": 0.55, "d3": 0.60, "d4": 0.52, "d5": 0.92},
+    }
+    out = _eval_profiles_js(_matrix_rows(matrix))
+    for model in out["models"]:
+        fractions = [step["fraction"] for step in model["steps"]]
+        assert fractions == sorted(fractions)
+        assert all(0.0 <= f <= 1.0 for f in fractions)
+        assert fractions[-1] == pytest.approx(1.0)
+
+
+def test_profiles_uses_top_five_only():
+    matrix = {
+        "a": {"d1": 0.90, "d2": 0.60, "d3": 0.80, "d4": 0.55, "d5": 0.70},
+        "b": {"d1": 0.80, "d2": 0.85, "d3": 0.70, "d4": 0.60, "d5": 0.65},
+        "c": {"d1": 0.70, "d2": 0.75, "d3": 0.90, "d4": 0.50, "d5": 0.60},
+        "d": {"d1": 0.60, "d2": 0.70, "d3": 0.65, "d4": 0.88, "d5": 0.55},
+        "e": {"d1": 0.65, "d2": 0.55, "d3": 0.60, "d4": 0.52, "d5": 0.92},
+    }
+    out_five = _eval_profiles_js(_matrix_rows(matrix))
+    # A sixth row that would be best-of-field on every column.
+    matrix_six = dict(matrix)
+    matrix_six["f"] = {"d1": 0.99, "d2": 0.99, "d3": 0.99, "d4": 0.99, "d5": 0.99}
+    out_six = _eval_profiles_js(_matrix_rows(matrix_six))
+    assert [m["model"] for m in out_six["models"]] == ["a", "b", "c", "d", "e"]
+    assert "f" not in {m["model"] for m in out_six["models"]}
+    # reference stays best-of-five, so nothing shifted
+    for lhs, rhs in zip(out_five["models"], out_six["models"], strict=True):
+        assert lhs["ratios"] == pytest.approx(rhs["ratios"], rel=1e-9)
+
+
+def test_profiles_insufficient_sentinel():
+    # Top five share only four dataset columns.
+    cols = {"d1": 0.8, "d2": 0.7, "d3": 0.9, "d4": 0.6}
+    matrix = {name: dict(cols) for name in ("a", "b", "c", "d", "e")}
+    out = _eval_profiles_js(_matrix_rows(matrix))
+    assert out["status"] == "insufficient"
+    assert out["nShared"] == 4
+
+
+def test_profiles_drops_nonpositive_columns():
+    # Five shared columns, but one carries a non-positive score for a top-5
+    # model, so it drops and the slice falls under the >=5 gate.
+    matrix = {
+        "a": {"d1": 0.90, "d2": 0.60, "d3": 0.80, "d4": 0.55, "d5": 0.0},
+        "b": {"d1": 0.80, "d2": 0.85, "d3": 0.70, "d4": 0.60, "d5": 0.65},
+        "c": {"d1": 0.70, "d2": 0.75, "d3": 0.90, "d4": 0.50, "d5": 0.60},
+        "d": {"d1": 0.60, "d2": 0.70, "d3": 0.65, "d4": 0.88, "d5": 0.55},
+        "e": {"d1": 0.65, "d2": 0.55, "d3": 0.60, "d4": 0.52, "d5": 0.92},
+    }
+    out = _eval_profiles_js(_matrix_rows(matrix))
+    assert out["status"] == "insufficient"
+    assert out["nShared"] == 4
+
+
+def test_profiles_all_tied_flag():
+    matrix = {
+        name: {"d1": 0.8, "d2": 0.8, "d3": 0.8, "d4": 0.8, "d5": 0.8}
+        for name in ("a", "b", "c", "d", "e")
+    }
+    out = _eval_profiles_js(_matrix_rows(matrix))
+    assert out["status"] == "ok"
+    assert out["allTied"] is True
+    for model in out["models"]:
+        assert all(abs(r - 1.0) < 1e-12 for r in model["ratios"])
+
+
+def test_profiles_aup_scalar():
+    # "a" strictly dominates every column, so it should carry the largest AUP.
+    matrix = {
+        "a": {"d1": 0.95, "d2": 0.95, "d3": 0.95, "d4": 0.95, "d5": 0.95},
+        "b": {"d1": 0.80, "d2": 0.85, "d3": 0.70, "d4": 0.60, "d5": 0.65},
+        "c": {"d1": 0.70, "d2": 0.75, "d3": 0.90, "d4": 0.50, "d5": 0.60},
+        "d": {"d1": 0.60, "d2": 0.70, "d3": 0.65, "d4": 0.88, "d5": 0.55},
+        "e": {"d1": 0.65, "d2": 0.55, "d3": 0.60, "d4": 0.52, "d5": 0.92},
+    }
+    out = _eval_profiles_js(_matrix_rows(matrix))
+    aups = {m["model"]: m["aup"] for m in out["models"]}
+    for value in aups.values():
+        assert math.isfinite(value)
+    assert aups["a"] == max(aups.values())
+    assert aups["a"] > max(v for k, v in aups.items() if k != "a")
+
+
+# --- Slice 9 (Slice 2): profile card scaffold + CSS ------------------------
+
+
+def test_profile_card_anchors():
+    text = HTML_PATH.read_text()
+    for anchor in ('id="profile-card"', 'id="profile-chart"', 'id="profile-tooltip"',
+                   'id="profile-legend"'):
+        assert anchor in text
+    card_at = text.index('id="profile-card"')
+    insights_at = text.index('id="insights"')
+    empty_at = text.index('id="table-empty"')
+    # Card sits between the table's empty state and the Insights section.
+    assert empty_at < card_at < insights_at
+    # A caption lives inside the card (before Insights begins).
+    caption_at = text.index("chart-caption", card_at)
+    assert caption_at < insights_at
+
+
+def test_profile_css_states():
+    text = HTML_PATH.read_text()
+    for cls in (".profile-line", ".profile-line.hovered", ".profile-line.pinned"):
+        assert cls in text
+    palette = re.search(r"const PROFILE_COLORS = \[(.*?)\];", text)
+    assert palette is not None
+    colors = [c for c in palette.group(1).split(",") if c.strip()]
+    assert len(colors) >= 5
+
+
+# --- Slice 9 (Slice 3): renderProfileChart base draw + wiring --------------
+
+
+def _renderinsights_body(text: str) -> str:
+    start = text.index("function renderInsights")
+    end = text.index("function ", start + len("function renderInsights"))
+    return text[start:end]
+
+
+def test_render_profile_wired_into_insights():
+    text = HTML_PATH.read_text()
+    assert "function renderProfileChart" in text
+    assert "profileSeries: null" in text  # declared on uiState
+    body = _renderinsights_body(text)
+    assert "renderProfileChart(" in body
+    assert "uiState.profileSeries = null" in body  # empty-rows branch
+
+
+def test_no_new_rankings_key(assembled):
+    rankings, _sensitivity, _meta, _default = assembled
+    slice_block = _slice_block(rankings, DEFAULT_SLICE_KEY)
+    for agg in ("avg_rank", "elo", "improvability"):
+        for row in slice_block[agg]["rows"]:
+            assert set(row) == ROW_KEYS
+    json.dumps(rankings, allow_nan=False)
+
+
+# --- Slice 9 (Slice 4): edge-case render states ----------------------------
+
+
+def _renderprofile_body(text: str) -> str:
+    start = text.index("function renderProfileChart")
+    end = text.index("function ", start + len("function renderProfileChart"))
+    return text[start:end]
+
+
+def test_profile_edge_state_copy():
+    body = _renderprofile_body(HTML_PATH.read_text())
+    # insufficient branch names the shared-dataset count
+    assert 'status === "insufficient"' in body
+    assert "Too few shared datasets" in body
+    assert "nShared" in body
+    # all-tied branch
+    assert "allTied" in body
+    assert "tied to within measurement" in body
+    # <5 models note guarded on nModels
+    assert "nModels < 5" in body
+    assert "models in this slice" in body
+
+
+# --- Slice 9 (Slice 5): τ-guide hover interaction --------------------------
+
+
+def test_profile_tau_guide_wiring():
+    body = _renderprofile_body(HTML_PATH.read_text())
+    assert "mousemove" in body
+    assert "profile-tooltip" in body  # tooltip filled per model
+    assert 'clearTooltip("profile-tooltip")' in body  # cleared on mouseout/leave
+    # plain-language τ gloss
+    assert "% of best" in body or "within" in body
+
+
+# --- Slice 9 (Slice 6): shared-highlight sync ------------------------------
+
+
+def _refresh_body(text: str) -> str:
+    start = text.index("function refreshSelectionVisuals")
+    end = text.index("function ", start + len("function refreshSelectionVisuals"))
+    return text[start:end]
+
+
+def test_profile_highlight_sync():
+    text = HTML_PATH.read_text()
+    refresh = _refresh_body(text)
+    # tooltip cleared + profile redrawn under the redrawCharts guard
+    assert 'clearTooltip("profile-tooltip")' in refresh
+    assert "renderProfileChart(" in refresh
+    assert "uiState.profileSeries" in refresh
+    assert "uiState.meta" in refresh
+    body = _renderprofile_body(text)
+    # legend rows join the shared highlight path
+    assert "setHoveredModel(" in body
+    assert "setHoveredModel(null)" in body
+    # step paths reflect hovered/pinned state
+    assert "uiState.hoveredModel" in body
+    assert "uiState.pinnedModel" in body
