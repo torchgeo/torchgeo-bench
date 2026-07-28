@@ -960,8 +960,12 @@ def test_profiles_aup_scalar():
 
 def test_profile_card_anchors():
     text = HTML_PATH.read_text()
-    for anchor in ('id="profile-card"', 'id="profile-chart"', 'id="profile-tooltip"',
-                   'id="profile-legend"'):
+    for anchor in (
+        'id="profile-card"',
+        'id="profile-chart"',
+        'id="profile-tooltip"',
+        'id="profile-legend"',
+    ):
         assert anchor in text
     card_at = text.index('id="profile-card"')
     insights_at = text.index('id="insights"')
