@@ -9,8 +9,18 @@ grid_cell_deg: 1.0         # lat/lon spatial-block cell size for the fold tier
 methods: [cleanlab, aer]   # subset of {cleanlab, aer}
 ignore_index: 255          # label value excluded from scoring
 # Fixed per-member training budget (no validation / early-stopping).
+# At batch_size=64 each step sees 8x the samples it did at the old bs=8, so 2000
+# steps is ~32 epochs of a 4k-sample split rather than ~4. The binding resource
+# is optimizer updates, not sample coverage: keep this at 2000 unless the Phase 3
+# curves show mIoU still climbing at the end (D6 sets the long budget from them).
 max_steps: 2000
 epoch_cap: 1000            # max loader passes to reach max_steps
+# Per-member training curves: evaluate the held-out fold every N steps and write
+# <root>/label_quality/<dataset>/<model>/training_curves.json (train loss,
+# held-out mIoU, per-class IoU). null -> no evaluation during training, which is
+# the historical behavior. Costs one eval pass per N steps per member; set e.g.
+# 200 to get evidence the members fit as the hparam search predicted.
+eval_every: null
 # Differential fine-tuning learning rates (null -> single `lr` group).
 backbone_lr: 1.0e-5
 head_lr: 1.0e-3
@@ -18,7 +28,37 @@ weight_decay: 0.0
 tta: true                  # dihedral (D4) TTA folded into the OOF substrate
 cleanlab_soft_min_temp: 0.1   # colder -> image score tracks the worst pixels
 low_capacity_threshold: 0.3   # OOF macro-mIoU below this annotates low_capacity
-batch_size: 8
+# Degeneracy gate (see label_quality/degeneracy.py). `low_capacity` above is a
+# scalar mIoU check and is structurally blind to a majority-class collapse: AER's
+# macro-IoU is per image over the classes present in *that image's* label, so a
+# background-only predictor scores ~1 on background and ~0 on the minority class,
+# averaging to ~0.5 -- comfortably clear of 0.3. Measured on the collapsed
+# dinov3sat/spacenet7 cell: OOF mIoU 0.475 (passes) with zero predicted mass on
+# buildings, and a cleanlab-vs-AER rank correlation of -0.167 that is pure noise.
+# Coverage is GT-relative so intrinsic imbalance (spacenet7 is ~95% background)
+# does not trip it: healthy cells measure ~0.9, the collapsed one 0.0.
+degenerate_coverage_threshold: 0.25
+# IQR backstop for "this ranking has no spread". Deliberately far below the
+# healthy range -- real v3 cells bottom out at 0.0335 -- so it catches a flat
+# ranking without competing with the coverage arm.
+min_score_iqr: 0.01
+# Unfrozen fine-tuning loader batch size. NOTE: this value is adopted from the
+# hyperparameter search, NOT validated by an OOM probe --
+# scripts/probe_segmentation_batch_size.py exists but has never been run (no
+# results/hparam_search/batch_size_probe.csv on disk). An earlier comment here
+# claimed a probe validated 64 at "23.7 GiB of 40"; that provenance was false and
+# the 2026-07-28 sweep refuted it: resnet50/spacenet2 and convnext_base/spacenet2
+# both OOM-died at 64.
+# The governing asymmetry is tile size, not model size. Only the ViTs set
+# `auto_resize: true`, which downsamples spacenet2's ~650px tiles to 224; the
+# convnets train at the native frame, ~8.4x the pixels. So a batch size that is
+# safe for a ViT is not transferable to a convnet on large-tile datasets.
+# Per-model override: eval.segmentation.finetune_batch_size (dinov3sat uses 32).
+batch_size: 64
+# DataLoader workers for the OOF train + inference loaders. These datasets are
+# decode-bound (512-650px tiles per sample), so 0 leaves the GPU starved waiting
+# on disk. Keep <= the job's --cpus-per-task.
+num_workers: 8
 seeds: null                # null -> derived from cfg.seed as seed + member_idx
 over_regularized: false    # optional low-capacity member variant (annotation only)
 cleanup_checkpoints: false # delete fold checkpoints after a dataset completes

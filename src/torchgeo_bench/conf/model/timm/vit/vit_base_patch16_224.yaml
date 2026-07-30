@@ -9,3 +9,38 @@ global_pool: avg
 seed: null
 name: vit_base_patch16_224
 use_cls_token: false
+# A fixed-grid ViT (patch16_224) has a 224×224 positional embedding, so inputs
+# larger than 224 (e.g. spacenet2's 650px tiles) must be bilinearly resized to
+# the model frame; the patch head then upsamples logits back to the native mask
+# resolution. Fully-convolutional backbones (resnet50) don't need this.
+auto_resize: true
+eval:
+  segmentation:
+    # A plain ViT has a single-resolution token stream, not an FPN pyramid. DPT
+    # requires exactly 4 taps in coarse-to-fine order; here all four are 14×14
+    # ((B, 197, 768) each, CLS dropped), so DPT's skip interpolations are no-ops.
+    # The value is the 3×3 ResidualConvUnit mixing: neighbouring tokens finally
+    # interact, which removes the hard 16×16 patch lattice that the previous
+    # per-token patch_linear head structurally could not avoid.
+    layers: ["blocks.2", "blocks.5", "blocks.8", "blocks.11"]
+    head_type: dpt
+    # Stage-1 hparam search winners (docs/plans/segmentation_hparam_search.md
+    # Phase 3, 126 trials). Best single (backbone_lr, head_lr) by mean final
+    # mIoU over all 6 datasets; per-dataset tuning would add only +0.0039,
+    # inside the single-fold noise band, so one setting per model it is.
+    #
+    # head_lr MUST stay at 1e-3: the search's 3e-3 column killed this backbone
+    # in 18/18 cells — 13 diverged to NaN with no usable eval, the other 5 ran
+    # the full budget pinned at a degenerate single-class constant. Every
+    # no-usable-eval trial in the entire 126-trial search was vit_base at 3e-3
+    # (resnet50 and convnext were 0/36 each). See `project_vit_seg_collapse`.
+    backbone_lr: 1.0e-4
+    head_lr: 1.0e-3
+    # Adopted-by-search batch size, NOT OOM-probed: the Phase 2 probe
+    # (scripts/probe_segmentation_batch_size.py, D5) was never run. Distinct from
+    # `batch_size`, which is the frozen cached-feature probe's and would OOM an
+    # unfrozen fine-tune.
+    # 64 held on all six datasets here, but that does not transfer to the
+    # convnets: `auto_resize: true` above downsamples large tiles to 224, where
+    # they train at the native frame (~8.4x the pixels on spacenet2).
+    finetune_batch_size: 64

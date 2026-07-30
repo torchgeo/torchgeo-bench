@@ -3,7 +3,9 @@
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 import torch
+from omegaconf import OmegaConf
 
 from torchgeo_bench.datasets.burn_scars import BurnScars
 
@@ -64,6 +66,75 @@ def _sinusoid_patch(freq: int) -> torch.Tensor:
     x = torch.linspace(0.0, 1.0, 16)
     grid = torch.outer(torch.sin((freq + 1) * 3.0 * x), torch.cos((freq + 1) * 2.0 * x))
     return grid.unsqueeze(0).repeat(3, 1, 1)
+
+
+class _DataFrameStub:
+    """Minimal ``data_df`` stand-in exposing ``columns`` + column access."""
+
+    def __init__(self, cols: dict):
+        self._cols = cols
+        self.columns = list(cols)
+
+    def __getitem__(self, key):
+        class _Col:
+            def __init__(s, vals):
+                s._vals = vals
+
+            def tolist(s):
+                return list(s._vals)
+
+        return _Col(self._cols[key])
+
+
+class _DfLoader:
+    """A loader carrying a ``data_df`` (like the V2 upstream), with N samples."""
+
+    def __init__(self, df, n):
+        self.data_df = df
+        self._n = n
+
+    def __len__(self):
+        return self._n
+
+    def __getitem__(self, i):
+        raise AssertionError("fast fold path must not materialize samples")
+
+
+class _DfBench:
+    """BenchDataset stand-in whose ``get_dataset`` returns a ``data_df`` loader."""
+
+    def __init__(self, df, n):
+        self._df, self._n = df, n
+
+    def get_dataset(self, split, *, metadata=None, **kwargs):
+        del split, metadata, kwargs
+        return _DfLoader(self._df, self._n)
+
+
+def test_assign_folds_fast_path_uses_data_df_without_image_io():
+    """latlon_block folds come from data_df lat/lon columns; no sample is read.
+
+    Regression for the mask-loading speedup: the fast path must (a) never call
+    __getitem__ (which raises here), and (b) produce byte-identical folds to the
+    slow, sample-materializing path on the same coordinates.
+    """
+    from torchgeo_bench.label_quality.folds import assign_folds
+
+    rng = np.random.default_rng(0)
+    lon = rng.uniform(-180, 180, size=200)
+    lat = np.degrees(np.arcsin(rng.uniform(-1, 1, size=200)))
+
+    df = _DataFrameStub({"lat": lat, "lon": lon})
+    fast_ids, fast_tier = assign_folds(_DfBench(df, 200), "train", k=5, cell_deg=10.0)
+
+    samples = [
+        {"image": torch.zeros(3, 4, 4), "lat": float(lat[i]), "lon": float(lon[i])}
+        for i in range(200)
+    ]
+    slow_ids, slow_tier = assign_folds(_FoldFakeDataset(samples), "train", k=5, cell_deg=10.0)
+
+    assert fast_tier == slow_tier == "latlon_block"
+    np.testing.assert_array_equal(fast_ids, slow_ids)  # identical folds, no image I/O
 
 
 def test_spatial_block_groupkfold_keeps_cells_together():
@@ -319,7 +390,7 @@ def test_run_oof_every_sample_held_out_once():
 
 
 def test_oof_views_shapes():
-    """``member_stack`` is (M,N,C,H,W); ``mean_softmax`` is its member-axis mean."""
+    """``mean_softmax`` is (N,C,H,W); ``member_preds`` is (M,N,H,W) uint8 argmax."""
     from torchgeo_bench.label_quality.oof import run_oof
 
     n, c, h, w, k = 8, 4, 6, 6, 2
@@ -336,9 +407,93 @@ def test_oof_views_shapes():
         batch_size=4,
     )
 
-    assert oof.member_stack.shape == (2, n, c, h, w)
     assert oof.mean_softmax.shape == (n, c, h, w)
-    assert torch.allclose(oof.mean_softmax, oof.member_stack.mean(0))
+    assert oof.member_preds.shape == (2, n, h, w)
+    assert oof.member_preds.dtype == torch.uint8
+    assert int(oof.member_preds.max()) < c  # every stored argmax is a valid class id
+
+
+def test_oof_mean_softmax_matches_full_stack_mean():
+    """``mean_softmax`` (running sum ÷ M) equals the old ``stack.mean(0)`` path.
+
+    Rebuilds the discarded full ``(M,N,C,H,W)`` stack from the per-member
+    hold-out softmax and asserts the accumulator-based mean is numerically
+    identical (up to float summation order).
+    """
+    from torchgeo_bench.label_quality.oof import run_oof
+
+    n, c, h, w, k = 6, 3, 5, 5, 2
+    imgs = torch.randn(n, c, h, w)
+    ds = _SegDS(imgs, torch.randint(0, c, (n, h, w)))
+    fold_ids = np.array([i % k for i in range(n)])
+    members = [{"num_classes": c, "seed": 0}, {"num_classes": c, "seed": 1}]
+
+    oof = run_oof(
+        ds,
+        members,
+        lambda seed: fold_ids,
+        member_factory=lambda spec: _IdentityMember(spec["num_classes"]),
+        tta=False,
+        batch_size=3,
+    )
+
+    # Identity member with tta=False -> each member's softmax is softmax(image).
+    per_member = imgs.softmax(dim=1)  # (N, C, H, W)
+    stack = per_member.unsqueeze(0).repeat(2, 1, 1, 1, 1)  # (M, N, C, H, W)
+    assert torch.allclose(oof.mean_softmax, stack.mean(dim=0), atol=1e-6)
+
+
+def test_oof_member_stack_refuses_rematerialization():
+    """The old ``member_stack`` view is a tripwire, not a re-allocation."""
+    from torchgeo_bench.label_quality.oof import run_oof
+
+    n, c, k = 4, 3, 2
+    ds = _SegDS(torch.randn(n, 3, 5, 5), torch.randint(0, c, (n, 5, 5)))
+    oof = run_oof(
+        ds,
+        [{"num_classes": c, "seed": 0}],
+        lambda seed: np.array([i % k for i in range(n)]),
+        member_factory=lambda spec: _RecordingMember(spec["num_classes"]),
+        tta=False,
+        batch_size=2,
+    )
+    with pytest.raises(AttributeError, match="member_preds"):
+        _ = oof.member_stack
+
+
+def test_oof_never_allocates_full_float_stack():
+    """Regression for FM-5: no ``(M,N,C,H,W)`` float tensor is ever allocated.
+
+    The 276 GB flair2 OOM was exactly that allocation. We wrap ``torch.zeros``
+    and assert nothing 5-D with the member axis is created during ``run_oof``;
+    the only large buffers are ``(N,C,H,W)`` softmax_sum and ``(M,N,H,W)`` uint8.
+    """
+    from torchgeo_bench.label_quality import oof as oof_mod
+
+    m, n, c, h, w, k = 3, 6, 4, 5, 5, 2
+    ds = _SegDS(torch.randn(n, 3, h, w), torch.randint(0, c, (n, h, w)))
+    members = [{"num_classes": c, "seed": s} for s in range(m)]
+
+    real_zeros = torch.zeros
+    five_d_float = []
+
+    def spy_zeros(*args, **kwargs):
+        t = real_zeros(*args, **kwargs)
+        if t.ndim == 5 and t.dtype.is_floating_point:
+            five_d_float.append(tuple(t.shape))
+        return t
+
+    with patch.object(oof_mod.torch, "zeros", spy_zeros):
+        oof_mod.run_oof(
+            ds,
+            members,
+            lambda seed: np.array([i % k for i in range(n)]),
+            member_factory=lambda spec: _RecordingMember(spec["num_classes"]),
+            tta=False,
+            batch_size=3,
+        )
+
+    assert five_d_float == [], f"full float stack allocated: {five_d_float}"
 
 
 def test_dihedral_tta_invertible_identity():
@@ -569,6 +724,7 @@ def test_aer_spurious_foreground_flags_empty_label():
 
 _CSV_SCHEMA = {
     "dataset",
+    "model",
     "method",
     "member_set",
     "image_id",
@@ -584,6 +740,10 @@ _CSV_SCHEMA = {
     "partition",
     "low_capacity",
     "native_id",
+    "degenerate",
+    "min_class_coverage",
+    "oof_per_class_iou_min",
+    "score_iqr",
 }
 
 
@@ -598,6 +758,7 @@ def test_write_results_csv_schema(tmp_path):
     write_results_csv(
         str(path),
         dataset="flair2",
+        model="resnet50",
         method="cleanlab",
         member_set="M5",
         image_scores=np.linspace(0.0, 1.0, n),
@@ -621,7 +782,7 @@ def test_write_results_csv_schema(tmp_path):
 
 
 def test_npz_roundtrip_pixel_artifacts(tmp_path):
-    """Per-sample pixel artifacts round-trip under the documented path layout."""
+    """Per-sample pixel artifacts round-trip under the model-keyed path layout."""
     import os
 
     from torchgeo_bench.label_quality.store import load_pixel_artifact, save_pixel_artifact
@@ -629,28 +790,68 @@ def test_npz_roundtrip_pixel_artifacts(tmp_path):
     pixel_scores = np.random.rand(8, 8).astype(np.float32)
     pred_mask = np.random.randint(0, 5, (8, 8)).astype(np.int64)
 
-    path = save_pixel_artifact(str(tmp_path), "flair2", "aer", "00042", pixel_scores, pred_mask)
-    assert path.endswith(os.path.join("label_quality", "flair2", "aer", "00042.npz"))
+    path = save_pixel_artifact(
+        str(tmp_path), "flair2", "resnet50", "aer", "00042", pixel_scores, pred_mask,
+        native_id="scene42", image_score=0.7, rank=3,
+    )
+    assert path.endswith(
+        os.path.join("label_quality", "flair2", "resnet50", "aer", "00042.npz")
+    )
 
-    loaded_scores, loaded_mask = load_pixel_artifact(str(tmp_path), "flair2", "aer", "00042")
-    np.testing.assert_array_equal(loaded_scores, pixel_scores)
-    np.testing.assert_array_equal(loaded_mask, pred_mask)
+    loaded = load_pixel_artifact(str(tmp_path), "flair2", "resnet50", "aer", "00042")
+    np.testing.assert_array_equal(loaded["pixel_scores"], pixel_scores)
+    np.testing.assert_array_equal(loaded["pred_mask"], pred_mask)
+    assert str(loaded["native_id"]) == "scene42"
+    assert int(loaded["rank"]) == 3
+    assert float(loaded["image_score"]) == 0.7
 
 
 def test_checkpoint_key_and_exists(tmp_path):
-    """The checkpoint path encodes (dataset, member_idx, fold_idx, seed) and exists after write."""
+    """The checkpoint path encodes (dataset, model_slug, member_idx, fold_idx, seed)."""
     from torchgeo_bench.label_quality.store import (
         checkpoint_exists,
         save_checkpoint,
     )
 
-    key = {"dataset": "flair2", "member_idx": 1, "fold_idx": 2, "seed": 7}
+    key = {"dataset": "flair2", "model_slug": "resnet50", "member_idx": 1, "fold_idx": 2, "seed": 7}
     assert checkpoint_exists(str(tmp_path), **key) is False
 
     path = save_checkpoint({"w": torch.zeros(3)}, str(tmp_path), **key)
-    for token in ("flair2", "member1", "fold2", "seed7"):
+    for token in ("flair2", "resnet50", "member1", "fold2", "seed7"):
         assert token in path
     assert checkpoint_exists(str(tmp_path), **key) is True
+
+
+def test_checkpoint_model_slug_isolates_paths(tmp_path):
+    """FM-1 regression: two models on the same (dataset,member,fold,seed) never collide.
+
+    Distinct ``model_slug`` values must resolve to distinct checkpoint paths, so
+    a resume with ``resume=true`` loads each backbone's own weights and never
+    cross-loads the other model's checkpoint.
+    """
+    from torchgeo_bench.label_quality.store import (
+        checkpoint_exists,
+        checkpoint_path,
+        save_checkpoint,
+    )
+
+    key = {"dataset": "cloudsen12", "member_idx": 0, "fold_idx": 0, "seed": 0}
+    p_resnet = checkpoint_path(str(tmp_path), model_slug="resnet50", **key)
+    p_vit = checkpoint_path(str(tmp_path), model_slug="vit_base_patch16_224", **key)
+    assert p_resnet != p_vit
+
+    # Writing the resnet checkpoint must not make the ViT one "exist" on resume.
+    save_checkpoint({"w": torch.zeros(3)}, str(tmp_path), model_slug="resnet50", **key)
+    assert checkpoint_exists(str(tmp_path), model_slug="resnet50", **key) is True
+    assert checkpoint_exists(str(tmp_path), model_slug="vit_base_patch16_224", **key) is False
+
+
+def test_sanitize_slug_path_safe():
+    """A model name with a ``/`` slug becomes a single path-safe segment."""
+    from torchgeo_bench.label_quality.store import sanitize_slug
+
+    assert sanitize_slug("timm/resnet50") == "timm-resnet50"
+    assert "/" not in sanitize_slug("terratorch/terramind_v1_base")
 
 
 def test_low_capacity_flag_threshold(tmp_path):
@@ -667,6 +868,7 @@ def test_low_capacity_flag_threshold(tmp_path):
     write_results_csv(
         str(path),
         dataset="d",
+        model="resnet50",
         method="cleanlab",
         member_set="M3",
         image_scores=np.zeros(n),
@@ -695,6 +897,7 @@ class _SynthSegBench:
 
     task = "segmentation"
     num_classes = 4
+    rgb_bands = ["red", "green", "blue"]
 
     def __init__(self, ds):
         self._ds = ds
@@ -711,7 +914,7 @@ def _synthetic_seg_dataset(n=12, h=8, w=8, c=4, seed=0):
     return _SegDS(images, masks)
 
 
-def _tiny_specs(cfg, *, num_classes, device, seeds):
+def _tiny_specs(cfg, bench=None, *, num_classes, device, seeds):
     """Member specs backed by the tiny conv backbone (no registry / network)."""
     return [
         {
@@ -779,6 +982,204 @@ def test_run_label_quality_end_to_end(tmp_path, monkeypatch):
         assert (df["method"] == method).sum() == len(ds)
     assert df["grouping_tier"].notna().all()
     assert df["grouping_tier"].iloc[0] != ""
+    assert set(df["model"]) == {"mock"}  # FM-2: model column populated from cfg.model.name
+    # Degeneracy columns come from the run wiring, not just the store layer.
+    for column in ("degenerate", "min_class_coverage", "oof_per_class_iou_min", "score_iqr"):
+        assert column in df.columns, f"{column} missing from run output"
+    assert df["min_class_coverage"].nunique() == 1  # cell-level: same on both methods
+
+
+# --- Slice 10: per-model hyperparameter overrides (Phase 5) ---------------
+
+
+class _HparamBench:
+    """Bench stand-in exposing just what ``build_member_specs`` reads."""
+
+    num_classes = 4
+    rgb_bands = ["red", "green", "blue"]
+
+    def select_band_specs(self, names):
+        del names
+        return []
+
+
+def _build_specs(tmp_path, monkeypatch, *, model_seg=None, **lq_overrides):
+    """Run ``build_member_specs`` with an optional ``cfg.model.eval.segmentation``."""
+    from torchgeo_bench.label_quality import run as lq_run
+
+    cfg = _lq_cfg(tmp_path, **lq_overrides)
+    cfg.label_quality.backbone_lr = lq_overrides.get("backbone_lr", 1e-5)
+    cfg.label_quality.head_lr = lq_overrides.get("head_lr", 1e-3)
+    if model_seg is not None:
+        cfg.model.eval = {"segmentation": model_seg}
+
+    # The backbone factory is never called here — only the spec dict is inspected.
+    monkeypatch.setattr(lq_run, "instantiate", lambda *a, **k: None)
+    return lq_run.build_member_specs(
+        cfg, _HparamBench(), num_classes=4, device="cpu", seeds=[0]
+    )
+
+
+def test_member_specs_default_to_global_label_quality_hparams(tmp_path, monkeypatch):
+    """Without a per-model override the label_quality globals still apply."""
+    spec = _build_specs(tmp_path, monkeypatch)[0]
+
+    assert spec["backbone_lr"] == 1e-5
+    assert spec["head_lr"] == 1e-3
+    assert spec["max_steps"] == 2  # from _lq_cfg
+
+
+def test_member_specs_per_model_override_wins(tmp_path, monkeypatch):
+    """A per-model eval.segmentation LR overrides the global label_quality value."""
+    spec = _build_specs(
+        tmp_path,
+        monkeypatch,
+        model_seg={
+            "layers": ["layer1", "layer2"],
+            "head_type": "fpn",
+            "backbone_lr": 1e-4,
+            "head_lr": 3e-3,
+            "max_steps": 8000,
+        },
+    )[0]
+
+    assert spec["backbone_lr"] == 1e-4
+    assert spec["head_lr"] == 3e-3
+    assert spec["max_steps"] == 8000
+
+
+def test_member_specs_null_override_falls_back_to_global(tmp_path, monkeypatch):
+    """An explicit null override (the config default) must not shadow the global.
+
+    ``conf/config.yaml`` ships these keys as ``null`` so they are discoverable;
+    a present-but-null key has to read as "no override".
+    """
+    spec = _build_specs(
+        tmp_path,
+        monkeypatch,
+        model_seg={
+            "layers": ["layer1", "layer2"],
+            "head_type": "fpn",
+            "backbone_lr": None,
+            "head_lr": None,
+        },
+    )[0]
+
+    assert spec["backbone_lr"] == 1e-5
+    assert spec["head_lr"] == 1e-3
+
+
+def test_finetune_batch_size_does_not_read_frozen_probe_batch_size(tmp_path, monkeypatch):
+    """``eval.segmentation.batch_size`` is the frozen probe's, and must be ignored.
+
+    That key already means the cached-feature probe batch size (64 by default).
+    Resolving the unfrozen fine-tune's loader batch size from it would ship 64
+    into a full fine-tune and OOM; the override key is ``finetune_batch_size``.
+    """
+    from torchgeo_bench.label_quality.run import _hparam
+
+    lq = OmegaConf.create({"batch_size": 8})
+    seg = OmegaConf.create({"batch_size": 64})  # frozen probe value
+    assert _hparam(seg, lq, "batch_size", 8, seg_key="finetune_batch_size") == 8
+
+    seg = OmegaConf.create({"batch_size": 64, "finetune_batch_size": 16})
+    assert _hparam(seg, lq, "batch_size", 8, seg_key="finetune_batch_size") == 16
+
+
+def test_oof_loaders_get_configured_num_workers(monkeypatch):
+    """``num_workers`` reaches BOTH the train and held-out loaders.
+
+    These datasets decode 512-650px tiles per sample, so a serial loader leaves
+    the GPU idle; the workers are what make the fixed step budget affordable.
+    """
+    from torchgeo_bench.label_quality import oof as lq_oof
+
+    seen: list[int] = []
+    real_loader = lq_oof._subset_loader
+
+    def spy(dataset, indices, batch_size, shuffle, num_workers=0):
+        seen.append(num_workers)
+        # Actually build with 0 workers so the test stays in-process.
+        return real_loader(dataset, indices, batch_size, shuffle, 0)
+
+    monkeypatch.setattr(lq_oof, "_subset_loader", spy)
+
+    ds = _synthetic_seg_dataset(n=8)
+    specs = _tiny_specs(None, None, num_classes=4, device="cpu", seeds=[0])
+    lq_oof.run_oof(
+        ds, specs, lambda seed: np.arange(len(ds)) % 2,
+        batch_size=4, num_workers=6, tta=False,
+    )
+
+    assert seen, "loaders must have been built"
+    assert set(seen) == {6}, f"every loader must get num_workers=6, got {sorted(set(seen))}"
+
+
+def test_oof_loader_defaults_to_serial(monkeypatch):
+    """Omitting ``num_workers`` keeps the historical serial loader."""
+    from torchgeo_bench.label_quality import oof as lq_oof
+
+    loader = lq_oof._subset_loader(_synthetic_seg_dataset(n=4), [0, 1], 2, shuffle=False)
+    assert loader.num_workers == 0
+    assert loader.persistent_workers is False
+
+
+def test_oof_records_no_curves_without_eval_every(tmp_path, monkeypatch):
+    """Default launch behavior is unchanged: no evaluation, no curves, no file."""
+    import os
+
+    from torchgeo_bench.label_quality import run as lq_run
+
+    ds = _synthetic_seg_dataset()
+    monkeypatch.setattr(lq_run, "_load_bench_dataset", lambda cfg, name: _SynthSegBench(ds))
+    monkeypatch.setattr(lq_run, "build_member_specs", _tiny_specs)
+
+    cfg = _lq_cfg(tmp_path)
+    lq_run.run_label_quality(cfg)
+
+    assert not os.path.exists(
+        tmp_path / "label_quality" / "synthetic" / "mock" / "training_curves.json"
+    )
+
+
+def test_oof_records_member_curves_with_eval_every(tmp_path, monkeypatch):
+    """``eval_every`` yields one curve per (member, fold) with the D8 fields."""
+    import json
+    import os
+
+    from torchgeo_bench.label_quality import run as lq_run
+
+    ds = _synthetic_seg_dataset()
+    monkeypatch.setattr(lq_run, "_load_bench_dataset", lambda cfg, name: _SynthSegBench(ds))
+
+    def _specs_with_eval(cfg, bench=None, *, num_classes, device, seeds):
+        specs = _tiny_specs(cfg, bench, num_classes=num_classes, device=device, seeds=seeds)
+        for s in specs:
+            s["eval_every"] = 1
+        return specs
+
+    monkeypatch.setattr(lq_run, "build_member_specs", _specs_with_eval)
+
+    cfg = _lq_cfg(tmp_path)
+    cfg.label_quality.eval_every = 1
+    lq_run.run_label_quality(cfg)
+
+    path = tmp_path / "label_quality" / "synthetic" / "mock" / "training_curves.json"
+    assert os.path.exists(path)
+    payload = json.loads(path.read_text())
+
+    # k=2 folds x n_members=2 -> 4 trainings, each with a recorded curve.
+    assert len(payload["curves"]) == cfg.label_quality.k * cfg.label_quality.n_members
+    for curve in payload["curves"]:
+        assert curve["n_train"] > 0 and curve["n_holdout"] > 0
+        assert curve["history"], "each training must record at least one point"
+        point = curve["history"][-1]
+        # D8: train loss + held-out mIoU + per-class IoU.
+        assert {"step", "train_loss", "val_mIoU", "per_class_IoU"} <= set(point)
+        assert len(point["per_class_IoU"]) == _SynthSegBench.num_classes
+    # The hparams the curves were produced under travel with them.
+    assert payload["eval_every"] == 1
+    assert payload["k"] == cfg.label_quality.k
 
 
 def test_run_label_quality_resume_skips_training(tmp_path, monkeypatch):
@@ -804,3 +1205,181 @@ def test_run_label_quality_resume_skips_training(tmp_path, monkeypatch):
     lq_run.run_label_quality(cfg)  # must not raise (checkpoints reused)
 
     assert len(pd.read_csv(cfg.label_quality.output)) == n_first  # nothing re-appended
+
+
+def test_resume_skip_is_per_model(tmp_path, monkeypatch):
+    """A second backbone still writes its rows when the first already wrote that dataset.
+
+    Regression: the resume guard keyed on ``(dataset, method)`` alone, so in a
+    sharded sweep whose nodes share one CSV, the backbone that finished first
+    suppressed every other backbone's rows -- silently discarding a completed
+    OOF run.
+    """
+    import pandas as pd
+
+    from torchgeo_bench.label_quality import run as lq_run
+
+    ds = _synthetic_seg_dataset()
+    monkeypatch.setattr(lq_run, "_load_bench_dataset", lambda cfg, name: _SynthSegBench(ds))
+    monkeypatch.setattr(lq_run, "build_member_specs", _tiny_specs)
+
+    out = str(tmp_path / "shared.csv")
+
+    cfg_a = _lq_cfg(tmp_path, output=out)
+    cfg_a.model.name = "resnet50"
+    lq_run.run_label_quality(cfg_a)
+
+    # Same dataset + methods, different backbone, resume on -- as in a sweep.
+    cfg_b = _lq_cfg(tmp_path, output=out)
+    cfg_b.model.name = "convnext_base"
+    cfg_b.resume = True
+    lq_run.run_label_quality(cfg_b)
+
+    df = pd.read_csv(out)
+    assert set(df["model"]) == {"resnet50", "convnext_base"}
+    for model in ("resnet50", "convnext_base"):
+        methods = set(df[df["model"] == model]["method"])
+        assert methods == {"cleanlab", "aer"}, f"{model} missing methods: {methods}"
+
+    # And the same backbone twice is still a no-op (real resume still skips).
+    n_before = len(df)
+    lq_run.run_label_quality(cfg_b)
+    assert len(pd.read_csv(out)) == n_before
+
+
+# --- Slice 11: degeneracy detection ----------------------------------------
+
+
+def _collapsed_cell(n=40, h=32, w=32, m=5, fg_rate=0.05, seed=0):
+    """Rare-foreground labels (spacenet7-like) with every member predicting background."""
+    rng = np.random.default_rng(seed)
+    labels = torch.from_numpy((rng.random((n, h, w)) < fg_rate).astype(np.int64))
+    preds = torch.zeros(m, n, h, w, dtype=torch.uint8)
+    return labels, preds
+
+
+def test_min_class_coverage_flags_collapsed_cell():
+    """A majority-class collapse is flagged -- and provably clears the old mIoU gate."""
+    from torchgeo_bench.label_quality.aer_score import score
+    from torchgeo_bench.label_quality.degeneracy import cell_metrics, is_degenerate
+    from torchgeo_bench.label_quality.store import LOW_CAPACITY_THRESHOLD
+
+    labels, preds = _collapsed_cell()
+
+    metrics = cell_metrics(labels, preds, num_classes=2)
+    assert metrics["min_class_coverage"] == pytest.approx(0.0, abs=1e-9)
+    assert is_degenerate(metrics["min_class_coverage"], score_iqr=0.5)
+
+    # Why this gate exists: the pre-existing scalar guard passes this same cell.
+    # AER's macro-IoU is per image over classes present in that image's label, so
+    # a background-only predictor scores ~1 on background and ~0 on foreground.
+    image_scores, _ = score(labels, preds, [0, 1])
+    assert 1.0 - image_scores.mean() > LOW_CAPACITY_THRESHOLD
+
+
+def test_min_class_coverage_healthy_cell_not_flagged():
+    """Class imbalance alone does not trip the gate: coverage is GT-relative."""
+    from torchgeo_bench.label_quality.degeneracy import cell_metrics, is_degenerate
+
+    rng = np.random.default_rng(1)
+    n, h, w, m = 40, 32, 32, 5
+    # ~5% foreground, i.e. the same imbalance a raw majority-fraction test would
+    # false-positive on; members mostly agree with the label.
+    labels_np = (rng.random((n, h, w)) < 0.05).astype(np.int64)
+    preds_np = np.stack(
+        [np.where(rng.random((n, h, w)) < 0.9, labels_np, 1 - labels_np) for _ in range(m)]
+    )
+    labels = torch.from_numpy(labels_np)
+    preds = torch.from_numpy(preds_np.astype(np.uint8))
+
+    metrics = cell_metrics(labels, preds, num_classes=2)
+    assert metrics["min_class_coverage"] > 0.5
+    assert not is_degenerate(metrics["min_class_coverage"], score_iqr=0.5)
+
+
+def test_score_iqr_flags_near_constant_scores():
+    """The IQR arm fires alone: healthy coverage, but a ranking with no spread."""
+    from torchgeo_bench.label_quality.degeneracy import is_degenerate, score_iqr
+
+    rng = np.random.default_rng(2)
+    flat = 0.5 + rng.normal(0.0, 1e-4, 4000)
+    spread = rng.uniform(0.0, 1.0, 4000)
+
+    assert score_iqr(flat) < 0.01
+    assert score_iqr(spread) > 0.1
+    # Coverage is healthy in both cases, so only the IQR arm can differ.
+    assert is_degenerate(0.9, score_iqr(flat))
+    assert not is_degenerate(0.9, score_iqr(spread))
+
+
+def test_degeneracy_respects_ignore_index():
+    """A class living only under ``ignore_index`` never enters the present set."""
+    from torchgeo_bench.label_quality.degeneracy import class_mass_coverage
+
+    labels = torch.zeros(3, 10, 10, dtype=torch.long)
+    labels[:, 0, 0] = 1  # class 1 ...
+    labels[:, 0:3, 0:3] = 255  # ... is then fully covered by the ignore block
+    preds = torch.zeros(2, 3, 10, 10, dtype=torch.uint8)  # background only
+
+    min_coverage, coverage = class_mass_coverage(labels, preds, num_classes=2)
+
+    # Only class 0 is present, and the members predict it perfectly -> healthy.
+    assert coverage.shape[1] == 1
+    assert min_coverage == pytest.approx(1.0)
+
+
+def test_global_per_class_iou_min_below_macro_miou():
+    """Global per-class IoU exposes the collapse that AER's per-image macro hides."""
+    from torchgeo_bench.label_quality.aer_score import score
+    from torchgeo_bench.label_quality.degeneracy import global_per_class_iou
+
+    labels, preds = _collapsed_cell()
+
+    min_iou, per_class = global_per_class_iou(labels, preds, num_classes=2)
+    image_scores, _ = score(labels, preds, [0, 1])
+
+    assert min_iou == pytest.approx(0.0, abs=1e-9)  # foreground IoU is zero
+    assert per_class.max() > 0.9  # ... masked by a near-perfect background IoU
+    assert 1.0 - image_scores.mean() > 0.3  # which is why the macro mean clears 0.3
+
+
+def test_degeneracy_columns_written_per_method(tmp_path):
+    """Cell columns are constant across methods; ``score_iqr``/``degenerate`` are not."""
+    import pandas as pd
+
+    from torchgeo_bench.label_quality.store import write_results_csv
+
+    n = 20
+    path = tmp_path / "results.csv"
+    shared = {
+        "dataset": "spacenet7",
+        "model": "dinov3sat",
+        "member_set": "M5",
+        "n_flagged_pixels": np.arange(n),
+        "grouping_tier": "latlon_block",
+        "folds": np.arange(n) % 5,
+        "native_ids": None,
+        "k": 5,
+        "n_members": 5,
+        "seed": 0,
+        "bands": "rgb",
+        "partition": "default",
+        "low_capacity": False,
+        "min_class_coverage": 0.0,  # cell-level: same on both methods
+        "oof_per_class_iou_min": 0.0,
+    }
+    write_results_csv(
+        str(path), method="cleanlab", image_scores=np.linspace(0.0, 1.0, n),
+        score_iqr=0.4, degenerate=False, **shared,
+    )
+    write_results_csv(
+        str(path), method="aer", image_scores=np.full(n, 0.5),
+        score_iqr=0.0, degenerate=True, **shared,
+    )
+
+    df = pd.read_csv(str(path))
+    for column in ("min_class_coverage", "oof_per_class_iou_min"):
+        assert df[column].nunique() == 1, f"{column} must be cell-level"
+    assert set(df[df.method == "cleanlab"]["degenerate"]) == {False}
+    assert set(df[df.method == "aer"]["degenerate"]) == {True}
+    assert df[df.method == "aer"]["score_iqr"].iloc[0] == pytest.approx(0.0)

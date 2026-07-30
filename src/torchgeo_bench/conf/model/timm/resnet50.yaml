@@ -12,3 +12,16 @@ eval:
   segmentation:
     # Layers in coarse-to-fine order (deepest first) for FPN head.
     layers: ["layer4", "layer3", "layer2", "layer1"]
+    # Stage-1 hparam search winners (docs/plans/segmentation_hparam_search.md
+    # Phase 3, 126 trials). Best single (backbone_lr, head_lr) by mean final
+    # mIoU over all 6 datasets; per-dataset tuning would add only +0.0002,
+    # far inside the single-fold noise band, so one setting per model it is.
+    backbone_lr: 1.0e-4
+    head_lr: 1.0e-3
+    # Adopted-by-search batch size, NOT OOM-probed: the Phase 2 probe
+    # (scripts/probe_segmentation_batch_size.py, D5) was never run. Distinct from
+    # `batch_size`, which is the frozen cached-feature probe's and would OOM an
+    # unfrozen fine-tune.
+    # Known limit: 64 OOMs on spacenet2, which has no `auto_resize` here, so
+    # training runs at the native ~650px frame. That cell runs at 32.
+    finetune_batch_size: 64
