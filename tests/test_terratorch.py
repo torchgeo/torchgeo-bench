@@ -21,10 +21,10 @@ requires_terratorch = pytest.mark.skipif(
 pytestmark = [requires_terratorch]
 
 
-def _bands(names: list[str]) -> list[BandSpec]:
+def _bands(names: list[str], sensor: str = "s2") -> list[BandSpec]:
     return [
         BandSpec(
-            sensor="s2",
+            sensor=sensor,
             name=name,
             source_name=name.upper(),
             mean=0.2,
@@ -126,11 +126,10 @@ def test_terramind_full_s2l2a_no_band_selection(mock_registry):
     model.forward_patch_features(x)
     payload = mock_registry["instances"][-1].last_forward_input["S2L2A"]
     assert payload.shape == (1, 12, 224, 224)
-    assert torch.equal(payload, x)  # already in pretrained order
+    assert torch.equal(payload, x)
 
 
 def test_terramind_incomplete_s2l2a_uses_band_selection(mock_registry):
-    # so2sat-like: 10/12 S2L2A bands, no coastal/watervapor.
     names = ["b02", "b03", "b04", "b05", "b06", "b07", "b08", "b8a", "b11", "b12"]
     model = TerraTorchTerraMindBench(bands=_bands(names), normalization="identity")
     _, build_kwargs = mock_registry["build_calls"][0]
@@ -152,24 +151,21 @@ def test_terramind_incomplete_s2l2a_uses_band_selection(mock_registry):
     model.forward_patch_features(x)
     payload = mock_registry["instances"][-1].last_forward_input["S2L2A"]
     assert payload.shape == (2, 10, 224, 224)
-    # b8a (src index 7) lands in NIR_NARROW position (selected index 7 here too),
-    # but src is already pretrained-ordered for this layout, so identity mapping.
     assert torch.equal(payload, x)
 
 
 def test_terramind_native_rgb_modality_reorders_channels(mock_registry):
-    # Dataset stores blue, green, red — RGB modality expects RED, GREEN, BLUE.
     bands = _bands(["blue", "green", "red"])
     model = TerraTorchTerraMindBench(bands=bands, normalization="identity", modality="RGB")
     _, build_kwargs = mock_registry["build_calls"][0]
     assert build_kwargs["modalities"] == ["RGB"]
-    assert "bands" not in build_kwargs  # complete RGB set needs no selection
+    assert "bands" not in build_kwargs
     x = torch.rand(1, 3, 224, 224)
     model.forward_patch_features(x)
     payload = mock_registry["instances"][-1].last_forward_input["RGB"]
-    assert torch.equal(payload[:, 0], x[:, 2])  # red
-    assert torch.equal(payload[:, 1], x[:, 1])  # green
-    assert torch.equal(payload[:, 2], x[:, 0])  # blue
+    assert torch.equal(payload[:, 0], x[:, 2])
+    assert torch.equal(payload[:, 1], x[:, 1])
+    assert torch.equal(payload[:, 2], x[:, 0])
 
 
 def test_terramind_rgb_dataset_with_s2l2a_modality_selects_three_bands(mock_registry):
@@ -183,27 +179,16 @@ def test_terramind_rgb_dataset_with_s2l2a_modality_selects_three_bands(mock_regi
 
 
 def test_terramind_duplicate_canonical_names_prefer_s2(mock_registry):
-    # TreeSatAI-like: aerial RGB+NIR before the S2 channels.
-    aerial = [
-        BandSpec(sensor="aerial", name=n, source_name=n, mean=0.2, std=0.1, min=0.0, max=1.0)
-        for n in ["red", "green", "blue", "nir"]
-    ]
+    aerial = _bands(["red", "green", "blue", "nir"], sensor="aerial")
     s2 = _bands(["b02", "b03", "b04", "b08"])
     model = TerraTorchTerraMindBench(bands=aerial + s2, normalization="identity")
-    x = torch.zeros(1, 8, 224, 224)
-    for c in range(8):
-        x[:, c] = float(c)
+    x = torch.arange(8.0).view(1, 8, 1, 1).expand(1, 8, 224, 224)
     model.forward_patch_features(x)
     payload = mock_registry["instances"][-1].last_forward_input["S2L2A"]
-    # Selected order is pretrained order: BLUE, GREEN, RED, NIR_BROAD — all from S2.
-    assert torch.equal(payload[:, 0], x[:, 4])  # b02
-    assert torch.equal(payload[:, 1], x[:, 5])  # b03
-    assert torch.equal(payload[:, 2], x[:, 6])  # b04
-    assert torch.equal(payload[:, 3], x[:, 7])  # b08
+    assert torch.equal(payload, x[:, [4, 5, 6, 7]])
 
 
 def test_terramind_model_native_rgb_applies_pretraining_stats(mock_registry):
-    # uint8 aerial RGB (max=255): no unit conversion, stats applied directly.
     bands = [
         BandSpec(sensor="aerial", name=n, source_name=n, mean=120.0, std=50.0, min=0.0, max=255.0)
         for n in ["red", "green", "blue"]
@@ -211,18 +196,17 @@ def test_terramind_model_native_rgb_applies_pretraining_stats(mock_registry):
     model = TerraTorchTerraMindBench(bands=bands, normalization="model_native", modality="RGB")
     x = torch.full((1, 3, 4, 4), 100.0)
     out = model.normalize_inputs(x)
-    # TerraMind v1 RGB pretraining stats: RED (87.271, 58.767) at dataset channel 0.
+    # TerraMind v1 RGB pretraining stats: RED (87.271, 58.767), BLUE (66.667, 42.631)
     assert torch.allclose(out[:, 0], torch.full((1, 4, 4), (100.0 - 87.271) / 58.767), atol=1e-4)
     assert torch.allclose(out[:, 2], torch.full((1, 4, 4), (100.0 - 66.667) / 42.631), atol=1e-4)
 
 
 def test_terramind_model_native_s2l2a_converts_unit_then_zscores(mock_registry):
-    # Reflectance-scale S2 bands (max<=1): converted to DN (*10000) before stats.
     bands = _bands(["blue", "green", "red"])
     model = TerraTorchTerraMindBench(bands=bands, normalization="model_native")
     x = torch.full((1, 3, 4, 4), 0.15)
     out = model.normalize_inputs(x)
-    # S2L2A BLUE stats: mean 1503.317, std 2141.107; 0.15 -> 1500 DN.
+    # 0.15 reflectance -> 1500 DN; S2L2A BLUE pretraining stats (1503.317, 2141.107)
     assert torch.allclose(
         out[:, 0], torch.full((1, 4, 4), (1500.0 - 1503.317) / 2141.107), atol=1e-4
     )
@@ -236,10 +220,7 @@ def test_terramind_unsupported_modality_raises(mock_registry):
 
 
 def test_terramind_rgb_modality_without_rgb_bands_raises(mock_registry):
-    sar = [
-        BandSpec(sensor="sar", name=n, source_name=n, mean=0.2, std=0.1, min=0.0, max=1.0)
-        for n in ["vv", "vh"]
-    ]
+    sar = _bands(["vv", "vh"], sensor="sar")
     with pytest.raises(ValueError, match="none of the target bands"):
         TerraTorchTerraMindBench(bands=sar, normalization="identity", modality="RGB")
 

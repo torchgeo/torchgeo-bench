@@ -96,6 +96,14 @@ class TestMapToModelBands:
             return
         raise AssertionError("expected ValueError for channel-count mismatch")
 
+    def test_preferred_sensor_wins_slot(self) -> None:
+        src = [_band("red", sensor="aerial"), _band("B04")]
+        x = torch.zeros(1, 2, 2, 2)
+        x[:, 0] = 1.0
+        x[:, 1] = 2.0
+        out, _ = map_to_model_bands(x, src, ["red"], preferred_sensors=("s2",))
+        assert torch.equal(out[:, 0], x[:, 1])
+
 
 class TestSelectSrcBands:
     def test_full_match_preserves_target_order(self) -> None:
@@ -112,7 +120,6 @@ class TestSelectSrcBands:
         assert indices == [2, 1, 0]
 
     def test_duplicate_canonical_name_prefers_sensor(self) -> None:
-        # TreeSatAI layout: aerial red/green/blue/nir before the S2 bands.
         src = [
             _band("red", sensor="aerial"),
             _band("green", sensor="aerial"),
@@ -138,16 +145,6 @@ class TestSelectSrcBands:
         src = [_band("vv", sensor="sar"), _band("vh", sensor="sar")]
         with pytest.raises(ValueError, match="none of the target bands"):
             select_src_bands(src, ["red", "green", "blue"])
-
-
-class TestMapToModelBandsSensorPreference:
-    def test_preferred_sensor_wins_slot(self) -> None:
-        src = [_band("red", sensor="aerial"), _band("B04")]
-        x = torch.zeros(1, 2, 2, 2)
-        x[:, 0] = 1.0  # aerial red
-        x[:, 1] = 2.0  # s2 red
-        out, _ = map_to_model_bands(x, src, ["red"], preferred_sensors=("s2",))
-        assert torch.equal(out[:, 0], x[:, 1])
 
 
 class TestWavelengthsUm:

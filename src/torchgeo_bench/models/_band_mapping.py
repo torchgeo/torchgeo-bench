@@ -125,9 +125,8 @@ def select_src_bands(
 ) -> tuple[list[int], list[str]]:
     """Select source channel indices for the targets present in ``src_bands``.
 
-    Unlike :func:`map_to_model_bands` this never pads: missing targets are
-    dropped so callers can pass the surviving subset to a model-native
-    band-selection API.  Returns ``(indices, selected)`` in target order.
+    Missing targets are dropped rather than zero-filled.  Returns
+    ``(indices, selected)`` in target order.
     """
     src_index = resolve_src_indices(src_bands, preferred_sensors=preferred_sensors)
     indices: list[int] = []

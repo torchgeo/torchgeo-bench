@@ -199,15 +199,11 @@ _TERRAMIND_NATIVE_UNITS = {"S2L2A": InputUnit.S2_DN, "RGB": InputUnit.UINT8}
 class TerraTorchTerraMindBench(_TerraTorchBench):
     """TerraMind v1 — native modality input, ``{modality: (B, C, H, W)}``.
 
-    Dataset channels are matched to the modality's pretrained band layout by
-    canonical name, preferring Sentinel-2 when a name exists on several
-    sensors.  Incomplete band sets use TerraTorch's ``bands=`` patch-embed
-    selection instead of zero-filling.  RGB-only datasets should use
-    ``modality: RGB``, not an RGB subset of ``S2L2A``.
-
-    Under ``model_native``, inputs are converted to the modality's native
-    scale (S2 DN / uint8) and z-scored with TerraMind's published
-    per-modality pretraining mean/std.
+    Dataset bands are matched to the modality's pretrained layout by canonical
+    name (preferring Sentinel-2); missing bands use TerraTorch's ``bands=``
+    patch-embed selection rather than zero-fill.  RGB-only datasets should use
+    ``modality: RGB``.  Under ``model_native``, inputs are converted to the
+    modality's native scale and z-scored with TerraMind's pretraining stats.
     """
 
     expected_input_unit = InputUnit.REFLECTANCE_0_1
