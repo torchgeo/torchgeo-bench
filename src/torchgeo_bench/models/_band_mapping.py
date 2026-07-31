@@ -101,10 +101,8 @@ def resolve_src_indices(
 ) -> dict[str, int]:
     """Map each canonical band name to one source channel index.
 
-    When two source bands share a canonical name (e.g. TreeSatAI's aerial
-    ``red`` vs Sentinel-2 ``b04``), the band whose ``BandSpec.sensor``
-    appears earliest in ``preferred_sensors`` wins; ties keep the first
-    occurrence in ``src_bands``.
+    When two source bands share a canonical name, the sensor listed earliest
+    in ``preferred_sensors`` wins; ties keep the first occurrence.
     """
     best: dict[str, tuple[int, int]] = {}
     for i, b in enumerate(src_bands):
@@ -127,14 +125,9 @@ def select_src_bands(
 ) -> tuple[list[int], list[str]]:
     """Select source channel indices for the targets present in ``src_bands``.
 
-    Unlike :func:`map_to_model_bands` this never pads: targets with no
-    matching source band are simply dropped, so callers can hand the
-    surviving subset to a model-native band-selection API (e.g. TerraTorch's
-    ``bands=`` argument for TerraMind).
-
-    Returns ``(indices, selected)`` where ``indices[i]`` is the source
-    channel for ``selected[i]`` and ``selected`` preserves the order of
-    ``target_band_names``.
+    Unlike :func:`map_to_model_bands` this never pads: missing targets are
+    dropped so callers can pass the surviving subset to a model-native
+    band-selection API.  Returns ``(indices, selected)`` in target order.
     """
     src_index = resolve_src_indices(src_bands, preferred_sensors=preferred_sensors)
     indices: list[int] = []

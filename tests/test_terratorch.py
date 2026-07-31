@@ -202,6 +202,32 @@ def test_terramind_duplicate_canonical_names_prefer_s2(mock_registry):
     assert torch.equal(payload[:, 3], x[:, 7])  # b08
 
 
+def test_terramind_model_native_rgb_applies_pretraining_stats(mock_registry):
+    # uint8 aerial RGB (max=255): no unit conversion, stats applied directly.
+    bands = [
+        BandSpec(sensor="aerial", name=n, source_name=n, mean=120.0, std=50.0, min=0.0, max=255.0)
+        for n in ["red", "green", "blue"]
+    ]
+    model = TerraTorchTerraMindBench(bands=bands, normalization="model_native", modality="RGB")
+    x = torch.full((1, 3, 4, 4), 100.0)
+    out = model.normalize_inputs(x)
+    # TerraMind v1 RGB pretraining stats: RED (87.271, 58.767) at dataset channel 0.
+    assert torch.allclose(out[:, 0], torch.full((1, 4, 4), (100.0 - 87.271) / 58.767), atol=1e-4)
+    assert torch.allclose(out[:, 2], torch.full((1, 4, 4), (100.0 - 66.667) / 42.631), atol=1e-4)
+
+
+def test_terramind_model_native_s2l2a_converts_unit_then_zscores(mock_registry):
+    # Reflectance-scale S2 bands (max<=1): converted to DN (*10000) before stats.
+    bands = _bands(["blue", "green", "red"])
+    model = TerraTorchTerraMindBench(bands=bands, normalization="model_native")
+    x = torch.full((1, 3, 4, 4), 0.15)
+    out = model.normalize_inputs(x)
+    # S2L2A BLUE stats: mean 1503.317, std 2141.107; 0.15 -> 1500 DN.
+    assert torch.allclose(
+        out[:, 0], torch.full((1, 4, 4), (1500.0 - 1503.317) / 2141.107), atol=1e-4
+    )
+
+
 def test_terramind_unsupported_modality_raises(mock_registry):
     with pytest.raises(ValueError, match="Unsupported TerraMind modality"):
         TerraTorchTerraMindBench(

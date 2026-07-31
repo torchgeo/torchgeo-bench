@@ -1,6 +1,7 @@
 """TerraTorch backbone wrappers for torchgeo-bench."""
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -10,7 +11,8 @@ import torch.nn.functional as F
 from torchgeo_bench.datasets.base import BandSpec
 
 from ._band_mapping import map_to_model_bands, select_src_bands
-from ._input_units import InputUnit
+from ._input_units import InputUnit, convert_unit, detect_input_unit
+from ._normalization import NormalizationStrategy
 from ._pooling import VALID_MODES, pool_tokens
 from .interface import BenchModel
 
@@ -169,8 +171,7 @@ class TerraTorchClayBench(_TerraTorchBench):
         )
 
 
-# Canonical short name -> TerraTorch pretrained band token, in each
-# modality's pretrained channel order (terramind_register.PRETRAINED_BANDS).
+# Canonical name -> TerraTorch band token, in pretrained channel order.
 TERRAMIND_MODALITY_BANDS: dict[str, dict[str, str]] = {
     "S2L2A": {
         "coastal": "COASTAL_AEROSOL",
@@ -191,18 +192,22 @@ TERRAMIND_MODALITY_BANDS: dict[str, dict[str, str]] = {
 
 TERRAMIND_S2L2A_BANDS: list[str] = list(TERRAMIND_MODALITY_BANDS["S2L2A"])
 
+_TERRAMIND_MODALITY_KEYS = {"S2L2A": "untok_sen2l2a@224", "RGB": "untok_sen2rgb@224"}
+_TERRAMIND_NATIVE_UNITS = {"S2L2A": InputUnit.S2_DN, "RGB": InputUnit.UINT8}
+
 
 class TerraTorchTerraMindBench(_TerraTorchBench):
     """TerraMind v1 — native modality input, ``{modality: (B, C, H, W)}``.
 
     Dataset channels are matched to the modality's pretrained band layout by
-    canonical name (Sentinel-2 bands preferred when a name is ambiguous
-    across sensors, e.g. TreeSatAI aerial vs S2 ``red``).  When only a
-    subset of the pretrained bands is available, the backbone is built with
-    TerraTorch's ``bands=`` argument, which selects the matching pretrained
-    patch-embedding channels instead of zero-filling absent bands.  RGB-only
-    datasets should use ``modality: RGB`` (the dedicated ``untok_sen2rgb``
-    adapter), not an RGB subset of ``S2L2A``.
+    canonical name, preferring Sentinel-2 when a name exists on several
+    sensors.  Incomplete band sets use TerraTorch's ``bands=`` patch-embed
+    selection instead of zero-filling.  RGB-only datasets should use
+    ``modality: RGB``, not an RGB subset of ``S2L2A``.
+
+    Under ``model_native``, inputs are converted to the modality's native
+    scale (S2 DN / uint8) and z-scored with TerraMind's published
+    per-modality pretraining mean/std.
     """
 
     expected_input_unit = InputUnit.REFLECTANCE_0_1
@@ -237,6 +242,33 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         self.modality = modality
         self.model_bands = selected
         self._band_indices = indices
+        if self.normalization is NormalizationStrategy.MODEL_NATIVE:
+            self._normalizer = self._pretrain_normalizer()
+
+    def _pretrain_normalizer(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        """z-score with TerraMind's per-modality pretraining statistics."""
+        from terratorch.models.backbones.terramind.model.terramind_register import (
+            v1_pretraining_mean,
+            v1_pretraining_std,
+        )
+
+        key = _TERRAMIND_MODALITY_KEYS[self.modality]
+        src = detect_input_unit(self.bands)
+        native = _TERRAMIND_NATIVE_UNITS[self.modality]
+        order = list(TERRAMIND_MODALITY_BANDS[self.modality])
+        n = len(self.bands)
+        mean = torch.zeros(1, n, 1, 1)
+        std = torch.ones(1, n, 1, 1)
+        for name, ds_idx in zip(self.model_bands, self._band_indices):
+            pos = order.index(name)
+            mean[0, ds_idx] = v1_pretraining_mean[key][pos]
+            std[0, ds_idx] = v1_pretraining_std[key][pos]
+
+        def _f(x: torch.Tensor) -> torch.Tensor:
+            x = convert_unit(x, src, native)
+            return (x - mean.to(x.device, x.dtype)) / std.to(x.device, x.dtype)
+
+        return _f
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
