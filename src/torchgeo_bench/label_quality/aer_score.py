@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def score(
     labels: torch.Tensor | np.ndarray,
-    member_stack: torch.Tensor | np.ndarray,
+    member_preds: torch.Tensor | np.ndarray,
     present_classes: Iterable[int] | None = None,
     *,
     ignore_index: int = 255,
@@ -33,8 +33,10 @@ def score(
     Args:
         labels: Integer masks ``(N, H, W)`` with values in ``0..C-1`` or
             ``ignore_index``.
-        member_stack: Per-member softmax ``(M, N, C, H, W)`` (typically
-            ``OOFResult.member_stack``). Only the argmax is used.
+        member_preds: Per-member **hard predictions** ``(M, N, H, W)`` (typically
+            ``OOFResult.member_preds``, uint8 argmax). A full ``(M, N, C, H, W)``
+            softmax stack is also accepted for backward compatibility, in which
+            case the argmax over the class axis is taken here.
         present_classes: Universe of valid class ids to consider. Per image the
             macro mean is taken over the intersection of this set with the classes
             actually present in the label. ``None`` uses all classes in the label.
@@ -49,8 +51,9 @@ def score(
           ignored pixels).
     """
     labels_t = _as_long_tensor(labels)
-    stack_t = _as_tensor(member_stack)
-    preds = stack_t.argmax(dim=2)  # (M, N, H, W) hard predictions
+    preds = _as_long_tensor(member_preds)
+    if preds.ndim == 5:  # (M, N, C, H, W) softmax stack -> hard predictions
+        preds = preds.argmax(dim=2)
 
     n = labels_t.shape[0]
     allowed = None if present_classes is None else {int(c) for c in present_classes}

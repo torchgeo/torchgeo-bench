@@ -255,6 +255,60 @@ def save_training_curves(
     return path
 
 
+def save_per_class_diagnostics(
+    root: str, dataset: str, model_slug: str, cell: dict, **metadata
+) -> str:
+    """Write one cell's per-class degeneracy detail as JSON.
+
+    The CSV carries only the two *minima* (``min_class_coverage``,
+    ``oof_per_class_iou_min``), which say that a cell collapsed but not which
+    classes died — and that distinction is the whole diagnosis: collapse
+    concentrated in the rarest class while common classes hold up points at the
+    training objective, whereas uniformly mediocre IoU points at capacity or the
+    probing head instead.
+
+    JSON rather than new CSV columns because the vectors are variable length
+    (2–13 present classes across these datasets) and ``coverage`` is 2-D
+    ``(members × classes)``; neither fits a fixed tidy schema.
+
+    Args:
+        root: Results root (the directory holding the results CSV).
+        dataset: Dataset name.
+        model_slug: Sanitized model slug.
+        cell: The dict returned by :func:`degeneracy.cell_metrics`.
+        **metadata: Extra scalars to record alongside (e.g. ``num_classes``).
+
+    Returns:
+        The path written.
+    """
+    dest = os.path.join(root, "label_quality", dataset, model_slug)
+    os.makedirs(dest, exist_ok=True)
+    path = os.path.join(dest, "per_class_iou.json")
+    payload = {
+        **metadata,
+        "dataset": dataset,
+        "model": model_slug,
+        **{k: _jsonable(v) for k, v in cell.items()},
+    }
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    return path
+
+
+def _jsonable(value):
+    """Coerce numpy scalars/arrays to JSON-serializable Python types.
+
+    ``json`` cannot encode ``np.float64`` or ``ndarray``, and NaN round-trips
+    through ``json`` as the non-standard ``NaN`` literal, which Python's own
+    decoder reads back correctly — the diagnostic is read by this repo only.
+    """
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.floating, np.integer)):
+        return value.item()
+    return value
+
+
 def load_pixel_artifact(
     root: str, dataset: str, model_slug: str, method: str, image_id_str: str
 ) -> dict:

@@ -1,6 +1,6 @@
-# ViT-Large Patch16 224
+# DINOv3 ViT-Large Patch16, SAT-493M pretraining
 # Feature dimension: 1024
-# Model: vit_large_patch16_224
+# Model: vit_large_patch16_dinov3.sat493m
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
 model_name: vit_large_patch16_dinov3.sat493m
@@ -10,3 +10,25 @@ seed: null
 name: vit_large_patch16_dinov3sat
 auto_resize: true
 use_cls_token: false
+eval:
+  segmentation:
+    # 24 blocks, not the 12 of a ViT-Base, so the base taps (2/5/8/11) would
+    # sample only the first half of the network. These are the same quarter
+    # points, scaled: coarse-to-fine order for DPT.
+    layers: ["blocks.5", "blocks.11", "blocks.17", "blocks.23"]
+    # Single-resolution token stream like any plain ViT: all four taps are the
+    # same grid, so DPT's skip interpolations are no-ops and the value is the
+    # 3x3 ResidualConvUnit mixing that breaks up the patch lattice.
+    head_type: dpt
+    # Stage-1 hparam search winners (docs/plans/segmentation_hparam_search.md
+    # Phase 3, 126 trials). Best single (backbone_lr, head_lr) by mean final
+    # mIoU over all 6 datasets; per-dataset tuning would add only +0.0035,
+    # inside the single-fold noise band, so one setting per model it is.
+    # Note the backbone_lr is 100x lower than the other three backbones: this
+    # is a ViT-Large with satellite pretraining, and the search preferred
+    # leaving it nearly frozen. It won 4 of the 6 datasets outright.
+    # Only the head_lr=1e-3 column was searched (3 trials/cell, by design).
+    backbone_lr: 1.0e-6
+    head_lr: 1.0e-3
+    # ViT-Large: half the batch of the other backbones to fit in memory.
+    finetune_batch_size: 32

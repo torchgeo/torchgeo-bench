@@ -262,33 +262,55 @@ class SegmentationProbe(nn.Module):
         self.backbone.train(was_training)
         return channels
 
+    def _num_prefix_tokens(self) -> int:
+        """Number of non-patch tokens the backbone prepends to its token stream.
+
+        A plain ViT prepends one CLS token, but DINOv3 also carries register
+        tokens (``num_prefix_tokens=5``: 1 CLS + 4 registers), so assuming a
+        single prefix token silently mis-grids those models — or, at 224px,
+        fails to grid them at all (196+5=201 is neither square nor square+1).
+        timm exposes the true count; fall back to 1 for the CLS-only case.
+        """
+        inner = getattr(self.backbone, "backbone", self.backbone)
+        n = getattr(inner, "num_prefix_tokens", None)
+        if n is None:
+            n = 1 if any(hasattr(inner, a) for a in ("cls_token", "dist_token")) else 0
+        return int(n)
+
     def _process_feature(self, feat: torch.Tensor) -> torch.Tensor:
         if feat.ndim == 2:
             return feat.view(feat.shape[0], feat.shape[1], 1, 1)
         if feat.ndim == 3:
             # Handle transformer token features in either (B, L, C) or (B, C, L) layout.
-            # Prefer exact square token grids; if L-1 is square, drop CLS token.
+            # Prefer exact square token grids; otherwise drop the backbone's prefix
+            # tokens (CLS + any registers) and retry.
             bsz, d1, d2 = feat.shape
+            n_prefix = self._num_prefix_tokens()
 
             # Try (B, L, C)
             side = math.isqrt(d1)
             if side * side == d1:
                 return feat.permute(0, 2, 1).reshape(bsz, d2, side, side)
-            side_no_cls = math.isqrt(d1 - 1) if d1 > 1 else 0
-            if side_no_cls * side_no_cls == d1 - 1:
-                return feat[:, 1:, :].permute(0, 2, 1).reshape(bsz, d2, side_no_cls, side_no_cls)
+            side_no_pre = math.isqrt(d1 - n_prefix) if d1 > n_prefix else 0
+            if side_no_pre * side_no_pre == d1 - n_prefix:
+                return (
+                    feat[:, n_prefix:, :]
+                    .permute(0, 2, 1)
+                    .reshape(bsz, d2, side_no_pre, side_no_pre)
+                )
 
             # Try (B, C, L)
             side = math.isqrt(d2)
             if side * side == d2:
                 return feat.reshape(bsz, d1, side, side)
-            side_no_cls = math.isqrt(d2 - 1) if d2 > 1 else 0
-            if side_no_cls * side_no_cls == d2 - 1:
-                return feat[:, :, 1:].reshape(bsz, d1, side_no_cls, side_no_cls)
+            side_no_pre = math.isqrt(d2 - n_prefix) if d2 > n_prefix else 0
+            if side_no_pre * side_no_pre == d2 - n_prefix:
+                return feat[:, :, n_prefix:].reshape(bsz, d1, side_no_pre, side_no_pre)
 
             raise ValueError(
                 "Could not reshape 3D feature map to 2D grid. "
-                f"Got shape={tuple(feat.shape)}. Expected tokens with L=s^2 or L=s^2+1 (CLS)."
+                f"Got shape={tuple(feat.shape)} with num_prefix_tokens={n_prefix}. "
+                "Expected tokens with L=s^2 or L=s^2+num_prefix_tokens."
             )
         # 4D tensor: NCHW (standard) or NHWC (Swin-family).
         # Detect NHWC: spatial dims are square (H==W) and channel dim (last) is

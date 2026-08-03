@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import re
 
@@ -76,10 +77,48 @@ def is_degenerate(sub: pd.DataFrame) -> bool:
     Legacy CSVs predate the column entirely; a missing column and a NaN both mean
     *unknown*, which is reported as not-degenerate but is never evidence of
     health. Only an explicit ``True`` suppresses a cell.
+
+    A NaN inside a CSV that *does* carry the column is a different animal: it
+    means the file mixes rows from before and after the gate landed, so this
+    cell's health was never measured. Silently reading that as healthy is how a
+    collapsed cell reaches a headline number, so it is warned about loudly here
+    and fixed at the source by ``scripts/clean_label_quality_csv.py``.
     """
     if "degenerate" not in sub.columns:
         return False
-    return bool(sub["degenerate"].fillna(False).astype(bool).any())
+    column = sub["degenerate"]
+    unknown = int(column.isna().sum())
+    if unknown:
+        logging.warning(
+            "Cell %s: %d/%d rows have an unknown `degenerate` (pre-gate rows in an "
+            "append-only CSV). Treating them as not-degenerate, which is NOT evidence "
+            "of health -- run scripts/clean_label_quality_csv.py.",
+            _cell_label(sub), unknown, len(column),
+        )
+    # `astype(bool)` on an object column would make the string "False" truthy, so
+    # map the CSV's string round-trip explicitly before falling back to fillna.
+    flags = column.map(_as_flag)
+    return bool(flags.fillna(False).astype(bool).any())
+
+
+def _as_flag(value) -> bool | float:
+    """Coerce one CSV ``degenerate`` cell to a bool, leaving unknowns as NaN."""
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1"}:
+            return True
+        if text in {"false", "0", ""}:
+            return False
+        return float("nan")
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return float("nan")
+    return bool(value)
+
+
+def _cell_label(sub: pd.DataFrame) -> str:
+    """Best-effort "(model, dataset)" label for a warning message."""
+    parts = [str(sub[c].iloc[0]) for c in ("model", "dataset") if c in sub.columns and len(sub)]
+    return "/".join(parts) if parts else "<unknown>"
 
 
 def summary_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -262,7 +301,9 @@ def main() -> None:
         flagged += [(m, d, s, "low_capacity (OOF-mIoU below threshold)")
                     for m, d, s in set(zip(lowcap.model, lowcap.dataset, lowcap.member_set))]
     if "degenerate" in df.columns:
-        degen = df[df.degenerate.fillna(False).astype(bool)]
+        # Via `_as_flag` so a CSV round-trip's literal "False" string does not
+        # read as truthy on an object-dtype column.
+        degen = df[df.degenerate.map(_as_flag).fillna(False).astype(bool)]
         flagged += [(m, d, s, "degenerate (collapsed predictor / no rank spread)")
                     for m, d, s in set(zip(degen.model, degen.dataset, degen.member_set))]
     if flagged:

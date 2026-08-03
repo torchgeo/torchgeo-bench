@@ -97,6 +97,21 @@ eval:
       _target_: torch.nn.CrossEntropyLoss
       ignore_index: 255
     lr_scheduler: "cosine"  # "cosine" (CosineAnnealingLR) or "none"
+    # Per-model fixed-budget fine-tuning overrides for mode=label_quality. Left
+    # null here so the global `label_quality.*` values apply; a model config that
+    # sets one (from scripts/run_segmentation_hparam_search.py, see
+    # docs/plans/segmentation_hparam_search.md) overrides the global for that
+    # model only. Unused by the frozen mainline segmentation path above.
+    # NOTE: the loader batch size is `finetune_batch_size`, NOT `batch_size`
+    # above — that one is the frozen cached-feature probe batch size (64), a
+    # different quantity entirely. An unfrozen fine-tune holds activations for
+    # backward through the whole backbone, so its ceiling is several times lower.
+    backbone_lr: null
+    head_lr: null
+    weight_decay: null
+    max_steps: null
+    epoch_cap: null
+    finetune_batch_size: null
     # Feature caching: run frozen backbone once, cache features to RAM for head training
     cache_features: true        # pre-extract backbone features (large speedup for ViT)
     cache_dtype: "float16"      # storage dtype: "float16" (half RAM) or "float32"

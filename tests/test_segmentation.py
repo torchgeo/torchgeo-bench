@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 import torch.nn as nn
@@ -32,6 +34,26 @@ class MockBackbone(nn.Module):
         return x
 
 
+class BatchNormBackbone(nn.Module):
+    """Backbone carrying BatchNorm, so train/eval mode is observable in behavior."""
+
+    def __init__(self):
+        super().__init__()
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, padding=1, stride=2),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+        )
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=3, padding=1, stride=2),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        return self.layer2(self.layer1(x))
+
+
 class WrappedBackbone(nn.Module):
     """Backbone whose layers are nested under a 'backbone' attribute, as in BenchModel wrappers."""
 
@@ -57,6 +79,30 @@ class ViTBackbone(nn.Module):
         x = x.flatten(2).transpose(1, 2)  # (B, H*W, C) = (B, L, C)
         x = self.blocks(x)
         return x
+
+
+class ViTRegisterBackbone(nn.Module):
+    """ViT emitting CLS + 4 register tokens ahead of the patch tokens, like DINOv3."""
+
+    num_prefix_tokens = 5
+
+    def __init__(self):
+        super().__init__()
+        # Embed dim is deliberately NOT a perfect square: a square C lets the
+        # (B, C, L) fallback branch "succeed" on a (B, L, C) tensor and silently
+        # mis-grid the tokens, which would mask the bug this fixture exists for.
+        self.patch_embed = nn.Conv2d(3, 24, kernel_size=16, stride=16)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, 24))
+        self.reg_token = nn.Parameter(torch.zeros(1, 4, 24))
+        self.blocks = nn.Identity()
+
+    def forward(self, x):
+        x = self.patch_embed(x)  # (B, 16, H/16, W/16)
+        B = x.shape[0]
+        x = x.flatten(2).transpose(1, 2)  # (B, L, C)
+        prefix = torch.cat([self.cls_token, self.reg_token], dim=1).expand(B, -1, -1)
+        x = torch.cat([prefix, x], dim=1)  # (B, 5 + L, C)
+        return self.blocks(x)
 
 
 class TwoChannelBackbone(nn.Module):
@@ -270,8 +316,171 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
     metrics = solver.evaluate(loader)
 
     assert isinstance(metrics, dict)
-    assert set(metrics.keys()) == {"mIoU", "fw_IoU", "precision", "recall", "f1"}
+    assert set(metrics.keys()) == {
+        "mIoU",
+        "fw_IoU",
+        "per_class_IoU",
+        "precision",
+        "recall",
+        "f1",
+    }
     assert 0.0 <= metrics["mIoU"] <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Training stability: gradient clipping + non-finite guard
+# ---------------------------------------------------------------------------
+
+
+def _stability_solver(mock_backbone, **kwargs):
+    probe = SegmentationProbe(
+        backbone=mock_backbone, layer_names=["layer1", "layer2"], num_classes=NUM_CLASSES
+    )
+    return SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu", **kwargs)
+
+
+def test_train_on_batch_clips_gradients(mock_backbone, dummy_data, monkeypatch):
+    """Gradients are clipped to max_grad_norm before the optimizer steps."""
+    solver = _stability_solver(mock_backbone, max_grad_norm=1.0)
+
+    observed = {}
+    real_clip = torch.nn.utils.clip_grad_norm_
+
+    def recording_clip(params, max_norm, **kw):
+        params = list(params)
+        total = real_clip(params, max_norm, **kw)
+        observed["max_norm"] = max_norm
+        # Norm *after* clipping is what actually reaches the optimizer.
+        observed["after"] = torch.nn.utils.get_total_norm(
+            [p.grad for p in params if p.grad is not None]
+        ).item()
+        return total
+
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", recording_clip)
+
+    # A large-loss batch: without clipping this produces a big gradient norm.
+    batch = (dummy_data["image"], dummy_data["mask"])
+    solver.model.train()
+    solver._train_on_batch(batch)
+
+    assert observed["max_norm"] == 1.0
+    assert observed["after"] <= 1.0 + 1e-4
+
+
+def test_clipping_happens_after_unscale(mock_backbone, dummy_data, monkeypatch):
+    """Clipping must land between scaler.unscale_ and scaler.step.
+
+    Clipping still-scaled gradients would threshold against the GradScaler's
+    current scale factor — an effectively random magnitude that changes whenever
+    the scaler backs off. CPU tests run with AMP disabled, so the ordering is
+    asserted against a recording stand-in scaler rather than requiring a GPU.
+    """
+    solver = _stability_solver(mock_backbone, max_grad_norm=1.0)
+
+    order = []
+
+    class RecordingScaler:
+        def scale(self, loss):
+            order.append("scale")
+            return loss
+
+        def unscale_(self, optimizer):
+            order.append("unscale_")
+
+        def step(self, optimizer):
+            order.append("step")
+            optimizer.step()
+
+        def update(self, *args):
+            order.append("update")
+
+    solver.scaler = RecordingScaler()
+
+    real_clip = torch.nn.utils.clip_grad_norm_
+    monkeypatch.setattr(
+        torch.nn.utils,
+        "clip_grad_norm_",
+        lambda p, max_norm, **k: (order.append("clip"), real_clip(p, max_norm, **k))[1],
+    )
+
+    solver.model.train()
+    solver._train_on_batch((dummy_data["image"], dummy_data["mask"]))
+
+    assert order == ["scale", "unscale_", "clip", "step", "update"]
+
+
+def test_train_on_batch_clipping_can_be_disabled(mock_backbone, dummy_data, monkeypatch):
+    """max_grad_norm=None skips clipping entirely."""
+    solver = _stability_solver(mock_backbone, max_grad_norm=None)
+
+    called = []
+    monkeypatch.setattr(
+        torch.nn.utils,
+        "clip_grad_norm_",
+        lambda *a, **k: called.append(True),
+    )
+
+    solver.model.train()
+    solver._train_on_batch((dummy_data["image"], dummy_data["mask"]))
+
+    assert called == []
+
+
+def test_train_on_batch_raises_on_non_finite_loss(mock_backbone, dummy_data):
+    """A NaN loss raises NonFiniteLossError instead of poisoning the optimizer."""
+    from torchgeo_bench.segmentation_task import NonFiniteLossError
+
+    solver = _stability_solver(mock_backbone)
+
+    class NanCriterion(nn.Module):
+        def forward(self, logits, masks):
+            return logits.sum() * float("nan")
+
+    solver.criterion = NanCriterion()
+    solver.model.train()
+
+    with pytest.raises(NonFiniteLossError, match="Non-finite training loss"):
+        solver._train_on_batch((dummy_data["image"], dummy_data["mask"]))
+
+
+def test_non_finite_loss_raised_before_optimizer_is_touched(mock_backbone, dummy_data):
+    """The guard fires before any state reaches AdamW.
+
+    This is the whole point of catching at the first occurrence: once a
+    non-finite value lands in exp_avg/exp_avg_sq, every later step is poisoned.
+    """
+    from torchgeo_bench.segmentation_task import NonFiniteLossError
+
+    solver = _stability_solver(mock_backbone)
+
+    class NanCriterion(nn.Module):
+        def forward(self, logits, masks):
+            return logits.sum() * float("nan")
+
+    solver.criterion = NanCriterion()
+    solver.model.train()
+
+    with pytest.raises(NonFiniteLossError):
+        solver._train_on_batch((dummy_data["image"], dummy_data["mask"]))
+
+    # AdamW populates per-parameter state lazily on its first step; an empty
+    # state dict proves no step ran on the non-finite loss.
+    assert all(not st for st in solver.optimizer.state.values())
+
+
+def test_fit_cached_is_not_clipped(mock_backbone, dummy_data, monkeypatch):
+    """fit_cached is deliberately untouched: clipping it would invalidate the LP sweep."""
+    solver = _stability_solver(mock_backbone, max_grad_norm=1.0)
+
+    called = []
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", lambda *a, **k: called.append(True))
+
+    features = [torch.randn(4, c, 8, 8) for c in solver.model.channels_list]
+    masks = torch.randint(0, NUM_CLASSES, (4, 8, 8))
+    cached = CachedFeaturesDataset(features, masks)
+    solver.fit_cached(cached, epochs=1, batch_size=2, verbose=False)
+
+    assert called == []
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +584,22 @@ def test_probe_vit_token_features():
     images = torch.randn(2, 3, 64, 64)
     logits = probe(images)
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
+
+
+def test_probe_vit_register_token_features():
+    """A DINOv3-style backbone with CLS + register tokens grids on num_prefix_tokens.
+
+    Assuming a single CLS token leaves L=s^2+5 matching neither the square nor
+    the square+1 branch, so these models previously failed to grid at all.
+    """
+    backbone = ViTRegisterBackbone()
+    probe = make_probe(backbone, ["blocks"], head_type="linear")
+    images = torch.randn(2, 3, 64, 64)
+    logits = probe(images)
+    assert logits.shape == (2, NUM_CLASSES, 64, 64)
+    # feature_hw_list comes from the 224px dry run: 224/16 = 14, so the 5 prefix
+    # tokens must have been dropped off a 201-token stream to leave a 14x14 grid.
+    assert probe.feature_hw_list == [(14, 14)]
 
 
 def test_probe_dry_run_uses_backbone_num_channels():
@@ -512,6 +737,63 @@ def test_probe_dpt_wrong_num_layers():
         make_probe(backbone, layers=["layer1", "layer2"], head_type="dpt", hidden_dim=16)
 
 
+def test_dpt_fusion_layer_shim_matches_reference():
+    """The SimpleNamespace shim still satisfies the reference fusion layer's config API.
+
+    ``DPTFeatureFusionLayer`` is a private ``transformers`` API with no stability
+    guarantee. This asserts the four structural properties we depend on, so a
+    breaking upstream bump fails loudly here instead of silently changing the
+    decoder's arithmetic.
+    """
+    pytest.importorskip("transformers")
+    from transformers.models.dpt.modeling_dpt import DPTPreActResidualLayer
+
+    from torchgeo_bench.models.segmentation_heads import _dpt_fusion_layer
+
+    layer = _dpt_fusion_layer(16)
+
+    # 1. Post-fusion 1x1 projection is present (absent from the old implementation).
+    assert isinstance(layer.projection, nn.Conv2d)
+    assert layer.projection.kernel_size == (1, 1)
+
+    # 2. Both residual units are pre-activation (relu -> conv -> relu -> conv).
+    assert isinstance(layer.residual_layer1, DPTPreActResidualLayer)
+    assert isinstance(layer.residual_layer2, DPTPreActResidualLayer)
+
+    # 3. Each fusion layer upsamples 2x internally.
+    out = layer(torch.randn(1, 16, 7, 7))
+    assert out.shape == (1, 16, 14, 14)
+
+    # 4. A mismatched skip is resized to the primary input, not the reverse.
+    out = layer(torch.randn(1, 16, 7, 7), torch.randn(1, 16, 3, 3))
+    assert out.shape == (1, 16, 14, 14)
+
+
+def test_dpt_head_upsamples_purely_through_fusion_cascade():
+    """Four fusion layers take a 14x14 ViT token grid to 224x224 exactly.
+
+    The faithful cascade supplies all upsampling itself, so the head no longer
+    needs the pre-projection 2x and terminal 4x interpolations. With input_h/w
+    already at 224 the trailing resize is a no-op, which is what makes this a
+    regression test on the schedule rather than on the final ``F.interpolate``.
+    """
+    pytest.importorskip("transformers")
+    from torchgeo_bench.models.segmentation_heads import DPTHead
+
+    head = DPTHead([32, 32, 32, 32], num_classes=NUM_CLASSES, hidden_dim=16)
+    features = [torch.randn(1, 32, 14, 14) for _ in range(4)]
+
+    # Intercept the cascade output before out_conv / the final resize.
+    projected = [conv(norm(f)) for norm, conv, f in zip(head.input_norms, head.convs, features)]
+    fused = head.ref[0](projected[0])
+    for layer, feat in zip(head.ref[1:], projected[1:]):
+        fused = layer(fused, feat)
+    assert fused.shape[-2:] == (224, 224)
+
+    logits = head(features, 224, 224)
+    assert logits.shape == (1, NUM_CLASSES, 224, 224)
+
+
 # ---------------------------------------------------------------------------
 # Probe: PatchLinear head
 # ---------------------------------------------------------------------------
@@ -548,6 +830,38 @@ def test_patch_linear_head_non_exact_size():
 
     assert logits.shape == (2, 3, 65, 65)
     assert torch.isfinite(logits).all()
+
+
+def test_patch_linear_head_size_robust_across_calls():
+    """The decode factor is fixed on the first call and reused at a different native size.
+
+    Regression for the auto-resize ViT path: a fixed-224 ViT is dry-run at the
+    224 model frame (grid 14 -> P=16), then scores 650px tiles (native frame).
+    The head must not re-derive P from 650/14 and must still emit native-frame
+    logits — the trailing interpolate absorbs the size difference.
+    """
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    head = PatchLinearHead([8], num_classes=3)
+    # First (dry-run) call at the model frame fixes P = 224/14 = 16.
+    _ = head([torch.randn(1, 8, 14, 14)], 224, 224)
+    assert head.patch_size == 16
+
+    # A subsequent call at a larger native frame must not raise and must reuse P.
+    logits = head([torch.randn(2, 8, 14, 14)], 650, 650)
+    assert head.patch_size == 16  # unchanged
+    assert logits.shape == (2, 3, 650, 650)
+    assert torch.isfinite(logits).all()
+
+
+def test_patch_linear_head_explicit_decode_patch_size():
+    """An explicit decode_patch_size pins P regardless of the token grid / input."""
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    head = PatchLinearHead([8], num_classes=3, decode_patch_size=16)
+    logits = head([torch.randn(2, 8, 14, 14)], 650, 650)
+    assert head.patch_size == 16
+    assert logits.shape == (2, 3, 650, 650)
 
 
 def test_patch_linear_head_ignores_extra_channels():
@@ -806,6 +1120,163 @@ def test_solver_fixed_step_budget(mock_backbone, dummy_data):
     solver.fit(loader, max_steps=3, verbose=False)
 
     assert step_count == 3
+
+
+def test_fixed_budget_uninstrumented_records_no_history(mock_backbone, dummy_data):
+    """Without eval_every the fixed-budget path stays silent: no history, no val passes."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    eval_calls = 0
+    real_evaluate = solver.evaluate
+
+    def counting_evaluate(*args, **kwargs):
+        nonlocal eval_calls
+        eval_calls += 1
+        return real_evaluate(*args, **kwargs)
+
+    solver.evaluate = counting_evaluate
+    # A val_loader alone must not trigger evaluation — eval_every gates it.
+    result = solver.fit(loader, val_loader=loader, max_steps=3, verbose=False)
+
+    assert eval_calls == 0
+    assert solver.history == []
+    assert solver.val_history == []
+    assert result is None
+
+
+def test_fixed_budget_history_records_curve(mock_backbone, dummy_data):
+    """eval_every populates history with (step, train_loss, val_mIoU, per_class_IoU)."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)  # 1 batch/epoch
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    last = solver.fit(loader, val_loader=loader, max_steps=6, eval_every=2, verbose=False)
+
+    # Evaluations at steps 2, 4, 6 — the final step coincides with an eval_every
+    # multiple, so it must not be recorded twice.
+    assert [h["step"] for h in solver.history] == [2, 4, 6]
+    assert all(len(h["per_class_IoU"]) == NUM_CLASSES for h in solver.history)
+    assert all(math.isfinite(h["train_loss"]) for h in solver.history)
+    assert solver.val_history == [h["val_mIoU"] for h in solver.history]
+    assert last == solver.history[-1]["val_mIoU"]
+
+
+def test_fixed_budget_always_evaluates_final_step(mock_backbone, dummy_data):
+    """The final step is always recorded, even when it is not an eval_every multiple."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    solver.fit(loader, val_loader=loader, max_steps=5, eval_every=2, verbose=False)
+
+    assert [h["step"] for h in solver.history] == [2, 4, 5]
+
+
+def test_fixed_budget_step_callback_prunes(mock_backbone, dummy_data):
+    """A step_callback returning True stops training at that evaluation."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    step_count = 0
+    real_step = solver.optimizer.step
+
+    def counting_step(*args, **kwargs):
+        nonlocal step_count
+        step_count += 1
+        return real_step(*args, **kwargs)
+
+    solver.optimizer.step = counting_step
+    seen: list[int] = []
+
+    def callback(step, val_miou):
+        del val_miou
+        seen.append(step)
+        return step >= 4
+
+    solver.fit(
+        loader,
+        val_loader=loader,
+        max_steps=100,
+        eval_every=2,
+        step_callback=callback,
+        verbose=False,
+    )
+
+    assert seen == [2, 4]
+    assert step_count == 4
+
+
+def test_fixed_budget_restores_train_mode_after_eval(dummy_data):
+    """A mid-pass eval must not leave the model in eval mode for the rest of the pass.
+
+    ``evaluate()`` calls ``model.eval()`` and does not restore; the fixed-budget
+    loop only calls ``train()`` once per loader pass, so without an explicit
+    restore the remainder of that pass would train with eval-mode
+    BatchNorm/dropout — silently wrong, and invisible in the loss.
+    """
+    images = torch.randn(8, 3, 64, 64)
+    masks = torch.randint(0, NUM_CLASSES, (8, 64, 64))
+    loader = make_loader(images, masks)  # 4 batches/epoch
+    probe = make_probe(BatchNormBackbone(), ["layer1", "layer2"], freeze=False)
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    modes: list[bool] = []
+    real_train_on_batch = solver._train_on_batch
+
+    def recording_train_on_batch(batch):
+        modes.append(solver.model.training)
+        return real_train_on_batch(batch)
+
+    solver._train_on_batch = recording_train_on_batch
+    # eval_every=1 evaluates after every step, so every step after the first
+    # follows an ``evaluate()`` call within the same loader pass.
+    solver.fit(loader, val_loader=loader, max_steps=4, eval_every=1, verbose=False)
+
+    assert all(modes), "model must be in train mode for every training step"
+
+
+def test_fixed_budget_eval_keeps_frozen_backbone_in_eval_mode(dummy_data):
+    """Restoring train mode must not un-freeze a frozen backbone's BatchNorm."""
+    images = torch.randn(8, 3, 64, 64)
+    masks = torch.randint(0, NUM_CLASSES, (8, 64, 64))
+    loader = make_loader(images, masks)
+    probe = make_probe(BatchNormBackbone(), ["layer1", "layer2"], freeze=True)
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    backbone_modes: list[bool] = []
+    real_train_on_batch = solver._train_on_batch
+
+    def recording_train_on_batch(batch):
+        backbone_modes.append(solver.model.backbone.training)
+        return real_train_on_batch(batch)
+
+    solver._train_on_batch = recording_train_on_batch
+    solver.fit(loader, val_loader=loader, max_steps=4, eval_every=1, verbose=False)
+
+    assert not any(backbone_modes), "frozen backbone must stay in eval mode"
+
+
+def test_evaluate_reports_per_class_iou(mock_backbone, dummy_data):
+    """evaluate() returns per-class IoU alongside the scalar aggregates."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    metrics = solver.evaluate(loader)
+
+    per_class = metrics["per_class_IoU"]
+    assert isinstance(per_class, list)
+    assert len(per_class) == NUM_CLASSES
+    # macro mIoU is the mean over classes, so the two must agree.
+    assert metrics["mIoU"] == pytest.approx(sum(per_class) / NUM_CLASSES, abs=1e-6)
 
 
 def test_solver_single_lr_backward_compatible(mock_backbone, dummy_data):

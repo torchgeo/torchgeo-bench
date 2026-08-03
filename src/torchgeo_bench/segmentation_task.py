@@ -2,6 +2,7 @@
 
 import logging
 import math
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
@@ -22,7 +23,19 @@ from .segmentation_probe import (
 
 logger = logging.getLogger(__name__)
 
-SegMetrics = dict[str, float]
+# Scalar aggregates plus ``per_class_IoU``, which is a ``list[float]`` of length
+# ``num_classes``. Consumers writing flat rows must select scalars by key.
+SegMetrics = dict[str, float | list[float]]
+
+
+class NonFiniteLossError(RuntimeError):
+    """Raised when training produces a NaN or infinite loss.
+
+    Distinct from a generic ``RuntimeError`` so callers can tell divergence
+    apart from real failures (OOM, shape bugs) and react differently — the
+    hparam search turns this into ``optuna.TrialPruned`` rather than letting
+    the trial fail.
+    """
 
 
 class SegmentationSolver:
@@ -40,6 +53,7 @@ class SegmentationSolver:
         ignore_index: int = 255,
         backbone_lr: float | None = None,
         head_lr: float | None = None,
+        max_grad_norm: float | None = 1.0,
     ) -> None:
         """Initialize the SegmentationSolver.
 
@@ -58,14 +72,24 @@ class SegmentationSolver:
                 differential-LR param groups (backbone / head) instead of a
                 single ``lr`` group.
             head_lr: Learning rate for the head param group; see ``backbone_lr``.
+            max_grad_norm: Global gradient-norm clip applied in the full
+                fine-tuning path (:meth:`_train_on_batch`). ``None`` disables
+                clipping. Defaults to 1.0 — unclipped AMP fp16 training let a
+                single non-finite gradient poison AdamW's ``exp_avg`` /
+                ``exp_avg_sq`` permanently, which is what drove the mid-training
+                divergence to NaN in the ViT segmentation runs.
         """
         self.model = model.to(device)
         self.num_classes = num_classes
         self.device = device
         self.lr_scheduler_type = lr_scheduler
         self.val_history: list[float] = []
+        # Per-evaluation training curve, populated only by the instrumented
+        # fixed-budget path (``fit(max_steps=..., val_loader=..., eval_every=...)``).
+        self.history: list[dict] = []
 
         self.ignore_index = ignore_index
+        self.max_grad_norm = max_grad_norm
         self.optimizer = self._build_optimizer(lr, weight_decay, backbone_lr, head_lr)
 
         self.criterion = (
@@ -83,6 +107,14 @@ class SegmentationSolver:
             num_classes=self.num_classes,
             ignore_index=self.ignore_index,
             average="weighted",
+        )
+        # Per-class IoU: free on eval passes already being paid for, and what
+        # separates "hard dataset" from "broken dataset" — a low mIoU driven by
+        # two dead classes reads very differently from a uniformly low one.
+        self.metric_per_class_iou = MulticlassJaccardIndex(
+            num_classes=self.num_classes,
+            ignore_index=self.ignore_index,
+            average=None,
         )
         self.metric_precision = MulticlassPrecision(
             num_classes=self.num_classes,
@@ -102,6 +134,7 @@ class SegmentationSolver:
         self._all_metrics = [
             self.metric,
             self.metric_fw_iou,
+            self.metric_per_class_iou,
             self.metric_precision,
             self.metric_recall,
             self.metric_f1,
@@ -159,26 +192,50 @@ class SegmentationSolver:
         verbose: bool = True,
         max_steps: int | None = None,
         epoch_cap: int = 1000,
+        eval_every: int | None = None,
+        step_callback: "Callable[[int, float], bool] | None" = None,
     ) -> float | None:
         """Train the segmentation probe.
 
         Args:
             train_loader: Training data loader.
             val_loader: Optional validation data loader for per-epoch mIoU logging.
+                In the fixed-budget regime it is used only when ``eval_every``
+                is also set (see below).
             epochs: Number of training epochs (epoch-based regime).
             verbose: Whether to show progress bars and epoch logs.
             max_steps: If set, train for exactly this many optimizer steps
                 (fixed-budget regime), cycling through the loader across up to
-                ``epoch_cap`` epochs, with no validation, scheduling, or
-                early-stopping. Overrides ``epochs`` and ``val_loader``.
+                ``epoch_cap`` epochs, with no scheduling or early-stopping.
+                Overrides ``epochs``.
             epoch_cap: Maximum number of loader passes when ``max_steps`` is set.
+            eval_every: Fixed-budget regime only. When set together with
+                ``val_loader``, evaluate on ``val_loader`` every this many
+                optimizer steps (and once at the final step), recording each
+                result in :attr:`history`. Defaults to ``None`` — no mid-training
+                evaluation, so the fixed-budget path behaves exactly as before.
+            step_callback: Fixed-budget regime only. Called as
+                ``step_callback(step, val_mIoU)`` after every mid-training
+                evaluation; returning ``True`` stops training early. Used by the
+                hyperparameter search to feed an Optuna pruner. Note that this is
+                the *only* way the fixed-budget loop can terminate early — the
+                training regime itself never early-stops (see D9).
 
         Returns:
             Val mIoU from the final epoch if val_loader is given (epoch-based
-            regime only), else None.
+            regime), the last recorded val mIoU in the fixed-budget regime when
+            ``eval_every`` is set, else None.
         """
         if max_steps is not None:
-            return self._fit_fixed_budget(train_loader, max_steps, epoch_cap, verbose)
+            return self._fit_fixed_budget(
+                train_loader,
+                max_steps,
+                epoch_cap,
+                verbose,
+                val_loader=val_loader,
+                eval_every=eval_every,
+                step_callback=step_callback,
+            )
 
         scheduler = self._make_scheduler(epochs)
         last_val_miou: float | None = None
@@ -209,7 +266,13 @@ class SegmentationSolver:
         return last_val_miou
 
     def _train_on_batch(self, batch) -> float:
-        """Run one optimizer step on a single batch and return its loss value."""
+        """Run one optimizer step on a single batch and return its loss value.
+
+        Raises:
+            NonFiniteLossError: If the loss is NaN or infinite. Raised at the
+                *first* occurrence rather than at the next eval boundary, so the
+                caller sees the step that actually broke.
+        """
         if isinstance(batch, dict):
             images = batch["image"].to(self.device)
             masks = batch["mask"].to(self.device).long()
@@ -224,7 +287,25 @@ class SegmentationSolver:
             logits = self.model(images)
             loss = self.criterion(logits, masks)
 
+        # Catch divergence before the bad value reaches the optimizer: once a
+        # non-finite gradient lands in AdamW's exp_avg/exp_avg_sq, every
+        # subsequent step is poisoned and the run never recovers.
+        if not torch.isfinite(loss):
+            raise NonFiniteLossError(f"Non-finite training loss: {loss.item()}")
+
         self.scaler.scale(loss).backward()
+
+        if self.max_grad_norm is not None:
+            # Must come after unscale_: clipping still-scaled gradients would
+            # threshold against the scaler's current scale factor, i.e. at an
+            # effectively random magnitude that changes whenever the scaler
+            # backs off.
+            self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(
+                (p for p in self.model.parameters() if p.requires_grad),
+                max_norm=self.max_grad_norm,
+            )
+
         self.scaler.step(self.optimizer)
         self.scaler.update()
 
@@ -236,15 +317,36 @@ class SegmentationSolver:
         max_steps: int,
         epoch_cap: int,
         verbose: bool,
-    ) -> None:
-        """Train for exactly ``max_steps`` optimizer steps (no validation).
+        *,
+        val_loader: DataLoader | None = None,
+        eval_every: int | None = None,
+        step_callback: "Callable[[int, float], bool] | None" = None,
+    ) -> float | None:
+        """Train for exactly ``max_steps`` optimizer steps.
 
         Cycles through ``train_loader`` across up to ``epoch_cap`` passes,
         stopping the moment ``max_steps`` steps have run. Learning rate is held
-        constant (no scheduler) and no early-stopping is applied.
+        constant (no scheduler) and the training regime never early-stops.
+
+        Instrumentation is opt-in: with ``val_loader`` and ``eval_every`` both
+        set, the held-out set is evaluated every ``eval_every`` steps and at the
+        final step, and each result is appended to :attr:`history` alongside the
+        mean train loss since the previous evaluation. With either omitted the
+        loop is byte-identical to its uninstrumented behavior, so the
+        label-quality launch pays nothing for the search's needs.
+
+        Returns:
+            The last recorded val mIoU when evaluating, else ``None``.
         """
         self.val_history = []
+        self.history = []
+        instrument = val_loader is not None and eval_every is not None and eval_every > 0
+
         steps = 0
+        loss_sum = 0.0
+        loss_count = 0
+        last_val_miou: float | None = None
+
         for _ in range(epoch_cap):
             self.model.train()
             if self.model.freeze_backbone:
@@ -253,11 +355,46 @@ class SegmentationSolver:
             desc = f"Step {steps}/{max_steps}"
             batches = track(train_loader, description=desc) if verbose else train_loader
             for batch in batches:
-                self._train_on_batch(batch)
+                loss = self._train_on_batch(batch)
                 steps += 1
-                if steps >= max_steps:
-                    return None
-        return None
+                loss_sum += loss
+                loss_count += 1
+
+                final = steps >= max_steps
+                if instrument and (final or steps % eval_every == 0):
+                    train_loss = loss_sum / loss_count if loss_count else float("nan")
+                    loss_sum, loss_count = 0.0, 0
+                    metrics = self.evaluate(val_loader)
+                    last_val_miou = metrics["mIoU"]
+                    self.val_history.append(last_val_miou)
+                    self.history.append(
+                        {
+                            "step": steps,
+                            "train_loss": train_loss,
+                            "val_mIoU": last_val_miou,
+                            "per_class_IoU": list(metrics["per_class_IoU"]),
+                        }
+                    )
+                    if verbose:
+                        logger.info(
+                            "Step %d train_loss=%.17g val mIoU=%.17g",
+                            steps,
+                            train_loss,
+                            last_val_miou,
+                        )
+                    # ``evaluate`` leaves the model in eval mode; the fixed-budget
+                    # loop only calls ``train()`` once per loader pass, so without
+                    # this the remainder of the pass would train with eval-mode
+                    # BatchNorm/dropout.
+                    self.model.train()
+                    if self.model.freeze_backbone:
+                        self.model.backbone.eval()
+                    if step_callback is not None and step_callback(steps, last_val_miou):
+                        return last_val_miou
+
+                if final:
+                    return last_val_miou
+        return last_val_miou
 
     @torch.no_grad()
     def evaluate(
@@ -375,6 +512,12 @@ class SegmentationSolver:
                     logits = self.model.head(features, *input_hw)
                     loss = self.criterion(logits, masks)
 
+                # Same divergence guard as ``_train_on_batch``: a non-finite loss
+                # here would otherwise reach AdamW and poison exp_avg/exp_avg_sq
+                # for every subsequent step.
+                if not torch.isfinite(loss):
+                    raise NonFiniteLossError(f"Non-finite training loss: {loss.item()}")
+
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
@@ -418,10 +561,15 @@ class SegmentationSolver:
         return self._evaluate_gpu_cache(gpu_cache, batch_size, collect_preds=collect_preds)
 
     def _compute_metrics(self) -> "SegMetrics":
-        """Compute and return all metrics as a dict."""
+        """Compute and return all metrics as a dict.
+
+        ``per_class_IoU`` is a length-``num_classes`` list (not a scalar), so
+        consumers writing flat metric rows must select it out explicitly.
+        """
         return {
             "mIoU": self.metric.compute().item(),
             "fw_IoU": self.metric_fw_iou.compute().item(),
+            "per_class_IoU": self.metric_per_class_iou.compute().tolist(),
             "precision": self.metric_precision.compute().item(),
             "recall": self.metric_recall.compute().item(),
             "f1": self.metric_f1.compute().item(),

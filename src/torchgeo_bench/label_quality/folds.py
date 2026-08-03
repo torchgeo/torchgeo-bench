@@ -58,6 +58,22 @@ def assign_folds(
         ``"phash"``, ``"leakage_uncontrolled"``.
     """
     ds = dataset.get_dataset(split, metadata=["lat", "lon"])
+
+    # Fast path: the native_id and latlon_block tiers only need per-sample
+    # metadata, which V2 datasets already carry as columns on the upstream
+    # ``data_df``. Reading it there avoids decoding every image off disk (a full
+    # serial pass over the split — minutes for a few-thousand-sample dataset).
+    # These yield byte-identical fold ids to the sample-materializing path.
+    cheap = _cheap_fold_keys(ds)
+    if cheap is not None:
+        native, lat, lon = cheap
+        if native is not None:
+            return _group_kfold_ids(native, k), "native_id"
+        if lat is not None and lon is not None:
+            return _group_kfold_ids(_grid_cells(lat, lon, cell_deg), k), "latlon_block"
+
+    # Slow path: no cheap metadata (or only phash discriminates). The phash tier
+    # genuinely needs pixels, so here we do materialize every sample.
     samples = [ds[i] for i in range(len(ds))]
     n = len(samples)
 
@@ -75,6 +91,49 @@ def assign_folds(
         return _group_kfold_ids(groups, k), "phash"
 
     return _random_kfold_ids(n, k, seed), "leakage_uncontrolled"
+
+
+def _cheap_fold_keys(
+    ds,
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None] | None:
+    """Per-sample fold keys read from the upstream ``data_df`` without image I/O.
+
+    Unwraps the framework's dataset adapter down to the loader carrying the
+    tortilla ``data_df`` and returns ``(native_ids, lat, lon)`` — any of which
+    may be ``None`` if that column is absent. Returns ``None`` when there is no
+    ``data_df`` at all (e.g. the synthetic test datasets), so the caller falls
+    back to materializing samples. ``native_id`` takes precedence over lat/lon,
+    matching the tier cascade.
+    """
+    inner = ds
+    for _ in range(3):
+        if hasattr(inner, "data_df"):
+            break
+        if hasattr(inner, "_inner"):
+            inner = inner._inner
+        else:
+            break
+    df = getattr(inner, "data_df", None)
+    if df is None:
+        return None
+
+    cols = getattr(df, "columns", [])
+    native = None
+    for key in ("native_id", "scene_id", "aoi_id", "tile_id"):
+        if key in cols:
+            native = np.array([str(x) for x in df[key].tolist()])
+            break
+
+    lat = lon = None
+    if "lat" in cols and "lon" in cols:
+        lat_arr = np.asarray(df["lat"].tolist(), dtype=float)
+        lon_arr = np.asarray(df["lon"].tolist(), dtype=float)
+        if np.isfinite(lat_arr).all() and np.isfinite(lon_arr).all():
+            lat, lon = lat_arr, lon_arr
+
+    if native is None and lat is None:
+        return None
+    return native, lat, lon
 
 
 def _native_ids(samples: list[dict]) -> np.ndarray | None:

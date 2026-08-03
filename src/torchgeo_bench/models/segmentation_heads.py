@@ -1,6 +1,6 @@
-# The DPT decoder heads are adapted from probe3d (MIT); see LICENSE-THIRDPARTY.
-
 """Segmentation decoder heads for use with SegmentationProbe."""
+
+from types import SimpleNamespace
 
 import torch
 import torch.nn as nn
@@ -51,21 +51,37 @@ class PatchLinearHead(nn.Module):
 
     The first hooked feature map is interpreted as a token grid. Each token is
     independently projected from ``D`` channels to ``C * P^2`` logits via a
-    1x1 conv, then rearranged to pixel space with ``pixel_shuffle(P)``.
+    1x1 conv, then rearranged to pixel space with ``pixel_shuffle(P)`` and
+    finally bilinearly resized to the native label frame.
+
+    ``P`` is the head's *decode* patch factor — a fixed structural parameter of
+    the learned conv, not a function of the caller's native input size. It is
+    inferred once from the token grid on the first forward (model frame ÷ grid,
+    e.g. 224/14 = 16) and reused for every subsequent call, so the head is
+    robust to inputs at a different native resolution than the model frame
+    (e.g. a fixed-224 ViT scoring 650px tiles via backbone auto-resize): the
+    trailing ``F.interpolate`` absorbs the residual size difference.
 
     Args:
         channels_list: Channel count for each hooked feature layer. Only the
             first entry is used.
         num_classes: Number of segmentation output classes.
+        decode_patch_size: Optional explicit decode factor ``P``. When ``None``
+            (default) it is inferred from the token grid on the first forward.
     """
 
-    def __init__(self, channels_list: list[int], num_classes: int) -> None:
+    def __init__(
+        self,
+        channels_list: list[int],
+        num_classes: int,
+        decode_patch_size: int | None = None,
+    ) -> None:
         super().__init__()
         self.num_classes = num_classes
         self.in_channels = channels_list[0]
         self.norm = ChannelLayerNorm(self.in_channels)
         self.conv: nn.Conv2d | None = None
-        self.patch_size: int | None = None
+        self.patch_size: int | None = decode_patch_size
 
     def _ensure_conv(
         self,
@@ -82,31 +98,29 @@ class PatchLinearHead(nn.Module):
             self.patch_size = patch_size
             return self.conv
 
-        if self.patch_size != patch_size:
-            raise ValueError(
-                f"PatchLinearHead was initialized for patch_size={self.patch_size}, "
-                f"but got patch_size={patch_size}."
-            )
-
         if self.conv.weight.device != device or self.conv.weight.dtype != dtype:
             self.conv = self.conv.to(device=device, dtype=dtype)
         return self.conv
 
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
-        """Project the token grid into pixel logits."""
+        """Project the token grid into pixel logits at the native label frame."""
         feat = features[0]
         grid_h, grid_w = feat.shape[-2:]
-        patch_h = round(input_h / grid_h)
-        patch_w = round(input_w / grid_w)
-        if patch_h != patch_w:
+        if grid_h != grid_w:
             raise ValueError(
-                "PatchLinearHead requires square patch geometry. "
-                f"Got input=({input_h}, {input_w}) and grid=({grid_h}, {grid_w})."
+                f"PatchLinearHead requires a square token grid. Got grid=({grid_h}, {grid_w})."
             )
 
-        conv = self._ensure_conv(patch_h, feat.device, feat.dtype)
+        # Decode factor is a fixed property of the learned conv: fix it on the
+        # first call (from the token grid vs. the native frame, rounded), then
+        # reuse it regardless of the caller's native input size.
+        patch = self.patch_size
+        if patch is None:
+            patch = max(1, round(input_h / grid_h))
+
+        conv = self._ensure_conv(patch, feat.device, feat.dtype)
         logits = conv(self.norm(feat))
-        logits = F.pixel_shuffle(logits, patch_h)
+        logits = F.pixel_shuffle(logits, self.patch_size)  # (B, C, grid*P, grid*P)
         if logits.shape[-2:] != (input_h, input_w):
             logits = F.interpolate(
                 logits, size=(input_h, input_w), mode="bilinear", align_corners=False
@@ -240,7 +254,12 @@ class FPNHead(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# DPT helper modules (adapted from probe3d — mbanani/probe3d)
+# DPT decoder
+#
+# The fusion cascade is the reference implementation from
+# ``transformers.models.dpt.modeling_dpt`` (Apache-2.0), itself a faithful port
+# of Intel-ISL DPT. It is imported rather than reimplemented so the residual
+# and upsampling arithmetic cannot silently drift from the paper.
 # ---------------------------------------------------------------------------
 
 
@@ -264,67 +283,63 @@ class ChannelLayerNorm(nn.Module):
         return self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2).contiguous()
 
 
-class ResidualConvUnit(nn.Module):
-    """Two conv+ReLU layers with a residual skip connection."""
+def _dpt_fusion_layer(hidden_dim: int) -> nn.Module:
+    """Construct a reference ``DPTFeatureFusionLayer`` at ``hidden_dim`` channels.
 
-    def __init__(self, features: int, kernel_size: int = 3) -> None:
-        super().__init__()
-        padding = kernel_size // 2
-        self.conv = nn.Sequential(
-            nn.Conv2d(features, features, kernel_size, padding=padding),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(features, features, kernel_size, padding=padding),
-            nn.ReLU(inplace=True),
-        )
+    ``DPTFeatureFusionLayer`` and the ``DPTPreActResidualLayer`` s it owns are
+    plain ``nn.Module`` s that read exactly three scalars off ``config``; they
+    never touch the rest of ``DPTConfig``. A ``SimpleNamespace`` therefore lets
+    us reuse the reference implementation verbatim without pulling in
+    ``DPTConfig``, ``DPTNeck``, or the bundled ViT.
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply residual conv block."""
-        return self.conv(x) + x
+    The two boolean settings reproduce the stock ViT-DPT defaults:
+    ``use_batch_norm_in_fusion_residual=False`` (the reference disables BN for
+    the ViT variants), which in turn makes the residual convs biased.
 
+    ``transformers`` is an optional dependency, so the import is deferred to
+    construction time — only the ``dpt`` head needs it.
+    """
+    try:
+        from transformers.models.dpt.modeling_dpt import DPTFeatureFusionLayer
+    except ImportError as e:  # pragma: no cover - exercised only without the extra
+        raise ImportError(
+            "DPTHead requires the 'transformers' package for its fusion cascade. "
+            "Install it with: pip install 'torchgeo-bench[sam3]' or pip install transformers"
+        ) from e
 
-class FeatureFusionBlock(nn.Module):
-    """Fuses a feature map with an optional skip connection via residual conv units."""
-
-    def __init__(self, features: int, kernel_size: int = 3, with_skip: bool = True) -> None:
-        super().__init__()
-        self.with_skip = with_skip
-        if with_skip:
-            self.resConfUnit1 = ResidualConvUnit(features, kernel_size)
-        self.resConfUnit2 = ResidualConvUnit(features, kernel_size)
-
-    def forward(self, x: torch.Tensor, skip_x: torch.Tensor | None = None) -> torch.Tensor:
-        """Fuse skip connection and refine features."""
-        if skip_x is not None:
-            if skip_x.shape[-2:] != x.shape[-2:]:
-                skip_x = F.interpolate(
-                    skip_x, size=x.shape[-2:], mode="bilinear", align_corners=False
-                )
-            x = self.resConfUnit1(x) + skip_x
-        return self.resConfUnit2(x)
+    config = SimpleNamespace(
+        fusion_hidden_size=hidden_dim,
+        use_batch_norm_in_fusion_residual=False,
+        use_bias_in_fusion_residual=None,  # → ``not use_batch_norm`` → True
+    )
+    return DPTFeatureFusionLayer(config)
 
 
 class DPTHead(nn.Module):
-    """DPT-style decoder head (adapted from probe3d at mbanani/probe3d, single-view).
+    """DPT decoder head using the reference ``transformers`` fusion cascade.
 
     Requires exactly **4** feature layers in **coarse-to-fine order** (same
     convention as FPN, e.g. ``["layer4", "layer3", "layer2", "layer1"]`` for
-    ResNet). The forward pass processes features from coarsest to finest
-    through a cascade of :class:`FeatureFusionBlock` modules.
+    ResNet). Features are normalised and projected to ``hidden_dim``, then run
+    through a top-down cascade of :class:`DPTFeatureFusionLayer`.
 
-    Upsampling chain (mirroring probe3d):
-      1. 1×1 project each map to ``hidden_dim``
-      2. 2× upsample all projected maps
-      3. Top-down fusion cascade (coarse → fine)
-      4. 4× upsample the fused result
-      5. 3×3 → ReLU → 3×3 output conv to ``num_classes``
-      6. Final resize to input resolution
+    The fusion layers are imported from ``transformers`` rather than
+    reimplemented, so the residual/fusion arithmetic matches Intel-ISL DPT
+    exactly: pre-activation residual units, refinement applied to the *skip*
+    (not the primary input), a post-fusion 1×1 projection, and a 2× upsample
+    inside every fusion layer. Four stacked layers therefore take a 14×14 ViT
+    token grid to 224×224 with no separate pre- or post-upsampling step.
+
+    Only the reassemble stage is ours: ``ChannelLayerNorm`` + a 1×1 projection
+    stands in for ``DPTReassembleStage``, because ``SegmentationProbe`` hands
+    the head backbone-agnostic ``(B, D, H, W)`` grids rather than the token
+    sequences plus patch geometry that the reference reassemble stage consumes.
 
     Args:
         channels_list: Channel count for each hooked feature layer (coarse-to-fine).
             Must have exactly 4 entries.
         num_classes: Number of segmentation output classes.
         hidden_dim: Hidden channel dimension (default 256).
-        kernel_size: Conv kernel size for residual units (default 3).
     """
 
     def __init__(
@@ -332,7 +347,6 @@ class DPTHead(nn.Module):
         channels_list: list[int],
         num_classes: int,
         hidden_dim: int = 256,
-        kernel_size: int = 3,
     ) -> None:
         super().__init__()
         if len(channels_list) != 4:
@@ -349,15 +363,9 @@ class DPTHead(nn.Module):
         self.convs = nn.ModuleList(
             [nn.Conv2d(c, hidden_dim, kernel_size=1, padding=0) for c in channels_list]
         )
-        # Fusion blocks: index 0 = coarsest (no skip), 1-3 receive skip from previous level
-        self.ref = nn.ModuleList(
-            [
-                FeatureFusionBlock(hidden_dim, kernel_size, with_skip=False),  # coarsest
-                FeatureFusionBlock(hidden_dim, kernel_size),
-                FeatureFusionBlock(hidden_dim, kernel_size),
-                FeatureFusionBlock(hidden_dim, kernel_size),  # finest
-            ]
-        )
+        # Fusion cascade: index 0 consumes the coarsest map alone, 1-3 each take
+        # the running fused state plus the next finer map as the skip.
+        self.ref = nn.ModuleList([_dpt_fusion_layer(hidden_dim) for _ in channels_list])
         self.out_conv = nn.Sequential(
             nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
@@ -372,20 +380,17 @@ class DPTHead(nn.Module):
             input_h: Target output height.
             input_w: Target output width.
         """
-        # Normalise → project → 2× upsample
-        projected = [
-            F.interpolate(conv(norm(f)), scale_factor=2, mode="bilinear", align_corners=True)
-            for norm, conv, f in zip(self.input_norms, self.convs, features)
-        ]
+        # Reassemble stand-in: normalise → 1×1 project to hidden_dim.
+        projected = [conv(norm(f)) for norm, conv, f in zip(self.input_norms, self.convs, features)]
 
-        # Top-down cascade: coarsest (0) → finest (3)
-        out = self.ref[0](projected[0], None)
-        out = self.ref[1](projected[1], out)
-        out = self.ref[2](projected[2], out)
-        out = self.ref[3](projected[3], out)
+        # Top-down cascade, coarsest (0) → finest (3). The running fused state is
+        # the primary input and the next feature map enters as the skip, matching
+        # ``DPTFeatureFusionStage``. Each layer upsamples 2×, so the cascade
+        # supplies all the upsampling (14×14 → 224×224 for a patch16 ViT).
+        out = self.ref[0](projected[0])
+        for layer, feat in zip(self.ref[1:], projected[1:]):
+            out = layer(out, feat)
 
-        # 4× upsample → output conv → resize to input resolution
-        out = F.interpolate(out, scale_factor=4, mode="bilinear", align_corners=True)
         out = self.out_conv(out)
         if out.shape[-2:] != (input_h, input_w):
             out = F.interpolate(out, size=(input_h, input_w), mode="bilinear", align_corners=False)

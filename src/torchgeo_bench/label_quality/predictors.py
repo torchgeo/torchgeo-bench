@@ -35,22 +35,40 @@ class Predictor:
         max_steps: int | None,
         epoch_cap: int,
         device: str,
+        eval_every: int | None = None,
     ) -> None:
         self.probe = probe
         self.solver = solver
         self.max_steps = max_steps
         self.epoch_cap = epoch_cap
         self.device = device
+        self.eval_every = eval_every
 
-    def fit(self, train_loader: DataLoader) -> "Predictor":
-        """Fine-tune the member for the configured fixed step budget (no validation)."""
+    def fit(self, train_loader: DataLoader, val_loader: DataLoader | None = None) -> "Predictor":
+        """Fine-tune the member for the configured fixed step budget.
+
+        Training itself is unchanged and never early-stops. When the member was
+        built with ``eval_every`` *and* a ``val_loader`` is supplied, the
+        held-out fold is additionally evaluated every ``eval_every`` steps and
+        the curve is recorded on ``solver.history`` — per-member evidence, across
+        all 25 trainings, that the members behaved as the hyperparameter search
+        predicted (``docs/plans/segmentation_hparam_search.md`` D11). With
+        ``eval_every`` unset this is byte-identical to the uninstrumented path.
+        """
         self.solver.fit(
             train_loader,
+            val_loader=val_loader,
             max_steps=self.max_steps,
             epoch_cap=self.epoch_cap,
+            eval_every=self.eval_every,
             verbose=False,
         )
         return self
+
+    @property
+    def history(self) -> list[dict]:
+        """The recorded training curve (empty unless ``eval_every`` was set)."""
+        return self.solver.history
 
     @torch.no_grad()
     def predict_proba(self, loader: DataLoader) -> torch.Tensor:
@@ -87,6 +105,9 @@ def build_member(spec: dict) -> Predictor:
             - ``ignore_index``: label value ignored in loss/metrics (default 255).
             - ``lr``/``weight_decay``/``backbone_lr``/``head_lr``: optimizer LRs.
             - ``max_steps``/``epoch_cap``: fixed training budget.
+            - ``eval_every``: optional held-out eval interval in steps. Set to
+              record a per-member training curve; ``None`` (default) trains with
+              no evaluation, exactly as before.
 
     Returns:
         An unfitted :class:`Predictor` wrapping an unfrozen probe and solver.
@@ -125,6 +146,7 @@ def build_member(spec: dict) -> Predictor:
         max_steps=spec.get("max_steps"),
         epoch_cap=spec.get("epoch_cap", 1000),
         device=device,
+        eval_every=spec.get("eval_every"),
     )
 
 

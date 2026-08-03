@@ -128,10 +128,26 @@ def _run_one_dataset(cfg: DictConfig, name: str, *, output: str, root: str, resu
     iqr_thr = float(lq.get("min_score_iqr", degeneracy.MIN_SCORE_IQR))
     logger.info(
         "Label-quality[%s]: tier=%s OOF-mIoU=%.3f low_capacity=%s "
-        "min_class_coverage=%.3f oof_per_class_iou_min=%.3f",
+        "min_class_coverage=%.3f oof_per_class_iou_min=%.3f pooled_macro_iou=%.3f",
         name, tier, oof_miou, low_capacity,
-        cell["min_class_coverage"], cell["oof_per_class_iou_min"],
+        cell["min_class_coverage"], cell["oof_per_class_iou_min"], cell["macro_iou"],
     )
+
+    # Persist the per-class detail the two CSV minima are taken over. `oof_miou`
+    # above is a per-image proxy that averages ~0.5 for a background-only
+    # predictor, so it cannot answer "did the rare class die, or is nothing
+    # fitting?" -- `macro_iou` here is the pooled figure that can.
+    diagnostics_path = store.save_per_class_diagnostics(
+        root, name, model_slug, cell,
+        num_classes=num_classes,
+        ignore_index=ignore_index,
+        oof_miou=oof_miou,
+        low_capacity=low_capacity,
+        k=k,
+        n_members=n_members,
+        bands=str(cfg.dataset.get("bands", "rgb")),
+    )
+    logger.info("Label-quality[%s]: wrote per-class diagnostics to %s", name, diagnostics_path)
 
     def _degeneracy_kwargs(image_scores):
         """Per-method degeneracy fields: IQR of this method's own score distribution."""

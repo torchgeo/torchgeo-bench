@@ -55,6 +55,49 @@ MIN_SCORE_IQR = 0.01
 _CHUNK_SIZE = 64
 
 
+def class_masses(
+    labels: torch.Tensor | np.ndarray,
+    member_preds: torch.Tensor | np.ndarray,
+    *,
+    num_classes: int,
+    ignore_index: int = 255,
+    chunk_size: int = _CHUNK_SIZE,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Raw GT and per-member predicted pixel counts per class.
+
+    Split out of :func:`class_mass_coverage` so the accumulation is written once
+    and the raw masses are available to callers that want the class *frequency*
+    distribution — the diagnostic question "which classes are rare?" — rather
+    than only the GT-relative coverage ratio.
+
+    Args:
+        labels: Integer masks ``(N, H, W)``.
+        member_preds: Per-member hard predictions ``(M, N, H, W)``.
+        num_classes: Size of the class universe ``C``.
+        ignore_index: Label value excluded from both masses.
+        chunk_size: Samples per accumulation chunk.
+
+    Returns:
+        ``(gt_mass, pred_mass)`` with shapes ``(C,)`` and ``(M, C)``, in pixels,
+        over the whole class universe (not restricted to present classes).
+    """
+    labels_t = _as_tensor(labels)
+    preds_t = _as_tensor(member_preds)
+    n_members = int(preds_t.shape[0])
+
+    gt_mass = torch.zeros(num_classes, dtype=torch.int64)
+    pred_mass = torch.zeros(n_members, num_classes, dtype=torch.int64)
+    for lo, hi in _chunks(int(labels_t.shape[0]), chunk_size):
+        label_chunk = labels_t[lo:hi].long()
+        valid = label_chunk != ignore_index
+        gt_mass += torch.bincount(label_chunk[valid].reshape(-1), minlength=num_classes)
+        for m in range(n_members):
+            pred_chunk = preds_t[m, lo:hi].long()
+            pred_mass[m] += torch.bincount(pred_chunk[valid].reshape(-1), minlength=num_classes)
+
+    return gt_mass.numpy(), pred_mass.numpy()
+
+
 def class_mass_coverage(
     labels: torch.Tensor | np.ndarray,
     member_preds: torch.Tensor | np.ndarray,
@@ -83,26 +126,36 @@ def class_mass_coverage(
         present classes, and the full ``(M, |C_present|)`` coverage matrix.
         Returns ``(nan, empty)`` when no class is present (all-ignore labels).
     """
-    labels_t = _as_tensor(labels)
-    preds_t = _as_tensor(member_preds)
-    n_members = int(preds_t.shape[0])
+    gt_mass, pred_mass = class_masses(
+        labels,
+        member_preds,
+        num_classes=num_classes,
+        ignore_index=ignore_index,
+        chunk_size=chunk_size,
+    )
+    return coverage_from_masses(gt_mass, pred_mass)
 
-    gt_mass = torch.zeros(num_classes, dtype=torch.int64)
-    pred_mass = torch.zeros(n_members, num_classes, dtype=torch.int64)
-    for lo, hi in _chunks(int(labels_t.shape[0]), chunk_size):
-        label_chunk = labels_t[lo:hi].long()
-        valid = label_chunk != ignore_index
-        gt_mass += torch.bincount(label_chunk[valid].reshape(-1), minlength=num_classes)
-        for m in range(n_members):
-            pred_chunk = preds_t[m, lo:hi].long()
-            pred_mass[m] += torch.bincount(pred_chunk[valid].reshape(-1), minlength=num_classes)
 
-    present = gt_mass > 0
+def coverage_from_masses(
+    gt_mass: np.ndarray, pred_mass: np.ndarray
+) -> tuple[float, np.ndarray]:
+    """Coverage matrix from raw masses, so a caller can accumulate them once.
+
+    Args:
+        gt_mass: GT pixel count per class ``(C,)``.
+        pred_mass: Predicted pixel count per member and class ``(M, C)``.
+
+    Returns:
+        ``(min_class_coverage, coverage)`` restricted to the present classes.
+    """
+    gt = torch.as_tensor(gt_mass)
+    pred = torch.as_tensor(pred_mass)
+    present = gt > 0
     if not bool(present.any()):
         logger.warning("Degeneracy: no class present in labels; coverage undefined.")
-        return float("nan"), np.zeros((n_members, 0), dtype=np.float64)
+        return float("nan"), np.zeros((int(pred.shape[0]), 0), dtype=np.float64)
 
-    coverage = pred_mass[:, present].double() / gt_mass[present].double()
+    coverage = pred[:, present].double() / gt[present].double()
     return float(coverage.min()), coverage.numpy()
 
 
@@ -174,31 +227,68 @@ def cell_metrics(
     num_classes: int,
     ignore_index: int = 255,
     chunk_size: int = _CHUNK_SIZE,
-) -> dict[str, float]:
-    """Both cell-level degeneracy metrics for one (model, dataset) cell.
+) -> dict:
+    """Cell-level degeneracy metrics for one (model, dataset) cell, with detail.
 
     Cell-level means method-independent: these depend only on the OOF substrate,
     so they are identical on the Cleanlab and AER rows of the same cell.
     ``score_iqr`` is *not* here — it is per method.
 
+    The two scalars are what the gate and the CSV consume. The remaining keys are
+    the per-class vectors the scalars are minima of: a cell reported as collapsed
+    says *that* it collapsed but not *which* classes died, and "the rarest class
+    is at IoU 0 while the common classes are fine" versus "everything is mediocre"
+    are different diagnoses pointing at different fixes (objective versus
+    capacity). They are persisted as JSON rather than added as CSV columns
+    because their length varies with the dataset's class count.
+
     Returns:
-        ``{"min_class_coverage": float, "oof_per_class_iou_min": float}``.
+        A dict with the two gate scalars ``min_class_coverage`` and
+        ``oof_per_class_iou_min``, plus ``present_classes`` (the class indices the
+        vectors are indexed by, since absent classes are dropped),
+        ``per_class_iou``, ``coverage`` ``(M, |C_present|)``, ``gt_fraction`` and
+        ``pred_fraction`` over present classes, and ``macro_iou`` — the pooled
+        dataset-wide macro mIoU, which unlike the per-image ``oof_miou`` proxy is
+        not blind to a majority-class collapse.
     """
-    min_coverage, _ = class_mass_coverage(
+    gt_mass, pred_mass = class_masses(
         labels,
         member_preds,
         num_classes=num_classes,
         ignore_index=ignore_index,
         chunk_size=chunk_size,
     )
-    min_iou, _ = global_per_class_iou(
+    min_coverage, coverage = coverage_from_masses(gt_mass, pred_mass)
+    min_iou, per_class_iou = global_per_class_iou(
         labels,
         member_preds,
         num_classes=num_classes,
         ignore_index=ignore_index,
         chunk_size=chunk_size,
     )
-    return {"min_class_coverage": min_coverage, "oof_per_class_iou_min": min_iou}
+
+    # `present` must be derived exactly as both helpers derive it (GT mass > 0),
+    # or the index list would not line up with the vectors it labels.
+    present = np.flatnonzero(np.asarray(gt_mass) > 0)
+    gt_present = np.asarray(gt_mass, dtype=np.float64)[present]
+    pred_present = np.asarray(pred_mass, dtype=np.float64)[:, present]
+    gt_total = float(gt_present.sum())
+    # Mean over members: the fraction each class occupies of the members' output.
+    pred_totals = pred_present.sum(axis=1, keepdims=True)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        gt_fraction = gt_present / gt_total if gt_total > 0 else np.full_like(gt_present, np.nan)
+        pred_fraction = np.where(pred_totals > 0, pred_present / pred_totals, np.nan).mean(axis=0)
+
+    return {
+        "min_class_coverage": min_coverage,
+        "oof_per_class_iou_min": min_iou,
+        "present_classes": present.tolist(),
+        "per_class_iou": per_class_iou,
+        "coverage": coverage,
+        "gt_fraction": gt_fraction,
+        "pred_fraction": pred_fraction,
+        "macro_iou": float(per_class_iou.mean()) if per_class_iou.size else float("nan"),
+    }
 
 
 def is_degenerate(
