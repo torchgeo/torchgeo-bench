@@ -482,6 +482,7 @@ class MockBackbone4Layer(nn.Module):
 
 def test_probe_dpt_head_forward():
     """DPT head with 4 coarse-to-fine layers produces correct output shape."""
+    pytest.importorskip("transformers")
     from torchgeo_bench.models.segmentation_heads import DPTHead
 
     backbone = MockBackbone4Layer()
@@ -510,6 +511,63 @@ def test_probe_dpt_wrong_num_layers():
     backbone = MockBackbone()  # only has layer1, layer2
     with pytest.raises(ValueError, match="DPTHead requires exactly 4 feature layers"):
         make_probe(backbone, layers=["layer1", "layer2"], head_type="dpt", hidden_dim=16)
+
+
+def test_dpt_fusion_layer_shim_matches_reference():
+    """The SimpleNamespace shim still satisfies the reference fusion layer's config API.
+
+    ``DPTFeatureFusionLayer`` is a private ``transformers`` API with no stability
+    guarantee. This asserts the four structural properties we depend on, so a
+    breaking upstream bump fails loudly here instead of silently changing the
+    decoder's arithmetic.
+    """
+    pytest.importorskip("transformers")
+    from transformers.models.dpt.modeling_dpt import DPTPreActResidualLayer
+
+    from torchgeo_bench.models.segmentation_heads import _dpt_fusion_layer
+
+    layer = _dpt_fusion_layer(16)
+
+    # 1. Post-fusion 1x1 projection is present (absent from the old implementation).
+    assert isinstance(layer.projection, nn.Conv2d)
+    assert layer.projection.kernel_size == (1, 1)
+
+    # 2. Both residual units are pre-activation (relu -> conv -> relu -> conv).
+    assert isinstance(layer.residual_layer1, DPTPreActResidualLayer)
+    assert isinstance(layer.residual_layer2, DPTPreActResidualLayer)
+
+    # 3. Each fusion layer upsamples 2x internally.
+    out = layer(torch.randn(1, 16, 7, 7))
+    assert out.shape == (1, 16, 14, 14)
+
+    # 4. A mismatched skip is resized to the primary input, not the reverse.
+    out = layer(torch.randn(1, 16, 7, 7), torch.randn(1, 16, 3, 3))
+    assert out.shape == (1, 16, 14, 14)
+
+
+def test_dpt_head_upsamples_purely_through_fusion_cascade():
+    """Four fusion layers take a 14x14 ViT token grid to 224x224 exactly.
+
+    The faithful cascade supplies all upsampling itself, so the head no longer
+    needs the pre-projection 2x and terminal 4x interpolations. With input_h/w
+    already at 224 the trailing resize is a no-op, which is what makes this a
+    regression test on the schedule rather than on the final ``F.interpolate``.
+    """
+    pytest.importorskip("transformers")
+    from torchgeo_bench.models.segmentation_heads import DPTHead
+
+    head = DPTHead([32, 32, 32, 32], num_classes=NUM_CLASSES, hidden_dim=16)
+    features = [torch.randn(1, 32, 14, 14) for _ in range(4)]
+
+    # Intercept the cascade output before out_conv / the final resize.
+    projected = [conv(norm(f)) for norm, conv, f in zip(head.input_norms, head.convs, features)]
+    fused = head.ref[0](projected[0])
+    for layer, feat in zip(head.ref[1:], projected[1:]):
+        fused = layer(fused, feat)
+    assert fused.shape[-2:] == (224, 224)
+
+    logits = head(features, 224, 224)
+    assert logits.shape == (1, NUM_CLASSES, 224, 224)
 
 
 # ---------------------------------------------------------------------------

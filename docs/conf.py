@@ -77,7 +77,7 @@ nitpick_ignore = [
     ("py:class", "GeoBenchv2"),
     ("py:class", "Single-label"),
     ("py:class", "auto_resize /"),
-    ("py:class", "FeatureFusionBlock"),
+    ("py:class", "DPTFeatureFusionLayer"),
     ("py:attr", "BenchModel.bands"),
     ("py:attr", "num_channels"),
     ("py:attr", "base.BenchDataset.supports_partitions"),
