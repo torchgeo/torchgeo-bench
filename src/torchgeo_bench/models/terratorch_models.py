@@ -1,6 +1,7 @@
 """TerraTorch backbone wrappers for torchgeo-bench."""
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -9,8 +10,9 @@ import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._band_mapping import map_to_model_bands
-from ._input_units import InputUnit
+from ._band_mapping import map_to_model_bands, select_src_bands
+from ._input_units import InputUnit, convert_unit, detect_input_unit
+from ._normalization import NormalizationStrategy
 from ._pooling import VALID_MODES, pool_tokens
 from .interface import BenchModel
 
@@ -122,7 +124,7 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         )
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
-        mapped, _ = map_to_model_bands(images, self.bands, PRITHVI_BANDS)
+        mapped, _ = map_to_model_bands(images, self.bands, PRITHVI_BANDS, preferred_sensors=("s2",))
         return mapped
 
 
@@ -157,7 +159,7 @@ class TerraTorchClayBench(_TerraTorchBench):
         self.register_buffer("_clay_waves", torch.tensor(_CLAY_WAVELENGTHS_UM, dtype=torch.float32))
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
-        mapped, _ = map_to_model_bands(images, self.bands, CLAY_BANDS)
+        mapped, _ = map_to_model_bands(images, self.bands, CLAY_BANDS, preferred_sensors=("s2",))
         return mapped
 
     @torch.no_grad()
@@ -169,24 +171,40 @@ class TerraTorchClayBench(_TerraTorchBench):
         )
 
 
-TERRAMIND_S2L2A_BANDS: list[str] = [
-    "coastal",
-    "blue",
-    "green",
-    "red",
-    "rededge1",
-    "rededge2",
-    "rededge3",
-    "nir",
-    "nir_narrow",
-    "watervapor",
-    "swir1",
-    "swir2",
-]
+# Canonical name -> TerraTorch band token, in pretrained channel order.
+TERRAMIND_MODALITY_BANDS: dict[str, dict[str, str]] = {
+    "S2L2A": {
+        "coastal": "COASTAL_AEROSOL",
+        "blue": "BLUE",
+        "green": "GREEN",
+        "red": "RED",
+        "rededge1": "RED_EDGE_1",
+        "rededge2": "RED_EDGE_2",
+        "rededge3": "RED_EDGE_3",
+        "nir": "NIR_BROAD",
+        "nir_narrow": "NIR_NARROW",
+        "watervapor": "WATER_VAPOR",
+        "swir1": "SWIR_1",
+        "swir2": "SWIR_2",
+    },
+    "RGB": {"red": "RED", "green": "GREEN", "blue": "BLUE"},
+}
+
+TERRAMIND_S2L2A_BANDS: list[str] = list(TERRAMIND_MODALITY_BANDS["S2L2A"])
+
+_TERRAMIND_MODALITY_KEYS = {"S2L2A": "untok_sen2l2a@224", "RGB": "untok_sen2rgb@224"}
+_TERRAMIND_NATIVE_UNITS = {"S2L2A": InputUnit.S2_DN, "RGB": InputUnit.UINT8}
 
 
 class TerraTorchTerraMindBench(_TerraTorchBench):
-    """TerraMind v1 — takes ``{modality: (B, 12, H, W)}`` for fixed-channel S2L2A tokenizer."""
+    """TerraMind v1 — native modality input, ``{modality: (B, C, H, W)}``.
+
+    Dataset bands are matched to the modality's pretrained layout by canonical
+    name (preferring Sentinel-2); missing bands use TerraTorch's ``bands=``
+    patch-embed selection rather than zero-fill.  RGB-only datasets should use
+    ``modality: RGB``.  Under ``model_native``, inputs are converted to the
+    modality's native scale and z-scored with TerraMind's pretraining stats.
+    """
 
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
@@ -200,17 +218,61 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         modality: str = "S2L2A",
         **kwargs: Any,
     ) -> None:
+        modality_bands = TERRAMIND_MODALITY_BANDS.get(modality)
+        if modality_bands is None:
+            raise ValueError(
+                f"Unsupported TerraMind modality {modality!r}; "
+                f"expected one of {sorted(TERRAMIND_MODALITY_BANDS)}."
+            )
+        indices, selected = select_src_bands(bands, list(modality_bands), preferred_sensors=("s2",))
+        backbone_kwargs: dict[str, Any] = {"pretrained": pretrained, "modalities": [modality]}
+        if len(selected) < len(modality_bands):
+            backbone_kwargs["bands"] = {modality: [modality_bands[name] for name in selected]}
         self.backbone_name = backbone_name
         super().__init__(
             bands=bands,
             target_size=target_size,
-            backbone_kwargs={"pretrained": pretrained, "modalities": [modality]},
+            backbone_kwargs=backbone_kwargs,
             **kwargs,
         )
         self.modality = modality
+        self.model_bands = selected
+        self._band_indices = indices
+        if self.normalization is NormalizationStrategy.MODEL_NATIVE:
+            self._normalizer = self._pretrain_normalizer()
+
+    def _pretrain_normalizer(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        """z-score with TerraMind's per-modality pretraining statistics."""
+        from terratorch.models.backbones.terramind.model.terramind_register import (
+            v1_pretraining_mean,
+            v1_pretraining_std,
+        )
+
+        key = _TERRAMIND_MODALITY_KEYS[self.modality]
+        src = detect_input_unit(self.bands)
+        native = _TERRAMIND_NATIVE_UNITS[self.modality]
+        order = list(TERRAMIND_MODALITY_BANDS[self.modality])
+        n = len(self.bands)
+        mean = torch.zeros(1, n, 1, 1)
+        std = torch.ones(1, n, 1, 1)
+        for name, ds_idx in zip(self.model_bands, self._band_indices):
+            pos = order.index(name)
+            mean[0, ds_idx] = v1_pretraining_mean[key][pos]
+            std[0, ds_idx] = v1_pretraining_std[key][pos]
+
+        def _f(x: torch.Tensor) -> torch.Tensor:
+            x = convert_unit(x, src, native)
+            return (x - mean.to(x.device, x.dtype)) / std.to(x.device, x.dtype)
+
+        return _f
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
-        x, _ = map_to_model_bands(images, self.bands, TERRAMIND_S2L2A_BANDS)
+        if images.shape[1] != len(self.bands):
+            raise ValueError(
+                f"TerraMind: images has {images.shape[1]} channels but "
+                f"bands has {len(self.bands)} entries."
+            )
+        x = images[:, self._band_indices]
         x = _maybe_resize(x, self.target_size)
         return _reduce_to_vec(self.backbone({self.modality: x}), pool=self.pool)

@@ -7,14 +7,15 @@ from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models._band_mapping import (
     canonical_band_name,
     map_to_model_bands,
+    select_src_bands,
     wavelengths_um,
 )
 from torchgeo_bench.models.torchgeo_models import _resolve_dofa_wavelengths
 
 
-def _band(name: str, wl: float | None = None) -> BandSpec:
+def _band(name: str, wl: float | None = None, sensor: str = "s2") -> BandSpec:
     return BandSpec(
-        sensor="s2",
+        sensor=sensor,
         name=name,
         source_name=name,
         mean=0.0,
@@ -94,6 +95,56 @@ class TestMapToModelBands:
         except ValueError:
             return
         raise AssertionError("expected ValueError for channel-count mismatch")
+
+    def test_preferred_sensor_wins_slot(self) -> None:
+        src = [_band("red", sensor="aerial"), _band("B04")]
+        x = torch.zeros(1, 2, 2, 2)
+        x[:, 0] = 1.0
+        x[:, 1] = 2.0
+        out, _ = map_to_model_bands(x, src, ["red"], preferred_sensors=("s2",))
+        assert torch.equal(out[:, 0], x[:, 1])
+
+
+class TestSelectSrcBands:
+    def test_full_match_preserves_target_order(self) -> None:
+        src = [_band("B02"), _band("B03"), _band("B04")]
+        indices, selected = select_src_bands(src, ["red", "green", "blue"])
+        assert selected == ["red", "green", "blue"]
+        assert indices == [2, 1, 0]
+
+    def test_partial_match_drops_missing_targets(self) -> None:
+        src = [_band("red"), _band("green"), _band("blue")]
+        target = ["coastal", "blue", "green", "red", "nir"]
+        indices, selected = select_src_bands(src, target)
+        assert selected == ["blue", "green", "red"]
+        assert indices == [2, 1, 0]
+
+    def test_duplicate_canonical_name_prefers_sensor(self) -> None:
+        src = [
+            _band("red", sensor="aerial"),
+            _band("green", sensor="aerial"),
+            _band("blue", sensor="aerial"),
+            _band("nir", sensor="aerial"),
+            _band("B02"),
+            _band("B03"),
+            _band("B04"),
+            _band("B08"),
+        ]
+        indices, selected = select_src_bands(
+            src, ["blue", "green", "red", "nir"], preferred_sensors=("s2",)
+        )
+        assert selected == ["blue", "green", "red", "nir"]
+        assert indices == [4, 5, 6, 7]
+
+    def test_duplicate_without_preference_keeps_first_occurrence(self) -> None:
+        src = [_band("red", sensor="aerial"), _band("B04")]
+        indices, _ = select_src_bands(src, ["red"])
+        assert indices == [0]
+
+    def test_no_match_raises(self) -> None:
+        src = [_band("vv", sensor="sar"), _band("vh", sensor="sar")]
+        with pytest.raises(ValueError, match="none of the target bands"):
+            select_src_bands(src, ["red", "green", "blue"])
 
 
 class TestWavelengthsUm:
