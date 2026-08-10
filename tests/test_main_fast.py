@@ -361,7 +361,10 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
 
     linear_call = linear_mock.call_args
     assert linear_call.args[8] == cfg.eval.bootstrap
-    assert linear_call.args[9] is cfg.eval.merge_val
+    # The label-budget linear path always fits train-only, so merge_val is a
+    # forced keyword False regardless of config or the +model.eval.merge_val
+    # override — which confirms the override does not leak into the probe fit.
+    assert linear_call.kwargs["merge_val"] is False
     assert linear_call.kwargs["calibration_n_bins"] == cfg.eval.calibration.n_bins_linear
 
     df = pd.read_csv(out)

@@ -76,3 +76,49 @@ def extract_features(
     y_all = np.concatenate(y_all, axis=0)
 
     return x_all, y_all
+
+
+def stratified_subsample_indices(
+    y: np.ndarray,
+    fraction: float,
+    seed: int,
+    min_per_class: int = 1,
+) -> np.ndarray:
+    """Return sorted positions of a stratified, nested subsample of ``y``.
+
+    For each class, one permutation of that class's positions is drawn from an
+    RNG seeded only by ``seed`` (never by the model or the fraction), and the
+    first ``min(n_c, max(min_per_class, round(fraction * n_c)))`` positions are
+    kept. Because every fraction reads a prefix of the same per-class
+    permutation, subsamples are automatically **nested**
+    (``f=0.05 ⊂ f=0.1 ⊂ … ⊂ f=1.0``) and **identical across models**. The
+    floor guarantees every class survives at every fraction.
+
+    Args:
+        y: 1D integer label array in fixed dataset order.
+        fraction: Label budget in ``(0, 1]``.
+        seed: Per-repeat seed (e.g. ``cfg.seed + repeat_index``).
+        min_per_class: Minimum kept examples per class.
+
+    Returns:
+        A sorted 1D ``int64`` array of positions into ``y``.
+
+    Raises:
+        ValueError: If ``fraction`` is outside ``(0, 1]``.
+    """
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError(f"fraction must be in (0, 1], got {fraction}.")
+    n = len(y)
+    if fraction == 1.0:
+        return np.arange(n, dtype=np.int64)
+
+    y = np.asarray(y)
+    rng = np.random.default_rng(seed)
+    selected: list[np.ndarray] = []
+    for cls in np.unique(y):
+        positions = np.flatnonzero(y == cls)
+        n_c = len(positions)
+        keep = min(n_c, max(min_per_class, round(fraction * n_c)))
+        perm = rng.permutation(positions)
+        selected.append(perm[:keep])
+    return np.sort(np.concatenate(selected)).astype(np.int64)
