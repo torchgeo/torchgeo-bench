@@ -4,6 +4,8 @@ import torch
 
 from torchgeo_bench.datasets.eurosat import EuroSAT, EuroSATSpatial
 from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
+from torchgeo_bench.datasets.spacenet2 import SpaceNet2
+from torchgeo_bench.datasets.spacenet7 import SpaceNet7
 
 # ---------------------------------------------------------------------------
 # FOTW.canonicalize_sample
@@ -36,6 +38,70 @@ class TestFOTWCanonicalize:
         sample = {"image_b": img_b, "label": 2}
         result = ds.canonicalize_sample(sample)
         assert torch.equal(result["image"], img_b)
+
+
+# ---------------------------------------------------------------------------
+# SpaceNet2.canonicalize_sample — reverse GeoBench's +1 mask offset
+# ---------------------------------------------------------------------------
+
+
+class TestSpaceNet2Canonicalize:
+    def test_declares_two_classes(self):
+        """The dead background class is dropped: 2 classes, not GeoBench's 3."""
+        assert SpaceNet2.num_classes == 2
+
+    def test_mask_offset_reversed(self):
+        """Upstream ``{1: no-building, 2: building}`` maps to native ``{0, 1}``."""
+        ds = SpaceNet2.__new__(SpaceNet2)
+        mask = torch.tensor([[1, 2], [2, 1]])
+        result = ds.canonicalize_sample({"image": torch.zeros(3, 2, 2), "mask": mask})
+        assert torch.equal(result["mask"], torch.tensor([[0, 1], [1, 0]]))
+        assert int(result["mask"].max()) < SpaceNet2.num_classes
+
+    def test_reserved_zero_folds_into_no_building(self):
+        """A stray reserved class 0 clamps to 0 (no-building), never wraps to -1."""
+        ds = SpaceNet2.__new__(SpaceNet2)
+        mask = torch.tensor([[0, 1, 2]])
+        result = ds.canonicalize_sample({"image": torch.zeros(3, 1, 3), "mask": mask})
+        assert torch.equal(result["mask"], torch.tensor([[0, 0, 1]]))
+
+    def test_missing_mask_is_noop(self):
+        """No mask key (e.g. inference) leaves the sample untouched."""
+        ds = SpaceNet2.__new__(SpaceNet2)
+        sample = {"image": torch.zeros(3, 4, 4)}
+        assert ds.canonicalize_sample(sample) == sample
+
+
+# ---------------------------------------------------------------------------
+# SpaceNet7.canonicalize_sample — same +1 offset defect as SpaceNet2
+# ---------------------------------------------------------------------------
+
+
+class TestSpaceNet7Canonicalize:
+    def test_declares_two_classes(self):
+        """The dead background class is dropped: 2 classes, not GeoBench's 3."""
+        assert SpaceNet7.num_classes == 2
+
+    def test_mask_offset_reversed(self):
+        """Upstream ``{1: no-building, 2: building}`` maps to native ``{0, 1}``."""
+        ds = SpaceNet7.__new__(SpaceNet7)
+        mask = torch.tensor([[1, 2], [2, 1]])
+        result = ds.canonicalize_sample({"image": torch.zeros(3, 2, 2), "mask": mask})
+        assert torch.equal(result["mask"], torch.tensor([[0, 1], [1, 0]]))
+        assert int(result["mask"].max()) < SpaceNet7.num_classes
+
+    def test_reserved_zero_folds_into_no_building(self):
+        """A stray reserved class 0 clamps to 0 (no-building), never wraps to -1."""
+        ds = SpaceNet7.__new__(SpaceNet7)
+        mask = torch.tensor([[0, 1, 2]])
+        result = ds.canonicalize_sample({"image": torch.zeros(3, 1, 3), "mask": mask})
+        assert torch.equal(result["mask"], torch.tensor([[0, 0, 1]]))
+
+    def test_missing_mask_is_noop(self):
+        """No mask key (e.g. inference) leaves the sample untouched."""
+        ds = SpaceNet7.__new__(SpaceNet7)
+        sample = {"image": torch.zeros(3, 4, 4)}
+        assert ds.canonicalize_sample(sample) == sample
 
 
 # ---------------------------------------------------------------------------

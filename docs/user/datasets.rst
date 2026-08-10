@@ -165,8 +165,8 @@ CLI name             #cls   bands notes                                        C
 ``fotw``             4      4     Fields of the World                          :class:`~torchgeo_bench.datasets.FieldsOfTheWorld`
 ``kuro_siwo``        4      3     SAR ``vv`` / ``vh`` + DEM (no RGB triplet)   :class:`~torchgeo_bench.datasets.KuroSiwo`
 ``pastis``           20     16    Sentinel-2 + Sentinel-1 (multi-modal)        :class:`~torchgeo_bench.datasets.PASTIS`
-``spacenet2``        3      9     WorldView 8-band + pan                       :class:`~torchgeo_bench.datasets.SpaceNet2`
-``spacenet7``        3      3                                                  :class:`~torchgeo_bench.datasets.SpaceNet7`
+``spacenet2``        2      9     WorldView 8-band + pan                       :class:`~torchgeo_bench.datasets.SpaceNet2`
+``spacenet7``        2      3                                                  :class:`~torchgeo_bench.datasets.SpaceNet7`
 ==================== ====== ===== ============================================ ==============================================================
 
 Other
