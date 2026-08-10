@@ -130,10 +130,31 @@ class TerraTorchPrithviBench(_TerraTorchBench):
 
 CLAY_BANDS: list[str] = ["blue", "green", "red", "nir", "swir1", "swir2"]
 _CLAY_WAVELENGTHS_UM: list[float] = [0.493, 0.560, 0.665, 0.842, 1.610, 2.190]
+# Clay's pretrained band centres, keyed by canonical name.  `waves` conditions a
+# learned embedding that Clay was pretrained with at *these* values, so the
+# wavelength comes from Clay's own table rather than from BandSpec.wavelength_um
+# (which DOFA and Panopticon use).  The two differ only trivially — cloudsen12
+# records b02 = 0.49 against Clay's 0.493, well inside the band's width — but
+# Clay's table is total over CLAY_BANDS and so can never raise, whereas reading
+# the BandSpec would fail on any band whose wavelength is unset.
+# `strict=True` pins the positional pairing: a band added to one list without
+# the other raises at import rather than silently shifting every wavelength.
+_CLAY_WAVELENGTH_BY_BAND: dict[str, float] = dict(
+    zip(CLAY_BANDS, _CLAY_WAVELENGTHS_UM, strict=True)
+)
 
 
 class TerraTorchClayBench(_TerraTorchBench):
-    """Clay v1.5 — 6 S2 bands @ 256, conditioned on per-band ``waves`` (µm) and ``gsd``."""
+    """Clay v1.5 — S2 bands @ 256, conditioned on per-band ``waves`` (µm) and ``gsd``.
+
+    Band-agnostic: the subset of :data:`CLAY_BANDS` actually present in the
+    dataset is resolved once at construction, in Clay's pretrained channel
+    order, and both the input mapping and the ``waves`` vector are built over
+    that subset.  An RGB dataset therefore runs as a genuine 3-channel model
+    with 3 wavelengths instead of raising on the missing ``nir``.  A full 6-band
+    S2 dataset resolves to all of :data:`CLAY_BANDS`, leaving channel order and
+    ``waves`` values exactly as they were.
+    """
 
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
@@ -148,6 +169,9 @@ class TerraTorchClayBench(_TerraTorchBench):
         gsd: float = 10.0,
         **kwargs: Any,
     ) -> None:
+        # Resolved before super().__init__ so a band set with no Clay band at
+        # all raises before the pretrained checkpoint is downloaded.
+        _, model_bands = select_src_bands(bands, CLAY_BANDS, preferred_sensors=("s2",))
         self.backbone_name = backbone_name
         super().__init__(
             bands=bands,
@@ -156,10 +180,19 @@ class TerraTorchClayBench(_TerraTorchBench):
             **kwargs,
         )
         self.gsd = gsd
-        self.register_buffer("_clay_waves", torch.tensor(_CLAY_WAVELENGTHS_UM, dtype=torch.float32))
+        self.model_bands = model_bands
+        self.register_buffer(
+            "_clay_waves",
+            torch.tensor(
+                [_CLAY_WAVELENGTH_BY_BAND[name] for name in model_bands],
+                dtype=torch.float32,
+            ),
+        )
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
-        mapped, _ = map_to_model_bands(images, self.bands, CLAY_BANDS, preferred_sensors=("s2",))
+        mapped, _ = map_to_model_bands(
+            images, self.bands, self.model_bands, preferred_sensors=("s2",)
+        )
         return mapped
 
     @torch.no_grad()

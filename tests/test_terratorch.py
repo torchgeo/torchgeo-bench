@@ -8,6 +8,9 @@ import torch.nn as nn
 
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models.terratorch_models import (
+    _CLAY_WAVELENGTH_BY_BAND,
+    _CLAY_WAVELENGTHS_UM,
+    CLAY_BANDS,
     TerraTorchClayBench,
     TerraTorchPrithviBench,
     TerraTorchTerraMindBench,
@@ -90,6 +93,95 @@ def test_clay_auxiliary_args_forwarded(mock_registry):
     assert "waves" in kwargs
     assert kwargs["waves"].shape == (6,)
     assert float(kwargs["gsd"]) == 20.0
+
+
+def test_clay_rgb_bands_resolve_to_three_channels(mock_registry):
+    """An RGB dataset runs Clay as a genuine 3-band model rather than raising
+    on the missing `nir` — Clay is wavelength-conditioned, so a band subset is
+    a real configuration, not a degenerate one."""
+    model = TerraTorchClayBench(bands=_bands(["red", "green", "blue"]), normalization="identity")
+    assert model.model_bands == ["blue", "green", "red"]
+    out = model.forward_patch_features(torch.rand(2, 3, 256, 256))
+    assert out.shape == (2, 8)
+    waves = mock_registry["instances"][-1].last_forward_kwargs["waves"]
+    assert waves.shape == (3,)
+    assert torch.allclose(waves, torch.tensor([0.493, 0.560, 0.665]))
+
+
+def test_clay_rgb_input_is_reordered_into_clay_band_order(mock_registry):
+    """Clay's pretrained order is blue, green, red — a red-first dataset (which
+    is exactly what cloudsen12's rgb config is) must be permuted, not passed
+    through."""
+    model = TerraTorchClayBench(bands=_bands(["red", "green", "blue"]), normalization="identity")
+    x = torch.arange(3.0).view(1, 3, 1, 1).expand(1, 3, 256, 256)
+    model.forward_patch_features(x)
+    payload = mock_registry["instances"][-1].last_forward_input
+    assert payload.shape == (1, 3, 256, 256)
+    assert torch.equal(payload[:, 0], x[:, 2])  # blue  <- src idx 2
+    assert torch.equal(payload[:, 1], x[:, 1])  # green <- src idx 1
+    assert torch.equal(payload[:, 2], x[:, 0])  # red   <- src idx 0
+
+
+def test_clay_six_band_s2_behaviour_is_unchanged(mock_registry):
+    """The regression gate for the band-agnostic change: a full 6-band S2
+    dataset must still resolve to exactly Clay's pretrained layout and waves,
+    so existing s2 measurements stay comparable."""
+    bands = _bands(["blue", "green", "red", "nir", "swir1", "swir2"])
+    model = TerraTorchClayBench(bands=bands, normalization="identity")
+    assert model.model_bands == CLAY_BANDS
+    model.forward_patch_features(torch.rand(1, 6, 256, 256))
+    waves = mock_registry["instances"][-1].last_forward_kwargs["waves"]
+    assert torch.equal(waves, torch.tensor(_CLAY_WAVELENGTHS_UM, dtype=torch.float32))
+
+
+def test_clay_partial_band_subset_keeps_pretrained_order(mock_registry):
+    """Bands are emitted in Clay's order, not the dataset's, and `waves` stays
+    aligned to them element-for-element."""
+    model = TerraTorchClayBench(
+        bands=_bands(["b12", "b04", "b08", "b02"]), normalization="identity"
+    )
+    assert model.model_bands == ["blue", "red", "nir", "swir2"]
+    model.forward_patch_features(torch.rand(1, 4, 256, 256))
+    waves = mock_registry["instances"][-1].last_forward_kwargs["waves"]
+    assert torch.allclose(waves, torch.tensor([0.493, 0.665, 0.842, 2.190]))
+
+
+def test_clay_wavelengths_come_from_clay_table_not_bandspec(mock_registry):
+    """Pins the design decision: `waves` is Clay's pretrained centre even when
+    the BandSpec records a different one.  cloudsen12 says b02 = 0.49; Clay was
+    pretrained at 0.493, and that is what conditions the embedding."""
+    bands = [
+        BandSpec(
+            sensor="s2",
+            name=name,
+            source_name=name.upper(),
+            mean=0.2,
+            std=0.1,
+            min=0.0,
+            max=1.0,
+            wavelength_um=wl,
+        )
+        for name, wl in (("b02", 0.49), ("b03", 0.56), ("b04", 0.665))
+    ]
+    model = TerraTorchClayBench(bands=bands, normalization="identity")
+    model.forward_patch_features(torch.rand(1, 3, 256, 256))
+    waves = mock_registry["instances"][-1].last_forward_kwargs["waves"]
+    assert float(waves[0]) == pytest.approx(0.493)  # Clay's, not the BandSpec's 0.49
+
+
+def test_clay_without_any_clay_band_raises(mock_registry):
+    """SAR-only input has no Clay band at all — a real incompatibility, which
+    must still raise at construction, before the checkpoint is fetched."""
+    with pytest.raises(ValueError, match="none of the target bands"):
+        TerraTorchClayBench(bands=_bands(["vv", "vh"], sensor="sar"), normalization="identity")
+    assert mock_registry["build_calls"] == []
+
+
+def test_clay_band_table_and_wavelengths_stay_aligned():
+    """CLAY_BANDS and _CLAY_WAVELENGTHS_UM are positionally paired; a band added
+    to one without the other would mis-assign every wavelength after it."""
+    assert len(CLAY_BANDS) == len(_CLAY_WAVELENGTHS_UM)
+    assert [_CLAY_WAVELENGTH_BY_BAND[b] for b in CLAY_BANDS] == _CLAY_WAVELENGTHS_UM
 
 
 _S2L2A_FULL = [

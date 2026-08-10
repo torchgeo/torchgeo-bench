@@ -10,6 +10,7 @@ from torchgeo_bench.segmentation_probe import (
     GPUTensorCache,
     SegmentationProbe,
     _estimate_cache_bytes,
+    _resolve_num_prefix_tokens,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver
 
@@ -375,6 +376,96 @@ def test_probe_vit_token_features():
     images = torch.randn(2, 3, 64, 64)
     logits = probe(images)
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
+
+
+def test_resolve_num_prefix_tokens_walks_module_tree():
+    """The resolver finds timm's num_prefix_tokens however deeply it is nested."""
+
+    class _Inner(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_prefix_tokens = 5
+
+    class _Outer(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.backbone = _Inner()
+
+    assert _resolve_num_prefix_tokens(_Outer()) == 5
+    # Non-timm token models declare nothing and must not be guessed at.
+    assert _resolve_num_prefix_tokens(nn.Linear(4, 4)) is None
+
+
+def test_process_feature_drops_dinov3_register_tokens():
+    """DINOv3's 1 CLS + 4 registers are dropped, not reshaped into a fake grid.
+
+    Regression for silent corruption: (B, 261, 1024) has L=261 (neither s^2 nor
+    s^2+1), so the old code fell through to the (B, C, L) branch where 1024 is a
+    perfect square and produced a 32x32 grid of 261 "channels" with no error.
+    """
+
+    class _DinoV3Backbone(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_prefix_tokens = 5
+            self.blocks = nn.Identity()
+
+        def forward(self, x):
+            b = x.shape[0]
+            return self.blocks(torch.randn(b, 261, 1024))
+
+    probe = make_probe(_DinoV3Backbone(), ["blocks"], head_type="linear")
+    assert probe.channels_list == [1024]
+    assert probe.feature_hw_list == [(16, 16)]
+
+
+def test_process_feature_plain_vit_cls_token_unchanged():
+    """A single CLS token (L=197) still resolves to a 14x14 grid."""
+
+    class _ViTBackbone(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_prefix_tokens = 1
+            self.blocks = nn.Identity()
+
+        def forward(self, x):
+            b = x.shape[0]
+            return self.blocks(torch.randn(b, 197, 768))
+
+    probe = make_probe(_ViTBackbone(), ["blocks"], head_type="linear")
+    assert probe.channels_list == [768]
+    assert probe.feature_hw_list == [(14, 14)]
+
+
+def test_process_feature_rejects_unreshapeable_tokens():
+    """A declared-prefix model with a non-square token count raises, not guesses.
+
+    The (B, C, L) fallback is gated on the model *not* declaring
+    num_prefix_tokens: a model that declares it is token-first by construction,
+    so a token count that survives prefix-stripping without becoming square is a
+    genuine mismatch.  Ungated, 1024 is a perfect square and this silently
+    reshaped into a 32x32 grid of 261 "channels".
+    """
+
+    class _OddBackbone(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_prefix_tokens = 2  # 261 - 2 = 259, not a square
+            self.blocks = nn.Identity()
+
+        def forward(self, x):
+            b = x.shape[0]
+            return self.blocks(torch.randn(b, 261, 1024))
+
+    with pytest.raises(ValueError, match="Could not reshape 3D feature map"):
+        make_probe(_OddBackbone(), ["blocks"], head_type="linear")
+
+
+def test_equivariance_resolve_num_prefix_tokens_importable():
+    """equivariance.layout re-exports the probe's resolver (was a latent ImportError)."""
+    from torchgeo_bench.equivariance.layout import resolve_num_prefix_tokens
+
+    assert resolve_num_prefix_tokens(nn.Linear(4, 4)) is None
 
 
 def test_probe_dry_run_uses_backbone_num_channels():
