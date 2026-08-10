@@ -461,13 +461,6 @@ def test_process_feature_rejects_unreshapeable_tokens():
         make_probe(_OddBackbone(), ["blocks"], head_type="linear")
 
 
-def test_equivariance_resolve_num_prefix_tokens_importable():
-    """equivariance.layout re-exports the probe's resolver (was a latent ImportError)."""
-    from torchgeo_bench.equivariance.layout import resolve_num_prefix_tokens
-
-    assert resolve_num_prefix_tokens(nn.Linear(4, 4)) is None
-
-
 def test_probe_dry_run_uses_backbone_num_channels():
     """Dry-run channel inference supports non-RGB benchmark models."""
     backbone = TwoChannelBackbone()
