@@ -9,3 +9,8 @@ global_pool: avg
 seed: null
 name: vit_base_patch16_224
 use_cls_token: false
+eval:
+  segmentation:
+    # Isotropic ViT-Base (12 transformer blocks, 768ch, 14x14 token grid).
+    # No spatial pyramid: pick 4 blocks spread across depth, deepest first.
+    layers: ["blocks.11", "blocks.8", "blocks.5", "blocks.2"]
