@@ -1,0 +1,74 @@
+defaults:
+  - model: ???
+  - _self_
+
+# Per-sample compute cost (GFLOPs) split into backbone / head / probe.
+#
+# There is no dataset axis: `_count_gflops` runs on a synthetic tensor, so
+# backbone GFLOPs at a fixed input shape is identical across datasets.  The
+# axis that *does* matter is channel count, captured by two fixed band
+# configs sourced from cloudsen12 (the canonical 12-band S2 set — not
+# so2sat, whose 12 bands are 10 S2 + 2 SAR).
+
+device: cuda
+resume: true
+
+# Nothing here is trained and GFLOPs is deterministic, so this seeds no
+# measurement directly.  It exists because model configs interpolate it —
+# conf/model/rcf.yaml carries `seed: ${seed}`, which raises
+# InterpolationKeyError at instantiation without a top-level key to resolve
+# against.  Held equal to config.yaml's default because RCF's features *are*
+# its random projection: a different seed would measure a different model.
+seed: 0
+
+output: results/compute_cost.csv
+
+band_configs: [rgb, s2]      # rgb = 3ch, s2 = 12ch, both sourced from cloudsen12
+band_source: cloudsen12
+normalization: bandspec_zscore
+image_size: 224
+
+# Segmentation head cells.  num_classes is deliberately not an axis: FPNHead
+# keeps hidden_dim=256 throughout and only its final 1x1 conv sees
+# num_classes, a sub-2% effect recoverable in closed form as
+#   delta = 2 * hidden_dim * n_taps * num_classes * H_f * W_f
+# What moves head cost is finest tap resolution, a backbone property.
+seg_head_types: [fpn, dpt]
+seg_num_classes: 4
+# `rgb` is the joinable half: every row in results/all_segmentation_results.csv
+# is bands=rgb (slurm/seg_validation.sbatch pins dataset.bands=rgb), so an
+# s2-only measurement would sit on a different axis than the accuracy it is
+# plotted against.  `s2` is kept as a free S2-vs-RGB head-cost comparison.
+seg_band_configs: [rgb, s2]
+
+# Base segmentation eval block; each model config's own `eval.segmentation`
+# (notably `layers`) is merged over this, mirroring the real seg pipeline.
+# Only the structural fields matter here — nothing is trained, so lr /
+# scheduler / criterion exist purely to satisfy _build_seg_probe_and_solver.
+eval:
+  segmentation:
+    layers: []
+    head_type: fpn
+    lr: 1.0e-3
+    lr_scheduler: cosine
+    criterion:
+      _target_: torch.nn.CrossEntropyLoss
+      ignore_index: 255
+
+# Probe head; mirrors eval.linear_head in config.yaml.  "mlp" adds a
+# Linear(D, D, bias=False) projection over the *feature* dim, so it scales
+# as D^2 — which is exactly the probe-capacity confound the CSV exposes.
+probe_head: linear           # linear | mlp
+probe_num_classes: 10
+
+# measure_profile settings; matches the real eval's batch so throughput,
+# latency, peak memory and energy are comparable to a live run.  GFLOPs is
+# per-sample regardless (the counter slices sample[:1]).
+timing_batch_size: 64
+n_warmup: 3
+n_measure: 20
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
