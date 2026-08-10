@@ -40,6 +40,7 @@ The bundled :doc:`/api/cli` provides one subcommand per family:
 .. code-block:: console
 
    $ torchgeo-bench download geobench_v1                              # full V1 bundle
+   $ torchgeo-bench download geobench_v1 --datasets m-eurosat         # V1 subset
    $ torchgeo-bench download geobench_v2                              # default V2 set
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # V2 subset
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT

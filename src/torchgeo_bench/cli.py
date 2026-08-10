@@ -79,7 +79,7 @@ def download(
     ] = Path("data"),
     datasets: Annotated[
         str | None,
-        typer.Option(help="(geobench_v2 only) Comma-separated dataset names."),
+        typer.Option(help="(GeoBench only) Comma-separated dataset names."),
     ] = None,
 ) -> None:
     """Download a benchmark dataset to disk."""
@@ -94,12 +94,25 @@ def download(
         typer.echo(f"Unknown target {target!r}. Choose from: {', '.join(sorted(valid))}", err=True)
         raise typer.Exit(1)
 
+    names = None
+    if datasets is not None:
+        names = [name.strip() for name in datasets.split(",") if name.strip()]
+        if not names:
+            raise typer.BadParameter(
+                "must contain at least one dataset name",
+                param_hint="--datasets",
+            )
+
     if target == "geobench_v1":
-        download_geobench_v1(output_dir)
+        download_geobench_v1(output_dir, datasets=names)
     elif target == "geobench_v2":
-        names = [n.strip() for n in datasets.split(",") if n.strip()] if datasets else None
         download_geobench_v2(output_dir, datasets=names)
     elif target == "eurosat":
+        if names is not None:
+            raise typer.BadParameter(
+                "is only supported for GeoBench downloads",
+                param_hint="--datasets",
+            )
         download_eurosat(output_dir)
 
 
