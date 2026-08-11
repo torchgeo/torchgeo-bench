@@ -40,6 +40,7 @@ The bundled :doc:`/api/cli` provides one subcommand per family:
 .. code-block:: console
 
    $ torchgeo-bench download geobench_v1                              # full V1 bundle
+   $ torchgeo-bench download geobench_v1 --datasets m-eurosat         # V1 subset
    $ torchgeo-bench download geobench_v2                              # default V2 set
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # V2 subset
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT
@@ -165,8 +166,8 @@ CLI name             #cls   bands notes                                        C
 ``fotw``             4      4     Fields of the World                          :class:`~torchgeo_bench.datasets.FieldsOfTheWorld`
 ``kuro_siwo``        4      3     SAR ``vv`` / ``vh`` + DEM (no RGB triplet)   :class:`~torchgeo_bench.datasets.KuroSiwo`
 ``pastis``           20     16    Sentinel-2 + Sentinel-1 (multi-modal)        :class:`~torchgeo_bench.datasets.PASTIS`
-``spacenet2``        3      9     WorldView 8-band + pan                       :class:`~torchgeo_bench.datasets.SpaceNet2`
-``spacenet7``        3      3                                                  :class:`~torchgeo_bench.datasets.SpaceNet7`
+``spacenet2``        2      9     WorldView 8-band + pan                       :class:`~torchgeo_bench.datasets.SpaceNet2`
+``spacenet7``        2      3                                                  :class:`~torchgeo_bench.datasets.SpaceNet7`
 ==================== ====== ===== ============================================ ==============================================================
 
 Other

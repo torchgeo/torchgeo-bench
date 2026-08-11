@@ -1,12 +1,14 @@
 """Command-line interface for ``torchgeo-bench``.
 
-Two subcommands:
+Three subcommands:
 
 - ``torchgeo-bench run [hydra overrides...]`` — runs the benchmark via Hydra.
+- ``torchgeo-bench flops [hydra overrides...]`` — measures per-sample compute
+  cost (GFLOPs split into backbone / head / probe).
 - ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`` — fetches data.
 
-The ``run`` subcommand forwards every remaining arg to Hydra by mutating
-``sys.argv`` and calling :func:`torchgeo_bench.main.main` in-process. We
+The ``run`` and ``flops`` subcommands forward every remaining arg to Hydra by
+mutating ``sys.argv`` and calling the corresponding entry point in-process. We
 restore ``sys.argv`` afterwards so embedded use (tests, notebooks) is safe.
 """
 
@@ -49,6 +51,22 @@ def run(ctx: typer.Context) -> None:
         sys.argv = saved
 
 
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Measure per-sample compute cost in GFLOPs (extra args forwarded to Hydra).",
+)
+def flops(ctx: typer.Context) -> None:
+    """Measure per-sample compute cost; extra args are forwarded to Hydra."""
+    from torchgeo_bench.flops_pipeline import main as hydra_main
+
+    saved = sys.argv[:]
+    try:
+        sys.argv = [saved[0], *ctx.args]
+        hydra_main()
+    finally:
+        sys.argv = saved
+
+
 @app.command(help="Download benchmark datasets.")
 def download(
     target: Annotated[
@@ -61,7 +79,7 @@ def download(
     ] = Path("data"),
     datasets: Annotated[
         str | None,
-        typer.Option(help="(geobench_v2 only) Comma-separated dataset names."),
+        typer.Option(help="(GeoBench only) Comma-separated dataset names."),
     ] = None,
 ) -> None:
     """Download a benchmark dataset to disk."""
@@ -76,12 +94,25 @@ def download(
         typer.echo(f"Unknown target {target!r}. Choose from: {', '.join(sorted(valid))}", err=True)
         raise typer.Exit(1)
 
+    names = None
+    if datasets is not None:
+        names = [name.strip() for name in datasets.split(",") if name.strip()]
+        if not names:
+            raise typer.BadParameter(
+                "must contain at least one dataset name",
+                param_hint="--datasets",
+            )
+
     if target == "geobench_v1":
-        download_geobench_v1(output_dir)
+        download_geobench_v1(output_dir, datasets=names)
     elif target == "geobench_v2":
-        names = [n.strip() for n in datasets.split(",") if n.strip()] if datasets else None
         download_geobench_v2(output_dir, datasets=names)
     elif target == "eurosat":
+        if names is not None:
+            raise typer.BadParameter(
+                "is only supported for GeoBench downloads",
+                param_hint="--datasets",
+            )
         download_eurosat(output_dir)
 
 

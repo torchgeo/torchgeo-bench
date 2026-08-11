@@ -3,7 +3,7 @@ Command-line interface
 
 .. module:: torchgeo_bench.cli
 
-The ``torchgeo-bench`` console script exposes two subcommands:
+The ``torchgeo-bench`` console script exposes three subcommands:
 
 ``torchgeo-bench run [hydra overrides...]``
     Runs the benchmark pipeline. All extra arguments are forwarded to
@@ -13,8 +13,12 @@ The ``torchgeo-bench`` console script exposes two subcommands:
 
 ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}``
     Downloads benchmark datasets into ``./data/`` (or a custom location with
-    ``--output-dir``). For GeoBench V2, individual datasets can be selected
-    with ``--datasets a,b,c``.
+    ``--output-dir``). For GeoBench V1 and V2, individual datasets can be
+    selected with ``--datasets a,b,c``.
+
+``torchgeo-bench flops [hydra overrides...]``
+    Measures per-sample backbone, head, and probe compute. Overrides are
+    composed from :file:`src/torchgeo_bench/conf/flops_config.yaml`.
 
 Hydra entry point
 -----------------

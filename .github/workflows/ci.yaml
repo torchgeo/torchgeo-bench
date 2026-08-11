@@ -14,14 +14,14 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            extras: --extra dev --extra id --extra olmoearth
-            cache-tag: dev-id-olmoearth
+            extras: --extra dev --extra id --extra olmoearth --extra sam3
+            cache-tag: dev-id-olmoearth-sam3
           - os: macos-latest
-            extras: --extra dev
-            cache-tag: dev
+            extras: --extra dev --extra sam3
+            cache-tag: dev-sam3
           - os: windows-latest
-            extras: --extra dev
-            cache-tag: dev
+            extras: --extra dev --extra sam3
+            cache-tag: dev-sam3
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read

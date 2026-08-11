@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.11.6,<0.12" ]
 
 [project]
 name = "torchgeo-bench"
-version = "0.4.0"
+version = "0.5.0"
 description = "Lightweight benchmarking framework for geospatial models"
 readme = "README.md"
 keywords = [
@@ -120,6 +120,10 @@ scripts.torchgeo-bench = "torchgeo_bench.cli:main"
 
 [tool.hatch]
 build.targets.wheel.packages = [ "src/torchgeo_bench" ]
+
+[tool.uv]
+build-backend.source-exclude = [ "/docs/_build" ]
+build-backend.source-include = [ "docs/**", "examples/**" ]
 
 [tool.ruff]
 target-version = "py312"

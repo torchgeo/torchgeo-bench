@@ -94,12 +94,64 @@ def canonical_band_name(name: str) -> str:
     return _BAND_ALIASES.get(key, key)
 
 
+def resolve_src_indices(
+    src_bands: list[BandSpec],
+    *,
+    preferred_sensors: tuple[str, ...] = (),
+) -> dict[str, int]:
+    """Map each canonical band name to one source channel index.
+
+    When two source bands share a canonical name, the sensor listed earliest
+    in ``preferred_sensors`` wins; ties keep the first occurrence.
+    """
+    best: dict[str, tuple[int, int]] = {}
+    for i, b in enumerate(src_bands):
+        name = canonical_band_name(b.name)
+        rank = (
+            preferred_sensors.index(b.sensor)
+            if b.sensor in preferred_sensors
+            else len(preferred_sensors)
+        )
+        if name not in best or rank < best[name][0]:
+            best[name] = (rank, i)
+    return {name: i for name, (_, i) in best.items()}
+
+
+def select_src_bands(
+    src_bands: list[BandSpec],
+    target_band_names: list[str],
+    *,
+    preferred_sensors: tuple[str, ...] = (),
+) -> tuple[list[int], list[str]]:
+    """Select source channel indices for the targets present in ``src_bands``.
+
+    Missing targets are dropped rather than zero-filled.  Returns
+    ``(indices, selected)`` in target order.
+    """
+    src_index = resolve_src_indices(src_bands, preferred_sensors=preferred_sensors)
+    indices: list[int] = []
+    selected: list[str] = []
+    for name in target_band_names:
+        idx = src_index.get(canonical_band_name(name))
+        if idx is not None:
+            indices.append(idx)
+            selected.append(name)
+    if not indices:
+        available = sorted(src_index)
+        raise ValueError(
+            f"select_src_bands: none of the target bands {target_band_names} are present. "
+            f"Available canonical bands: {available}."
+        )
+    return indices, selected
+
+
 def map_to_model_bands(
     images: torch.Tensor,
     src_bands: list[BandSpec],
     target_band_names: list[str],
     *,
     allow_missing: bool = False,
+    preferred_sensors: tuple[str, ...] = (),
 ) -> tuple[torch.Tensor, list[bool]]:
     """Rearrange ``images`` from src band order to ``target_band_names``, zero-filling gaps.
 
@@ -111,9 +163,7 @@ def map_to_model_bands(
             f"map_to_model_bands: images has {images.shape[1]} channels but "
             f"src_bands has {len(src_bands)} entries."
         )
-    src_index: dict[str, int] = {}
-    for i, b in enumerate(src_bands):
-        src_index.setdefault(canonical_band_name(b.name), i)
+    src_index = resolve_src_indices(src_bands, preferred_sensors=preferred_sensors)
 
     B, _, H, W = images.shape
     out = torch.zeros(B, len(target_band_names), H, W, device=images.device, dtype=images.dtype)

@@ -20,6 +20,25 @@ from torchgeo_bench.models.segmentation_heads import (
 logger = logging.getLogger(__name__)
 
 
+def _resolve_num_prefix_tokens(backbone: nn.Module) -> int | None:
+    """Return timm's ``num_prefix_tokens`` from anywhere in the module tree.
+
+    The benchmark nests the timm model under ``.backbone`` (sometimes deeper),
+    so walk the tree rather than reading the top-level attribute.  Returns
+    ``None`` for non-timm token models, which must declare the count by hand.
+
+    This is what distinguishes a CLS token from DINOv3's 1 CLS + 4 registers.
+    Guessing "one prefix token" silently corrupts the latter: at 256px a
+    DINOv3 ViT-L emits ``(B, 261, 1024)``, and 261 is neither ``s**2`` nor
+    ``s**2 + 1``.
+    """
+    for module in backbone.modules():
+        n = getattr(module, "num_prefix_tokens", None)
+        if isinstance(n, int) and n >= 0:
+            return n
+    return None
+
+
 class CachedFeaturesDataset(Dataset):
     """In-RAM cache of pre-extracted backbone features and masks.
 
@@ -267,28 +286,48 @@ class SegmentationProbe(nn.Module):
             return feat.view(feat.shape[0], feat.shape[1], 1, 1)
         if feat.ndim == 3:
             # Handle transformer token features in either (B, L, C) or (B, C, L) layout.
-            # Prefer exact square token grids; if L-1 is square, drop CLS token.
+            # Prefer exact square token grids, dropping the model's *declared*
+            # number of prefix tokens first.  Assuming a single CLS token is not
+            # enough: DINOv3 carries 1 CLS + 4 registers, so a 16x16 grid arrives
+            # as L=261, which is neither s^2 nor s^2+1.
             bsz, d1, d2 = feat.shape
+            n_prefix = _resolve_num_prefix_tokens(self.backbone)
 
-            # Try (B, L, C)
-            side = math.isqrt(d1)
-            if side * side == d1:
-                return feat.permute(0, 2, 1).reshape(bsz, d2, side, side)
-            side_no_cls = math.isqrt(d1 - 1) if d1 > 1 else 0
-            if side_no_cls * side_no_cls == d1 - 1:
-                return feat[:, 1:, :].permute(0, 2, 1).reshape(bsz, d2, side_no_cls, side_no_cls)
+            # Try (B, L, C).  dict.fromkeys dedupes while preserving order, so a
+            # model declaring 0 or 1 prefix tokens does not retry the same slice.
+            for drop in dict.fromkeys(([n_prefix] if n_prefix else []) + [0, 1]):
+                if drop >= d1:
+                    continue
+                side = math.isqrt(d1 - drop)
+                if side * side == d1 - drop:
+                    return feat[:, drop:, :].permute(0, 2, 1).reshape(bsz, d2, side, side)
 
-            # Try (B, C, L)
-            side = math.isqrt(d2)
-            if side * side == d2:
-                return feat.reshape(bsz, d1, side, side)
-            side_no_cls = math.isqrt(d2 - 1) if d2 > 1 else 0
-            if side_no_cls * side_no_cls == d2 - 1:
-                return feat[:, :, 1:].reshape(bsz, d1, side_no_cls, side_no_cls)
+            # Try (B, C, L), i.e. channel-first tokens.
+            #
+            # Gated, because ungated it is a trap rather than a fallback.
+            # Transformer widths are overwhelmingly powers of two (768, 1024,
+            # 1280), and every even power of two is a perfect square — so
+            # whenever a *token-first* tensor has a non-square token count, its
+            # channel dim still "looks like" a grid.  That is precisely how
+            # (B, 261, 1024) silently became a 32x32 map of 261 channels.
+            #
+            # A model that declares num_prefix_tokens is token-first by
+            # construction (that attribute describes the L axis), so for those
+            # the layout is already known and this branch must not apply: a
+            # token count that failed the loop above is a real mismatch to
+            # report, not a tensor to reinterpret.
+            if n_prefix is None and d1 < d2:
+                side = math.isqrt(d2)
+                if side * side == d2:
+                    return feat.reshape(bsz, d1, side, side)
+                side_no_cls = math.isqrt(d2 - 1) if d2 > 1 else 0
+                if side_no_cls * side_no_cls == d2 - 1:
+                    return feat[:, :, 1:].reshape(bsz, d1, side_no_cls, side_no_cls)
 
             raise ValueError(
                 "Could not reshape 3D feature map to 2D grid. "
-                f"Got shape={tuple(feat.shape)}. Expected tokens with L=s^2 or L=s^2+1 (CLS)."
+                f"Got shape={tuple(feat.shape)}, num_prefix_tokens={n_prefix}. "
+                "Expected tokens with L=s^2 after dropping prefix tokens."
             )
         # 4D tensor: NCHW (standard) or NHWC (Swin-family).
         # Detect NHWC: spatial dims are square (H==W) and channel dim (last) is

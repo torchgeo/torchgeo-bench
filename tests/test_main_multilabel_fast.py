@@ -65,6 +65,7 @@ def _multilabel_resume_row(cfg) -> dict[str, object]:
         "interpolation": cfg.dataset.interpolation,
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
+        "num_classes": 43,
         "metric_name": "micro_mAP",
         "metric_value": 0.2,
     }

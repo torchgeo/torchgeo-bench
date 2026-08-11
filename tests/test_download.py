@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from torchgeo_bench.download import (
     DEFAULT_V2_DATASETS,
     download_eurosat,
@@ -32,6 +34,24 @@ def test_download_geobench_v1_creates_output_and_decompresses(tmp_path: Path) ->
     decompress_mock.assert_called_once()
 
 
+def test_download_geobench_v1_subset_uses_sharded_mirror(tmp_path: Path) -> None:
+    out = tmp_path / "data"
+    with mock.patch("torchgeo_bench.download.snapshot_download") as download_mock:
+        download_geobench_v1(out, datasets=["m-eurosat", "m-forestnet"])
+
+    download_mock.assert_called_once_with(
+        repo_id="isaaccorley/geobenchv1-webdataset",
+        repo_type="dataset",
+        local_dir=out / "classification_v1.0_wds",
+        allow_patterns=["m-eurosat/*", "m-forestnet/*"],
+    )
+
+
+def test_download_geobench_v1_rejects_empty_subset(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="at least one GeoBench V1"):
+        download_geobench_v1(tmp_path, datasets=[])
+
+
 def test_download_geobench_v2_subset(tmp_path: Path) -> None:
     out = tmp_path / "data"
     with mock.patch("torchgeo_bench.download.download_geobench_v2_dataset") as dl_mock:
@@ -39,6 +59,11 @@ def test_download_geobench_v2_subset(tmp_path: Path) -> None:
 
     assert (out / "geobenchv2").exists()
     dl_mock.assert_called_once_with("burn_scars", out / "geobenchv2")
+
+
+def test_download_geobench_v2_rejects_empty_subset(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="at least one GeoBench V2"):
+        download_geobench_v2(tmp_path, datasets=[])
 
 
 def test_download_geobench_v2_defaults_to_registry_list(tmp_path: Path) -> None:

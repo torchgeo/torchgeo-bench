@@ -26,15 +26,30 @@ def test_download_invalid_target() -> None:
 
 
 def test_download_geobench_v1(monkeypatch) -> None:
-    calls: list[str] = []
+    calls: list[tuple[str, list[str] | None]] = []
 
-    def _fake_download(path) -> None:
-        calls.append(str(path))
+    def _fake_download(path, datasets=None) -> None:
+        calls.append((str(path), datasets))
 
     monkeypatch.setattr("torchgeo_bench.download.download_geobench_v1", _fake_download)
     result = runner.invoke(app, ["download", "geobench_v1"])
     assert result.exit_code == 0
-    assert len(calls) == 1
+    assert calls == [("data", None)]
+
+
+def test_download_geobench_v1_with_datasets(monkeypatch) -> None:
+    calls: list[tuple[str, list[str] | None]] = []
+
+    def _fake_download(path, datasets=None) -> None:
+        calls.append((str(path), datasets))
+
+    monkeypatch.setattr("torchgeo_bench.download.download_geobench_v1", _fake_download)
+    result = runner.invoke(
+        app,
+        ["download", "geobench_v1", "--datasets", "m-eurosat,m-forestnet"],
+    )
+    assert result.exit_code == 0
+    assert calls == [("data", ["m-eurosat", "m-forestnet"])]
 
 
 def test_download_geobench_v2_with_datasets(monkeypatch) -> None:
@@ -62,3 +77,15 @@ def test_download_eurosat(monkeypatch) -> None:
     result = runner.invoke(app, ["download", "eurosat"])
     assert result.exit_code == 0
     assert len(calls) == 1
+
+
+def test_download_rejects_empty_dataset_list() -> None:
+    result = runner.invoke(app, ["download", "geobench_v1", "--datasets", ","])
+    assert result.exit_code == 2
+    assert "must contain at least one dataset name" in result.stderr
+
+
+def test_download_rejects_datasets_for_eurosat() -> None:
+    result = runner.invoke(app, ["download", "eurosat", "--datasets", "m-eurosat"])
+    assert result.exit_code == 2
+    assert "only supported for GeoBench downloads" in result.stderr

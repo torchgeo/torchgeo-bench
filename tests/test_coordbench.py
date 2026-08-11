@@ -38,6 +38,16 @@ def test_sincos_encode_shape(points: tuple[np.ndarray, np.ndarray]) -> None:
     assert np.isfinite(feats).all()
 
 
+def test_documented_fourier_encoder_example(points: tuple[np.ndarray, np.ndarray]) -> None:
+    from examples.coordbench_location_encoder import FourierLocationEncoder
+
+    lon, lat = points
+    feats = FourierLocationEncoder(num_frequencies=4).encode(lon, lat)
+    assert feats.shape == (len(lon), 16)
+    assert feats.dtype == np.float32
+    assert np.isfinite(feats).all()
+
+
 def test_linear_probe_regression_recovers_smooth_target(
     points: tuple[np.ndarray, np.ndarray],
 ) -> None:

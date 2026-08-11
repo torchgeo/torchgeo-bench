@@ -29,6 +29,8 @@ The packaged config tree is shipped inside the wheel:
    └── model/
        ├── rcf.yaml
        ├── imagestats.yaml
+       ├── mind.yaml
+       ├── sincos.yaml
        ├── sam3_encoder.yaml
        ├── olmoearth_{base,large}.yaml
        ├── timm/
@@ -46,7 +48,8 @@ Key                           Meaning
 ============================  ==================================================
 ``seed``                      Global RNG seed (numpy + torch).
 ``device``                    PyTorch device string (e.g. ``cuda:0``, ``cpu``).
-``output``                    Path to the appended results CSV.
+``mode``                      ``image`` for GeoBench or ``coord`` for CoordBench.
+``output``                    Image-benchmark results CSV; CoordBench uses ``coord.output``.
 ``verbose``                   Toggle progress logging.
 ``resume``                    Skip already-computed ``(dataset, method, model, config)`` combos.
 ============================  ==================================================
@@ -109,6 +112,29 @@ selection semantics.
 
 Refer to :doc:`/api/eval` for the runtime functions that consume each
 sub-block.
+
+``coord`` block
+---------------
+
+The coordinate-only track is selected with ``mode=coord`` and a compatible
+location-encoder model preset:
+
+.. code-block:: yaml
+
+   mode: coord
+   model: sincos
+   coord:
+     output: results/coordbench_results.csv
+     names: all                 # family names or individual benchmarks
+     methods: [knn, linear]     # KNN applies to classification only
+     split: random              # random | spatial | both
+     folds: 5
+     cell_deg: 10.0
+     knn_k: 5
+     knn_device: cpu
+
+See :doc:`coordbench` for benchmark families, included encoders, split
+semantics, and a custom-encoder example.
 
 ``model`` block
 ---------------

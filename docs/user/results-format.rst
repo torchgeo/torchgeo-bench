@@ -11,10 +11,10 @@ Sample rows
 
 .. code-block:: text
 
-   dataset,method,metric_name,metric_value,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model,name,normalization,image_size,interpolation,partition,bands
-   m-eurosat,knn5,accuracy,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,bandspec_zscore,224,bilinear,default,rgb
-   m-eurosat,linear,accuracy,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,bandspec_zscore,224,bilinear,default,rgb
-   burn_scars,seg-fpn,mIoU,0.6234,0.0,0.0,768,,1000,200,300,0,torchgeo_bench.models.TimmPatchBenchModel,resnet50,bandspec_zscore,224,bilinear,default,rgb
+   dataset,method,metric_name,metric_value,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model,name,normalization,image_size,interpolation,partition,bands,num_classes
+   m-eurosat,knn5,accuracy,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,bandspec_zscore,224,bilinear,default,rgb,10
+   m-eurosat,linear,accuracy,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,torchgeo_bench.models.RCFBench,rcf,bandspec_zscore,224,bilinear,default,rgb,10
+   burn_scars,seg-fpn,mIoU,0.6234,0.0,0.0,768,,1000,200,300,0,torchgeo_bench.models.TimmPatchBenchModel,resnet50,bandspec_zscore,224,bilinear,default,rgb,3
 
 Datasets emit unnormalized tensors; each model wrapper normalises inside
 :meth:`~torchgeo_bench.models.BenchModel.normalize_inputs` according to
@@ -84,6 +84,8 @@ Column               Description
 ``interpolation``    Resize interpolation mode.
 ``partition``        GeoBench V1 partition name (``default`` for V2).
 ``bands``            ``rgb`` / ``all`` / a sorted comma-joined list.
+``num_classes``      Dataset label count. It is also part of the resume key so
+                     label-schema changes cannot reuse stale rows.
 ``c_range_start``    ``eval.c_range[0]``.
 ``c_range_stop``     ``eval.c_range[1]``.
 ``c_range_num``      ``eval.c_range[2]``.
@@ -113,9 +115,16 @@ is:
 .. code-block:: python
 
    (dataset, method, model._target_, model.name,
-    normalization, image_size, interpolation, partition, bands)
+    normalization, image_size, interpolation, partition, bands, num_classes)
 
 Note that ``method`` is per-method (``knn5`` / ``linear`` /
 ``intrinsic_dim`` / ``seg-<head_type>``), so re-running with
 ``eval.skip_linear=false`` after a ``skip_linear=true`` run will fill in
 just the linear-probe rows.
+
+Rows written before version 0.5.0 do not have ``num_classes`` and are treated
+as incomplete by resume mode. The checked-in SpaceNet2/7 rows produced under
+the old three-class task were removed; they remain available from the 0.4.0 tag.
+
+CoordBench uses a separate schema and output path. See :doc:`coordbench` and
+:class:`~torchgeo_bench.coordbench.CoordResult`.
