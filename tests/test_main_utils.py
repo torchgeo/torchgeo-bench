@@ -103,6 +103,7 @@ def test_evaluate_profile_adds_cpu_metrics_branch() -> None:
         "interpolation": "bilinear",
         "partition": "default",
         "bands": "rgb",
+        "num_classes": 10,
         "c_range_start": -2,
         "c_range_stop": 2,
         "c_range_num": 3,

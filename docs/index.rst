@@ -6,7 +6,7 @@ torchgeo-bench
 A lightweight benchmarking framework for frozen geospatial foundation models.
 Choose your path below.
 
-.. grid:: 3
+.. grid:: 1 2 2 4
 
    .. grid-item-card:: Benchmark a model
       :link: user/quickstart
@@ -19,6 +19,12 @@ Choose your path below.
       :link-type: doc
 
       Implement ``BenchModel`` and run your pretrained GeoFM against the full suite.
+
+   .. grid-item-card:: Benchmark a location encoder
+      :link: user/coordbench
+      :link-type: doc
+
+      Evaluate coordinate-only encoders on CoordBench.
 
    .. grid-item-card:: Add a dataset
       :link: user/contribute_dataset

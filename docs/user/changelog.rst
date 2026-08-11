@@ -1,8 +1,58 @@
 Changelog
 =========
 
-Release notes are tracked on GitHub:
-https://github.com/torchgeo/torchgeo-bench/releases
+0.5.0 (2026-08-10)
+------------------
 
-A consolidated changelog will be added here once the project adopts
-``sphinx-github-changelog`` or a hand-maintained log.
+Added
+^^^^^
+
+* CoordBench coordinate-only evaluation with random and spatial-block
+  cross-validation, KNN and ridge-linear probes, MIND and sine/cosine encoders,
+  optional SatCLIP/GeoCLIP/Climplicit/SINR wrappers, checked-in results, and a
+  mean-rank leaderboard.
+* A dedicated ``torchgeo-bench flops`` pipeline for per-sample backbone, head,
+  and probe compute, with a checked-in compute-cost table.
+* OlmoEarth v1.2 Nano, Tiny, Small, and Base presets, including Landsat-as-S2
+  routes for ``m-forestnet``.
+* Representative segmentation sweeps and protocol-validation artifacts.
+* GeoBench V1 subset downloads through ``download geobench_v1 --datasets ...``.
+
+Changed
+^^^^^^^
+
+* Image-benchmark result rows now record ``num_classes`` and include it in the
+  resume key. Rows from an older label schema cannot be silently reused.
+* Linux x86_64 installs use the CUDA FAISS backend; other platforms use CPU
+  FAISS. CoordBench KNN remains CPU by default unless ``coord.knn_device`` is
+  overridden.
+* SpaceNet2 and SpaceNet7 now use their native two-class building masks instead
+  of GeoBench's unused third background class.
+* TerraMind RGB routing, band selection, and pretrained normalization now match
+  the selected modality.
+
+Fixed
+^^^^^
+
+* The DPT segmentation head now follows the reference decoder's projection,
+  fusion, and output path.
+* PyTorch checkpoints are loaded with ``weights_only=True`` where applicable.
+* OlmoEarth rejects ambiguous sensor routes that collapse multiple input bands
+  onto the same pretrained channel.
+* Resume-only datasets are skipped before data and model initialization.
+
+Result migration
+^^^^^^^^^^^^^^^^
+
+The 128 checked-in SpaceNet2/7 rows produced under the obsolete three-class
+task were removed. They remain available through the 0.4.0 tag but are not
+comparable to current two-class runs. Other pre-0.5 rows do not carry
+``num_classes`` and therefore cannot satisfy the new resume key.
+
+`Full 0.4.0 to 0.5.0 diff <https://github.com/torchgeo/torchgeo-bench/compare/v0.4.0...v0.5.0>`__
+
+Older releases
+--------------
+
+Earlier release notes remain available on
+`GitHub Releases <https://github.com/torchgeo/torchgeo-bench/releases>`__.

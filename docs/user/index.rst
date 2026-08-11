@@ -18,6 +18,7 @@ and models, and interpreting the results.
 
    datasets
    models
+   coordbench
    configuration
    results-format
    results-explorer

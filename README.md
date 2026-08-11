@@ -6,15 +6,16 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A lightweight benchmarking framework for evaluating **frozen** geospatial
-foundation models on the GeoBench V1 and V2 suites. Plug in any backbone, get
-KNN-5 / linear-probe accuracy on classification datasets and mIoU on
-segmentation datasets, with bootstrapped 95% confidence intervals — all
-configured through Hydra.
+foundation models on GeoBench V1/V2 and location encoders on CoordBench. Plug
+in a backbone or coordinate encoder and run consistent downstream probes through
+Hydra.
 
 - **Frozen-backbone evaluation** — KNN-5, L-BFGS logistic regression, and
   linear / conv / FPN / DPT segmentation probes.
 - **GeoBench V1 + V2 built in** — classification and segmentation, RGB or
   full multispectral / multi-modal stacks.
+- **CoordBench built in** — coordinate-only regression and classification with
+  random, spatial-block, and official holdouts.
 - **Hydra-driven** — sweep models, datasets, partitions, image sizes, and
   bands without code changes.
 - **Resumable** — `resume=true` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
@@ -107,11 +108,15 @@ torchgeo-bench run mode=coord model=sincos coord.names=pdfm coord.methods=[linea
 `model=mind` and `model=mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),
 distilled from AlphaEarth/Climplicit/GeoCLIP/SINR) and `model=sincos` work with
 the base install. The other pretrained encoders (SatCLIP / GeoCLIP / Climplicit /
-SINR, via `rshf`) need the `coordbench` extra: `pip install -e ".[coordbench]"`,
+SINR, via `rshf`) need the `coordbench` extra:
+`pip install "torchgeo-bench[coordbench]"`,
 then `model=climplicit` (etc.). Results land in
 `results/coordbench_results.csv`. Add your own encoder by subclassing
 `LocationEncoder` (implement `_encode`) and pointing a Hydra `model` config's
-`_target_` at it.
+`_target_` at it. See the
+[CoordBench guide](https://torchgeo.org/torchgeo-bench/user/coordbench.html)
+and the runnable
+[`FourierLocationEncoder` example](https://github.com/torchgeo/torchgeo-bench/blob/main/examples/coordbench_location_encoder.py).
 
 <!-- skip-on-docs-landing-start -->
 

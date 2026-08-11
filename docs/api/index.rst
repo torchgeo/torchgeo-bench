@@ -8,6 +8,7 @@ Complete API documentation for all ``torchgeo_bench`` modules.
 
    datasets
    models
+   coordbench
    eval
    intrinsic_dim
    cli

@@ -23,6 +23,7 @@ variables).  The bundled downloader fetches each family by name:
 .. code-block:: console
 
    $ torchgeo-bench download geobench_v1                       # ALL V1 classification datasets
+   $ torchgeo-bench download geobench_v1 --datasets m-eurosat # one V1 dataset
    $ torchgeo-bench download geobench_v2                       # default V2 set (cls + seg)
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars
    $ torchgeo-bench download eurosat                           # torchgeo's EuroSAT mirror
@@ -67,6 +68,22 @@ The default device is ``cuda:0``.  On a machine without a working CUDA GPU
 When the selected FAISS backend has no GPU resources, the runner evaluates KNN
 on CPU while keeping feature extraction on the configured accelerator. It logs
 this fallback; use ``eval.knn_device=cpu`` to select it explicitly.
+
+Benchmark a location encoder
+----------------------------
+
+CoordBench does not require an image download. Run the built-in sine/cosine
+location baseline on a single regression benchmark with:
+
+.. code-block:: console
+
+   $ torchgeo-bench run mode=coord model=sincos \
+       coord.names=california_housing coord.methods=[linear] \
+       coord.folds=2 device=cpu
+
+See :doc:`coordbench` for the pretrained MIND, SatCLIP, GeoCLIP, Climplicit,
+and SINR presets, spatial cross-validation, output schema, and a complete
+custom-encoder example.
 
 Resume mode
 -----------
