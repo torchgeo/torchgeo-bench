@@ -110,15 +110,47 @@ This assumes ``sphinx-build`` is on your ``PATH`` (install with
 Releasing to PyPI
 -----------------
 
-1. Configure a `PyPI Trusted Publisher
-   <https://docs.pypi.org/trusted-publishers/>`_ for this repository
-   with environment name ``pypi``.
-2. Tag and push:
+PyPI publishing uses the ``pypi`` GitHub environment and a
+`Trusted Publisher <https://docs.pypi.org/trusted-publishers/>`_. Prepare every
+release through a pull request:
+
+1. Update :file:`docs/user/changelog.rst`, ``project.version`` in
+   :file:`pyproject.toml`, the fallback ``__version__`` in
+   :file:`src/torchgeo_bench/__init__.py`, and :file:`uv.lock`.
+2. Run the release gate from a clean checkout:
 
    .. code-block:: console
 
-      $ git tag v0.2.0
-      $ git push origin v0.2.0
+      $ uv run pre-commit run --all-files
+      $ uv run pytest
+      $ uv run --extra docs sphinx-build -W --keep-going -b html docs docs/_build/html
+      $ uv build
+
+3. Merge the release PR only after CI and the docs preview pass. Pull the merge
+   commit onto ``main`` and confirm that the worktree is clean.
+4. Create and push a tag that exactly matches ``project.version``:
+
+   .. code-block:: console
+
+      $ git tag vX.Y.Z
+      $ git push origin vX.Y.Z
+
+5. Create the matching GitHub release with curated notes (or generated notes
+   reviewed against the changelog):
+
+   .. code-block:: console
+
+      $ gh release create vX.Y.Z --verify-tag --title vX.Y.Z --generate-notes
+
+6. Watch the ``Publish to PyPI`` workflow, then verify the project page and a
+   fresh install:
+
+   .. code-block:: console
+
+      $ gh run list --workflow release.yml
+      $ uvx --from "torchgeo-bench==X.Y.Z" torchgeo-bench --help
 
 The ``Publish to PyPI`` workflow (:file:`.github/workflows/release.yml`)
-builds and uploads the release automatically.
+builds the source distribution and wheel in an unprivileged job, then uploads
+them from a separate OIDC-authenticated job. The tag is the publication trigger;
+do not move or reuse a published version tag.

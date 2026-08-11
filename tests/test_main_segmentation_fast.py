@@ -64,6 +64,7 @@ def _seg_resume_row(cfg, *, metric_name: str = "mIoU") -> dict[str, object]:
         "interpolation": cfg.dataset.interpolation,
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
+        "num_classes": 3,
         "metric_name": metric_name,
         "metric_value": 0.42,
     }

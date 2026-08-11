@@ -105,6 +105,7 @@ def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, 
         "interpolation": cfg.dataset.interpolation,
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
+        "num_classes": 10,
         "metric_name": metric_name,
         "metric_value": 0.1,
     }
@@ -397,6 +398,33 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 1
 
 
+def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
+    """Rows from an older label schema must not satisfy the current resume key."""
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
+    legacy_row = _resume_row(cfg, method="knn5", metric_name="accuracy")
+    legacy_row.pop("num_classes")
+    pd.DataFrame([legacy_row]).to_csv(out, index=False)
+    model = _chainable_model_mock()
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.instantiate", return_value=model),
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ) as knn_mock,
+    ):
+        main.__wrapped__(cfg)
+
+    knn_mock.assert_called_once()
+    df = pd.read_csv(out)
+    assert len(df) == 2
+    assert pd.isna(df.iloc[0]["num_classes"])
+    assert int(df.iloc[1]["num_classes"]) == 10
+
+
 def test_dataset_not_found_skips(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out)
@@ -424,5 +452,14 @@ def test_csv_row_has_required_columns(tmp_path: Path):
         main.__wrapped__(cfg)
 
     df = pd.read_csv(out)
-    required = {"dataset", "method", "model", "metric_name", "metric_value", "partition", "bands"}
+    required = {
+        "dataset",
+        "method",
+        "model",
+        "metric_name",
+        "metric_value",
+        "partition",
+        "bands",
+        "num_classes",
+    }
     assert required.issubset(set(df.columns))

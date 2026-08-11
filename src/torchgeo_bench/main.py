@@ -246,6 +246,7 @@ class EvaluationResult:
     interpolation: str
     partition: str
     bands: str
+    num_classes: int
     c_range_start: float
     c_range_stop: float
     c_range_num: int
@@ -1034,6 +1035,7 @@ def main(cfg: DictConfig) -> None:
         "interpolation",
         "partition",
         "bands",
+        "num_classes",
     )
     completed_runs: set[tuple[str, ...]] = set()
     completed_metrics: dict[str, set[tuple[str, ...]]] = {}
@@ -1083,6 +1085,7 @@ def main(cfg: DictConfig) -> None:
                 getattr(cfg.dataset, "interpolation", "bilinear"),
                 cfg.dataset.partition,
                 bands_value,
+                ds_cls.num_classes,
             )
         )
         eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
@@ -1173,6 +1176,7 @@ def main(cfg: DictConfig) -> None:
             "interpolation": getattr(cfg.dataset, "interpolation", "bilinear"),
             "partition": cfg.dataset.partition,
             "bands": bands_value,
+            "num_classes": num_classes,
             "c_range_start": c_start,
             "c_range_stop": c_stop,
             "c_range_num": c_num,

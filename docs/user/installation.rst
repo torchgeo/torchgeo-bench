@@ -71,6 +71,7 @@ default.  Combine extras with comma-separated lists:
 Extra             Pulls in
 ================  ==============================================================
 ``cleanlab``      ``cleanlab``, ``imagehash``, ``matplotlib``, ``pillow`` (label-noise audit)
+``coordbench``    ``rshf`` for the SatCLIP, GeoCLIP, Climplicit, and SINR location encoders
 ``cuda``          ``faissknn[cuda]`` → ``faiss-cuda-cu128`` for GPU KNN (Linux only; shares the ``faiss`` namespace with the default ``faissknn[cpu]`` — install in a fresh env)
 ``dev``           ruff, pytest, pytest-cov, pytest-xdist, pre-commit, mdformat, pyproject-fmt
 ``docs``          sphinx, pydata-sphinx-theme, myst-parser, sphinx-copybutton, sphinx-design
@@ -79,8 +80,10 @@ Extra             Pulls in
 ``sam3``          ``transformers`` for the SAM 3 encoder
 ``terratorch``    ``terratorch`` for TerraTorch backbones
 ``viz``           ``matplotlib``, ``pillow`` for segmentation visualisations
-``all``           every extra above **except** ``cuda`` (FAISS conflict) and ``olmoearth``
+``all``           every extra above **except** ``cuda`` (FAISS conflict)
 ================  ==============================================================
 
 Datasets are not installed by these extras — see :doc:`datasets` for how to
 download GeoBench V1 / V2 with the bundled ``torchgeo-bench download`` command.
+CoordBench tables stream from Hugging Face when ``mode=coord``; see
+:doc:`coordbench`.
