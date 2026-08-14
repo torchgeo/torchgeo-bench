@@ -31,14 +31,22 @@ if [[ -z "${VIRTUAL_ENV:-}" ]]; then
   echo "VIRTUAL_ENV is not set after activation. Check the activate script." >&2
   exit 1
 fi
+PYTHON_BIN=${PYTHON_BIN:-python}
 VENV_PYTHON="$VIRTUAL_ENV/bin/python"
-if [[ ! -x "$VENV_PYTHON" ]]; then
-  echo "Template venv Python is not executable: $VENV_PYTHON" >&2
-  exit 1
+if [[ -x "$VENV_PYTHON" ]]; then
+  PYTHON_BIN="$VENV_PYTHON"
+else
+  PYTHON_BIN_PATH=$(command -v "$PYTHON_BIN" || true)
+  if [[ -z "$PYTHON_BIN_PATH" ]]; then
+    echo "Python not found after activation (PYTHON_BIN=${PYTHON_BIN})." >&2
+    exit 1
+  fi
+  PYTHON_BIN="$PYTHON_BIN_PATH"
+  echo "Template venv Python is not executable on this node; using activated module Python." >&2
 fi
-PYTHON_BIN="$VENV_PYTHON"
 
 echo "Using Python: $PYTHON_BIN"
+"$PYTHON_BIN" -c 'import os, torchgeo; expected = os.environ["VIRTUAL_ENV"]; assert torchgeo.__file__.startswith(expected), torchgeo.__file__'
 
 mkdir -p "$PROJECT_DIR/slurm_out" "$PROJECT_DIR/slurm_err"
 
