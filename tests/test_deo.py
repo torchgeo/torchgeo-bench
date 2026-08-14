@@ -116,7 +116,7 @@ def test_deo_rejects_bad_mode_normalization_and_missing_s2_band(monkeypatch) -> 
     rgb = [_band("rgb", name, 255) for name in ("red", "green", "blue")]
     with pytest.raises(ValueError, match="model_native"):
         TorchGeoDEOBench(bands=rgb, mode="rgb", normalization="identity")
-    with pytest.raises(ValueError, match="target_size=256"):
+    with pytest.raises(ValueError, match="target_size=224"):
         TorchGeoDEOBench(bands=rgb, mode="rgb", target_size=128)
     with pytest.raises(ValueError, match="missing required"):
         TorchGeoDEOBench(bands=_s2_bands(10000)[:-1], mode="s2")
@@ -130,7 +130,7 @@ def test_deo_pools_final_nhwc_map_and_keeps_backbone_frozen(monkeypatch) -> None
     features = model.forward_patch_features(torch.ones(2, 3, 17, 19))
     assert features.shape == (2, 1024)
     assert torch.equal(features[0], torch.arange(1024, dtype=features.dtype))
-    assert backbone.last_input is not None and backbone.last_input.shape[-2:] == (256, 256)
+    assert backbone.last_input is not None and backbone.last_input.shape[-2:] == (224, 224)
     assert model.training is False and backbone.training is False
     assert all(not parameter.requires_grad for parameter in backbone.parameters())
 
