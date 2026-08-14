@@ -74,7 +74,7 @@ def main() -> None:
             baseline["best_value"],
             height=0.22,
             color="#9aa0a6",
-            label="Best historical linear probe",
+            label="Best linear probe",
             xerr=np.vstack(
                 [
                     baseline["best_value"] - baseline["best_ci_lower"],
@@ -106,7 +106,7 @@ def main() -> None:
         ax.legend(loc="lower right")
         ax.invert_yaxis()
 
-    fig.suptitle("DEO RGB and S2 linear probes versus best historical baseline", fontsize=16)
+    fig.suptitle("DEO RGB and S2 linear probes versus best baseline", fontsize=16)
     fig.savefig(ROOT / "viz" / "deo_modalities_vs_best_linear.png", dpi=160)
 
 
