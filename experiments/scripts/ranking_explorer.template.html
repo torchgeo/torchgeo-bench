@@ -91,14 +91,14 @@
     <p class="kicker">Frozen foundation-model evaluation</p>
     <h1>Torchgeo-Bench Geospatial Foundation Model Ranking</h1>
     <p class="standfirst">Geospatial foundation models are pretrained backbones, with the promise of being easily adaptable to various earth observation downstream tasks. Torchgeo-Bench is a collective effort to provide transparent and fair evaluations of these models on established protocols such that the community can gain a better understanding of model performance across tasks.</p>
-    <p class="intro">The table summarizes per-dataset scores, and three settings decide what is being summarized:</p>
+    <p class="intro">The table summarizes per-dataset scores, and three settings provide different views of the results:</p>
     <ul class="intro-list">
       <li><strong>Aggregation</strong> sets how the per-dataset scores are combined into a single number.</li>
       <li><strong>Probe</strong> sets how frozen embeddings become predictions, either a fitted linear classifier or KNN-5.</li>
       <li><strong>Bands</strong> sets the input modality for the backbone that configures the required bands and order, either RGB or the available multispectral channels.</li>
     </ul>
     <p class="intro">Each setting is a separate experiment rather than a filter applied to one result, so the table can reorder when you change one of them. A model is ranked only when it has a result on every eligible dataset in the selected view, and the models that fall short are named below the table. The <a href="../user/ranking_explorer.html">evaluation setup</a> documents the protocol, the coverage rules, and how each aggregation is computed.</p>
-    <p class="feedback">If a result looks wrong, is missing, or seems implausible, please <a href="https://github.com/torchgeo/torchgeo-bench/issues" target="_blank" rel="noopener">open an issue</a> with the model, the view you were looking at, and any supporting evidence. General feedback is welcome too.</p>
+    <p class="feedback">If a result looks wrong, is missing, or seems implausible, please <a href="https://github.com/torchgeo/torchgeo-bench/issues" target="_blank" rel="noopener">open an issue</a> with the model, the view you were looking at, and any supporting evidence. General feedback is of course welcome too.</p>
 
     <section class="controls" aria-label="Ranking controls">
       <div class="control aggregation"><label for="sel-aggregation">Aggregation</label><select id="sel-aggregation"></select></div>
@@ -199,8 +199,16 @@
       return RANKINGS[state.task][state.probe][state.bandclass][state.aggregation];
     }
 
+    // Pinned to en-US so the separators never flip with the reader's locale: a
+    // German-formatted "1.813,931" reads as 1.8 million to everyone else.
     function formatNumber(value, digits = 3) {
-      return Number(value).toLocaleString(undefined, {maximumFractionDigits: digits});
+      return Number(value).toLocaleString("en-US", {maximumFractionDigits: digits});
+    }
+
+    // ELO ratings live in the hundreds-to-thousands; decimals on them are noise
+    // and the grouping separator invites a millions misreading.
+    function formatOverall(value, meta) {
+      return meta && meta.unit === "elo" ? Math.round(Number(value)).toString() : formatNumber(value);
     }
 
     function formatFixed(value, digits = 3) {
@@ -278,8 +286,8 @@
          sorter: "number", headerSortStartingDir: data.overall_meta.direction === "lower-is-better" ? "asc" : "desc",
          formatter(cell) {
           const row = cell.getRow().getData();
-          const ci = row.overall_ci ? `<span class="overall-ci">[${formatNumber(row.overall_ci[0])}, ${formatNumber(row.overall_ci[1])}]</span>` : "";
-          return `${formatNumber(cell.getValue())}${ci}`;
+          const ci = row.overall_ci ? `<span class="overall-ci">[${formatOverall(row.overall_ci[0], data.overall_meta)}, ${formatOverall(row.overall_ci[1], data.overall_meta)}]</span>` : "";
+          return `${formatOverall(cell.getValue(), data.overall_meta)}${ci}`;
         }},
         ...datasetNames.map(dataset => ({
           title: datasetMeta[dataset]?.label || dataset,
@@ -457,7 +465,7 @@
       const svg = svgElement("svg", {viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Compute versus ranking aggregation scatter plot"});
       const chartBottom = height - margin.bottom;
       logTicks(xMin, xMax).forEach(tick => { if (tick < xMin || tick > xMax) return; const x = xScale(tick); svg.appendChild(svgElement("line", {x1: x, y1: margin.top, x2: x, y2: chartBottom, class: "grid"})); svg.appendChild(svgElement("text", {x, y: chartBottom + 18, class: "tick", "text-anchor": "middle"}, formatNumber(tick, 2))); });
-      Array.from({length: 5}, (_, index) => yMin + index * (yMax - yMin) / 4).forEach(tick => { const y = yScale(tick); svg.appendChild(svgElement("line", {x1: margin.left, y1: y, x2: width - margin.right, y2: y, class: "grid"})); svg.appendChild(svgElement("text", {x: margin.left - 8, y: y + 3, class: "tick", "text-anchor": "end"}, formatNumber(tick))); });
+      Array.from({length: 5}, (_, index) => yMin + index * (yMax - yMin) / 4).forEach(tick => { const y = yScale(tick); svg.appendChild(svgElement("line", {x1: margin.left, y1: y, x2: width - margin.right, y2: y, class: "grid"})); svg.appendChild(svgElement("text", {x: margin.left - 8, y: y + 3, class: "tick", "text-anchor": "end"}, formatOverall(tick, data.overall_meta))); });
       svg.appendChild(svgElement("line", {x1: margin.left, y1: chartBottom, x2: width - margin.right, y2: chartBottom, class: "axis"}));
       svg.appendChild(svgElement("line", {x1: margin.left, y1: margin.top, x2: margin.left, y2: chartBottom, class: "axis"}));
       // Both axis titles carry their own direction. Under rotate(-90) a "→" glyph
@@ -467,7 +475,7 @@
       const positionedPoints = points.map((row, index) => ({row, index, x: xScale(Number(row.gflops_backbone)), y: yScale(Number(row.overall))}));
       positionedPoints.forEach(({row, x, y}) => {
         const point = svgElement("circle", {cx: x, cy: y, r: 5.5, class: `scatter-point ${state.hoveredModel === row.model ? "hovered" : ""}`, "data-model": row.model, tabindex: "0"});
-        const tooltip = `<strong>${row.display}</strong><br>${formatNumber(row.gflops_backbone)} GFLOPs<br>${data.overall_meta.label}: ${formatNumber(row.overall)}`;
+        const tooltip = `<strong>${row.display}</strong><br>${formatNumber(row.gflops_backbone)} GFLOPs<br>${data.overall_meta.label}: ${formatOverall(row.overall, data.overall_meta)}`;
         point.appendChild(svgElement("title", {}, tooltip.replace(/<[^>]+>/g, " ")));
         point.addEventListener("mouseenter", event => { setHoveredModel(row.model); showTooltip("scatter-tooltip", event, tooltip); });
         point.addEventListener("mousemove", event => showTooltip("scatter-tooltip", event, tooltip));

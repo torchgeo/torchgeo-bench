@@ -85,6 +85,17 @@ class BenchModel(nn.Module, ABC):
         """Apply the configured normalisation strategy."""
         return self._normalizer(images)
 
+    @property
+    def effective_normalization(self) -> str:
+        """Return the input-normalization policy applied by this model.
+
+        Most wrappers apply :attr:`normalization` directly.  Wrappers with an
+        internal pretrained normalization pipeline override this property so
+        result metadata describes the policy that actually reached the
+        backbone, rather than merely the requested dataset setting.
+        """
+        return self.normalization.value
+
     @abstractmethod
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         """Subclass hook — receives normalized ``(B, C, H, W)``, returns ``(B, K)``.

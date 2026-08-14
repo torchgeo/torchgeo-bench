@@ -1053,9 +1053,10 @@ def main(cfg: DictConfig) -> None:
         logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
-    # Selectable input-normalisation strategy; recorded in the CSV so
-    # ablations across strategies are distinguishable.
-    normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
+    # Selectable input-normalisation strategy.  The result rows below record
+    # the policy actually applied by each instantiated wrapper; these can
+    # differ when a model owns its preprocessing internally.
+    requested_normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     # A model may declare its own input resolution, overriding the global
@@ -1080,7 +1081,7 @@ def main(cfg: DictConfig) -> None:
         config_tuple = tuple(
             _canonical_key_cell(v)
             for v in (
-                normalization,
+                requested_normalization,
                 effective_image_size,
                 getattr(cfg.dataset, "interpolation", "bilinear"),
                 cfg.dataset.partition,
@@ -1158,20 +1159,21 @@ def main(cfg: DictConfig) -> None:
         )
         instantiate_kwargs: dict = {
             "bands": bands_list,
-            "normalization": normalization,
+            "normalization": requested_normalization,
             "_convert_": "object",
         }
         if is_rcf_empirical:
             instantiate_kwargs["dataset"] = train_dataset
         model: BenchModel = instantiate(cfg.model, **instantiate_kwargs)
         model.to(device).eval()
+        effective_normalization = model.effective_normalization
 
         common_meta = {
             "dataset": ds_name,
             "seed": cfg.seed,
             "model": cfg.model._target_,
             "name": cfg.model.name,
-            "normalization": normalization,
+            "normalization": effective_normalization,
             "image_size": effective_image_size,
             "interpolation": getattr(cfg.dataset, "interpolation", "bilinear"),
             "partition": cfg.dataset.partition,
