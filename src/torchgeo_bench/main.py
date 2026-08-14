@@ -35,6 +35,7 @@ from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import measure_profile
 from torchgeo_bench.models.interface import BenchModel
+from torchgeo_bench.models.satmae import build_satmae_input_adapter
 from torchgeo_bench.segmentation_probe import (
     SegmentationProbe,
 )
@@ -260,6 +261,7 @@ class EvaluationResult:
     # Calibration metrics for KNN / Linear Probing (None for segmentation rows)
     ece: float | None = None
     rms_ce: float | None = None
+    preprocessing: str = "dataset_default"
     mce: float | None = None
     # Post temperature-scaling calibration (Linear Probing only; None for KNN/seg)
     ece_ts: float | None = None
@@ -1035,6 +1037,7 @@ def main(cfg: DictConfig) -> None:
         "interpolation",
         "partition",
         "bands",
+        "preprocessing",
         "num_classes",
     )
     completed_runs: set[tuple[str, ...]] = set()
@@ -1055,7 +1058,8 @@ def main(cfg: DictConfig) -> None:
 
     # Selectable input-normalisation strategy; recorded in the CSV so
     # ablations across strategies are distinguishable.
-    normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
+    base_normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
+    normalization = base_normalization
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     # A model may declare its own input resolution, overriding the global
@@ -1069,6 +1073,7 @@ def main(cfg: DictConfig) -> None:
         if _model_image_size == "__inherit__"
         else _model_image_size
     )
+    effective_interpolation = getattr(cfg.dataset, "interpolation", "bilinear")
 
     for ds_name in track(dataset_names, description="Datasets"):
         try:
@@ -1076,15 +1081,32 @@ def main(cfg: DictConfig) -> None:
         except KeyError:
             logger.warning(f"Skipping dataset {ds_name} (not in registry)")
             continue
+        bench_for_bands = ds_cls()
+        bands_resolved = (
+            tuple(bench_for_bands.rgb_bands)
+            if cfg.dataset.bands == "rgb"
+            else None
+            if cfg.dataset.bands in ("all", None)
+            else tuple(cfg.dataset.bands)
+        )
+        source_bands = bench_for_bands.select_band_specs(bands_resolved)
+        adapter = build_satmae_input_adapter(str(cfg.model._target_), source_bands)
+        if adapter is not None:
+            normalization = adapter.output_normalization
+            effective_image_size = adapter.target_size
+            effective_interpolation = adapter.interpolation
+        else:
+            normalization = base_normalization
 
         config_tuple = tuple(
             _canonical_key_cell(v)
             for v in (
                 normalization,
                 effective_image_size,
-                getattr(cfg.dataset, "interpolation", "bilinear"),
+                effective_interpolation,
                 cfg.dataset.partition,
                 bands_value,
+                "satmae_native" if adapter is not None else "dataset_default",
                 ds_cls.num_classes,
             )
         )
@@ -1117,9 +1139,10 @@ def main(cfg: DictConfig) -> None:
                 batch_size=cfg.dataset.batch_size,
                 num_workers=int(cfg.dataset.get("num_workers", 8)),
                 return_val=True,
-                image_size=effective_image_size,
-                interpolation=getattr(cfg.dataset, "interpolation", "bilinear"),
+                image_size=None if adapter is not None else effective_image_size,
+                interpolation=effective_interpolation,
                 bands=getattr(cfg.dataset, "bands", "rgb"),
+                sample_transform=adapter,
             )
         except (FileNotFoundError, DatasetNotFoundError) as exc:
             logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
@@ -1133,16 +1156,7 @@ def main(cfg: DictConfig) -> None:
         is_segmentation = ds_cls.task == "segmentation"
         num_classes = ds_cls.num_classes
 
-        # Build the BandSpec list that matches the actual loaded channels.
-        bench_for_bands = ds_cls()
-        bands_resolved = (
-            tuple(bench_for_bands.rgb_bands)
-            if cfg.dataset.bands == "rgb"
-            else None
-            if cfg.dataset.bands in ("all", None)
-            else tuple(cfg.dataset.bands)
-        )
-        bands_list = bench_for_bands.select_band_specs(bands_resolved)
+        bands_list = adapter.output_bands if adapter is not None else source_bands
         assert len(bands_list) == num_channels, (
             f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
             f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
@@ -1173,7 +1187,8 @@ def main(cfg: DictConfig) -> None:
             "name": cfg.model.name,
             "normalization": normalization,
             "image_size": effective_image_size,
-            "interpolation": getattr(cfg.dataset, "interpolation", "bilinear"),
+            "interpolation": effective_interpolation,
+            "preprocessing": "satmae_native" if adapter is not None else "dataset_default",
             "partition": cfg.dataset.partition,
             "bands": bands_value,
             "num_classes": num_classes,

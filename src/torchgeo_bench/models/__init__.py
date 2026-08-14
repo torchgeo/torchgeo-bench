@@ -7,6 +7,7 @@ from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
 from .rcf import RCFBench
 from .sam3 import SAM3Encoder
+from .satmae import SatMAEBench, SatMAEInputAdapter
 from .segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead, PatchLinearHead
 from .terratorch_models import (
     TerraTorchClayBench,
@@ -33,6 +34,8 @@ __all__: list[str] = [
     "TimmPatchBenchModel",
     "OlmoEarthBenchModel",
     "SAM3Encoder",
+    "SatMAEBench",
+    "SatMAEInputAdapter",
     "TorchGeoCromaBench",
     "TorchGeoDOFABench",
     "TorchGeoEarthLocBench",

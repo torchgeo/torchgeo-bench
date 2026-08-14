@@ -172,6 +172,7 @@ def get_datasets(
     image_size: int | None = None,
     interpolation: str = "bilinear",
     bands: str | Iterable[str] | None = "rgb",
+    sample_transform: Callable[[dict], dict] | None = None,
 ) -> tuple:
     """Load benchmark dataset splits and dataloaders.
 
@@ -191,6 +192,8 @@ def get_datasets(
             ``"bilinear"``, ``"nearest"``).
         bands: ``"rgb"`` (use the dataset's ``rgb_bands``), ``"all"`` /
             ``None`` (load all bands), or an explicit iterable of band names.
+        sample_transform: Optional model-native sample transform. It owns image
+            and mask geometry, so it cannot be combined with ``image_size``.
 
     Returns:
         Either ``(train_dataset, train_loader, test_loader)`` or, when
@@ -223,7 +226,9 @@ def get_datasets(
     else:
         bands_tuple = tuple(bands)
 
-    transform = _make_resize_transform(image_size, interpolation)
+    if sample_transform is not None and image_size is not None:
+        raise ValueError("sample_transform and image_size cannot both be set.")
+    transform = sample_transform or _make_resize_transform(image_size, interpolation)
     train_partition = partition_name if bench.supports_partitions else "default"
 
     common = {"bands": bands_tuple, "transform": transform}

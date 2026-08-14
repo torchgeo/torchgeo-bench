@@ -33,6 +33,7 @@ from torchgeo_bench.model_profile import (
     lenient_grad_hooks,
     measure_profile,
 )
+from torchgeo_bench.models.satmae import build_satmae_input_adapter
 
 warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
@@ -368,9 +369,17 @@ def main(cfg: DictConfig) -> None:
                 continue
 
         band_specs = band_specs_for[band_config]
+        adapter = build_satmae_input_adapter(model_target, band_specs)
+        if adapter is not None:
+            band_specs = adapter.output_bands
+            cell_normalization = adapter.output_normalization
+            cell_image_size = adapter.target_size
+        else:
+            cell_normalization = normalization
+            cell_image_size = image_size
         n_channels = len(band_specs)
 
-        model = _build_model(cfg.model, band_specs, normalization, band_config)
+        model = _build_model(cfg.model, band_specs, cell_normalization, band_config)
         if model is None:
             n_skipped += 1
             continue
@@ -381,8 +390,9 @@ def main(cfg: DictConfig) -> None:
             "name": model_name,
             "band_config": band_config,
             "n_channels": n_channels,
-            "image_size": image_size,
+            "image_size": cell_image_size,
             "num_classes": int(cfg.probe_num_classes),
+            "preprocessing": "satmae_native" if adapter is not None else "synthetic_default",
         }
 
         # --- classification cell ------------------------------------------
@@ -394,7 +404,7 @@ def main(cfg: DictConfig) -> None:
                 metrics, used_batch = _measure_backbone(
                     model,
                     n_channels,
-                    image_size,
+                    cell_image_size,
                     device,
                     int(cfg.timing_batch_size),
                     int(cfg.n_warmup),
@@ -404,7 +414,7 @@ def main(cfg: DictConfig) -> None:
                 gflops_probe, params_probe_m, feature_dim = _probe_gflops(
                     model,
                     n_channels,
-                    image_size,
+                    cell_image_size,
                     device,
                     str(cfg.probe_head),
                     int(cfg.probe_num_classes),
@@ -448,9 +458,9 @@ def main(cfg: DictConfig) -> None:
                     "params_probe_m": params_probe_m,
                     "feature_dim": feature_dim,
                     "pool": getattr(model, "pool", None),
-                    "n_tokens": _n_tokens(model, image_size),
-                    "throughput_samples_per_sec": metrics["throughput_samples_per_sec"],
+                    "n_tokens": _n_tokens(model, cell_image_size),
                     "latency_ms_per_batch_p50": metrics["latency_ms_per_batch_p50"],
+                    "throughput_samples_per_sec": metrics["throughput_samples_per_sec"],
                     "peak_gpu_mem_gb": metrics["peak_gpu_mem_gb"],
                     "reserved_gpu_mem_gb": metrics["reserved_gpu_mem_gb"],
                     "timing_batch_size": used_batch,
@@ -501,7 +511,7 @@ def main(cfg: DictConfig) -> None:
                 continue
             probe.to(device).eval()
 
-            gflops_head = _seg_head_gflops(probe, n_channels, image_size, device)
+            gflops_head = _seg_head_gflops(probe, n_channels, cell_image_size, device)
             rows.append(
                 {
                     **base_meta,
@@ -517,7 +527,7 @@ def main(cfg: DictConfig) -> None:
                     "params_probe_m": None,
                     "feature_dim": sum(probe.channels_list),
                     "pool": getattr(model, "pool", None),
-                    "n_tokens": _n_tokens(model, image_size),
+                    "n_tokens": _n_tokens(model, cell_image_size),
                     "throughput_samples_per_sec": None,
                     "latency_ms_per_batch_p50": None,
                     "peak_gpu_mem_gb": None,
