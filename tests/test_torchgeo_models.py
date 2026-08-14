@@ -1,6 +1,7 @@
 """Unit tests for torchgeo wrapper helpers and construction contracts."""
 
 import warnings
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -172,6 +173,51 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
     assert mean_out.shape == (2, 8)
     assert torch.allclose(cls_out, torch.full_like(cls_out, 2.0))
     assert torch.allclose(mean_out, torch.full_like(mean_out, 1.0))
+
+
+def _make_tiny_scalemae(monkeypatch, **kwargs):
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _PatchEmbed(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.proj = nn.Conv2d(3, 8, 1)
+
+    class _TinyScaleMAE(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.patch_embed = _PatchEmbed()
+            self.res = 1.0
+
+        def forward_features(self, images: torch.Tensor) -> torch.Tensor:
+            batch = images.shape[0]
+            return torch.ones(batch, 5, 8, device=images.device)
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyScaleMAE()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+    )
+    return TorchGeoScaleMAEBench(normalization="identity", input_unit_check="ignore", **kwargs)
+
+
+def test_scalemae_gsd_from_sensor(monkeypatch):
+    model = _make_tiny_scalemae(monkeypatch, bands=_rgb_bands())
+    assert model.backbone.res == 10.0
+
+
+def test_scalemae_gsd_override(monkeypatch):
+    model = _make_tiny_scalemae(monkeypatch, bands=_rgb_bands(), gsd=0.3)
+    assert model.backbone.res == 0.3
+
+
+def test_scalemae_unknown_sensor_raises(monkeypatch):
+    bands = [replace(b, sensor="unobtanium") for b in _rgb_bands()]
+    with pytest.raises(ValueError, match="No GSD known"):
+        _make_tiny_scalemae(monkeypatch, bands=bands)
 
 
 def test_torchgeo_resnet_forward_shape(monkeypatch):

@@ -7,8 +7,8 @@ weights_class: ScaleMAELarge16_Weights
 weights_member: FMOW_RGB
 auto_resize: true
 target_size: 224
-pool: cls
-name: tgeo_scalemae_large_fmow
+pool: mean
+name: tgeo_scalemae_large_fmow_mean
 eval:
   segmentation:
     # ViT-Large (24 blocks, 1024ch). Coarse-to-fine: deepest block first.

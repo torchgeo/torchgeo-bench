@@ -480,11 +480,21 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
 # ---------------------------------------------------------------------------
 
 
+# GSD (m/px) per optical sensor. No SAR: Scale-MAE is RGB-only.
+_SCALEMAE_SENSOR_GSD: dict[str, float] = {
+    "s2": 10.0,
+    "landsat": 30.0,
+    "aerial": 1.0,
+    "naip": 1.0,
+}
+
+
 class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
     """Wrapper for torchgeo ScaleMAE-Large.
 
     ``forward_features()`` returns ``(B, N+1, D)`` tokens; ``pool`` selects
-    between CLS, mean-pooled patch tokens, or their concatenation.
+    between CLS, mean-pooled patch tokens, or their concatenation.  ``res`` is
+    the input GSD (m/px) Scale-MAE conditions its positional embeddings on.
     """
 
     weights_input_unit = "uint8_div255"
@@ -499,7 +509,8 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         auto_resize: bool = True,
         target_size: int | None = 224,
         input_unit_check: str = "warn",
-        pool: str = "mean",
+        pool: str = "cls",
+        gsd: float | None = None,
         **_kwargs: Any,
     ) -> None:
         super().__init__(
@@ -515,6 +526,13 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         if pool not in VALID_MODES:
             raise ValueError(f"pool={pool!r} not in {VALID_MODES}")
         self.pool = pool
+        sensor = self.bands[0].sensor.lower()
+        if gsd is None and sensor not in _SCALEMAE_SENSOR_GSD:
+            raise ValueError(
+                f"No GSD known for sensor {sensor!r}; pass gsd= explicitly. "
+                f"Known sensors: {sorted(_SCALEMAE_SENSOR_GSD)}."
+            )
+        self.backbone.res = float(gsd) if gsd is not None else _SCALEMAE_SENSOR_GSD[sensor]
         # Adapt ScaleMAE's patch-embed projection to N-channel input.
         # Pretrained on fMoW RGB; adapted weights mean these N-band results
         # should be marked as "adapted" rather than vanilla pretrained.
