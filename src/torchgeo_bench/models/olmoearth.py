@@ -378,6 +378,11 @@ class OlmoEarthBenchModel(BenchModel):
             to ``min_image_size × min_image_size`` via bilinear interpolation.
             Useful for datasets with small native images (e.g. m-so2sat at
             32 px) where the patch grid would otherwise be too sparse.
+        pretrained: If False, build the architecture but skip loading the
+            pretrained checkpoint, leaving the encoder randomly initialised.
+            The architecture comes from a separately-downloaded ``config.json``
+            so it is identical either way, and ``Normalizer`` is
+            weight-independent so normalization is unaffected.
     """
 
     def __init__(
@@ -395,6 +400,7 @@ class OlmoEarthBenchModel(BenchModel):
         landsat_scale_factor: float | None = None,
         sensor_remap: dict[str, str] | None = None,
         min_image_size: int | None = None,
+        pretrained: bool = True,
         **_kwargs,
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
@@ -442,7 +448,12 @@ class OlmoEarthBenchModel(BenchModel):
         self.min_image_size = min_image_size
 
         model_id = getattr(ModelID, f"OLMOEARTH_{version.upper()}_{model_size.upper()}")
-        self.encoder_model = load_model_from_id(model_id, load_weights=True)
+        # `load_weights=False` builds the architecture from the downloaded
+        # config.json and leaves the weights at their random init — the
+        # random-init baseline arm. Without an explicit `pretrained` parameter
+        # here the flag would be swallowed by `**_kwargs` and silently yield a
+        # fully pretrained model labelled "random".
+        self.encoder_model = load_model_from_id(model_id, load_weights=pretrained)
         self.normalizer = Normalizer(std_multiplier=std_multiplier)
 
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:

@@ -6,7 +6,7 @@ import logging
 import os
 import time
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import median
 from typing import Any
@@ -374,6 +374,33 @@ def bootstrap_map(
     return map_mean, lower, upper
 
 
+def resolve_init(model_cfg: Any) -> str:
+    """Return ``"pretrained"`` or ``"random"`` for a model config.
+
+    Derived from ``model.pretrained`` rather than carried as an independent
+    config key so the label can never disagree with the weights that were
+    actually loaded. Models without the key (e.g. ``rcf``, ``imagestats``)
+    report ``"pretrained"``: they have no checkpoint to skip, so they sit in
+    the default arm.
+
+    Args:
+        model_cfg: The ``cfg.model`` node.
+
+    Returns:
+        ``"random"`` when ``pretrained`` is explicitly false, else
+        ``"pretrained"``.
+    """
+    # Mapping covers both shapes that reach this function: plain dicts (tests)
+    # and DictConfig. Going through `.get` rather than `getattr` matters —
+    # OmegaConf raises on a missing key in struct mode instead of returning the
+    # default, so `getattr(cfg, "pretrained", True)` would propagate an error
+    # for every model config that predates the key.
+    pretrained = model_cfg.get("pretrained", True) if isinstance(model_cfg, Mapping) else True
+    if pretrained is None:
+        return "pretrained"
+    return "random" if not bool(pretrained) else "pretrained"
+
+
 @dataclass
 class EvaluationResult:
     """Container for a single evaluation result row."""
@@ -421,6 +448,8 @@ class EvaluationResult:
     calibration_n_bins: int | None = None
     feature_norm: str = "none"
     solver: str = "lbfgs"
+    # "pretrained" | "random" — which backbone-init arm produced this row.
+    init: str = "pretrained"
 
     def to_row(self) -> dict:
         """Convert to a flat dictionary suitable for CSV/DataFrame export."""
@@ -1375,6 +1404,7 @@ def main(cfg: DictConfig) -> None:
             "bootstrap": cfg.eval.bootstrap,
             "feature_norm": str(cfg.eval.get("feature_norm", "none")),
             "solver": str(cfg.eval.get("solver", "lbfgs")),
+            "init": resolve_init(cfg.model),
         }
 
         seg_summary_complete = False

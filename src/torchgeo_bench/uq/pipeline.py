@@ -3,7 +3,7 @@
 import logging
 import os
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +20,16 @@ from torchgeo.datasets.errors import DatasetNotFoundError
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets, list_datasets
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
-from torchgeo_bench.main import append_rows_atomic
+from torchgeo_bench.main import append_rows_atomic, resolve_init
 from torchgeo_bench.models.interface import BenchModel
+from torchgeo_bench.cka.hooks import HookCollector, validate_collected_activations
 from torchgeo_bench.uq.corruptions import SKIP_POISSON_GAUSSIAN, CorruptionTransform
+from torchgeo_bench.uq.distance import (
+    SCORE_KINDS,
+    ActivationReference,
+    build_activation_references,
+)
+from torchgeo_bench.uq.error_pr import compute_error_pr
 from torchgeo_bench.uq.methods import (
     BootstrapEnsemble,
     ConformalPredictor,
@@ -50,6 +57,7 @@ from torchgeo_bench.uq.splits import stratified_cal_split
 from torchgeo_bench.uq.traces import (
     build_config_hash,
     build_conformal_trace_frame,
+    build_distance_trace_frame,
     build_probabilistic_trace_frame,
     build_trace_block_key,
     build_trace_link_row,
@@ -117,6 +125,7 @@ warnings.filterwarnings("ignore", message="Dataset has no geotransform", categor
 _RESUME_KEY_COLS: tuple[str, ...] = (
     "model",
     "name",
+    "init",
     "seed",
     "dataset",
     "normalization",
@@ -130,6 +139,17 @@ _RESUME_KEY_COLS: tuple[str, ...] = (
     "svgp_inducing_init",
     "svgp_mixing_weights",
 )
+
+# Scalar metrics emitted per activation-distance block. Only ranking-based
+# metrics are defined for a score with no probabilities. This tuple is the single
+# source of truth shared by _expected_metrics (resume) and _run_distance_block
+# (emission) — see _expected_metrics for why they must not drift apart.
+DISTANCE_METRIC_NAMES: set[str] = {
+    "raw_aurc",
+    "eaurc",
+    "selective_acc_90",
+    "error_auroc",
+}
 
 _CLOUD_PATTERN_MODE_MAP: dict[str, str] = {
     "fixed_across_severity": "fixed",
@@ -250,6 +270,19 @@ def _normalize_cloud_pattern_mode(cloud_pattern_mode: str) -> str:
         ) from exc
 
 
+def _is_distance_method(uq_method: str) -> bool:
+    """Return whether a ``uq_method`` name denotes an activation-distance scorer.
+
+    Args:
+        uq_method: UQ method name, e.g. ``"maha@backbone.layer4"``.
+
+    Returns:
+        ``True`` for ``"<score_kind>@<layer>"`` keys built by
+        :func:`torchgeo_bench.uq.distance.build_activation_references`.
+    """
+    return any(str(uq_method).startswith(f"{kind}@") for kind in SCORE_KINDS)
+
+
 def _expected_metrics(uq_method: str) -> set[str]:
     """Return expected metric names for a UQ method.
 
@@ -261,6 +294,12 @@ def _expected_metrics(uq_method: str) -> set[str]:
     """
     if uq_method == "conformal":
         return {"accuracy", "empirical_coverage", "mean_set_size"}
+    if _is_distance_method(uq_method):
+        # Only ranking metrics are defined for a score with no probabilities.
+        # This set and the metrics dict built in _run_distance_block are ONE
+        # contract: if they diverge, every distance cell silently re-runs on
+        # every resume. Change both or neither.
+        return DISTANCE_METRIC_NAMES
     return {
         "accuracy",
         "ece",
@@ -291,7 +330,13 @@ def _build_resume_set(csv_path: str) -> set[tuple[str, ...]]:
     df = pd.read_csv(csv_path)
     for col in (*_RESUME_KEY_COLS, "metric_name"):
         if col not in df.columns:
-            df[col] = ""
+            # `init` predates no rows: every CSV written before the random-init
+            # arm existed is entirely pretrained. Backfilling it with "" instead
+            # would make every stored key miss the "pretrained" key that
+            # `build_resume_key` now emits, silently re-running finished cells.
+            df[col] = "pretrained" if col == "init" else ""
+    if "init" in df.columns:
+        df["init"] = df["init"].fillna("").replace("", "pretrained")
     df = df.fillna("")
 
     completed: set[tuple[str, ...]] = set()
@@ -397,6 +442,92 @@ def _lookup_best_c(
     return best_c
 
 
+def build_resume_key(
+    *,
+    common_meta: Mapping[str, Any],
+    cfg: Any,
+    dataset_name: str,
+    normalization: str,
+    bands_value: str,
+    uq_method: str,
+    corruption_type: str,
+    severity: str,
+) -> tuple[str, ...]:
+    """Build a resume key matching the schema :func:`_build_resume_set` produces.
+
+    Derived from :data:`_RESUME_KEY_COLS` rather than spelled out positionally:
+    the two must agree in *width* as well as content, and a hand-written tuple
+    silently stops matching whenever a key column is added (as happened when the
+    two ``svgp_*`` columns were appended, leaving a 12-wide lookup against
+    14-wide stored keys, so no cell ever resumed). ``init`` was appended for the
+    same reason: it separates the pretrained and random-init arms structurally
+    rather than relying on them being written to different files.
+
+    Args:
+        common_meta: Common metadata columns for the current cell.
+        cfg: Hydra config, used for the model/seed fields.
+        dataset_name: Dataset being evaluated.
+        normalization: Normalization identifier.
+        bands_value: Canonical band selector string.
+        uq_method: UQ method or scorer name.
+        corruption_type: Corruption name (or ``"clean"``).
+        severity: Severity, already stringified.
+
+    Returns:
+        Tuple aligned with :data:`_RESUME_KEY_COLS`.
+    """
+    values: dict[str, Any] = {
+        **common_meta,
+        "model": str(cfg.model._target_),
+        "name": str(cfg.model.name),
+        "init": resolve_init(cfg.model),
+        "seed": str(cfg.seed),
+        "dataset": dataset_name,
+        "normalization": normalization,
+        "image_size": str(getattr(cfg.dataset, "image_size", None)),
+        "interpolation": str(getattr(cfg.dataset, "interpolation", "bilinear")),
+        "partition": str(cfg.dataset.partition),
+        "bands": bands_value,
+        "uq_method": uq_method,
+        "corruption_type": corruption_type,
+        "severity": severity,
+    }
+    return tuple(str(values.get(col, "")) for col in _RESUME_KEY_COLS)
+
+
+def remap_labels_to_probe_classes(y: np.ndarray, probe_like: Any) -> np.ndarray:
+    """Remap labels through ``probe.classes_`` so indices match the probe's columns.
+
+    Probes re-index training labels to ``[0, n_unique)``; test labels are still
+    original values. This matters when a class present in the test set was absent
+    from training (e.g. sen12ms class 7), which would otherwise cause an
+    ``IndexError`` in ``nll`` / ``ece`` / ``brier``. Ensembles expose ``classes_``
+    directly; single probes expose it via ``_probe``.
+
+    Shared by :func:`_run_uq_block` and :func:`_run_distance_block` so the two
+    cannot drift: they describe the same samples and are joined on ``sample_id``
+    downstream, so disagreeing label indexing would corrupt the join silently.
+
+    Args:
+        y: Labels with shape ``(N,)`` in original dataset indexing.
+        probe_like: Object exposing ``classes_`` directly or via ``_probe``.
+
+    Returns:
+        Labels remapped to probe column indices, or ``y`` unchanged when no
+        ``classes_`` attribute is reachable.
+    """
+    classes = getattr(probe_like, "classes_", None)
+    if classes is None:
+        inner = getattr(probe_like, "_probe", None)
+        classes = getattr(inner, "classes_", None)
+    if classes is None:
+        return y
+    classes = np.asarray(classes).astype(np.int64)
+    remap = np.full(int(classes.max()) + 1, -1, dtype=np.int64)
+    remap[classes] = np.arange(len(classes), dtype=np.int64)
+    return remap[y]
+
+
 def _run_uq_block(
     *,
     method_name: str,
@@ -491,20 +622,7 @@ def _run_uq_block(
     assert X_test is not None
     assert y_test is not None
 
-    # Remap y_test through probe.classes_ so label indices match the probe's output columns.
-    # Probes re-index training labels to [0, n_unique); test labels are still original values.
-    # This matters when a class present in the test set was absent from training (e.g. sen12ms
-    # class 7 absent from the entire dataset), which would cause IndexError in nll / ece / brier.
-    # Ensembles expose classes_ directly; single probes expose it via _probe.
-    _classes = getattr(method, "classes_", None)
-    if _classes is None:
-        _probe = getattr(method, "_probe", None)
-        _classes = getattr(_probe, "classes_", None)
-    if _classes is not None:
-        classes = _classes.astype(np.int64)
-        remap = np.full(int(classes.max()) + 1, -1, dtype=np.int64)
-        remap[classes] = np.arange(len(classes), dtype=np.int64)
-        y_test = remap[y_test]
+    y_test = remap_labels_to_probe_classes(y_test, method)
 
     rows: list[dict[str, Any]] = []
     trace_df = None
@@ -636,6 +754,384 @@ def _run_uq_block(
     return rows
 
 
+def _run_distance_block(
+    *,
+    reference: ActivationReference,
+    acts_test: np.ndarray,
+    probe: Any,
+    output_path: str,
+    common_meta: dict[str, Any],
+    corruption_type: str,
+    severity: int,
+    n_cal: int,
+    n_train: int,
+    feature_dim: int,
+    best_c: float,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    sample_ids: np.ndarray | None = None,
+    trace_ctx: dict[str, Any] | None = None,
+) -> list[dict]:
+    """Evaluate one activation-distance scorer for one corruption condition.
+
+    Sibling of :func:`_run_uq_block` rather than a third branch inside it: a
+    distance reference has no ``predict_proba``, and only the four ranking
+    metrics in :data:`DISTANCE_METRIC_NAMES` are defined for it. Everything else
+    — block keys, partition paths, integrity checks, atomic writes, CSV row shape
+    — is the existing plumbing, reused unchanged.
+
+    Args:
+        reference: Fitted reference, already fitted on clean *train* activations.
+        acts_test: Test activations for ``reference.layer_name``, shape ``(N, D)``.
+        probe: Probe supplying predictions and probabilities (unchanged by the score).
+        output_path: Destination CSV path.
+        common_meta: Common metadata columns shared across result rows.
+        corruption_type: Corruption name (or ``"clean"``).
+        severity: Corruption severity level.
+        n_cal: Calibration sample count.
+        n_train: Probe training sample count.
+        feature_dim: Head embedding feature dimension (matches the probabilistic rows).
+        best_c: Probe regularization hyperparameter.
+        X_test: Head embeddings used for the probe's predictions.
+        y_test: Test labels in original dataset indexing.
+        sample_ids: Optional stable sample identifiers aligned with ``y_test``.
+        trace_ctx: Optional trace persistence context dictionary.
+
+    Returns:
+        Appended CSV rows for this scorer/corruption block.
+
+    Raises:
+        ValueError: If activations and labels are not row-aligned.
+    """
+    if acts_test.shape[0] != y_test.shape[0]:
+        raise ValueError(
+            f"acts_test has {acts_test.shape[0]} rows but y_test has {y_test.shape[0]}; "
+            "hooked activations must be row-aligned with the extracted labels."
+        )
+
+    # Same remap as _run_uq_block, via the shared helper: y_pred/correct come from
+    # the probe, so disagreeing label indexing would make these rows describe
+    # different samples than the uncalibrated rows they are joined against.
+    y_test = remap_labels_to_probe_classes(y_test, probe)
+
+    probs = probe.predict_proba(X_test)
+    y_pred = probs.argmax(axis=1)
+    distance = reference.score(acts_test).astype(np.float64, copy=False)
+    is_error = (y_pred != y_test).astype(np.int64)
+
+    # Distance is an uncertainty; _risk_coverage_curve sorts by DESCENDING
+    # confidence, so it enters negated. Getting this backwards inverts the curve
+    # and produces a spectacular-looking spurious result.
+    confidence = -distance
+
+    metrics: dict[str, float] = {
+        "raw_aurc": raw_aurc(confidence, y_pred, y_test),
+        "eaurc": excess_aurc(confidence, y_pred, y_test),
+        "selective_acc_90": selective_accuracy(confidence, y_pred, y_test, coverage=0.9),
+    }
+    try:
+        # compute_error_pr returns 'auroc'; the resume contract demands the key
+        # 'error_auroc'. This mapping IS that contract — see _expected_metrics.
+        metrics["error_auroc"] = float(
+            compute_error_pr(is_error=is_error, uncertainty=distance)["auroc"]
+        )
+    except ValueError:
+        # Degenerate block (all-correct or all-wrong): AUROC is undefined. Emit
+        # NaN rather than omitting the row, or the cell never resumes as complete.
+        logger.warning(
+            "error_auroc undefined for %s (dataset=%s corruption=%s severity=%d): "
+            "is_error has a single class.",
+            reference.key,
+            common_meta.get("dataset"),
+            corruption_type,
+            severity,
+        )
+        metrics["error_auroc"] = float("nan")
+
+    assert set(metrics) == DISTANCE_METRIC_NAMES, (
+        "distance metric names diverged from the resume contract: "
+        f"{sorted(set(metrics) ^ DISTANCE_METRIC_NAMES)}"
+    )
+
+    trace_link: dict[str, str] = {}
+    if trace_ctx:
+        trace_block_key = build_trace_block_key(
+            common_meta=common_meta,
+            uq_method=reference.key,
+            corruption_type=corruption_type,
+            severity=int(severity),
+        )
+        trace_df = build_distance_trace_frame(
+            trace_block_key=trace_block_key,
+            run_id=str(trace_ctx["run_id"]),
+            common_meta=common_meta,
+            uq_method=reference.key,
+            corruption_type=corruption_type,
+            severity=int(severity),
+            config_hash=str(trace_ctx["config_hash"]),
+            git_sha=str(trace_ctx["git_sha"]),
+            created_at_utc=str(trace_ctx["created_at_utc"]),
+            y_true=y_test,
+            probs=probs,
+            distance_score=distance,
+            layer_name=reference.layer_name,
+            score_kind=reference.score_kind,
+            sample_ids=sample_ids,
+        )
+        trace_path = resolve_trace_partition_path(
+            trace_dataset_root=str(trace_ctx["trace_dataset_root"]),
+            trace_block_key=trace_block_key,
+            dataset=str(common_meta["dataset"]),
+            backbone=str(common_meta["backbone"]),
+            uq_method=reference.key,
+            corruption_type=corruption_type,
+            severity=int(severity),
+        )
+        status = check_trace_block_status(
+            trace_path=trace_path,
+            expected_n_test=int(len(y_test)),
+        )
+        maybe_warn_trace_integrity(
+            status=status,
+            trace_path=trace_path,
+            block_key=trace_block_key,
+        )
+        if not bool(status["is_complete"]) or bool(trace_ctx["overwrite"]):
+            write_trace_block_atomic(
+                trace_path=trace_path,
+                trace_df=trace_df,
+                compression=str(trace_ctx["compression"]),
+            )
+        trace_link = build_trace_link_row(
+            trace_dataset_root=str(trace_ctx["trace_dataset_root"]),
+            run_id=str(trace_ctx["run_id"]),
+            trace_block_key=trace_block_key,
+        )
+
+    rows: list[dict[str, Any]] = []
+    for metric_name, metric_value in metrics.items():
+        rows.append(
+            {
+                **common_meta,
+                "uq_method": reference.key,
+                "corruption_type": corruption_type,
+                "severity": int(severity),
+                "metric_name": metric_name,
+                "metric_value": float(metric_value),
+                "n_cal": int(n_cal),
+                "n_train": int(n_train),
+                "n_test": int(len(y_test)),
+                "best_c": float(best_c),
+                "feature_dim": int(feature_dim),
+                **trace_link,
+            }
+        )
+
+    append_rows_atomic(output_path, rows)
+    return rows
+
+
+def _run_conditions(
+    *,
+    cfg: DictConfig,
+    dataset_name: str,
+    model: BenchModel,
+    test_loader: DataLoader,
+    device: torch.device,
+    band_specs: list[BandSpec],
+    cloud_pattern_mode: str,
+    normalization: str,
+    bands_value: str,
+    methods: dict[str, Any],
+    references: dict[str, ActivationReference],
+    probe_predictor: Any,
+    test_collector: HookCollector | None,
+    hook_paths: list[str],
+    common_meta: dict[str, Any],
+    completed: set[tuple[str, ...]],
+    output_path: str,
+    trace_ctx: dict[str, Any] | None,
+    X_cal: np.ndarray | None,
+    X_final_train: np.ndarray,
+    best_c: float | None,
+) -> None:
+    """Evaluate every (corruption, severity) condition for one (model, dataset) cell.
+
+    Extracted from :func:`main` so the hook lifecycle around it stays a plain
+    ``try/finally`` rather than an extra level of nesting inside the dataset loop.
+
+    Args:
+        cfg: Hydra configuration for the run.
+        dataset_name: Dataset being evaluated.
+        model: Instantiated backbone, already on ``device`` and in eval mode.
+        test_loader: Test dataloader.
+        device: Device used for feature extraction.
+        band_specs: Band metadata required for non-clean corruptions.
+        cloud_pattern_mode: Normalized cloud RNG mode.
+        normalization: Normalization identifier for result keys.
+        bands_value: Canonical band selector string for result keys.
+        methods: Probabilistic UQ methods keyed by name.
+        references: Fitted activation references keyed by ``"<kind>@<layer>"``.
+        probe_predictor: Numpy-in/numpy-out probe wrapper supplying predictions
+            for distance blocks (an :class:`Uncalibrated` around the probe).
+        test_collector: Shared hook collector, or ``None`` when distance is off.
+        hook_paths: Hook paths registered on ``test_collector``.
+        common_meta: Common metadata columns shared across result rows.
+        completed: Resume keys already present in the output CSV.
+        output_path: Destination CSV path.
+        trace_ctx: Optional trace persistence context dictionary.
+        X_cal: Calibration embeddings, or ``None``.
+        X_final_train: Probe training embeddings.
+        best_c: Probe regularization hyperparameter, or ``None``.
+    """
+    for corruption_type in cfg.uq.corruptions:
+        severities = [0] if corruption_type == "clean" else [int(s) for s in cfg.uq.corruption_severities]
+        if corruption_type == "poisson_gaussian" and dataset_name in SKIP_POISSON_GAUSSIAN:
+            logger.info("Skipping poisson_gaussian for dataset %s", dataset_name)
+            continue
+
+        for severity in severities:
+            transform = None
+            if corruption_type != "clean":
+                transform = CorruptionTransform(
+                    corruption_type=corruption_type,
+                    severity=severity,
+                    seed=cfg.seed,
+                    band_specs=band_specs,
+                    dataset_name=dataset_name,
+                    cloud_pattern_mode=cloud_pattern_mode,
+                )
+            sample_ids: np.ndarray | None = None
+            extracted = extract_features(
+                model,
+                test_loader,
+                device,
+                transforms=transform,
+                verbose=cfg.verbose,
+                return_sample_ids=trace_ctx is not None,
+            )
+            if trace_ctx:
+                X_test, y_test, sample_ids = extracted
+            else:
+                X_test, y_test = extracted
+
+            # Ordering is load-bearing: collect() must run after this extraction
+            # returns and before the next one begins, or two conditions'
+            # activations concatenate silently. The row-count check in
+            # validate_collected_activations makes that failure loud.
+            acts_test: dict[str, np.ndarray] = {}
+            if test_collector is not None:
+                acts_test = test_collector.collect()
+                validate_collected_activations(
+                    acts_test,
+                    hook_paths,
+                    int(len(y_test)),
+                    f"{corruption_type}/severity={severity}",
+                )
+
+            # corruption/severity are bound as defaults rather than captured, so
+            # the closure cannot drift with the loop variables.
+            def _resume_key(
+                uq_method: str,
+                _corruption: str = str(corruption_type),
+                _severity: str = str(int(severity)),
+            ) -> tuple[str, ...]:
+                return build_resume_key(
+                    common_meta=common_meta,
+                    cfg=cfg,
+                    dataset_name=dataset_name,
+                    normalization=normalization,
+                    bands_value=bands_value,
+                    uq_method=uq_method,
+                    corruption_type=_corruption,
+                    severity=_severity,
+                )
+
+            for method_name, method in methods.items():
+                if cfg.resume and _resume_key(method_name) in completed:
+                    if trace_ctx:
+                        trace_block_key = build_trace_block_key(
+                            common_meta=common_meta,
+                            uq_method=str(method_name),
+                            corruption_type=str(corruption_type),
+                            severity=int(severity),
+                        )
+                        trace_path = resolve_trace_partition_path(
+                            trace_dataset_root=str(trace_ctx["trace_dataset_root"]),
+                            trace_block_key=trace_block_key,
+                            dataset=str(dataset_name),
+                            backbone=str(cfg.model.name),
+                            uq_method=str(method_name),
+                            corruption_type=str(corruption_type),
+                            severity=int(severity),
+                        )
+                        status = check_trace_block_status(
+                            trace_path=trace_path,
+                            expected_n_test=int(len(y_test)),
+                        )
+                        if not bool(status["is_complete"]):
+                            logger.warning(
+                                "Resume skip: scalar metrics exist but trace block is incomplete/missing "
+                                "(dataset=%s backbone=%s method=%s corruption=%s severity=%d).",
+                                dataset_name,
+                                cfg.model.name,
+                                method_name,
+                                corruption_type,
+                                severity,
+                            )
+                    continue
+
+                _run_uq_block(
+                    method_name=method_name,
+                    method=method,
+                    output_path=output_path,
+                    common_meta=common_meta,
+                    corruption_type=str(corruption_type),
+                    severity=int(severity),
+                    ece_bins=int(cfg.uq.ece_bins),
+                    ece_binning=str(getattr(cfg.uq, "ece_binning", "equal_width")),
+                    conformal_alpha=float(cfg.uq.conformal_alpha),
+                    n_cal=len(X_cal) if X_cal is not None else 0,
+                    n_train=len(X_final_train),
+                    feature_dim=int(X_final_train.shape[1]),
+                    best_c=float(best_c) if best_c is not None else float("nan"),
+                    seed=int(cfg.seed),
+                    X_test=X_test,
+                    y_test=y_test,
+                    sample_ids=sample_ids,
+                    cloud_pattern_mode=cloud_pattern_mode,
+                    trace_ctx=trace_ctx,
+                )
+
+            # Activation scorers loop separately from the probabilistic methods:
+            # a reference has no predict_proba, and only the four ranking metrics
+            # are defined for it (see _run_distance_block).
+            for scorer_key, reference in references.items():
+                if cfg.resume and _resume_key(scorer_key) in completed:
+                    continue
+                _run_distance_block(
+                    reference=reference,
+                    acts_test=acts_test[reference.layer_name],
+                    # Uncalibrated, not the bare probe: it supplies the same
+                    # numpy-in/numpy-out predict_proba contract _run_uq_block
+                    # uses (the raw LogisticRegression wants a torch.Tensor),
+                    # and still exposes classes_ via _probe for the remap.
+                    probe=probe_predictor,
+                    output_path=output_path,
+                    common_meta=common_meta,
+                    corruption_type=str(corruption_type),
+                    severity=int(severity),
+                    n_cal=len(X_cal) if X_cal is not None else 0,
+                    n_train=len(X_final_train),
+                    feature_dim=int(X_final_train.shape[1]),
+                    best_c=float(best_c) if best_c is not None else float("nan"),
+                    X_test=X_test,
+                    y_test=y_test,
+                    sample_ids=sample_ids,
+                    trace_ctx=trace_ctx,
+                )
+
+
 @hydra.main(config_path="../conf", config_name="uq_config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """Run the Hydra-configured UQ evaluation pipeline.
@@ -686,11 +1182,33 @@ def main(cfg: DictConfig) -> None:
             trace_ctx["trace_dataset_root"],
         )
 
+    distance_cfg = getattr(cfg.uq, "distance", None)
+    distance_enabled = (
+        bool(getattr(distance_cfg, "enabled", False)) if distance_cfg is not None else False
+    )
+    distance_score_kinds: list[str] = []
+    distance_layers_cfg: dict[str, list[str]] = {}
+    distance_knn_k = 10
+    distance_shrinkage = "ledoit_wolf"
+    if distance_enabled:
+        distance_score_kinds = [str(k) for k in getattr(distance_cfg, "scores", SCORE_KINDS)]
+        layers_obj = getattr(distance_cfg, "layers", None)
+        if layers_obj is not None:
+            resolved_layers = OmegaConf.to_container(layers_obj, resolve=True)
+            if isinstance(resolved_layers, dict):
+                distance_layers_cfg = {
+                    str(k): [str(p) for p in v] for k, v in resolved_layers.items()
+                }
+        distance_knn_k = int(getattr(distance_cfg, "knn_k", 10))
+        distance_shrinkage = str(getattr(distance_cfg, "shrinkage", "ledoit_wolf"))
+
     _PROBE_DEPENDENT_METHODS = frozenset(
         {"uncalibrated", "temp_scaling", "bootstrap_ensemble", "deep_ensemble", "laplace", "conformal"}
     )
     requested_methods = set(cfg.uq.methods)
-    needs_probe = bool(requested_methods & _PROBE_DEPENDENT_METHODS)
+    # Distance scorers report the probe's predictions (they only reorder deferral),
+    # so enabling them also requires the probe and its best_c lookup.
+    needs_probe = bool(requested_methods & _PROBE_DEPENDENT_METHODS) or distance_enabled
 
     prior_results = None
     if needs_probe:
@@ -753,10 +1271,44 @@ def main(cfg: DictConfig) -> None:
         }
         if is_rcf_empirical:
             instantiate_kwargs["dataset"] = train_dataset
+        # Re-seed immediately before construction. This loop runs once per
+        # dataset, so without it the N-th dataset's model would draw from a
+        # different RNG state: with `pretrained=false` the backbone weights
+        # themselves would then depend on dataset ordering and on which cells
+        # resume skipped. A no-op for pretrained backbones.
+        torch.manual_seed(int(cfg.seed))
         model: BenchModel = instantiate(cfg.model, **instantiate_kwargs)
         model.to(device).eval()
 
-        X_train, y_train = extract_features(model, train_loader, device, transforms=None, verbose=cfg.verbose)
+        # Activation-distance layer paths for this model, if the scorers are on.
+        # Iterate the configured list — never assume four layers: rcf_empirical
+        # has exactly one hook path.
+        hook_paths: list[str] = []
+        if distance_enabled:
+            hook_paths = list(distance_layers_cfg.get(str(cfg.model.name), []))
+            if not hook_paths:
+                logger.warning(
+                    "uq.distance.enabled=true but no uq.distance.layers entry for model %s; "
+                    "distance scorers are disabled for this run.",
+                    cfg.model.name,
+                )
+
+        if hook_paths:
+            # One extra hooked pass over the train split per (model, dataset)
+            # cell: the reference must be fit on clean TRAIN activations.
+            with HookCollector(model, hook_paths) as collector:
+                X_train, y_train = extract_features(
+                    model, train_loader, device, transforms=None, verbose=cfg.verbose
+                )
+                acts_train = collector.collect()
+            validate_collected_activations(
+                acts_train, hook_paths, int(len(y_train)), "clean-train"
+            )
+        else:
+            acts_train = {}
+            X_train, y_train = extract_features(
+                model, train_loader, device, transforms=None, verbose=cfg.verbose
+            )
         X_val, y_val = extract_features(model, val_loader, device, transforms=None, verbose=cfg.verbose)
 
         X_cal: np.ndarray | None = None
@@ -813,6 +1365,32 @@ def main(cfg: DictConfig) -> None:
         else:
             X_final_train = np.concatenate([X_train, X_val], axis=0)
             y_final_train = np.concatenate([y_train, y_val], axis=0)
+
+        # Fit the activation references ONCE per (model, dataset) cell, on clean
+        # train activations only. Decision 3: refitting or renormalizing per
+        # condition would destroy comparability across severities, which the
+        # pooled risk-coverage evaluation depends on. ActivationReference.fit
+        # raises on a second call to make that guarantee enforced, not documented.
+        references: dict[str, ActivationReference] = {}
+        if hook_paths and acts_train:
+            y_ref = remap_labels_to_probe_classes(y_train.astype(np.int64), probe)
+            references = build_activation_references(
+                acts_train=acts_train,
+                y_train=y_ref,
+                score_kinds=distance_score_kinds,
+                knn_k=distance_knn_k,
+                shrinkage=distance_shrinkage,
+            )
+            logger.info(
+                "Fitted %d activation references for %s / %s over layers %s.",
+                len(references),
+                cfg.model.name,
+                dataset_name,
+                hook_paths,
+            )
+            # Free the train activations: the largest (resisc45, 24800 x 2048 x 4
+            # layers) is ~813 MB and is only needed during reference fitting.
+            acts_train = {}
 
         methods: dict[str, Any] = {}
         if "uncalibrated" in cfg.uq.methods:
@@ -934,6 +1512,7 @@ def main(cfg: DictConfig) -> None:
         common_meta = {
             "model": str(cfg.model._target_),
             "name": str(cfg.model.name),
+            "init": resolve_init(cfg.model),
             "backbone": str(cfg.model.name),
             "dataset": dataset_name,
             "normalization": normalization,
@@ -952,106 +1531,38 @@ def main(cfg: DictConfig) -> None:
             "svgp_mixing_weights": bool(getattr(cfg.uq, "svgp_mixing_weights", False)),
         }
 
-        for corruption_type in cfg.uq.corruptions:
-            severities = [0] if corruption_type == "clean" else [int(s) for s in cfg.uq.corruption_severities]
-            if corruption_type == "poisson_gaussian" and dataset_name in SKIP_POISSON_GAUSSIAN:
-                logger.info("Skipping poisson_gaussian for dataset %s", dataset_name)
-                continue
-
-            for severity in severities:
-                transform = None
-                if corruption_type != "clean":
-                    transform = CorruptionTransform(
-                        corruption_type=corruption_type,
-                        severity=severity,
-                        seed=cfg.seed,
-                        band_specs=band_specs,
-                        dataset_name=dataset_name,
-                        cloud_pattern_mode=cloud_pattern_mode,
-                    )
-                sample_ids: np.ndarray | None = None
-                extracted = extract_features(
-                    model,
-                    test_loader,
-                    device,
-                    transforms=transform,
-                    verbose=cfg.verbose,
-                    return_sample_ids=trace_ctx is not None,
-                )
-                if trace_ctx:
-                    X_test, y_test, sample_ids = extracted
-                else:
-                    X_test, y_test = extracted
-
-                for method_name, method in methods.items():
-                    key = (
-                        str(cfg.model._target_),
-                        str(cfg.model.name),
-                        str(cfg.seed),
-                        dataset_name,
-                        normalization,
-                        str(getattr(cfg.dataset, "image_size", None)),
-                        str(getattr(cfg.dataset, "interpolation", "bilinear")),
-                        str(cfg.dataset.partition),
-                        bands_value,
-                        method_name,
-                        str(corruption_type),
-                        str(int(severity)),
-                    )
-                    if cfg.resume and key in completed:
-                        if trace_ctx:
-                            trace_block_key = build_trace_block_key(
-                                common_meta=common_meta,
-                                uq_method=str(method_name),
-                                corruption_type=str(corruption_type),
-                                severity=int(severity),
-                            )
-                            trace_path = resolve_trace_partition_path(
-                                trace_dataset_root=str(trace_ctx["trace_dataset_root"]),
-                                trace_block_key=trace_block_key,
-                                dataset=str(dataset_name),
-                                backbone=str(cfg.model.name),
-                                uq_method=str(method_name),
-                                corruption_type=str(corruption_type),
-                                severity=int(severity),
-                            )
-                            status = check_trace_block_status(
-                                trace_path=trace_path,
-                                expected_n_test=int(len(y_test)),
-                            )
-                            if not bool(status["is_complete"]):
-                                logger.warning(
-                                    "Resume skip: scalar metrics exist but trace block is incomplete/missing "
-                                    "(dataset=%s backbone=%s method=%s corruption=%s severity=%d).",
-                                    dataset_name,
-                                    cfg.model.name,
-                                    method_name,
-                                    corruption_type,
-                                    severity,
-                                )
-                        continue
-
-                    _run_uq_block(
-                        method_name=method_name,
-                        method=method,
-                        output_path=output_path,
-                        common_meta=common_meta,
-                        corruption_type=str(corruption_type),
-                        severity=int(severity),
-                        ece_bins=int(cfg.uq.ece_bins),
-                        ece_binning=str(getattr(cfg.uq, "ece_binning", "equal_width")),
-                        conformal_alpha=float(cfg.uq.conformal_alpha),
-                        n_cal=len(X_cal) if X_cal is not None else 0,
-                        n_train=len(X_final_train),
-                        feature_dim=int(X_final_train.shape[1]),
-                        best_c=float(best_c) if best_c is not None else float("nan"),
-                        seed=int(cfg.seed),
-                        X_test=X_test,
-                        y_test=y_test,
-                        sample_ids=sample_ids,
-                        cloud_pattern_mode=cloud_pattern_mode,
-                        trace_ctx=trace_ctx,
-                    )
+        # One collector instance for the whole (model, dataset) cell, reused
+        # across all conditions: HookCollector.collect() clears its buffers, so
+        # re-registering hooks per condition would be pure overhead. The
+        # try/finally guarantees the hooks come off even if a condition raises.
+        test_collector = HookCollector(model, hook_paths) if references else None
+        try:
+            _run_conditions(
+                cfg=cfg,
+                dataset_name=dataset_name,
+                model=model,
+                test_loader=test_loader,
+                device=device,
+                band_specs=band_specs,
+                cloud_pattern_mode=cloud_pattern_mode,
+                normalization=normalization,
+                bands_value=bands_value,
+                methods=methods,
+                references=references,
+                probe_predictor=Uncalibrated(probe) if references else None,
+                test_collector=test_collector,
+                hook_paths=hook_paths,
+                common_meta=common_meta,
+                completed=completed,
+                output_path=output_path,
+                trace_ctx=trace_ctx,
+                X_cal=X_cal,
+                X_final_train=X_final_train,
+                best_c=best_c,
+            )
+        finally:
+            if test_collector is not None:
+                test_collector.remove()
 
     logger.info("UQ benchmark complete. Results appended to %s", output_path)
 

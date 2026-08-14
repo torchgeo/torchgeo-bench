@@ -105,3 +105,40 @@ class HookCollector:
 
     def __exit__(self, *_: object) -> None:
         self.remove()
+
+
+def validate_collected_activations(
+    acts: dict[str, np.ndarray],
+    hook_paths: list[str],
+    expected_n_samples: int,
+    condition_label: str,
+) -> None:
+    """Validate that all required hook paths produced non-empty aligned arrays.
+
+    The row-count check is the loud failure for the ordering hazard in reusing a
+    single collector across conditions: ``collect()`` clears its buffers, so if it
+    is not called between two extractions the activations of both concatenate
+    silently and this raises instead.
+
+    Args:
+        acts: Mapping of hook path to collected activations.
+        hook_paths: Hook paths that must be present.
+        expected_n_samples: Row count the activations must match.
+        condition_label: Label used in error messages, e.g. ``"clean-train"``.
+
+    Raises:
+        ValueError: If a path is missing, empty, non-2D, or row-count misaligned.
+    """
+    for path in hook_paths:
+        if path not in acts:
+            raise ValueError(f"Missing collected activations for path {path!r} in {condition_label}.")
+        arr = acts[path]
+        if arr.ndim != 2:
+            raise ValueError(f"Collected activations for path {path!r} must be 2D, got shape {arr.shape}.")
+        if arr.shape[0] == 0:
+            raise ValueError(f"Collected activations for path {path!r} are empty in {condition_label}.")
+        if arr.shape[0] != expected_n_samples:
+            raise ValueError(
+                f"Collected activations for path {path!r} in {condition_label} have "
+                f"{arr.shape[0]} samples, expected {expected_n_samples}."
+            )

@@ -16,7 +16,7 @@ from omegaconf import DictConfig
 from rasterio.errors import NotGeoreferencedWarning
 from torchgeo.datasets.errors import DatasetNotFoundError
 
-from torchgeo_bench.cka.hooks import HookCollector
+from torchgeo_bench.cka.hooks import HookCollector, validate_collected_activations
 from torchgeo_bench.cka.metrics import (
     bootstrap_cka_ci,
     cosine_drift,
@@ -206,26 +206,10 @@ def _purge_resume_key_rows(csv_path: str, resume_key: tuple[str, ...]) -> None:
     df_kept.to_csv(csv_path, index=False)
 
 
-def _validate_collected_activations(
-    acts: dict[str, np.ndarray],
-    hook_paths: list[str],
-    expected_n_samples: int,
-    condition_label: str,
-) -> None:
-    """Validate that all required hook paths produced non-empty aligned arrays."""
-    for path in hook_paths:
-        if path not in acts:
-            raise ValueError(f"Missing collected activations for path {path!r} in {condition_label}.")
-        arr = acts[path]
-        if arr.ndim != 2:
-            raise ValueError(f"Collected activations for path {path!r} must be 2D, got shape {arr.shape}.")
-        if arr.shape[0] == 0:
-            raise ValueError(f"Collected activations for path {path!r} are empty in {condition_label}.")
-        if arr.shape[0] != expected_n_samples:
-            raise ValueError(
-                f"Collected activations for path {path!r} in {condition_label} have "
-                f"{arr.shape[0]} samples, expected {expected_n_samples}."
-            )
+# Lives next to HookCollector in cka.hooks so the UQ distance pipeline can reuse
+# it without importing this Hydra entry-point module. Kept under the old private
+# name here for the existing call sites.
+_validate_collected_activations = validate_collected_activations
 
 
 def _write_sample_parquet(

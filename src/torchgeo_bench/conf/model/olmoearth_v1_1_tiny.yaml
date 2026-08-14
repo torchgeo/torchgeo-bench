@@ -3,6 +3,7 @@
 # v1.1 improves accuracy with ~6.2M params.
 
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
+pretrained: true
 model_size: tiny
 version: v1_1
 patch_size: 8

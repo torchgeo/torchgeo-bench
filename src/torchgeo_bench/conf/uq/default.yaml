@@ -47,3 +47,97 @@ trace:
 reliability:
   bins: 15
   binning: equal_width
+
+# Activation-distance deferral scorers (docs/plans/activation_distance_deferral.md).
+# Opt-in: the standard UQ sweep is unaffected while enabled=false.
+distance:
+  enabled: false
+  scores: [maha, maha_classagnostic, knn]
+  knn_k: 10                # fixed, deliberately not swept
+  shrinkage: ledoit_wolf
+  # Per-model dotted hook paths. COPIED from conf/cka/default.yaml rather than
+  # imported, so the two sweeps can diverge. Note rcf_empirical has ONE layer:
+  # never assume four.
+  layers:
+    resnet50:
+      - backbone.layer1
+      - backbone.layer2
+      - backbone.layer3
+      - backbone.layer4
+    resnet18:
+      - backbone.layer1
+      - backbone.layer2
+      - backbone.layer3
+      - backbone.layer4
+    mobilenetv3_large_100:
+      - backbone.blocks.1
+      - backbone.blocks.2
+      - backbone.blocks.4
+      - backbone.blocks.6
+    convnext_large_dinov3:
+      - backbone.stages.0
+      - backbone.stages.1
+      - backbone.stages.2
+      - backbone.stages.3
+    swin_tiny_patch4_window7_224:
+      - backbone.layers.0
+      - backbone.layers.1
+      - backbone.layers.2
+      - backbone.layers.3
+    vit_base_patch16_224:
+      - backbone.blocks.2
+      - backbone.blocks.5
+      - backbone.blocks.8
+      - backbone.blocks.11
+    vit_large_patch16_dinov3sat:
+      - backbone.blocks.5
+      - backbone.blocks.11
+      - backbone.blocks.17
+      - backbone.blocks.23
+    vit_large_patch16_224:
+      - backbone.blocks.5
+      - backbone.blocks.11
+      - backbone.blocks.17
+      - backbone.blocks.23
+    rcf_empirical:
+      - rcf
+    tgeo_dofa_base:
+      - backbone.blocks.2
+      - backbone.blocks.5
+      - backbone.blocks.8
+      - backbone.blocks.11
+    tgeo_panopticon:
+      - backbone.model.blocks.2
+      - backbone.model.blocks.5
+      - backbone.model.blocks.8
+      - backbone.model.blocks.11
+    olmoearth_v1_1_base:
+      - encoder_model.encoder.blocks.2
+      - encoder_model.encoder.blocks.5
+      - encoder_model.encoder.blocks.8
+      - encoder_model.encoder.blocks.11
+    tt_clay_v1_5_base:
+      - backbone.clay_encoder.transformer.layers.2.1
+      - backbone.clay_encoder.transformer.layers.5.1
+      - backbone.clay_encoder.transformer.layers.8.1
+      - backbone.clay_encoder.transformer.layers.11.1
+    tt_prithvi_eo_v2_300_tl:
+      - backbone.blocks.5
+      - backbone.blocks.11
+      - backbone.blocks.17
+      - backbone.blocks.23
+    tt_terramind_v1_base:
+      - backbone.encoder.2
+      - backbone.encoder.5
+      - backbone.encoder.8
+      - backbone.encoder.11
+    tt_terramind_v1_base_rgb:
+      - backbone.encoder.2
+      - backbone.encoder.5
+      - backbone.encoder.8
+      - backbone.encoder.11
+    olmoearth_v1_1_tiny:
+      - encoder_model.encoder.blocks.2
+      - encoder_model.encoder.blocks.5
+      - encoder_model.encoder.blocks.8
+      - encoder_model.encoder.blocks.11

@@ -48,6 +48,16 @@ TRACE_REQUIRED_COLUMNS: tuple[str, ...] = (
     "correct",
 )
 
+# Distance fragments extend the shared schema rather than replacing it: they keep
+# every TRACE_REQUIRED_COLUMNS field (populated from the probe, exactly as a
+# probabilistic fragment is) and append the three activation-distance columns, so
+# old and new fragments still union cleanly on the shared columns in one scan.
+DISTANCE_TRACE_COLUMNS: tuple[str, ...] = TRACE_REQUIRED_COLUMNS + (
+    "layer_name",
+    "score_kind",
+    "distance_score",
+)
+
 TRACE_KEY_COLUMNS: tuple[str, ...] = (
     "model",
     "backbone",
@@ -387,6 +397,98 @@ def build_probabilistic_trace_frame(
 
     frame = pd.DataFrame(data)
     return frame[list(TRACE_REQUIRED_COLUMNS)]
+
+
+def build_distance_trace_frame(
+    *,
+    trace_block_key: str,
+    run_id: str,
+    common_meta: Mapping[str, object],
+    uq_method: str,
+    corruption_type: str,
+    severity: int,
+    config_hash: str,
+    git_sha: str,
+    created_at_utc: str,
+    y_true: np.ndarray,
+    probs: np.ndarray,
+    distance_score: np.ndarray,
+    layer_name: str,
+    score_kind: str,
+    sample_ids: Sequence[str] | np.ndarray | None = None,
+) -> pd.DataFrame:
+    """Build a per-sample trace frame for an activation-distance scorer.
+
+    The probe columns (``y_pred``, ``max_probability``, ``confidence``, entropies)
+    are carried over unchanged from ``probs``: a distance score reorders which
+    samples are deferred, it never changes a prediction. ``confidence`` therefore
+    stays the probe's max-probability, and the distance lives in its own column —
+    consumers that want to defer by distance use ``-distance_score``.
+
+    Args:
+        trace_block_key: Deterministic block key for this evaluation coordinate.
+        run_id: Trace run identifier.
+        common_meta: Common metadata columns shared across result rows.
+        uq_method: Scorer key, e.g. ``"maha@backbone.layer4"``.
+        corruption_type: Corruption name (or ``"clean"``).
+        severity: Corruption severity level.
+        config_hash: Hash of the resolved run config.
+        git_sha: Git SHA of the running tree.
+        created_at_utc: Trace creation timestamp.
+        y_true: True labels with shape ``(N,)``, remapped through ``probe.classes_``.
+        probs: Probe class probabilities with shape ``(N, C)``.
+        distance_score: Activation-distance scores with shape ``(N,)``.
+        layer_name: Hook path the score was computed on.
+        score_kind: Score family, e.g. ``"maha"``.
+        sample_ids: Optional stable per-sample identifiers.
+
+    Returns:
+        Frame with :data:`DISTANCE_TRACE_COLUMNS`.
+
+    Raises:
+        ValueError: If array shapes are inconsistent.
+    """
+    if probs.ndim != 2:
+        raise ValueError(f"probs must be 2D, got shape {probs.shape}")
+    if y_true.ndim != 1:
+        raise ValueError(f"y_true must be 1D, got shape {y_true.shape}")
+    if distance_score.ndim != 1:
+        raise ValueError(f"distance_score must be 1D, got shape {distance_score.shape}")
+    n = y_true.shape[0]
+    if probs.shape[0] != n or distance_score.shape[0] != n:
+        raise ValueError("probs, y_true, and distance_score must have equal first dimension")
+
+    y_pred = probs.argmax(axis=1).astype(np.int64)
+    confidence = probs.max(axis=1).astype(np.float64)
+    sample_idx = np.arange(n, dtype=np.int64)
+
+    data = _base_trace_columns(
+        trace_block_key=trace_block_key,
+        run_id=run_id,
+        common_meta=common_meta,
+        uq_method=uq_method,
+        corruption_type=corruption_type,
+        severity=severity,
+        config_hash=config_hash,
+        git_sha=git_sha,
+        created_at_utc=created_at_utc,
+        sample_idx=sample_idx,
+        sample_ids=sample_ids,
+        y_true=y_true,
+        y_pred=y_pred,
+    )
+    data["max_probability"] = confidence
+    data["confidence"] = confidence
+    data["predictive_entropy"] = _per_sample_entropy(probs).astype(np.float64)
+    data["normalized_predictive_entropy"] = _per_sample_normalized_entropy(probs).astype(
+        np.float64
+    )
+    data["layer_name"] = str(layer_name)
+    data["score_kind"] = str(score_kind)
+    data["distance_score"] = distance_score.astype(np.float64)
+
+    frame = pd.DataFrame(data)
+    return frame[list(DISTANCE_TRACE_COLUMNS)]
 
 
 def build_conformal_trace_frame(

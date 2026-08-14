@@ -4,6 +4,7 @@
 # Multi-modal: auto-routes S2/SAR/Landsat/NAIP bands to the correct modality.
 
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
+pretrained: true
 model_size: base
 version: v1_1
 patch_size: 8
