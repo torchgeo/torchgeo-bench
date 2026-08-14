@@ -1,0 +1,9 @@
+# TorchGeo DEO Swin-B, native high-resolution RGB pathway (1024-dim output).
+_target_: torchgeo_bench.models.TorchGeoDEOBench
+mode: rgb
+normalization: model_native
+auto_resize: true
+target_size: 224
+name: tgeo_deo_swin_rgb
+
+# Classification only: DEO's final Swin map is spatially pooled by the wrapper.
