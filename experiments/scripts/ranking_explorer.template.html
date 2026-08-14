@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ranking Explorer · torchgeo-bench</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700;8..60,900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
+  <style>
+    :root {
+      --paper: #fff1e5; --rule: #b3a9a0; --soft-rule: #d9cfc6;
+      --text: #262a33; --muted: #66605c; --claret: #990f3d; --blue: #0f5499;
+      --heat-low: #f3ede4; --white: #fff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--text); background: var(--paper); font-family: "Source Serif 4", Georgia, serif; }
+    .sans, select, .tabulator, .panel, .foot { font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
+    .wrap { max-width: 1220px; margin: 0 auto; padding: 28px 24px 72px; }
+    .masthead { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #000; padding-bottom: 10px; margin-bottom: 22px; }
+    .wordmark { font-size: 22px; font-weight: 700; color: #000; }
+    .wordmark small { margin-left: 10px; color: var(--muted); font: 700 11px/1 Inter, sans-serif; letter-spacing: .16em; text-transform: uppercase; }
+    .kicker { margin: 0 0 10px; color: var(--claret); font: 700 12px/1.2 Inter, sans-serif; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0 0 12px; font-size: 32px; line-height: 1.12; }
+    .standfirst { max-width: 900px; margin: 0 0 13px; font-size: 19px; line-height: 1.45; }
+    .intro { max-width: 920px; margin: 0 0 20px; font-size: 15px; line-height: 1.55; }
+    .intro strong { font-weight: 700; }
+    .intro a { color: var(--blue); font-weight: 600; }
+    .intro-list { max-width: 920px; margin: -10px 0 16px; padding-left: 1.4rem; font-size: 15px; line-height: 1.55; list-style: disc outside; }
+    .intro-list li { margin: 5px 0; padding-left: 4px; }
+    .intro-list li::marker { color: var(--claret); }
+    .feedback { max-width: 920px; margin: -8px 0 20px; color: var(--muted); font: 13px/1.55 Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
+    .feedback a { color: var(--blue); font-weight: 600; }
+    .controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: end; padding: 14px 0; margin-bottom: 18px; border-block: 1px solid var(--rule); }
+    .control { display: grid; gap: 5px; }
+    .control label { color: var(--muted); font: 700 11px/1 Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+    .control.aggregation label { color: var(--claret); }
+    select { min-width: 150px; padding: 7px 10px; color: var(--text); background: var(--white); border: 1px solid var(--rule); border-radius: 2px; font-size: 14px; }
+    .control.aggregation select { border: 2px solid var(--claret); font-weight: 600; }
+    select:disabled { cursor: not-allowed; color: var(--muted); background: #f1e6dc; }
+    .method { max-width: 930px; margin: 0 0 16px; padding: 12px 15px; border-left: 3px solid var(--claret); background: #fbf3f6; font-size: 15px; line-height: 1.5; }
+    .method strong, .aggregation-name { font-family: Inter, sans-serif; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+    .aggregation-name { display: block; margin-bottom: 5px; color: var(--claret); font-weight: 700; }
+    h2 { margin: 0 0 6px; font: 700 15px/1.3 Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; }
+    .lede { max-width: 880px; margin: 0 0 12px; color: var(--muted); font: 13px/1.55 Inter, sans-serif; }
+    .table-key { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 10px; color: var(--muted); font: 12px/1.4 Inter, sans-serif; }
+    .swatch { display: inline-block; width: 88px; height: 11px; margin-right: 5px; vertical-align: middle; border: 1px solid var(--soft-rule); border-radius: 2px; background: linear-gradient(to right, var(--heat-low), var(--blue)); }
+    #table { overflow-x: auto; border: 1px solid var(--soft-rule); }
+    .tabulator { font-size: 13px; background: var(--white); font-variant-numeric: tabular-nums; }
+    .tabulator .tabulator-header, .tabulator .tabulator-col { background: var(--white); }
+    .tabulator .tabulator-header { border-bottom: 2px solid #000; }
+    .tabulator .tabulator-col .tabulator-col-title { white-space: normal; text-overflow: clip; font-size: 12px; line-height: 1.25; }
+    .tabulator-cell.column-best { font-weight: 700; }
+    .overall-ci { display: block; color: var(--muted); font-size: 11px; line-height: 1.3; }
+    .sort-status { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin: 8px 0 0; color: var(--muted); font: 12px/1.5 Inter, sans-serif; }
+    .sort-status button { padding: 2px 8px; color: var(--blue); background: var(--white); border: 1px solid var(--rule); border-radius: 2px; cursor: pointer; font: 600 12px/1.4 Inter, sans-serif; }
+    .sort-status button:hover { color: var(--claret); border-color: var(--claret); }
+    .tabulator-row.baseline-row { background: #fbf3f6; }
+    .tabulator-row.table-hovered { box-shadow: inset 0 0 0 999px rgba(15, 84, 153, .12); }
+    .excluded { margin: 11px 0 28px; color: var(--muted); font: 12px/1.5 Inter, sans-serif; }
+    .excluded ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 2px 18px; margin: 6px 0 0; padding: 0; list-style: none; }
+    .excluded li { padding-left: 0; }
+    .panel { position: relative; margin-top: 28px; padding: 16px; background: rgba(255,255,255,.58); border: 1px solid var(--soft-rule); }
+    .panel .lede { margin-bottom: 12px; }
+    svg { display: block; width: 100%; height: auto; overflow: visible; }
+    .axis { stroke: var(--rule); stroke-width: 1; }
+    .grid { stroke: var(--soft-rule); stroke-dasharray: 2 3; }
+    .tick, .axis-title { fill: var(--muted); font: 11px Inter, sans-serif; }
+    .matrix-label { fill: var(--text); font: 600 11px Inter, sans-serif; }
+    .axis-title { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .axis-direction { fill: var(--muted); font-size: 9.5px; font-weight: 400; }
+    .matrix-cell { stroke: var(--paper); stroke-width: 1; }
+    .matrix-value { fill: var(--text); font: 700 11px Inter, sans-serif; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+    .matrix-meta { fill: var(--text); font: 10px Inter, sans-serif; text-anchor: middle; pointer-events: none; }
+    .matrix-value.on-dark, .matrix-meta.on-dark, .tabulator-cell.on-dark { fill: #fff; color: #fff; }
+    .scatter-point { fill: var(--blue); stroke: #fff; stroke-width: 1.5; cursor: default; }
+    .scatter-point.hovered { fill: var(--claret); stroke: var(--claret); stroke-width: 3; }
+    .scatter-label { fill: var(--text); font: 10.5px Inter, sans-serif; paint-order: stroke; stroke: rgba(255,255,255,.94); stroke-linejoin: round; stroke-width: 3px; pointer-events: none; }
+    .chart-tooltip { position: absolute; z-index: 2; display: none; max-width: 270px; padding: 8px 10px; color: var(--text); background: rgba(255,255,255,.98); border: 1px solid var(--rule); box-shadow: 0 8px 20px rgba(38,42,51,.12); font: 11px/1.45 Inter, sans-serif; pointer-events: none; }
+    .omitted { min-height: 18px; margin: 10px 0 0; color: var(--muted); font: 12px/1.5 Inter, sans-serif; }
+    .empty { padding: 24px 0 4px; color: var(--muted); font: 13px/1.5 Inter, sans-serif; }
+    .foot { margin-top: 34px; padding-top: 12px; color: var(--muted); border-top: 1px solid var(--rule); font-size: 12px; line-height: 1.6; }
+    @media (max-width: 620px) { .wrap { padding-inline: 14px; } h1 { font-size: 27px; } .panel { padding: 12px; } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="masthead"><div class="wordmark">torchgeo-bench <small>ranking explorer</small></div><span class="sans">classification benchmarks</span></header>
+    <p class="kicker">Frozen foundation-model evaluation</p>
+    <h1>Torchgeo-Bench Geospatial Foundation Model Ranking</h1>
+    <p class="standfirst">Geospatial foundation models are pretrained backbones, with the promise of being easily adaptable to various earth observation downstream tasks. Torchgeo-Bench is a collective effort to provide transparent and fair evaluations of these models on established protocols such that the community can gain a better understanding of model performance across tasks.</p>
+    <p class="intro">The table summarizes per-dataset scores, and three settings decide what is being summarized:</p>
+    <ul class="intro-list">
+      <li><strong>Aggregation</strong> sets how the per-dataset scores are combined into a single number.</li>
+      <li><strong>Probe</strong> sets how frozen embeddings become predictions, either a fitted linear classifier or KNN-5.</li>
+      <li><strong>Bands</strong> sets the input modality for the backbone that configures the required bands and order, either RGB or the available multispectral channels.</li>
+    </ul>
+    <p class="intro">Each setting is a separate experiment rather than a filter applied to one result, so the table can reorder when you change one of them. A model is ranked only when it has a result on every eligible dataset in the selected view, and the models that fall short are named below the table. The <a href="../user/ranking_explorer.html">evaluation setup</a> documents the protocol, the coverage rules, and how each aggregation is computed.</p>
+    <p class="feedback">If a result looks wrong, is missing, or seems implausible, please <a href="https://github.com/torchgeo/torchgeo-bench/issues" target="_blank" rel="noopener">open an issue</a> with the model, the view you were looking at, and any supporting evidence. General feedback is welcome too.</p>
+
+    <section class="controls" aria-label="Ranking controls">
+      <div class="control aggregation"><label for="sel-aggregation">Aggregation</label><select id="sel-aggregation"></select></div>
+      <div class="control"><label for="sel-task">Task</label><select id="sel-task"></select></div>
+      <div class="control"><label for="sel-probe">Probe</label><select id="sel-probe"></select></div>
+      <div class="control"><label for="sel-bands">Bands</label><select id="sel-bands"></select></div>
+    </section>
+
+    <div id="aggregation-prose" class="method" aria-live="polite"></div>
+
+    <section aria-labelledby="table-heading">
+      <h2 id="table-heading">Aggregation table</h2>
+      <p id="aggregation-copy" class="lede"></p>
+      <div class="table-key"><span><i class="swatch"></i>Raw dataset score, low to high</span><span id="metric-key"></span><span>Bold marks the best score in a dataset column</span><span>Shaded rows are reference baselines, not foundation models</span><span>Click a column header to sort; the # column keeps the ranking position</span></div>
+      <div id="table" aria-label="Ranking aggregation table"></div>
+      <p id="sort-status" class="sort-status" aria-live="polite"></p>
+      <div id="excluded" class="excluded" aria-live="polite"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="compute-heading">
+      <h2 id="compute-heading">Measured compute versus selected aggregation</h2>
+      <p id="scatter-copy" class="lede"></p>
+      <div id="scatter-tooltip" class="chart-tooltip" role="tooltip"></div>
+      <div id="compute-scatter" aria-live="polite"></div>
+      <p id="omitted-compute" class="omitted"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="sensitivity-heading">
+      <h2 id="sensitivity-heading">Ranking sensitivity across views</h2>
+      <p class="lede">This fixed overview uses average rank, so it remains stable while you inspect a table slice. Each cell asks whether the same models land in the same order in two experiments. It keeps only models available in both views, re-ranks them using every dataset available in each view, and then calculates tie-aware Kendall τ-b. +1 means the same order, 0 little agreement, and −1 a reversal.</p>
+      <p class="lede">Each cell reports τ-b, shared models (<em>n</em>), and datasets in its row and column views (<em>d</em>). A dagger marks a small shared roster.</p>
+      <div id="sensitivity" aria-live="polite"></div>
+    </section>
+
+    <footer class="foot">Classification only. The page is a static rendering of precomputed rankings and measured 224-pixel backbone GFLOPs; it does not estimate missing compute.</footer>
+  </main>
+
+  <script>
+    const RANKINGS = {};
+    const SENSITIVITY = {};
+    const DEFAULT_SLICE = {};
+
+    const AGGREGATION_LABELS = {avg_rank: "Average rank", elo: "ELO", improvability: "Improvability"};
+    const AGGREGATION_PROSE = {
+      avg_rank: "Rank models within every dataset, then average those positions. A narrow win counts the same as a large one, so datasets with different score ranges do not dominate. A score of 1 is best.",
+      elo: "Treat each dataset as a set of head-to-head comparisons: a model wins when its raw score is higher. One rating summarizes those results; the interval is a bootstrapped 95% confidence interval. Higher is better.",
+      improvability: "Compare every model with the best score on each dataset. The result is the share of its remaining error that must disappear to tie the leader, averaged across datasets. A score of 0 is best.",
+    };
+    const SENSITIVITY_AGGREGATION = "avg_rank";
+    const controls = {
+      aggregation: document.getElementById("sel-aggregation"),
+      task: document.getElementById("sel-task"),
+      probe: document.getElementById("sel-probe"),
+      bandclass: document.getElementById("sel-bands"),
+    };
+    const state = {...DEFAULT_SLICE, hoveredModel: null};
+    let table = null;
+
+    function labelView(view) {
+      return `${view.task} · ${view.probe} · ${view.bandclass}`;
+    }
+
+    function labelViewLines(view) {
+      const task = view.task === "classification" ? "Classification" : view.task;
+      const probe = view.probe === "linear" ? "Linear probe" : view.probe === "knn5" ? "KNN-5" : view.probe;
+      return [task, probe, view.bandclass];
+    }
+
+    function values(object) {
+      return Object.keys(object || {});
+    }
+
+    function fillSelect(select, options, selected, labels = {}) {
+      select.innerHTML = "";
+      options.forEach(value => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = labels[value] || value;
+        option.selected = value === selected;
+        select.appendChild(option);
+      });
+      return options.includes(selected) ? selected : options[0];
+    }
+
+    function populateControls() {
+      const tasks = values(RANKINGS);
+      state.task = fillSelect(controls.task, tasks, state.task);
+      controls.task.disabled = tasks.length < 2;
+      const probes = values(RANKINGS[state.task]);
+      state.probe = fillSelect(controls.probe, probes, state.probe);
+      const bands = values(RANKINGS[state.task][state.probe]);
+      state.bandclass = fillSelect(controls.bandclass, bands, state.bandclass);
+      const aggregations = values(RANKINGS[state.task][state.probe][state.bandclass]);
+      state.aggregation = fillSelect(controls.aggregation, aggregations, state.aggregation, AGGREGATION_LABELS);
+    }
+
+    function block() {
+      return RANKINGS[state.task][state.probe][state.bandclass][state.aggregation];
+    }
+
+    function formatNumber(value, digits = 3) {
+      return Number(value).toLocaleString(undefined, {maximumFractionDigits: digits});
+    }
+
+    function formatFixed(value, digits = 3) {
+      return Number(value).toFixed(digits);
+    }
+
+    // Text turns white past ON_DARK_FRACTION, where the ramp stops clearing 4.5:1 against body text.
+    const ON_DARK_FRACTION = 0.65;
+
+    function heatColor(fraction) {
+      const lo = [243, 237, 228], hi = [15, 84, 153];
+      const channels = lo.map((channel, index) => Math.round(channel + (hi[index] - channel) * fraction));
+      return `rgb(${channels.join(",")})`;
+    }
+
+    function setHoveredModel(model) {
+      state.hoveredModel = model;
+      if (table) {
+        table.getRows().forEach(row => row.getElement().classList.toggle("table-hovered", row.getData().model === model));
+      }
+      document.querySelectorAll(".scatter-point").forEach(point => point.classList.toggle("hovered", point.dataset.model === model));
+    }
+
+    function renderMetricKey(datasetNames, datasetMeta) {
+      const groups = new Map();
+      datasetNames.forEach(dataset => {
+        const metric = datasetMeta[dataset]?.metric || "score";
+        if (!groups.has(metric)) groups.set(metric, []);
+        groups.get(metric).push(datasetMeta[dataset]?.label || dataset);
+      });
+      const entries = [...groups.entries()];
+      document.getElementById("metric-key").textContent = entries.length === 1
+        ? `Every dataset column is ${entries[0][0].toLowerCase()}`
+        : entries.map(([metric, labels]) => `${metric}: ${labels.join(", ")}`).join("; ");
+    }
+
+    function renderSortStatus(sorters, data) {
+      const target = document.getElementById("sort-status");
+      const active = (sorters || []).filter(sorter => sorter.field);
+      if (!active.length) {
+        target.textContent = `Rows are in ${data.overall_meta.label.toLowerCase()} order.`;
+        return;
+      }
+      const described = active.map(sorter => {
+        const title = sorter.column.getDefinition().title;
+        const textual = sorter.field === "display";
+        const direction = sorter.dir === "desc"
+          ? (textual ? "Z to A" : "high to low")
+          : (textual ? "A to Z" : "low to high");
+        return `${title}, ${direction}`;
+      }).join("; then ");
+      target.textContent = `Sorted by ${described}. `;
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.textContent = `Reset to ${data.overall_meta.label.toLowerCase()} order`;
+      reset.addEventListener("click", () => { table.clearSort(); renderSortStatus([], data); });
+      target.appendChild(reset);
+    }
+
+    function renderTable(data) {
+      const datasetNames = Object.keys(data.rows[0]?.per_task || {});
+      const datasetMeta = data.dataset_meta || {};
+      const ranges = Object.fromEntries(datasetNames.map(dataset => {
+        const scores = data.rows.map(row => row.per_task[dataset]);
+        return [dataset, [Math.min(...scores), Math.max(...scores)]];
+      }));
+      // The payload arrives in aggregation order, so the position is fixed here and
+      // travels with the model when the reader sorts by something else.
+      const rows = data.rows.map((row, index) => ({...row, rank: index + 1}));
+      const hasInterval = rows.some(row => row.overall_ci);
+      const columns = [
+        {title: "#", field: "rank", width: 46, hozAlign: "right", headerSort: false},
+        {title: "Model", field: "display", minWidth: 195, sorter: "string"},
+        {title: data.overall_meta.label, field: "overall", width: hasInterval ? 132 : 108, hozAlign: "right",
+         sorter: "number", headerSortStartingDir: data.overall_meta.direction === "lower-is-better" ? "asc" : "desc",
+         formatter(cell) {
+          const row = cell.getRow().getData();
+          const ci = row.overall_ci ? `<span class="overall-ci">[${formatNumber(row.overall_ci[0])}, ${formatNumber(row.overall_ci[1])}]</span>` : "";
+          return `${formatNumber(cell.getValue())}${ci}`;
+        }},
+        ...datasetNames.map(dataset => ({
+          title: datasetMeta[dataset]?.label || dataset,
+          headerTooltip: `${dataset} — ${datasetMeta[dataset]?.metric || "score"}`,
+          field: `per_task.${dataset}`, width: 84, hozAlign: "right",
+          sorter: "number", headerSortStartingDir: "desc",
+          formatter(cell) {
+            const value = cell.getValue(), [min, max] = ranges[dataset];
+            const fraction = max === min ? 1 : (value - min) / (max - min);
+            const element = cell.getElement();
+            element.style.backgroundColor = heatColor(fraction);
+            element.classList.toggle("on-dark", fraction >= ON_DARK_FRACTION);
+            element.classList.toggle("column-best", value === max);
+            return formatFixed(value);
+          },
+        })),
+      ];
+      const fields = new Set(columns.map(column => column.field).filter(Boolean));
+      const initialSort = table
+        ? table.getSorters().filter(sorter => fields.has(sorter.field)).map(sorter => ({column: sorter.field, dir: sorter.dir}))
+        : [];
+      if (table) table.destroy();
+      table = new Tabulator("#table", {
+        data: rows, columns, layout: "fitDataStretch", index: "model", movableColumns: false, initialSort,
+        rowFormatter(row) { if (row.getData().is_baseline) row.getElement().classList.add("baseline-row"); },
+      });
+      table.on("dataSorted", sorters => renderSortStatus(sorters, data));
+      renderSortStatus([], data);
+      renderMetricKey(datasetNames, datasetMeta);
+      setHoveredModel(state.hoveredModel);
+    }
+
+    function renderExcluded(excluded) {
+      const target = document.getElementById("excluded");
+      if (!excluded.length) { target.textContent = "All observed models have complete quality coverage for this view."; return; }
+      const items = excluded.map(row => `<li>${row.display || row.model} (${row.n_tasks} datasets)</li>`).join("");
+      target.innerHTML = `<strong>Excluded models: incomplete quality coverage.</strong><ul>${items}</ul>`;
+    }
+
+    function renderAggregationProse() {
+      const target = document.getElementById("aggregation-prose");
+      target.innerHTML = `<span class="aggregation-name">${AGGREGATION_LABELS[state.aggregation]}</span>${AGGREGATION_PROSE[state.aggregation] || ""}`;
+    }
+
+    function svgElement(name, attributes = {}, text = "") {
+      const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+      Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+      if (text) element.textContent = text;
+      return element;
+    }
+
+    function multilineSvgText(lines, attributes) {
+      const text = svgElement("text", attributes);
+      lines.forEach((line, index) => {
+        text.appendChild(svgElement("tspan", {x: attributes.x, dy: index === 0 ? 0 : 13}, line));
+      });
+      return text;
+    }
+
+    function directedAxisTitle(attributes, before, main, after) {
+      const text = svgElement("text", attributes);
+      text.appendChild(svgElement("tspan", {class: "axis-direction"}, before));
+      text.appendChild(svgElement("tspan", {dx: 6}, main));
+      text.appendChild(svgElement("tspan", {dx: 6, class: "axis-direction"}, after));
+      return text;
+    }
+
+    function showTooltip(id, event, html) {
+      const tooltip = document.getElementById(id), panel = tooltip.parentElement;
+      tooltip.innerHTML = html;
+      tooltip.style.display = "block";
+      const bounds = panel.getBoundingClientRect();
+      tooltip.style.left = `${Math.max(8, event.clientX - bounds.left + 12)}px`;
+      tooltip.style.top = `${Math.max(8, event.clientY - bounds.top + 12)}px`;
+    }
+
+    function hideTooltip(id) { document.getElementById(id).style.display = "none"; }
+
+    function matrixColor(tau) {
+      if (tau === null) return "#b8b2aa";
+      const intensity = Math.abs(tau);
+      const lo = [215, 210, 202], hi = tau >= 0 ? [15, 84, 153] : [153, 15, 61];
+      const rgb = lo.map((value, index) => Math.round(value + (hi[index] - value) * intensity));
+      return `rgb(${rgb.join(",")})`;
+    }
+
+    function renderSensitivity() {
+      const target = document.getElementById("sensitivity");
+      const aggregation = SENSITIVITY.by_aggregation?.[SENSITIVITY_AGGREGATION]
+        ? SENSITIVITY_AGGREGATION
+        : values(SENSITIVITY.by_aggregation)[0];
+      const matrix = SENSITIVITY.by_aggregation?.[aggregation], views = SENSITIVITY.views || [];
+      if (!matrix || !views.length) { target.innerHTML = '<p class="empty">No comparable views are available.</p>'; return; }
+      const n = views.length, cell = Math.max(76, Math.min(110, Math.floor(580 / n)));
+      const left = 156, top = 70, width = left + cell * n + 12, height = top + cell * n + 10;
+      const svg = svgElement("svg", {viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Kendall tau-b ranking sensitivity matrix"});
+      views.forEach((view, index) => {
+        const lines = labelViewLines(view);
+        svg.appendChild(multilineSvgText(lines, {x: left + index * cell + cell / 2, y: 18, class: "matrix-label", "text-anchor": "middle"}));
+        svg.appendChild(multilineSvgText(lines, {x: left - 13, y: top + index * cell + cell / 2 - 13, class: "matrix-label", "text-anchor": "end"}));
+      });
+      matrix.forEach((row, rowIndex) => row.forEach((entry, columnIndex) => {
+        const rowView = views[rowIndex], columnView = views[columnIndex];
+        const x = left + columnIndex * cell, y = top + rowIndex * cell;
+        const rectangle = svgElement("rect", {x, y, width: cell, height: cell, fill: matrixColor(entry.tau), class: "matrix-cell"});
+        const tau = entry.tau === null ? "undefined" : entry.tau.toFixed(3);
+        const warning = entry.small_n ? " Small shared roster warning." : "";
+        const contrastClass = entry.tau !== null && Math.abs(entry.tau) >= 0.62 ? " on-dark" : "";
+        rectangle.appendChild(svgElement("title", {}, `${labelView(rowView)} compared with ${labelView(columnView)}. Kendall tau-b: ${tau}. Shared models: ${entry.n_models}. Datasets: ${entry.n_datasets_a} and ${entry.n_datasets_b}.${warning}`));
+        svg.appendChild(rectangle);
+        svg.appendChild(svgElement("text", {x: x + cell / 2, y: y + cell / 2 - 7, class: `matrix-value${contrastClass}`}, entry.tau === null ? "τ —" : `τ ${entry.tau.toFixed(2)}`));
+        svg.appendChild(svgElement("text", {x: x + cell / 2, y: y + cell / 2 + 13, class: `matrix-meta${contrastClass}`}, `n=${entry.n_models} · d=${entry.n_datasets_a}/${entry.n_datasets_b}${entry.small_n ? " †" : ""}`));
+      }));
+      target.replaceChildren(svg);
+    }
+
+    function logTicks(min, max) {
+      const first = Math.floor(Math.log10(min)), last = Math.ceil(Math.log10(max));
+      return Array.from({length: last - first + 1}, (_, index) => 10 ** (first + index));
+    }
+
+    function overlapArea(first, second) {
+      const width = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
+      const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
+      return width * height;
+    }
+
+    function labelRectangle(x, baseline, anchor, text) {
+      const width = text.length * 5.9 + 2;
+      const left = anchor === "end" ? x - width : anchor === "middle" ? x - width / 2 : x;
+      return {left, right: left + width, top: baseline - 10, bottom: baseline + 3};
+    }
+
+    function placeScatterLabels(points, bounds) {
+      const placed = [];
+      const pointBoxes = points.map(point => ({left: point.x - 6, right: point.x + 6, top: point.y - 6, bottom: point.y + 6}));
+      const candidates = [
+        {dx: 8, dy: -8, anchor: "start"}, {dx: 8, dy: 14, anchor: "start"},
+        {dx: -8, dy: -8, anchor: "end"}, {dx: -8, dy: 14, anchor: "end"},
+        {dx: 0, dy: -11, anchor: "middle"}, {dx: 0, dy: 17, anchor: "middle"},
+        {dx: 15, dy: -16, anchor: "start"}, {dx: -15, dy: -16, anchor: "end"},
+      ];
+      [...points].sort((a, b) => b.row.display.length - a.row.display.length).forEach(point => {
+        const options = candidates.map((candidate, index) => {
+          const x = point.x + candidate.dx, y = point.y + candidate.dy;
+          const rect = labelRectangle(x, y, candidate.anchor, point.row.display);
+          const outside = Math.max(0, bounds.left - rect.left) + Math.max(0, rect.right - bounds.right) + Math.max(0, bounds.top - rect.top) + Math.max(0, rect.bottom - bounds.bottom);
+          const labelOverlap = placed.reduce((total, label) => total + overlapArea(rect, label.rect), 0);
+          const pointOverlap = pointBoxes.reduce((total, box, pointIndex) => total + (box === pointBoxes[point.index] ? 0 : overlapArea(rect, box)), 0);
+          return {x, y, anchor: candidate.anchor, rect, score: outside * 10000 + labelOverlap * 250 + pointOverlap * 250 + index};
+        });
+        const best = options.reduce((current, option) => option.score < current.score ? option : current);
+        placed.push({...best, model: point.row.model});
+      });
+      return new Map(placed.map(label => [label.model, label]));
+    }
+
+    function renderScatter(data) {
+      const target = document.getElementById("compute-scatter"), omitted = document.getElementById("omitted-compute");
+      const points = data.rows.filter(row => Number(row.gflops_backbone) > 0);
+      const absent = data.rows.filter(row => !(Number(row.gflops_backbone) > 0)).map(row => row.display);
+      omitted.textContent = absent.length ? `Omitted from the log-scale chart because GFLOPs are zero or unmeasured: ${absent.join(", ")}.` : "All seated models have positive measured GFLOPs.";
+      const direction = data.overall_meta.direction, title = data.overall_meta.label;
+      document.getElementById("scatter-copy").textContent = `Measured backbone GFLOPs at 224-pixel input (log scale) versus ${title}. The vertical direction is always the same: better is higher and worse is lower.`;
+      if (!points.length) { target.innerHTML = '<p class="empty">No seated model has positive measured backbone GFLOPs.</p>'; return; }
+      const width = 840, height = 470, margin = {left: 75, right: 22, top: 24, bottom: 58};
+      const xs = points.map(point => Number(point.gflops_backbone)), ys = points.map(point => Number(point.overall));
+      const xMin = Math.min(...xs), xMax = Math.max(...xs), yMin = Math.min(...ys), yMax = Math.max(...ys);
+      const xScale = value => margin.left + (Math.log10(value) - Math.log10(xMin)) / Math.max(.01, Math.log10(xMax) - Math.log10(xMin)) * (width - margin.left - margin.right);
+      const yScale = value => {
+        const fraction = (value - yMin) / Math.max(.00001, yMax - yMin);
+        const visual = direction === "lower-is-better" ? fraction : 1 - fraction;
+        return margin.top + visual * (height - margin.top - margin.bottom);
+      };
+      const svg = svgElement("svg", {viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Compute versus ranking aggregation scatter plot"});
+      const chartBottom = height - margin.bottom;
+      logTicks(xMin, xMax).forEach(tick => { if (tick < xMin || tick > xMax) return; const x = xScale(tick); svg.appendChild(svgElement("line", {x1: x, y1: margin.top, x2: x, y2: chartBottom, class: "grid"})); svg.appendChild(svgElement("text", {x, y: chartBottom + 18, class: "tick", "text-anchor": "middle"}, formatNumber(tick, 2))); });
+      Array.from({length: 5}, (_, index) => yMin + index * (yMax - yMin) / 4).forEach(tick => { const y = yScale(tick); svg.appendChild(svgElement("line", {x1: margin.left, y1: y, x2: width - margin.right, y2: y, class: "grid"})); svg.appendChild(svgElement("text", {x: margin.left - 8, y: y + 3, class: "tick", "text-anchor": "end"}, formatNumber(tick))); });
+      svg.appendChild(svgElement("line", {x1: margin.left, y1: chartBottom, x2: width - margin.right, y2: chartBottom, class: "axis"}));
+      svg.appendChild(svgElement("line", {x1: margin.left, y1: margin.top, x2: margin.left, y2: chartBottom, class: "axis"}));
+      // Both axis titles carry their own direction. Under rotate(-90) a "→" glyph
+      // points up the screen, so the y arrows read with the axis they label.
+      svg.appendChild(directedAxisTitle({x: (margin.left + width - margin.right) / 2, y: height - 10, class: "axis-title", "text-anchor": "middle"}, "Less compute ←", "Backbone GFLOPs (log scale)", "→ More compute"));
+      svg.appendChild(directedAxisTitle({x: 16, y: height / 2, class: "axis-title", "text-anchor": "middle", transform: `rotate(-90 16 ${height / 2})`}, "Worse ←", title, "→ Better"));
+      const positionedPoints = points.map((row, index) => ({row, index, x: xScale(Number(row.gflops_backbone)), y: yScale(Number(row.overall))}));
+      positionedPoints.forEach(({row, x, y}) => {
+        const point = svgElement("circle", {cx: x, cy: y, r: 5.5, class: `scatter-point ${state.hoveredModel === row.model ? "hovered" : ""}`, "data-model": row.model, tabindex: "0"});
+        const tooltip = `<strong>${row.display}</strong><br>${formatNumber(row.gflops_backbone)} GFLOPs<br>${data.overall_meta.label}: ${formatNumber(row.overall)}`;
+        point.appendChild(svgElement("title", {}, tooltip.replace(/<[^>]+>/g, " ")));
+        point.addEventListener("mouseenter", event => { setHoveredModel(row.model); showTooltip("scatter-tooltip", event, tooltip); });
+        point.addEventListener("mousemove", event => showTooltip("scatter-tooltip", event, tooltip));
+        point.addEventListener("mouseleave", () => { setHoveredModel(null); hideTooltip("scatter-tooltip"); });
+        point.addEventListener("focus", event => { setHoveredModel(row.model); showTooltip("scatter-tooltip", event, tooltip); });
+        point.addEventListener("blur", () => { setHoveredModel(null); hideTooltip("scatter-tooltip"); });
+        svg.appendChild(point);
+      });
+      const labels = placeScatterLabels(positionedPoints, {left: margin.left, right: width - margin.right, top: margin.top, bottom: chartBottom});
+      positionedPoints.forEach(({row}) => {
+        const label = labels.get(row.model);
+        svg.appendChild(svgElement("text", {x: label.x, y: label.y, class: "scatter-label", "text-anchor": label.anchor}, row.display));
+      });
+      target.replaceChildren(svg);
+    }
+
+    function render() {
+      populateControls();
+      const data = block();
+      document.getElementById("aggregation-copy").textContent = `${data.overall_meta.label}: ${data.overall_meta.direction.replaceAll("-", " ")}. The table reorders complete model rows and retains their raw per-dataset scores.`;
+      renderAggregationProse();
+      renderTable(data);
+      renderExcluded(data.excluded);
+      renderSensitivity();
+      renderScatter(data);
+    }
+
+    Object.entries(controls).forEach(([key, select]) => select.addEventListener("change", () => { state[key] = select.value; state.hoveredModel = null; render(); }));
+    if (Object.keys(RANKINGS).length) render();
+  </script>
+</body>
+</html>

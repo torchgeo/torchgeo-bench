@@ -8,6 +8,7 @@ experiments/scripts/*
 !experiments/scripts/tune_dataloader.py
 !experiments/scripts/regen_results_explorer.py
 !experiments/scripts/regen_leaderboard.py
+!experiments/scripts/ranking_explorer.template.html
 !experiments/scripts/test_knn_gpu_smoke.py
 !experiments/scripts/cleanlab_extract_probs.py
 !experiments/scripts/run_cleanlab_audit.py
