@@ -1,38 +1,52 @@
 #!/bin/bash
 #SBATCH --account=hai_uqmethodbox
 #SBATCH --nodes=1
-#SBATCH --output=slurm_out/deo_classification.%A_%a.out
-#SBATCH --error=slurm_err/deo_classification.%A_%a.err
+#SBATCH --output=slurm_out/deo_classification.%j.out
+#SBATCH --error=slurm_err/deo_classification.%j.err
 #SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --partition=booster
 #SBATCH --gres=gpu:4
-#SBATCH --array=0-1
 
-# Submit both standardized classification tracks with:
-#   sbatch scripts/slurm_deo_classification.sh
+# Submit two independent, non-array jobs:
+#   MODE=rgb sbatch scripts/slurm_deo_classification.sh
+#   MODE=s2  sbatch scripts/slurm_deo_classification.sh
 #
-# Array task 0: DEO native RGB pathway on all 11 classification datasets.
-# Array task 1: DEO native 10-band Sentinel-2 pathway on its 8 compatible datasets.
-# Each task writes to a separate local CSV under results/.
+# Each job distributes its datasets over the four allocated GPUs and writes a
+# separate local CSV under results/.
 
 set -euo pipefail
 
 module load Stages/2025 GCCcore/.13.3.0 Python/3.12.3
 
 PROJECT_DIR=/p/project1/hai_uqmethodbox/nils/torchgeo-bench
-VENV_ACTIVATE=${VENV_ACTIVATE:-"$PROJECT_DIR/sc_venv_template/activate.sh"}
+VENV_ACTIVATE=${VENV_ACTIVATE:-/p/project1/hai_uqmethodbox/nils/torchgeo-bench/sc_venv_template/activate.sh}
 if [[ ! -f "$VENV_ACTIVATE" ]]; then
-  echo "Venv activation script not found: $VENV_ACTIVATE" >&2
+  echo "Venv activate script not found: $VENV_ACTIVATE" >&2
   exit 1
 fi
 source "$VENV_ACTIVATE"
 
-PYTHON_BIN=${PYTHON_BIN:-"$VIRTUAL_ENV/bin/python"}
-if [[ ! -x "$PYTHON_BIN" ]]; then
-  echo "Python executable not found: $PYTHON_BIN" >&2
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+  echo "VIRTUAL_ENV is not set after activation. Check the activate script." >&2
   exit 1
 fi
+PYTHON_BIN=${PYTHON_BIN:-python}
+VENV_PYTHON="$VIRTUAL_ENV/bin/python"
+if [[ -x "$VENV_PYTHON" ]]; then
+  PYTHON_BIN="$VENV_PYTHON"
+else
+  PYTHON_BIN_PATH=$(command -v "$PYTHON_BIN" || true)
+  if [[ -z "$PYTHON_BIN_PATH" ]]; then
+    echo "Python not found after activation (PYTHON_BIN=${PYTHON_BIN})." >&2
+    exit 1
+  fi
+  PYTHON_BIN="$PYTHON_BIN_PATH"
+fi
+
+echo "Using Python: $PYTHON_BIN"
+
+mkdir -p "$PROJECT_DIR/slurm_out" "$PROJECT_DIR/slurm_err"
 
 cd "$PROJECT_DIR"
 export PYTHONPATH="$PROJECT_DIR/src:${PYTHONPATH:-}"
@@ -46,9 +60,8 @@ export TORCH_HOME="$CACHE_ROOT/torch"
 export TIMM_CACHE_DIR="$CACHE_ROOT/timm"
 export XDG_CACHE_HOME="$CACHE_ROOT/xdg"
 
-case "${SLURM_ARRAY_TASK_ID:?SLURM array task ID is required}" in
-  0)
-    MODE=rgb
+case "${MODE:?Set MODE=rgb or MODE=s2 when submitting this job}" in
+  rgb)
     MODEL=torchgeo/deo_rgb
     BANDS=rgb
     OUTPUT=results/deo_rgb_classification.csv
@@ -57,15 +70,14 @@ case "${SLURM_ARRAY_TASK_ID:?SLURM array task ID is required}" in
       benv2 treesatai so2sat forestnet eurosat
     )
     ;;
-  1)
-    MODE=s2
+  s2)
     MODEL=torchgeo/deo_s2
     BANDS=all
     OUTPUT=results/deo_s2_classification.csv
     DATASETS=(m-eurosat m-so2sat m-brick-kiln m-bigearthnet benv2 treesatai so2sat eurosat)
     ;;
   *)
-    echo "Unsupported SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID" >&2
+    echo "Unsupported MODE: $MODE (expected rgb or s2)" >&2
     exit 2
     ;;
 esac
@@ -79,7 +91,7 @@ echo "Datasets: ${DATASETS[*]}"
 # SHA-256 and state-dict compatibility checks.
 "$PYTHON_BIN" -c 'from torchgeo_bench.models.torchgeo_models import _load_deo_backbone; _load_deo_backbone()'
 
-GPU_COUNT=${SLURM_GPUS_ON_NODE:-4}
+GPU_COUNT=${GPU_COUNT:-${SLURM_GPUS_ON_NODE:-4}}
 if (( GPU_COUNT < 1 )); then
   echo "No GPU was allocated." >&2
   exit 1
