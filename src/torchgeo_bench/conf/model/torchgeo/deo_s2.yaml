@@ -3,7 +3,7 @@ _target_: torchgeo_bench.models.TorchGeoDEOBench
 mode: s2
 normalization: model_native
 auto_resize: true
-target_size: 224
+target_size: 256
 name: tgeo_deo_swin_s2
 
 # Classification only: DEO's final Swin map is spatially pooled by the wrapper.

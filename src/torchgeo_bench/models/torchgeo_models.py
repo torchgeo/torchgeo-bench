@@ -30,7 +30,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchgeo.models as tgm
-from torchgeo.models import DEO_Weights, deo_base
+from torchgeo.models import DEO_Weights
+from torchvision import models as torchvision_models
+from torchvision.ops.misc import Permute
 from torchvision.transforms import Normalize as NormalizeV1
 from torchvision.transforms.v2 import Normalize as NormalizeV2
 
@@ -129,6 +131,8 @@ _DEO_CHECKPOINT_URL = (
     "43bcb822955b8ceb3ca44ee2c4c0e059002bc0f8/DEO_swin_b.pth"
 )
 _DEO_CHECKPOINT_SHA256 = "2be7271623e3ea74d41f574f3fa8281cb8143220a336595459f086c1c9f93905"
+_DEO_WINDOW_SIZE = [12, 12]
+_DEO_TARGET_SIZE = 256
 
 
 def _verify_deo_checkpoint_digest(path: Path) -> None:
@@ -144,8 +148,56 @@ def _verify_deo_checkpoint_digest(path: Path) -> None:
         )
 
 
+class _DEOSwinBackbone(nn.Module):
+    """Released DEO Swin-B feature extractor with its native window geometry."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.feat_extr = torchvision_models.SwinTransformer(
+            patch_size=[4, 4],
+            embed_dim=128,
+            depths=[2, 2, 18, 2],
+            num_heads=[4, 8, 16, 32],
+            window_size=_DEO_WINDOW_SIZE,
+            stochastic_depth_prob=0.5,
+        )
+        del self.feat_extr.features[0]
+        embed_dim = self.feat_extr.features[0][0].norm1.normalized_shape[0]
+        self.feat_extr.conv_ms = nn.Sequential(
+            nn.Conv2d(10, embed_dim, kernel_size=(4, 4), stride=(4, 4)),
+            Permute([0, 2, 3, 1]),
+            nn.LayerNorm(embed_dim, eps=1e-5),
+        )
+        self.feat_extr.conv_rgb = nn.Sequential(
+            nn.Conv2d(3, embed_dim, kernel_size=(4, 4), stride=(4, 4)),
+            Permute([0, 2, 3, 1]),
+            nn.LayerNorm(embed_dim, eps=1e-5),
+        )
+        del self.feat_extr.norm
+        del self.feat_extr.head
+
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        """Return the final NHWC Swin feature map."""
+        if images.shape[1] == 10:
+            features = self.feat_extr.conv_ms(images)
+        else:
+            features = self.feat_extr.conv_rgb(images)
+        for layer in self.feat_extr.features:
+            features = layer(features)
+        return features
+
+
+def _map_deo_checkpoint_keys(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Map the public DEO feature-extractor checkpoint into this model namespace."""
+    return {
+        f"feat_extr.{key}": value
+        for key, value in state_dict.items()
+        if key.startswith(("features.", "conv_ms.", "conv_rgb."))
+    }
+
+
 def _load_deo_backbone() -> nn.Module:
-    """Load DEO weights and reject checkpoints incompatible with the public architecture."""
+    """Load the public DEO feature extractor with all backbone keys validated."""
     weights = DEO_Weights.DEO_SWIN
     if weights.url != _DEO_CHECKPOINT_URL:
         raise RuntimeError(
@@ -153,7 +205,7 @@ def _load_deo_backbone() -> nn.Module:
             f"{weights.url!r}."
         )
 
-    backbone = deo_base(weights=None)
+    backbone = _DEOSwinBackbone()
     state_dict = weights.get_state_dict(progress=True, weights_only=True)
     checkpoint_path = (
         Path(torch.hub.get_dir()) / "checkpoints" / Path(urlparse(weights.url).path).name
@@ -161,12 +213,15 @@ def _load_deo_backbone() -> nn.Module:
     if checkpoint_path.is_file():
         _verify_deo_checkpoint_digest(checkpoint_path)
 
-    incompatible = backbone.load_state_dict(state_dict, strict=False)
-    if incompatible.missing_keys or incompatible.unexpected_keys:
+    backbone_state = _map_deo_checkpoint_keys(state_dict)
+    missing_keys = sorted(set(backbone.state_dict()) - set(backbone_state))
+    unexpected_keys = sorted(set(backbone_state) - set(backbone.state_dict()))
+    if missing_keys or unexpected_keys:
         raise RuntimeError(
-            "DEO checkpoint is incompatible with torchgeo.models.deo_base: "
-            f"missing={incompatible.missing_keys}, unexpected={incompatible.unexpected_keys}."
+            "DEO checkpoint is incompatible with the released DEO Swin-B feature extractor: "
+            f"missing={missing_keys}, unexpected={unexpected_keys}."
         )
+    backbone.load_state_dict(backbone_state, strict=True)
     return backbone
 
 
@@ -838,7 +893,7 @@ class TorchGeoDEOBench(BenchModel):
         mode: str = "rgb",
         normalization: NormalizationStrategy | str = NormalizationStrategy.MODEL_NATIVE,
         auto_resize: bool = True,
-        target_size: int = 224,
+        target_size: int = _DEO_TARGET_SIZE,
         **_kwargs: Any,
     ) -> None:
         if NormalizationStrategy(normalization) is not NormalizationStrategy.MODEL_NATIVE:
@@ -848,8 +903,8 @@ class TorchGeoDEOBench(BenchModel):
             )
         if mode not in {"rgb", "s2"}:
             raise ValueError("TorchGeoDEOBench mode must be 'rgb' or 's2'.")
-        if target_size != 224:
-            raise ValueError("TorchGeoDEOBench requires target_size=224.")
+        if target_size != _DEO_TARGET_SIZE:
+            raise ValueError(f"TorchGeoDEOBench requires target_size={_DEO_TARGET_SIZE}.")
 
         # DEO does its own native conversion below. Avoid the generic model_native
         # builder, which cannot infer a single unit from mixed sensor inputs.

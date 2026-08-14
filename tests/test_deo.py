@@ -22,6 +22,12 @@ class _FakeDEO(nn.Module):
         self.incompatible = incompatible
         self.last_input: torch.Tensor | None = None
 
+    def state_dict(self, *args, **kwargs):
+        del args, kwargs
+        if self.incompatible:
+            return {"feat_extr.features.0.weight": torch.tensor(1)}
+        return {}
+
     def load_state_dict(self, state_dict, strict: bool = True):
         del state_dict, strict
         if self.incompatible:
@@ -47,7 +53,7 @@ def _mock_loader(monkeypatch, *, incompatible: bool = False) -> _FakeDEO:
             return {"checkpoint": torch.tensor(1)}
 
     monkeypatch.setattr(tg_models, "DEO_Weights", SimpleNamespace(DEO_SWIN=_Weights()))
-    monkeypatch.setattr(tg_models, "deo_base", lambda *, weights: backbone)
+    monkeypatch.setattr(tg_models, "_DEOSwinBackbone", lambda: backbone)
     monkeypatch.setattr(torch.hub, "get_dir", lambda: "/tmp/nonexistent-deo-cache")
     return backbone
 
@@ -110,7 +116,7 @@ def test_deo_rejects_bad_mode_normalization_and_missing_s2_band(monkeypatch) -> 
     rgb = [_band("rgb", name, 255) for name in ("red", "green", "blue")]
     with pytest.raises(ValueError, match="model_native"):
         TorchGeoDEOBench(bands=rgb, mode="rgb", normalization="identity")
-    with pytest.raises(ValueError, match="target_size=224"):
+    with pytest.raises(ValueError, match="target_size=256"):
         TorchGeoDEOBench(bands=rgb, mode="rgb", target_size=128)
     with pytest.raises(ValueError, match="missing required"):
         TorchGeoDEOBench(bands=_s2_bands(10000)[:-1], mode="s2")
@@ -124,7 +130,7 @@ def test_deo_pools_final_nhwc_map_and_keeps_backbone_frozen(monkeypatch) -> None
     features = model.forward_patch_features(torch.ones(2, 3, 17, 19))
     assert features.shape == (2, 1024)
     assert torch.equal(features[0], torch.arange(1024, dtype=features.dtype))
-    assert backbone.last_input is not None and backbone.last_input.shape[-2:] == (224, 224)
+    assert backbone.last_input is not None and backbone.last_input.shape[-2:] == (256, 256)
     assert model.training is False and backbone.training is False
     assert all(not parameter.requires_grad for parameter in backbone.parameters())
 

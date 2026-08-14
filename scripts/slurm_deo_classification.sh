@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --account=hai_uqmethodbox
+#SBATCH --account=hai_1282
 #SBATCH --nodes=1
 #SBATCH --output=slurm_out/deo_classification.%j.out
 #SBATCH --error=slurm_err/deo_classification.%j.err
-#SBATCH --time=12:00:00
+#SBATCH --time=02:00:00
 #SBATCH --cpus-per-task=16
-#SBATCH --partition=booster
+#SBATCH --partition=develbooster
 #SBATCH --gres=gpu:4
 
 # Submit two independent, non-array jobs:
@@ -85,11 +85,6 @@ esac
 echo "Running DEO $MODE classification sweep"
 echo "Results: $OUTPUT"
 echo "Datasets: ${DATASETS[*]}"
-
-# Populate and validate the pinned DEO checkpoint once before four workers can
-# attempt the same download. This uses the benchmark loader, including its
-# SHA-256 and state-dict compatibility checks.
-"$PYTHON_BIN" -c 'from torchgeo_bench.models.torchgeo_models import _load_deo_backbone; _load_deo_backbone()'
 
 GPU_COUNT=${GPU_COUNT:-${SLURM_GPUS_ON_NODE:-4}}
 if (( GPU_COUNT < 1 )); then
