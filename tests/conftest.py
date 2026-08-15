@@ -34,32 +34,6 @@ def geobench_v2_root():
 
 
 @pytest.fixture
-def eurosat_root():
-    """Fixture providing the torchgeo EuroSAT data root path."""
-    if not EUROSAT_ROOT.exists():
-        pytest.skip(f"EuroSAT (torchgeo) data not found at {EUROSAT_ROOT}")
-    return str(EUROSAT_ROOT)
-
-
-@pytest.fixture
-def all_datasets():
-    """Fixture providing list of all available dataset names."""
-    return [
-        "m-eurosat",
-        "m-forestnet",
-        "m-so2sat",
-        "m-pv4ger",
-        "m-brick-kiln",
-    ]
-
-
-@pytest.fixture
 def small_partition():
     """Fixture providing a small partition name for fast tests."""
     return "0.01x_train"
-
-
-@pytest.fixture
-def all_splits():
-    """Fixture providing all split names."""
-    return ["train", "valid", "test"]

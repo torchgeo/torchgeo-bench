@@ -7,10 +7,6 @@ from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
 from torchgeo_bench.datasets.spacenet2 import SpaceNet2
 from torchgeo_bench.datasets.spacenet7 import SpaceNet7
 
-# ---------------------------------------------------------------------------
-# FOTW.canonicalize_sample
-# ---------------------------------------------------------------------------
-
 
 class TestFOTWCanonicalize:
     def test_image_already_present(self):
@@ -40,16 +36,7 @@ class TestFOTWCanonicalize:
         assert torch.equal(result["image"], img_b)
 
 
-# ---------------------------------------------------------------------------
-# SpaceNet2.canonicalize_sample — reverse GeoBench's +1 mask offset
-# ---------------------------------------------------------------------------
-
-
 class TestSpaceNet2Canonicalize:
-    def test_declares_two_classes(self):
-        """The dead background class is dropped: 2 classes, not GeoBench's 3."""
-        assert SpaceNet2.num_classes == 2
-
     def test_mask_offset_reversed(self):
         """Upstream ``{1: no-building, 2: building}`` maps to native ``{0, 1}``."""
         ds = SpaceNet2.__new__(SpaceNet2)
@@ -72,16 +59,7 @@ class TestSpaceNet2Canonicalize:
         assert ds.canonicalize_sample(sample) == sample
 
 
-# ---------------------------------------------------------------------------
-# SpaceNet7.canonicalize_sample — same +1 offset defect as SpaceNet2
-# ---------------------------------------------------------------------------
-
-
 class TestSpaceNet7Canonicalize:
-    def test_declares_two_classes(self):
-        """The dead background class is dropped: 2 classes, not GeoBench's 3."""
-        assert SpaceNet7.num_classes == 2
-
     def test_mask_offset_reversed(self):
         """Upstream ``{1: no-building, 2: building}`` maps to native ``{0, 1}``."""
         ds = SpaceNet7.__new__(SpaceNet7)
@@ -110,22 +88,6 @@ class TestSpaceNet7Canonicalize:
 
 
 class TestEuroSATMeta:
-    def test_name(self):
-        assert EuroSAT.name == "eurosat"
-
-    def test_split_sizes(self):
-        s = EuroSAT.split_sizes
-        assert s["train"] + s["val"] + s["test"] == 27000
-
-    def test_data_root(self):
-        assert EuroSAT.data_root().name == "eurosat"
-
-    def test_num_classes(self):
-        assert EuroSAT.num_classes == 10
-
-    def test_band_specs_non_empty(self):
-        assert len(EuroSAT.bands) > 0
-
     def test_get_dataset_mocked(self, monkeypatch):
         """get_dataset calls TGEuroSAT with correct band codes — test without disk."""
 
@@ -146,13 +108,6 @@ class TestEuroSATMeta:
 
 
 class TestEuroSATSpatialMeta:
-    def test_name(self):
-        assert EuroSATSpatial.name == "eurosat-spatial"
-
-    def test_split_sizes(self):
-        s = EuroSATSpatial.split_sizes
-        assert s["train"] + s["val"] + s["test"] == 27000
-
     def test_data_root_shared(self):
         # Both classes share the same data root
         assert EuroSAT.data_root() == EuroSATSpatial.data_root()

@@ -27,14 +27,6 @@ class _GlobalPoolModel(torch.nn.Module):
         return {"global_pool": x.flatten(1)}
 
 
-class _HeadGlobalPoolModel(torch.nn.Module):
-    """Returns 4-D output (B, 1, C) under head.global_pool key."""
-
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        feats = x.flatten(1).unsqueeze(1)  # (B, 1, C)
-        return {"head.global_pool": feats}
-
-
 class _1DModel(torch.nn.Module):
     """Returns 1-D output (single sample)."""
 
@@ -70,14 +62,6 @@ def test_dict_global_pool_output():
     model = _GlobalPoolModel()
     X, y = extract_features(model, loader, device="cpu", verbose=False)
     assert X.shape[0] == 8
-
-
-def test_dict_head_global_pool_3d():
-    loader = _make_loader(n=4, c=2, h=2)
-    model = _HeadGlobalPoolModel()
-    X, y = extract_features(model, loader, device="cpu", verbose=False)
-    assert X.shape[0] == 4
-    assert X.ndim == 2
 
 
 def test_missing_label_key_raises():

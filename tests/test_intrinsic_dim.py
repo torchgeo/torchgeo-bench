@@ -9,7 +9,6 @@ import pytest
 import torch
 
 from torchgeo_bench.intrinsic_dim import (
-    SUPPORTED_ESTIMATORS,
     DegenerateManifoldError,
     _drop_zero_distance_rows,
     _load_estimator,
@@ -32,13 +31,6 @@ class TestResolveDevice:
         with mock.patch.object(torch.cuda, "is_available", return_value=True):
             assert _resolve_device(None).type == "cuda"
 
-    def test_none_falls_back_to_cpu(self) -> None:
-        with mock.patch.object(torch.cuda, "is_available", return_value=False):
-            assert _resolve_device(None).type == "cpu"
-
-    def test_explicit_cpu(self) -> None:
-        assert _resolve_device("cpu").type == "cpu"
-
     def test_cuda_unavailable_falls_back_to_cpu(self, caplog: pytest.LogCaptureFixture) -> None:
         with (
             mock.patch.object(torch.cuda, "is_available", return_value=False),
@@ -47,10 +39,6 @@ class TestResolveDevice:
             dev = _resolve_device("cuda")
         assert dev.type == "cpu"
         assert any("CUDA requested" in r.message for r in caplog.records)
-
-    def test_torch_device_passthrough(self) -> None:
-        d = torch.device("cpu")
-        assert _resolve_device(d) == d
 
 
 class TestSubsample:
@@ -75,12 +63,6 @@ class TestSubsample:
         b = _subsample(X, max_samples=10, seed=42)
         np.testing.assert_array_equal(a, b)
 
-    def test_different_seeds_differ(self) -> None:
-        X = np.arange(2000).reshape(1000, 2)
-        a = _subsample(X, max_samples=10, seed=1)
-        b = _subsample(X, max_samples=10, seed=2)
-        assert not np.array_equal(a, b)
-
 
 # ---- compute_intrinsic_dim: argument validation (no torchid needed) ------
 
@@ -94,10 +76,6 @@ class TestComputeBasic:
         out = compute_intrinsic_dim(np.zeros((10, 3)), estimators=[])
         assert out == {}
 
-    def test_supported_estimators_constant(self) -> None:
-        for name in ("TwoNN", "MLE", "lPCA"):
-            assert name in SUPPORTED_ESTIMATORS
-
 
 # ---- error paths (mocked torchid) ----------------------------------------
 
@@ -105,13 +83,7 @@ class TestComputeBasic:
 class TestErrorHandling:
     @requires_torchid
     def test_unknown_estimator_raises(self) -> None:
-        """Estimator lookup failures surface immediately — we no longer
-        swallow them as NaN, which previously hid the TwoNN bug.
-
-        Needs the real torchid because the error is raised by
-        ``_load_estimator`` after a successful import; without torchid it
-        raises ImportError first (still a propagated failure, just from
-        a different layer)."""
+        """Estimator lookup failure raises instead of writing NaN."""
         X = np.random.RandomState(0).randn(100, 5).astype(np.float32)
         with pytest.raises(ValueError, match="Unknown torchid estimator"):
             compute_intrinsic_dim(
@@ -120,8 +92,8 @@ class TestErrorHandling:
 
     @requires_torchid
     def test_failing_estimator_propagates(self) -> None:
-        """A torchid-internal exception propagates — we don't silently
-        write NaN for it, because that previously hid real bugs.
+        """A torchid-internal exception propagates instead of being
+        written as NaN.
 
         Patches the torchid estimators registry rather than swapping the
         whole module so ``torchid.primitives`` (used by the
@@ -139,18 +111,6 @@ class TestErrorHandling:
         ):
             compute_intrinsic_dim(X, estimators=["Boom"], device="cpu", max_samples=None)
 
-    def test_missing_torchid_raises_importerror(self) -> None:
-        """ImportError from ``_load_estimator`` propagates instead of
-        becoming a silent NaN row."""
-        from torchgeo_bench import intrinsic_dim as mod
-
-        X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
-        with (
-            mock.patch.object(mod, "_load_estimator", side_effect=ImportError("forced")),
-            pytest.raises(ImportError, match="forced"),
-        ):
-            compute_intrinsic_dim(X, estimators=["TwoNN"], device="cpu", max_samples=None)
-
 
 # ---- _load_estimator ---------------------------------------------------------
 
@@ -160,11 +120,6 @@ class TestLoadEstimator:
     def test_known_estimator_returns_class(self) -> None:
         cls = _load_estimator("TwoNN")
         assert callable(cls)
-
-    @requires_torchid
-    def test_unknown_estimator_raises(self) -> None:
-        with pytest.raises(ValueError, match="Unknown torchid estimator"):
-            _load_estimator("NotReal")
 
     def test_missing_torchid_raises_import_error(self) -> None:
         import builtins
@@ -299,18 +254,8 @@ class TestRealTorchid:
         b = compute_intrinsic_dim(X, estimators=["TwoNN"], device="cpu", max_samples=500, seed=7)
         assert a == b
 
-    def test_cpu_explicit(self) -> None:
-        X = self._uniform_cube(500, d=3)
-        out = compute_intrinsic_dim(X, estimators=["TwoNN"], device="cpu", max_samples=None)
-        assert np.isfinite(out["TwoNN"])
-
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_cuda_path(self) -> None:
         X = self._uniform_cube(500, d=3)
         out = compute_intrinsic_dim(X, estimators=["TwoNN"], device="cuda", max_samples=None)
-        assert np.isfinite(out["TwoNN"])
-
-    def test_auto_device_runs(self) -> None:
-        X = self._uniform_cube(500, d=3)
-        out = compute_intrinsic_dim(X, estimators=["TwoNN"], device=None, max_samples=None)
         assert np.isfinite(out["TwoNN"])

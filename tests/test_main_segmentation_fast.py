@@ -182,7 +182,10 @@ def test_segmentation_viz_called_when_enabled(tmp_path: Path):
         mock.patch(
             "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
         ),
-        mock.patch("torchgeo_bench.segmentation_task.build_seg_probe_and_solver", return_value=(probe, solver)),
+        mock.patch(
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
+            return_value=(probe, solver),
+        ),
         mock.patch("torchgeo_bench.segmentation_viz.save_segmentation_viz") as viz_mock,
     ):
         main(cfg)

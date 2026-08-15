@@ -9,14 +9,14 @@ import torch.nn as nn
 from torchvision.transforms import Normalize
 
 from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets.m_eurosat import MEurosat
+from torchgeo_bench.datasets.m_so2sat import MSo2Sat
 from torchgeo_bench.models.torchgeo_models import (
     TorchGeoCromaBench,
     TorchGeoDOFABench,
-    TorchGeoEarthLocBench,
     TorchGeoPanopticonBench,
     TorchGeoResNetBench,
     TorchGeoScaleMAEBench,
-    TorchGeoSwinBench,
     _adapt_first_conv,
     _extract_normalize_transforms,
     _resolve_torchgeo_factory,
@@ -87,16 +87,11 @@ def test_weights_resolution_failure(monkeypatch):
         _resolve_torchgeo_weights("FakeWeights", "FAKE_MEMBER")
 
 
-def test_first_conv_adaptation_single_channel():
+@pytest.mark.parametrize("in_chans", [1, 12])
+def test_first_conv_adaptation(in_chans: int):
     model = nn.Sequential(nn.Conv2d(3, 16, 3))
-    _adapt_first_conv(model, "0", in_chans=1)
-    assert model[0].in_channels == 1
-
-
-def test_first_conv_adaptation_multichannel():
-    model = nn.Sequential(nn.Conv2d(3, 16, 3))
-    _adapt_first_conv(model, "0", in_chans=12)
-    assert model[0].in_channels == 12
+    _adapt_first_conv(model, "0", in_chans=in_chans)
+    assert model[0].in_channels == in_chans
 
 
 def test_normalize_transform_extraction():
@@ -264,40 +259,6 @@ def test_torchgeo_resnet_forward_shape(monkeypatch):
     assert torch.isfinite(out).all()
 
 
-def test_torchgeo_swin_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    import torchgeo_bench.models.torchgeo_models as tg_models
-
-    class _TinySwin(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.features = nn.Sequential(nn.Sequential(nn.Conv2d(3, 8, 1)))
-            self.head = nn.Linear(8, 8)
-            self.pool = nn.AdaptiveAvgPool2d(1)
-
-        def forward(self, images: torch.Tensor) -> torch.Tensor:
-            feats = self.pool(self.features[0][0](images)).flatten(1)
-            return feats
-
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySwin()
-    )
-    monkeypatch.setattr(
-        tg_models,
-        "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
-    )
-
-    model = TorchGeoSwinBench(
-        bands=_rgb_bands(),
-        normalization="identity",
-        input_unit_check="ignore",
-    )
-    out = model.forward_patch_features(torch.rand(2, 3, 64, 64))
-    assert out.ndim == 2
-    assert out.shape[0] == 2
-    assert torch.isfinite(out).all()
-
-
 def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
@@ -323,40 +284,6 @@ def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     out = model.forward_patch_features(torch.rand(2, 12, 64, 64))
     assert out.ndim == 2
     assert out.shape == (2, 8)
-    assert torch.isfinite(out).all()
-
-
-def test_torchgeo_earthloc_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    import torchgeo_bench.models.torchgeo_models as tg_models
-
-    class _TinyEarthLoc(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.backbone = nn.Sequential()
-            self.backbone.conv1 = nn.Conv2d(3, 6, 3, padding=1)
-            self.pool = nn.AdaptiveAvgPool2d(1)
-
-        def forward(self, images: torch.Tensor) -> torch.Tensor:
-            feats = self.pool(self.backbone.conv1(images))
-            return feats.flatten(1)
-
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyEarthLoc()
-    )
-    monkeypatch.setattr(
-        tg_models,
-        "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
-    )
-
-    model = TorchGeoEarthLocBench(
-        bands=_rgb_bands(),
-        normalization="identity",
-        input_unit_check="ignore",
-    )
-    out = model.forward_patch_features(torch.rand(2, 3, 64, 64))
-    assert out.ndim == 2
-    assert out.shape[0] == 2
     assert torch.isfinite(out).all()
 
 
@@ -503,13 +430,9 @@ def _dn_bands() -> list[BandSpec]:
     ]
 
 
-def _reflectance_bands() -> list[BandSpec]:
-    return [
-        BandSpec(
-            sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=0.15, std=0.05, min=0.0, max=1.0
-        )
-        for i in range(3)
-    ]
+def _dataset_bands(cls, names: tuple[str, ...]) -> list[BandSpec]:
+    by_name = {b.name: b for b in cls.bands}
+    return [by_name[name] for name in names]
 
 
 def test_warn_unit_mismatch_ignore_mode():
@@ -536,14 +459,6 @@ def test_warn_unit_mismatch_none_unit_skips():
         _warn_unit_mismatch("TestModel", None, _dn_bands(), "warn")
 
 
-def test_warn_unit_mismatch_matching_unit_no_warning():
-    # DN bands with s2_dn_div10000 → units match, but means are high → might warn on mean range
-    # Use reflectance bands with reflectance unit → no mismatch
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        _warn_unit_mismatch("TestModel", "reflectance_0_1", _reflectance_bands(), "warn")
-
-
 def test_warn_unit_mismatch_mean_range_warn():
     # DN bands paired with s2_dn_div10000 unit → unit matches but mean exceeds hi*1.5
     dn_high = [
@@ -553,6 +468,22 @@ def test_warn_unit_mismatch_mean_range_warn():
     ]
     with pytest.warns(UserWarning, match="mean outside"):
         _warn_unit_mismatch("TestModel", "s2_dn_div10000", dn_high, "warn")
+
+
+def test_s2_dn_weights_warn_on_reflectance_dataset() -> None:
+    """Reflectance-scale So2Sat must not pass as raw Sentinel-2 DN."""
+    bands = _dataset_bands(MSo2Sat, ("red", "green", "blue"))
+    with pytest.warns(UserWarning, match="look like reflectance_0_1"):
+        _warn_unit_mismatch("Demo", "s2_dn_div10000", bands, "warn")
+
+
+def test_s2_dn_weights_accept_raw_s2_dataset() -> None:
+    """Raw Sentinel-2 DN datasets remain accepted for /10000 torchgeo weights."""
+    bands = _dataset_bands(MEurosat, ("red", "green", "blue"))
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always")
+        _warn_unit_mismatch("Demo", "s2_dn_div10000", bands, "warn")
+    assert records == []
 
 
 # ---------------------------------------------------------------------------

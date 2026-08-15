@@ -36,7 +36,7 @@ def test_run_unknown_model_errors() -> None:
 
 
 def test_run_unknown_key_errors() -> None:
-    with pytest.raises(Exception, match="typo_key"):
+    with pytest.raises(SystemExit, match="typo_key"):
         cli_main(["run", "typo_key=1"])
 
 
@@ -99,3 +99,27 @@ def test_download_rejects_empty_dataset_list() -> None:
 def test_download_rejects_datasets_for_eurosat() -> None:
     with pytest.raises(SystemExit, match="only supported for GeoBench"):
         cli_main(["download", "eurosat", "--datasets", "m-eurosat"])
+
+
+def test_flops_without_model_errors_cleanly() -> None:
+    """The flops subparser has no --datasets flag; flag translation must not assume one."""
+    with pytest.raises(SystemExit, match="No model selected"):
+        cli_main(["flops"])
+
+
+def test_flops_composes_flops_config(monkeypatch) -> None:
+    received = []
+    monkeypatch.setattr("torchgeo_bench.flops_pipeline.main", received.append)
+    cli_main(["flops", "-m", "rcf", "--device", "cpu"])
+    assert received[0].probe_num_classes == 10
+    assert received[0].device == "cpu"
+
+
+def test_unknown_model_suggests_close_names() -> None:
+    with pytest.raises(SystemExit, match="timm/resnet50"):
+        cli_main(["run", "-m", "resnet50"])
+
+
+def test_bad_override_is_not_a_traceback() -> None:
+    with pytest.raises(SystemExit, match="bad config override"):
+        cli_main(["run", "typo.key=1"])

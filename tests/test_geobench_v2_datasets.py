@@ -234,7 +234,7 @@ class MockKuroSiwo:
 
 
 class TestKuroSiwoCanonicalization:
-    """Verify the kuro_siwo wrapper folds per-modality keys into a 3-D image."""
+    """The kuro_siwo wrapper folds per-modality keys into a 3-D image."""
 
     @pytest.fixture
     def mocked_kuro_siwo(self):
