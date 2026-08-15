@@ -200,7 +200,18 @@ class SegmentationProbe(nn.Module):
 
         missing_layers = set(self.layer_names) - found_layers
         if missing_layers:
-            logger.warning(f"The following layers were not found in the backbone: {missing_layers}")
+            # Warning-and-continue would train the head on however many taps
+            # happened to resolve, quietly reporting a multi-scale probe that
+            # never ran.  A wrong layer name is a config bug, so fail on it.
+            available = [
+                name.replace("backbone.", "", 1) if name.startswith("backbone.") else name
+                for name, _ in self.backbone.named_modules()
+            ]
+            raise ValueError(
+                f"Segmentation layers not found in backbone: {sorted(missing_layers)}. "
+                f"Set eval.segmentation.layers for this model to names it exposes, e.g. "
+                f"{[n for n in available if n][:8]}."
+            )
 
         if self.freeze_backbone:
             for param in self.backbone.parameters():

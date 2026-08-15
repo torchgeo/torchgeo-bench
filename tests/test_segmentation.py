@@ -195,7 +195,9 @@ def test_probe_dry_run_exception_handling():
     class BrokenBackbone(nn.Module):
         def __init__(self):
             super().__init__()
-            self.dummy_layer = nn.Linear(2, 2)
+            # A real `layer1` so the probe gets past its layer-name check and
+            # this test exercises the forward crash it is named for.
+            self.layer1 = nn.Conv2d(3, 4, 1)
 
         def forward(self, x):
             del x
@@ -899,3 +901,21 @@ def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
     )
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0
+
+
+def test_probe_raises_on_unknown_layer_name(mock_backbone):
+    """A layer name the backbone does not expose must fail, not warn.
+
+    Warning and continuing would build the head from whatever taps happened to
+    resolve and report a multi-scale mIoU for a probe that never ran at that
+    many scales.
+    """
+    with pytest.raises(ValueError, match="Segmentation layers not found"):
+        SegmentationProbe(mock_backbone, ["layer1", "layer_does_not_exist"], NUM_CLASSES)
+
+
+def test_probe_error_lists_available_layers(mock_backbone):
+    """The message must name real modules so the config can be fixed from it."""
+    with pytest.raises(ValueError) as excinfo:
+        SegmentationProbe(mock_backbone, ["nope"], NUM_CLASSES)
+    assert "layer1" in str(excinfo.value)
