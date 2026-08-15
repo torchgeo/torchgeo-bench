@@ -1,28 +1,16 @@
-"""Token pooling strategies for ViT-style frozen backbones.
+"""Token pooling for ViT-style frozen backbones.
 
-The choice between CLS-token and mean-pooled patch tokens is not innocent.
-Different pretraining objectives leave the [CLS] token with different
-quality of information:
-
-- MAE / SSL reconstruction (Prithvi, Clay): [CLS] is not directly
-  supervised; the encoder ends up routing whatever it likes through it.
-  Mean-pooled patch tokens tend to be richer for downstream probing.
-- DINO / DINOv3: explicit [CLS] supervision via self-distillation; the
-  CLS token is the canonical feature.
-- ImageNet-supervised ViT (most timm baselines): [CLS] is read by the
-  classifier; both CLS and pooled patches are reasonable.
-
-This module hosts a single helper so every wrapper picks pooling the
-same way and the choice is easy to ablate from configs.
+CLS quality depends on the pretraining objective — unsupervised in the
+MAE family, explicitly supervised in DINO — so pooling is a config axis
+rather than a fixed choice.
 """
 
 import torch
 
-PoolMode = str  # "cls" | "mean" | "both"
 VALID_MODES = ("cls", "mean", "both")
 
 
-def pool_tokens(tokens: torch.Tensor, mode: PoolMode = "mean") -> torch.Tensor:
+def pool_tokens(tokens: torch.Tensor, mode: str = "mean") -> torch.Tensor:
     """Pool ``(B, N, D)`` ViT tokens to a single ``(B, D)`` (or ``(B, 2D)``) vector.
 
     Args:

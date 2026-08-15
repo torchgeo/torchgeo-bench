@@ -1,29 +1,7 @@
 """Model interface for torchgeo-bench.
 
-Defines :class:`BenchModel`, the abstract base class that every benchmarkable
-model inherits from.  The contract is split into two halves:
-
-1. **Construction**: subclasses receive a
-   :class:`list[~torchgeo_bench.datasets.base.BandSpec]` describing the input
-   channels.  Per-channel mean/std/min/max statistics are available on each
-   :class:`~torchgeo_bench.datasets.base.BandSpec` and are used by
-   :meth:`normalize_inputs` to z-score the raw input tensor.
-
-2. **Forward path**:
-
-   * The public :meth:`forward_patch_features` is **sealed** — subclasses
-     do not override it.  It always applies :meth:`normalize_inputs` before
-     dispatching to :meth:`_forward_patch_features`, so normalization can't
-     be silently forgotten.
-   * Subclasses implement :meth:`_forward_patch_features` (the abstract
-     hook) which receives the **already-normalized** ``(B, C, H, W)`` tensor
-     and returns ``(B, K)`` embeddings.
-
-Models whose backbones do their own normalization (e.g. OlmoEarth) override
-:meth:`normalize_inputs` to identity.  Models that need a different
-normalization strategy (ImageNet-style for pretrained RGB CNNs, weights-bound
-``Normalize`` transforms for torchgeo wrappers, etc.) override
-:meth:`normalize_inputs` with their own policy.
+Defines :class:`BenchModel`; see its docstring for the construction and
+sealed-forward contract.
 """
 
 from abc import ABC, abstractmethod

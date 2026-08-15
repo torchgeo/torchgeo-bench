@@ -271,7 +271,6 @@ TERRAMIND_MODALITY_BANDS: dict[str, dict[str, str]] = {
     "RGB": {"red": "RED", "green": "GREEN", "blue": "BLUE"},
 }
 
-TERRAMIND_S2L2A_BANDS: list[str] = list(TERRAMIND_MODALITY_BANDS["S2L2A"])
 
 _TERRAMIND_MODALITY_KEYS = {"S2L2A": "untok_sen2l2a@224", "RGB": "untok_sen2rgb@224"}
 _TERRAMIND_NATIVE_UNITS = {"S2L2A": InputUnit.S2_DN, "RGB": InputUnit.UINT8}
