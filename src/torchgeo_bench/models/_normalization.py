@@ -125,7 +125,27 @@ def build_normalizer(
         convert = lambda x: x  # noqa: E731
 
     if pretrain_mean is None:
-        return convert
+        # Unit conversion alone is not a normalisation: it would feed raw DN
+        # (0 - 10 000) straight into the backbone, which measurably collapses
+        # the features — Prithvi scored an identical 0.264 on treesatai at
+        # 86M, 304M and 631M parameters, below the imagestats baseline.
+        #
+        # Raising here would break wrappers that install their own
+        # model_native normaliser *after* super().__init__ (TerraMind) or that
+        # override normalize_inputs entirely (the torchgeo wrappers, which use
+        # the Normalize bound to their weights).  So defer: fail only if this
+        # normaliser is actually the one used.
+        def _undefined(x: torch.Tensor) -> torch.Tensor:
+            raise ValueError(
+                "model_native normalisation is undefined for this model: it declares "
+                f"expected_input_unit={expected_input_unit.value!r} but no pretrain_mean/"
+                "pretrain_std, and it does not supply its own normaliser.  Converting "
+                "units without standardising leaves raw sensor values.  Set "
+                "pretrain_mean/pretrain_std on the wrapper, or evaluate it with "
+                "dataset.normalization=bandspec_zscore."
+            )
+
+        return _undefined
 
     n = len(pretrain_mean)
     pm = torch.tensor(pretrain_mean, dtype=torch.float32).view(1, n, 1, 1)

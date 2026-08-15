@@ -18,6 +18,7 @@ experiments/scripts/*
 !experiments/scripts/run_cleanlab_audit.py
 !experiments/scripts/render_flagged_gallery.py
 !experiments/scripts/introspect_seg_layers.py
+!experiments/scripts/audit_model_native.py
 !experiments/scripts/eurosat_family_dedup.py
 !experiments/scripts/cleanlab_per_class_multilabel.py
 !experiments/scripts/cleanlab_per_class_singlelabel.py
