@@ -2,11 +2,15 @@
 
 import logging
 import math
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 from rich.progress import track
 from torch.utils.data import DataLoader
+
+if TYPE_CHECKING:
+    from omegaconf import DictConfig
 from torchmetrics.classification import (
     MulticlassF1Score,
     MulticlassJaccardIndex,
@@ -379,3 +383,40 @@ class SegmentationSolver:
         if collect_preds:
             return metrics, torch.cat(pred_list, dim=0)
         return metrics
+
+
+def build_seg_probe_and_solver(
+    model: nn.Module,
+    num_classes: int,
+    eval_cfg: "DictConfig",
+    device: torch.device,
+    lr: float,
+) -> tuple[SegmentationProbe, SegmentationSolver]:
+    """Build the frozen-backbone probe and its solver from the merged eval config."""
+    from torchgeo_bench.config import instantiate
+
+    layer_names = list(eval_cfg.segmentation.layers)
+    if not layer_names:
+        raise ValueError(
+            "Segmentation evaluation requires eval.segmentation.layers to name "
+            "spatial backbone layers. Refusing to probe the global backbone output."
+        )
+    probe = SegmentationProbe(
+        backbone=model,
+        layer_names=layer_names,
+        num_classes=num_classes,
+        head_type=eval_cfg.segmentation.head_type,
+        freeze_backbone=True,
+    )
+    criterion = instantiate(eval_cfg.segmentation.criterion)
+    criterion_ignore = getattr(criterion, "ignore_index", None)
+    solver = SegmentationSolver(
+        model=probe,
+        num_classes=num_classes,
+        lr=lr,
+        device=str(device),
+        criterion=criterion,
+        lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
+        ignore_index=int(criterion_ignore) if criterion_ignore is not None else 255,
+    )
+    return probe, solver

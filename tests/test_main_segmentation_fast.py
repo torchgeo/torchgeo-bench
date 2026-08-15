@@ -107,7 +107,7 @@ def test_segmentation_row_emitted(tmp_path: Path):
             "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
         ),
         mock.patch(
-            "torchgeo_bench.main._build_seg_probe_and_solver",
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
             return_value=_mock_probe_and_solver(),
         ),
     ):
@@ -129,10 +129,10 @@ def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):
             "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
         ),
         mock.patch(
-            "torchgeo_bench.main._build_seg_probe_and_solver",
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
             return_value=_mock_probe_and_solver(),
         ),
-        mock.patch("torchgeo_bench.main.save_segmentation_viz") as viz_mock,
+        mock.patch("torchgeo_bench.segmentation_viz.save_segmentation_viz") as viz_mock,
     ):
         main(cfg)
 
@@ -148,7 +148,7 @@ def test_segmentation_resume_skips_complete_run(tmp_path: Path):
     with (
         mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
         mock.patch("torchgeo_bench.main.instantiate", return_value=model) as instantiate_mock,
-        mock.patch("torchgeo_bench.main._build_seg_probe_and_solver") as build_mock,
+        mock.patch("torchgeo_bench.segmentation_task.build_seg_probe_and_solver") as build_mock,
     ):
         main(cfg)
 
@@ -182,8 +182,8 @@ def test_segmentation_viz_called_when_enabled(tmp_path: Path):
         mock.patch(
             "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
         ),
-        mock.patch("torchgeo_bench.main._build_seg_probe_and_solver", return_value=(probe, solver)),
-        mock.patch("torchgeo_bench.main.save_segmentation_viz") as viz_mock,
+        mock.patch("torchgeo_bench.segmentation_task.build_seg_probe_and_solver", return_value=(probe, solver)),
+        mock.patch("torchgeo_bench.segmentation_viz.save_segmentation_viz") as viz_mock,
     ):
         main(cfg)
 
