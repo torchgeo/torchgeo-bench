@@ -8,12 +8,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from statistics import median
 
-import hydra
 import numpy as np
 import pandas as pd
 import torch
 from filelock import FileLock
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from rich.progress import track
 from sklearn.metrics import accuracy_score, average_precision_score
@@ -25,6 +23,7 @@ from torchgeo_bench.calibration import (
     compute_calibration_metrics,
     fit_temperature,
 )
+from torchgeo_bench.config import instantiate
 from torchgeo_bench.datasets import (
     get_bench_dataset_class,
     get_datasets,
@@ -1024,7 +1023,6 @@ def _resolve_output_path(cfg: DictConfig) -> str:
     return str(model_results_path(cfg.get("results_dir", DEFAULT_RESULTS_DIR), name))
 
 
-@hydra.main(config_path="conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)
@@ -1179,9 +1177,8 @@ def main(cfg: DictConfig) -> None:
             f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
         )
 
-        # Instantiate Backbone — pass `bands` post-hoc so Hydra never tries
-        # to OmegaConf-ify the BandSpec list.  `_convert_="object"` keeps
-        # the rest of the model config as plain Python primitives.
+        # `bands` is passed as a kwarg (not via the config) so the BandSpec
+        # dataclasses reach the constructor intact.
         is_rcf_empirical = (
             hasattr(model_cfg, "mode")
             and str(model_cfg._target_).endswith("RCFBench")
@@ -1190,7 +1187,6 @@ def main(cfg: DictConfig) -> None:
         instantiate_kwargs: dict = {
             "bands": bands_list,
             "normalization": normalization,
-            "_convert_": "object",
         }
         if is_rcf_empirical:
             instantiate_kwargs["dataset"] = train_dataset

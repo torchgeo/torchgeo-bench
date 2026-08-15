@@ -338,7 +338,7 @@ def test_terramind_modality_map_matches_shipped_configs():
     This is the one failure mode that yields a plausible-looking wrong number
     instead of an exception, so it is pinned against the actual config files.
     """
-    from hydra import compose, initialize_config_module
+    from torchgeo_bench.config import compose_config
 
     for config_name, band_config in [
         ("terratorch/terramind_v1_base", "s2"),
@@ -346,8 +346,7 @@ def test_terramind_modality_map_matches_shipped_configs():
         ("terratorch/terramind_v1_large", "s2"),
         ("terratorch/terramind_v1_large_rgb", "rgb"),
     ]:
-        with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-            cfg = compose(config_name="config", overrides=[f"model={config_name}"])
+        cfg = compose_config([f"model={config_name}"])
         assert str(cfg.model.modality) == _MODALITY_FOR_BAND_CONFIG[band_config]
 
 
@@ -397,7 +396,7 @@ def test_load_completed_tolerates_malformed_csv(tmp_path):
 
 
 def _wrap(exc: BaseException, depth: int = 2) -> BaseException:
-    """Nest *exc* in `depth` layers, the way hydra wraps a target's exception."""
+    """Nest *exc* in `depth` layers of wrapper exceptions."""
     out: BaseException = exc
     for i in range(depth):
         try:
@@ -407,8 +406,8 @@ def _wrap(exc: BaseException, depth: int = 2) -> BaseException:
     return out
 
 
-def test_band_incompatibility_detected_through_hydra_wrapping():
-    """The band ValueError never arrives unwrapped, so the chain must be walked."""
+def test_band_incompatibility_detected_through_wrapping():
+    """A wrapped band ValueError is still found by walking the chain."""
     inner = ValueError("Missing required model band 'nir'. Available canonical bands: ...")
     assert _is_band_incompatibility(_wrap(inner)) is inner
 
@@ -518,11 +517,11 @@ def test_flops_config_resolves_every_shipped_model_config():
     InterpolationKeyError unless flops_config defines a top-level ``seed``.
     With the narrowed guard that is now a hard crash rather than a silent skip,
     so the sweep's own config is checked here rather than in the job."""
-    from hydra import compose, initialize_config_module
     from omegaconf import OmegaConf
 
-    with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-        cfg = compose(config_name="flops_config", overrides=["model=rcf"])
+    from torchgeo_bench.config import compose_config
+
+    cfg = compose_config(["model=rcf"], config_name="flops_config", default_model=None)
     resolved = OmegaConf.to_container(cfg, resolve=True)  # raises if unresolvable
     assert resolved["model"]["seed"] == resolved["seed"] == 0
 
@@ -536,17 +535,14 @@ def test_flops_config_resolves_every_shipped_model_config():
 def test_panopticon_yields_finite_gflops():
     """Panopticon used to exhaust all three tiers and raise; it must now
     measure."""
-    from hydra import compose, initialize_config_module
-    from hydra.utils import instantiate
+    from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()
-    with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-        cfg = compose(config_name="config", overrides=["model=torchgeo/panopticon"])
+    cfg = compose_config(["model=torchgeo/panopticon"])
     model = instantiate(
         cfg.model,
         bands=bench.select_band_specs(None),
         normalization="bandspec_zscore",
-        _convert_="object",
     ).eval()
 
     gflops = _count_gflops(model, torch.randn(1, 12, 224, 224))
@@ -557,18 +553,14 @@ def test_panopticon_yields_finite_gflops():
 @pytest.mark.slow
 def test_vit_gflops_ordering_and_tokens():
     """Sanity ordering: ViT-L > ViT-B, and n_tokens tracks (size/patch)^2."""
-    from hydra import compose, initialize_config_module
-    from hydra.utils import instantiate
+    from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()
     rgb = bench.select_band_specs(bench.rgb_bands)
 
     def build(name):
-        with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-            cfg = compose(config_name="config", overrides=[f"model={name}"])
-        return instantiate(
-            cfg.model, bands=rgb, normalization="bandspec_zscore", _convert_="object"
-        ).eval()
+        cfg = compose_config([f"model={name}"])
+        return instantiate(cfg.model, bands=rgb, normalization="bandspec_zscore").eval()
 
     base = build("timm/vit/vit_base_patch16_224")
     large = build("timm/vit/vit_large_patch16_224")

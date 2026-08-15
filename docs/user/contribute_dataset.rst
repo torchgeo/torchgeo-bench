@@ -45,7 +45,7 @@ Create a new module under :file:`src/torchgeo_bench/datasets/` and subclass
 
 Required class-level attributes:
 
-* ``name`` — unique string identifier used by the Hydra registry and CLI
+* ``name`` — unique string identifier used by the dataset registry and CLI
 * ``task`` — ``"classification"`` or ``"segmentation"``
 * ``num_classes`` — integer label count
 * ``bands`` — list of :class:`~torchgeo_bench.datasets.base.BandSpec` objects
@@ -76,7 +76,7 @@ Register and configure
 
    from .my_dataset import MyDataset
 
-**2. Add a Hydra dataset config YAML** under
+**2. Add a dataset config YAML** under
 :file:`src/torchgeo_bench/conf/dataset/` named after your dataset
 (e.g. :file:`my_dataset.yaml`):
 

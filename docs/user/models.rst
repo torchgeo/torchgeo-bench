@@ -229,7 +229,7 @@ hosting weights, and submitting a PR.
 
    Two key patterns apply regardless of stage:
 
-   * **Do not put** ``bands`` **in the Hydra YAML.**  The runner reads the
+   * **Do not put** ``bands`` **in the model YAML.**  The runner reads the
      current dataset's :class:`~torchgeo_bench.datasets.base.BandSpec` list
      and injects it into the constructor automatically.  Adding ``bands`` to
      the YAML causes a ``TypeError`` (duplicate keyword argument).

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from hydra.utils import instantiate
+from torchgeo_bench.config import instantiate
 from omegaconf import DictConfig, OmegaConf
 from rich.progress import track
 

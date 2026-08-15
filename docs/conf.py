@@ -91,7 +91,6 @@ nitpick_ignore = [
     ("py:class", "geobench_v2.GeoBenchDataModule"),
     ("py:class", "geobenchv2.task.Task"),
     ("py:class", "h5py._hl.dataset.Dataset"),
-    ("py:class", "hydra.core.config_store.ConfigStore"),
     ("py:class", "omegaconf.dictconfig.DictConfig"),
     ("py:class", "omegaconf.listconfig.ListConfig"),
     ("py:class", "timm.models.resnet.ResNet"),

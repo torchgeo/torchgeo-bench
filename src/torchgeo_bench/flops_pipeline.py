@@ -19,12 +19,11 @@ import os
 import warnings
 from datetime import UTC
 
-import hydra
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
+from torchgeo_bench.config import instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.main import _build_seg_probe_and_solver, append_rows_atomic
 from torchgeo_bench.model_profile import (
@@ -111,9 +110,8 @@ _BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
 def _is_band_incompatibility(exc: BaseException) -> BaseException | None:
     """Return the band-incompatibility cause in *exc*'s chain, or None.
 
-    hydra wraps the target's exception in ``InstantiationException``, so the
-    ``ValueError`` a band-incompatible model raises never arrives unwrapped —
-    the chain has to be walked.  Only genuine band/shape mismatches match;
+    Model constructors may wrap the band-mismatch ``ValueError``, so the
+    exception chain is walked.  Only genuine band/shape mismatches match;
     anything else (a missing checkpoint, an exhausted disk quota, a malformed
     config) is a real failure and must propagate rather than be recorded as a
     skip.
@@ -163,12 +161,7 @@ def _build_model(
                 f"Measuring this pair would map through the wrong band table."
             )
     try:
-        return instantiate(
-            cfg_model,
-            bands=band_specs,
-            normalization=normalization,
-            _convert_="object",
-        )
+        return instantiate(cfg_model, bands=band_specs, normalization=normalization)
     except Exception as exc:
         cause = _is_band_incompatibility(exc)
         if cause is None:
@@ -314,13 +307,8 @@ def _seg_head_gflops(
     return float(counter.get_total_flops()) / 1e9
 
 
-@hydra.main(config_path="conf", config_name="flops_config", version_base=None)
 def main(cfg: DictConfig) -> None:
-    """Measure per-sample compute cost for one model config.
-
-    Args:
-        cfg: Hydra configuration.
-    """
+    """Measure per-sample compute cost for one model config."""
     output_path = str(cfg.output)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 

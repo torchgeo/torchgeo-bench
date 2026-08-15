@@ -37,7 +37,7 @@ def test_intrinsic_dim_rows_emitted(tmp_path: Path):
         ),
         mock.patch("torchgeo_bench.main.compute_intrinsic_dim", side_effect=_mock_compute),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     id_df = df[df["method"] == "intrinsic_dim"]
@@ -80,7 +80,7 @@ def test_intrinsic_dim_resume_per_estimator(tmp_path: Path):
         ),
         mock.patch("torchgeo_bench.main.compute_intrinsic_dim", side_effect=_mock_compute),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     id_df = df[df["method"] == "intrinsic_dim"]

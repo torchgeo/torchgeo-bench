@@ -153,9 +153,9 @@ For a complete example see ``TorchGeoDOFABench`` in
 ``wavelength_um`` from each ``BandSpec`` at construction and passes the
 resulting list to ``backbone.forward_features(images, wavelengths=...)``.
 
-.. _eval-hydra-config:
+.. _eval-model-config:
 
-Create a Hydra config
+Create a model config
 ---------------------
 
 Create a model YAML file at :file:`src/torchgeo_bench/conf/model/new_model.yaml`.

@@ -97,7 +97,7 @@ def test_multilabel_knn_emits_micro_map(tmp_path: Path):
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     row = df[df["method"] == "knn5"].iloc[0]
@@ -131,7 +131,7 @@ def test_multilabel_linear_emits_micro_map(tmp_path: Path):
             ),
         ),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     row = df[df["method"] == "linear"].iloc[0]
@@ -149,7 +149,7 @@ def test_multilabel_resume_key_stable(tmp_path: Path):
         ),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     knn_mock.assert_not_called()
     df = pd.read_csv(out)
