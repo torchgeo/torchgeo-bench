@@ -43,16 +43,30 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=_RUN_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    run.add_argument("-m", "--model", default=None, help="Model config, e.g. timm/resnet50 (default: rcf)")
-    run.add_argument("-d", "--datasets", default=None, help="Comma-separated dataset names, or 'all'")
+    run.add_argument(
+        "-m", "--model", default=None, help="Model config, e.g. timm/resnet50 (default: rcf)"
+    )
+    run.add_argument(
+        "-d", "--datasets", default=None, help="Comma-separated dataset names, or 'all'"
+    )
     run.add_argument("--device", default=None, help="Torch device, e.g. cuda:1 or cpu")
-    run.add_argument("-o", "--output", default=None, help="Results CSV path (default: results/all_results.csv)")
-    run.add_argument("--resume", action="store_true", help="Skip (dataset, method, config) combos already in the output CSV")
+    run.add_argument(
+        "-o", "--output", default=None, help="Results CSV path (default: results/all_results.csv)"
+    )
+    run.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip (dataset, method, config) combos already in the output CSV",
+    )
     run.add_argument("--seed", type=int, default=None, help="Random seed (default: 0)")
     run.add_argument("--partition", default=None, help="GeoBench partition (default: 'default')")
     run.add_argument("--bands", default=None, help="rgb | all | comma-separated band names")
-    run.add_argument("--batch-size", type=int, default=None, help="Dataloader batch size (default: 64)")
-    run.add_argument("--image-size", type=int, default=None, help="Resize edge in px (default: 224)")
+    run.add_argument(
+        "--batch-size", type=int, default=None, help="Dataloader batch size (default: 64)"
+    )
+    run.add_argument(
+        "--image-size", type=int, default=None, help="Resize edge in px (default: 224)"
+    )
     run.add_argument(
         "--normalization",
         choices=["bandspec_zscore", "model_native", "minmax", "minmax_zscore", "identity"],
@@ -60,25 +74,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Input normalization strategy (default: bandspec_zscore)",
     )
     run.add_argument("--skip-linear", action="store_true", help="Skip the linear probe (KNN only)")
-    run.add_argument("--bootstrap", type=int, default=None, help="Bootstrap resamples for CIs (default: 200)")
+    run.add_argument(
+        "--bootstrap", type=int, default=None, help="Bootstrap resamples for CIs (default: 200)"
+    )
     run.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging")
     run.add_argument("--print-config", action="store_true", help="Print the merged config and exit")
-    run.add_argument("--list-models", action="store_true", help="List available model configs and exit")
+    run.add_argument(
+        "--list-models", action="store_true", help="List available model configs and exit"
+    )
     _add_override_arg(run)
     run.set_defaults(func=_cmd_run)
 
     flops = sub.add_parser("flops", help="Measure per-sample compute cost (GFLOPs)")
-    flops.add_argument("-m", "--model", required=False, default=None, help="Model config (required)")
+    flops.add_argument(
+        "-m", "--model", required=False, default=None, help="Model config (required)"
+    )
     flops.add_argument("--device", default=None, help="Torch device")
     flops.add_argument("-o", "--output", default=None, help="Results CSV path")
-    flops.add_argument("--print-config", action="store_true", help="Print the merged config and exit")
+    flops.add_argument(
+        "--print-config", action="store_true", help="Print the merged config and exit"
+    )
     _add_override_arg(flops)
     flops.set_defaults(func=_cmd_flops)
 
     download = sub.add_parser("download", help="Download benchmark datasets")
-    download.add_argument("target", choices=["geobench_v1", "geobench_v2", "eurosat"], help="What to download")
-    download.add_argument("-o", "--output-dir", default="data", help="Benchmark data root (default: data)")
-    download.add_argument("--datasets", default=None, help="(GeoBench only) comma-separated dataset names")
+    download.add_argument(
+        "target", choices=["geobench_v1", "geobench_v2", "eurosat"], help="What to download"
+    )
+    download.add_argument(
+        "-o", "--output-dir", default="data", help="Benchmark data root (default: data)"
+    )
+    download.add_argument(
+        "--datasets", default=None, help="(GeoBench only) comma-separated dataset names"
+    )
     download.set_defaults(func=_cmd_download)
 
     return parser
@@ -102,7 +130,7 @@ def _flag_overrides(args: argparse.Namespace) -> list[str]:
     overrides = []
     if args.model is not None:
         overrides.append(f"model={args.model}")
-    if args.datasets is not None:
+    if getattr(args, "datasets", None) is not None:
         names = args.datasets if args.datasets == "all" else f"[{args.datasets}]"
         overrides.append(f"dataset.names={names}")
     if args.device is not None:
@@ -134,6 +162,8 @@ def _flag_overrides(args: argparse.Namespace) -> list[str]:
 
 
 def _compose(args: argparse.Namespace, *, config_name: str, default_model: str | None):
+    from omegaconf.errors import OmegaConfBaseException
+
     from torchgeo_bench.config import compose_config
 
     try:
@@ -142,6 +172,8 @@ def _compose(args: argparse.Namespace, *, config_name: str, default_model: str |
             config_name=config_name,
             default_model=default_model,
         )
+    except OmegaConfBaseException as err:
+        raise SystemExit(f"error: bad config override: {err}") from err
     except ValueError as err:
         raise SystemExit(f"error: {err}") from err
 

@@ -14,10 +14,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from torchgeo_bench.config import instantiate
 from omegaconf import DictConfig, OmegaConf
 from rich.progress import track
 
+from torchgeo_bench.config import instantiate
 from torchgeo_bench.coordbench.datasets import CoordBenchmark, load_benchmarks
 from torchgeo_bench.coordbench.models import LocationEncoder
 from torchgeo_bench.coordbench.probe import (

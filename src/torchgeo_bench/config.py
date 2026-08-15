@@ -30,9 +30,20 @@ def list_model_configs() -> list[str]:
     """Names accepted by ``model=`` / ``--model``, e.g. ``timm/resnet50``."""
     model_dir = CONF_DIR / "model"
     return sorted(
-        str(p.relative_to(model_dir)).removesuffix(".yaml")
-        for p in model_dir.rglob("*.yaml")
+        str(p.relative_to(model_dir)).removesuffix(".yaml") for p in model_dir.rglob("*.yaml")
     )
+
+
+def _closest_models(name: str, n: int = 5) -> str:
+    """Suggestion fragment naming the closest config names, or '' if none are close."""
+    import difflib
+
+    candidates = list_model_configs()
+    matches = difflib.get_close_matches(name, candidates, n=n, cutoff=0.5)
+    if not matches:
+        # Fall back to substring hits — "resnet50" should still find its variants.
+        matches = [c for c in candidates if name.lower() in c.lower()][:n]
+    return f"Did you mean: {', '.join(matches)}? " if matches else ""
 
 
 def compose_config(
@@ -71,13 +82,13 @@ def compose_config(
             dotlist.append(override)
 
     if model_name is None:
-        raise ValueError(
-            f"No model selected; pass model=<name>. Available: {', '.join(list_model_configs())}"
-        )
+        raise ValueError("No model selected; pass --model/-m (see `run --list-models`).")
     model_path = CONF_DIR / "model" / f"{model_name}.yaml"
     if not model_path.is_file():
         raise ValueError(
-            f"Unknown model config {model_name!r}. Available: {', '.join(list_model_configs())}"
+            f"Unknown model config {model_name!r}. "
+            f"{_closest_models(model_name)}Run `torchgeo-bench run --list-models` for all "
+            f"{len(list_model_configs())} configs."
         )
     cfg.model = OmegaConf.load(model_path)
 
