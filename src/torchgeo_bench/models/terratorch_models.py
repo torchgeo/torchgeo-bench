@@ -91,17 +91,30 @@ class _TerraTorchBench(BenchModel):
 
 PRITHVI_BANDS: list[str] = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
 
+# Canonical band name -> TerraTorch HLSBands member used for patch-embed selection.
+_PRITHVI_HLS_BANDS: dict[str, str] = {
+    "blue": "BLUE",
+    "green": "GREEN",
+    "red": "RED",
+    "nir_narrow": "NIR_NARROW",
+    "swir1": "SWIR_1",
+    "swir2": "SWIR_2",
+}
+
 
 class TerraTorchPrithviBench(_TerraTorchBench):
-    """IBM/NASA Prithvi-EO v1/v2 — auto-maps dataset bands onto 6 HLS slots @ 224.
+    """IBM/NASA Prithvi-EO v1/v2 — maps dataset bands onto its HLS slots @ 224.
 
     ``expected_input_unit = S2_DN``: under ``model_native`` the wrapper
     rescales the input to S2 DN scale before band-mapping.  Per-version
     pretraining mean/std are deliberately *not* applied here — they
-    correspond to the post-mapped 6-band layout, while strategy
-    normalisation runs on the dataset's raw channel count.  The BandSpec
-    z-score (default) and minmax strategies compose cleanly with the
-    band-mapping zero-fill that follows.
+    correspond to the post-mapped layout, while strategy normalisation runs
+    on the dataset's raw channel count.
+
+    Datasets that lack some of :data:`PRITHVI_BANDS` (RGB-only, for instance)
+    use TerraTorch's ``model_bands=`` patch-embed selection, which keeps the
+    pretrained weights for the bands that are present and drops the rest,
+    rather than zero-filling the missing channels.
     """
 
     expected_input_unit = InputUnit.S2_DN
@@ -115,16 +128,23 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         target_size: int | None = 224,
         **kwargs: Any,
     ) -> None:
+        _, selected = select_src_bands(bands, PRITHVI_BANDS, preferred_sensors=("s2",))
+        backbone_kwargs: dict[str, Any] = {"pretrained": pretrained, "num_frames": 1}
+        if len(selected) < len(PRITHVI_BANDS):
+            backbone_kwargs["bands"] = [_PRITHVI_HLS_BANDS[name] for name in selected]
         self.backbone_name = backbone_name
         super().__init__(
             bands=bands,
             target_size=target_size,
-            backbone_kwargs={"pretrained": pretrained, "num_frames": 1},
+            backbone_kwargs=backbone_kwargs,
             **kwargs,
         )
+        self.model_bands = selected
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
-        mapped, _ = map_to_model_bands(images, self.bands, PRITHVI_BANDS, preferred_sensors=("s2",))
+        mapped, _ = map_to_model_bands(
+            images, self.bands, self.model_bands, preferred_sensors=("s2",)
+        )
         return mapped
 
 
