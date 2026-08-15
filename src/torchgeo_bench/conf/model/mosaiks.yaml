@@ -1,0 +1,18 @@
+# MOSAIKS: the filter bank is ZCA-whitened patches sampled from the train
+# split, not Gaussian noise.  Reported as "mosaiks" rather than an RCF variant,
+# since calling both "RCF" has caused confusion about which filters were used.
+# Identical to rcf.yaml otherwise, so the pair isolates the filter source.
+_target_: torchgeo_bench.models.RCFBench
+features: 512
+kernel_size: 3
+mode: empirical        # sample filters from train patches (MOSAIKS)
+stats_mode: mean       # mean | stdev | all
+seed: ${seed}
+multiscale: true
+name: mosaiks
+eval:
+  segmentation:
+    # Parameter-free pyramid over the one filter bank; measured best of the
+    # pooling variants (experiments/scripts/slurm/rcf_pool_ablation.jobs).
+    layers: ["rcf.spatial_p8", "rcf.spatial_p4", "rcf.spatial_p2", "rcf.spatial"]
+    cache_features: false
