@@ -135,7 +135,7 @@ def build_normalizer(
         # override normalize_inputs entirely (the torchgeo wrappers, which use
         # the Normalize bound to their weights).  So defer: fail only if this
         # normaliser is actually the one used.
-        def _undefined(x: torch.Tensor) -> torch.Tensor:
+        def _undefined(_x: torch.Tensor) -> torch.Tensor:
             raise ValueError(
                 "model_native normalisation is undefined for this model: it declares "
                 f"expected_input_unit={expected_input_unit.value!r} but no pretrain_mean/"
