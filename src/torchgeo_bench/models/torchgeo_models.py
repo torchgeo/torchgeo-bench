@@ -339,10 +339,13 @@ class _TorchGeoBackboneBench(BenchModel):
         # applying unit conversion first would corrupt it (e.g. z-score uses
         # DN-scale mean/std — dividing raw DN by 10 000 before z-scoring
         # produces values ≈ 0 - 1000/500 ≈ -2, i.e. garbage).
-        weights_norm = self._weights_normalize
-        _need_unit_conv = self._weights_target_unit is not None and (
-            weights_norm is not None or self.normalization is NormalizationStrategy.MODEL_NATIVE
-        )
+        # The weights' own Normalize *is* the model-native pipeline, so it runs
+        # only under model_native.  Applying it under every strategy made
+        # dataset.normalization a no-op for each torchgeo model that ships a
+        # transform, silently collapsing the normalization ablation.
+        native = self.normalization is NormalizationStrategy.MODEL_NATIVE
+        weights_norm = self._weights_normalize if native else None
+        _need_unit_conv = self._weights_target_unit is not None and native
         if _need_unit_conv:
             images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
         if weights_norm is not None:

@@ -414,7 +414,7 @@ def test_channel_mismatch_preserves_tiled_normalize_chain(
     ]
     model = TorchGeoResNetBench(
         bands=six_bands,
-        normalization="identity",
+        normalization="model_native",
         input_unit_check="ignore",
     )
     normalized = model.normalize_inputs(torch.ones(1, 6, 8, 8))
@@ -557,3 +557,53 @@ def test_normalize_inputs_bandspec_zscore_no_unit_conversion(monkeypatch):
     x = torch.full((1, 3, 8, 8), 1200.0)
     normed = model.normalize_inputs(x)
     assert torch.allclose(normed, torch.zeros_like(normed), atol=1e-4)
+
+
+def test_weights_normalize_only_applies_under_model_native(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dataset.normalization must not be silently overridden by the weights transform."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 4, 1)
+            self.fc = nn.Identity()
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return images.mean(dim=(2, 3))
+
+    class _FakeWeights:
+        @staticmethod
+        def transforms() -> nn.Sequential:
+            return nn.Sequential(Normalize(mean=[0.0, 0.0, 0.0], std=[2.0, 2.0, 2.0]))
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: _FakeWeights(),
+    )
+
+    bands = _dn_bands()
+    sample = torch.full((1, 3, 4, 4), 1000.0)
+
+    native = TorchGeoResNetBench(
+        bands=bands, normalization="model_native", input_unit_check="ignore"
+    ).normalize_inputs(sample)
+    zscore = TorchGeoResNetBench(
+        bands=bands, normalization="bandspec_zscore", input_unit_check="ignore"
+    ).normalize_inputs(sample)
+    identity = TorchGeoResNetBench(
+        bands=bands, normalization="identity", input_unit_check="ignore"
+    ).normalize_inputs(sample)
+
+    # bandspec_zscore standardises with the BandSpec stats (mean 1200, std 400);
+    # identity passes raw values through; only model_native uses the weights'
+    # Normalize (std=2 -> 500.0).  Before the fix all three returned 500.0.
+    assert torch.allclose(zscore, torch.full_like(zscore, (1000.0 - 1200.0) / 400.0))
+    assert torch.allclose(identity, sample)
+    assert torch.allclose(native, torch.full_like(native, 500.0))
