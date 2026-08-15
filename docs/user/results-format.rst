@@ -2,7 +2,7 @@ Results format
 ==============
 
 All evaluation runs append rows to a single CSV file (default
-``results/all_results.csv``).  Each row is a flattened
+``results/models/<model name>.csv``).  Each row is a flattened
 :class:`~torchgeo_bench.main.EvaluationResult` describing a single
 ``(dataset, method, model, config)`` measurement.
 

@@ -6,7 +6,8 @@ defaults:
 
 seed: 0
 device: cuda:0
-output: results/all_results.csv
+output: null   # explicit CSV path; null writes to <results_dir>/<model name>.csv
+results_dir: results/models
 verbose: false
 resume: false  # if true, skip dataset+method combinations already in output CSV
 mode: image    # image (default GeoBench pipeline) | coord (CoordBench location-encoder track)

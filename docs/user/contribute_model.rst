@@ -191,7 +191,7 @@ For V2 datasets:
        dataset.names=[benv2,treesatai,so2sat,forestnet] \
        output=results/contributed/new_model.csv resume=true
 
-The CSV schema is identical to :file:`results/all_results.csv` — see
+The CSV schema is identical to the per-model results files — see
 :doc:`results-format` for the full column reference.
 
 .. _contrib-lint:

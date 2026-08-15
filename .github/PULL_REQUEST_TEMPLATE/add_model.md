@@ -1,7 +1,7 @@
 ## Add model: <!-- model name here -->
 
 Use this template for PRs that add a new model and contribute its benchmark
-rows to `results/all_results.csv`.
+rows to `results/models/<model name>.csv`.
 
 Docs:
 
@@ -63,7 +63,6 @@ explicitly so maintainers rerun on the same CPU/GPU path.
 ```bash
 uv run torchgeo-bench run model=<model_config_name> \
   dataset.names=all \
-  output=results/all_results.csv \
   resume=true \
   device=<cuda:0|cpu>
 ```
@@ -78,12 +77,13 @@ modality, list it here with the exact error or reason. Otherwise write `None`.
 ### 4. Commit results
 
 The goal is for maintainers to review and merge the model code and its
-benchmark rows together. `results/all_results.csv` ships pre-populated with
-reference results; do not replace it with a clean file for the final PR.
+benchmark rows together. Each model writes to its own
+`results/models/<model name>.csv`, so your PR should add exactly one new
+results file and leave every other model's file untouched.
 
-- [ ] New rows are committed to `results/all_results.csv`.
+- [ ] New rows are committed to `results/models/<model name>.csv`.
 - [ ] Added result rows are only for this model and the command above.
-- [ ] No existing `results/all_results.csv` rows were reordered, edited, or removed.
+- [ ] No other model's results file was added, edited, or removed.
 - [ ] Result rows match the documented [CSV schema](https://torchgeo.org/torchgeo-bench/user/results-format.html).
 - [ ] Added row count: <!-- e.g. 42 rows -->
 
@@ -96,7 +96,6 @@ git checkout <this-branch>
 uv sync --extra dev
 uv run torchgeo-bench run model=<model_config_name> \
   dataset.names=all \
-  output=results/all_results.csv \
   resume=true \
   device=<cuda:0|cpu>
 ```
