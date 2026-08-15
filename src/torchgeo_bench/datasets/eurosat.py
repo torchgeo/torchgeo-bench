@@ -8,10 +8,13 @@ splits come from :class:`torchgeo.datasets.EuroSAT`; metadata and the
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import ClassVar
 
 from torch.utils.data import Dataset
-from torchgeo.datasets import EuroSAT as TGEuroSAT
-from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial
+
+# Referenced through ``globals()[cls._tg_class]`` in ``get_dataset``.
+from torchgeo.datasets import EuroSAT as TGEuroSAT  # noqa: F401
+from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial  # noqa: F401
 
 from .base import BandSpec, BenchDataset
 
@@ -24,6 +27,10 @@ class EuroSAT(BenchDataset):
     data through :class:`torchgeo.datasets.EuroSAT`, so file layout and
     download behaviour are managed by torchgeo.
     """
+
+    # Name of the wrapped torchgeo class, resolved from this module's globals
+    # at call time so tests can monkeypatch ``TGEuroSAT``/``TGEuroSATSpatial``.
+    _tg_class: ClassVar[str] = "TGEuroSAT"
 
     name = "eurosat"
     task = "classification"
@@ -54,7 +61,12 @@ class EuroSAT(BenchDataset):
 
     @classmethod
     def data_root(cls) -> Path:
-        """Return ``Path("data/eurosat")`` (torchgeo manages its own layout below)."""
+        """Return ``Path("data/eurosat")`` (torchgeo manages its own layout below).
+
+        Shared by :class:`EuroSATSpatial`: both use the same
+        ``EuroSATallBands.zip``, only the split txt files differ, so a shared
+        root avoids a second 2GB download.
+        """
         return Path("data/eurosat")
 
     def get_dataset(
@@ -64,12 +76,11 @@ class EuroSAT(BenchDataset):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
-        normalize: str = "mean_stdev",
     ) -> Dataset:
-        """Return a :class:`torchgeo.datasets.EuroSAT` for the given split."""
-        del partition, normalize
+        """Return the wrapped torchgeo dataset (:attr:`_tg_class`) for the split."""
+        del partition
         band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
-        return TGEuroSAT(
+        return globals()[self._tg_class](
             root=str(self.data_root()),
             split=split,
             bands=band_codes,
@@ -87,33 +98,9 @@ class EuroSATSpatial(EuroSAT):
     default random split.
     """
 
+    _tg_class = "TGEuroSATSpatial"
+
     name = "eurosat-spatial"
     # Longitude-based 60/20/20: same totals as the random split, just
     # reassigned across regions.
     split_sizes = {"train": 16200, "val": 5400, "test": 5400}
-
-    @classmethod
-    def data_root(cls) -> Path:
-        """Return ``Path("data/eurosat")`` — shares the archive with :class:`EuroSAT`."""
-        # Both classes use the same EuroSATallBands.zip; only the split
-        # txt files differ. Sharing the root avoids a second 2GB download.
-        return Path("data/eurosat")
-
-    def get_dataset(
-        self,
-        split: str,
-        *,
-        partition: str = "default",
-        bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-        normalize: str = "mean_stdev",
-    ) -> Dataset:
-        """Return a :class:`torchgeo.datasets.EuroSATSpatial` for the given split."""
-        del partition, normalize
-        band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
-        return TGEuroSATSpatial(
-            root=str(self.data_root()),
-            split=split,
-            bands=band_codes,
-            transforms=transform,
-        )

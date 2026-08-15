@@ -9,12 +9,9 @@ import io
 import json
 import os
 import pickle
-import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
-from functools import cached_property
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal
 
 import h5py
 import numpy as np
@@ -31,52 +28,6 @@ V1_SHARDED_ROOT = Path("data/classification_v1.0_wds")
 V1_HF_REPO_ID = "isaaccorley/geobenchv1-webdataset"
 
 
-@dataclass
-class BandStats:
-    """Band statistics with type-safe access.
-
-    Attributes:
-        min: Minimum value.
-        max: Maximum value.
-        mean: Mean value.
-        std: Standard deviation.
-        median: Median value.
-        percentile_0_1: 0.1th percentile.
-        percentile_1: 1st percentile.
-        percentile_2: 2nd percentile (interpolated if not available).
-        percentile_5: 5th percentile.
-        percentile_95: 95th percentile.
-        percentile_98: 98th percentile (interpolated if not available).
-        percentile_99: 99th percentile.
-        percentile_99_9: 99.9th percentile.
-    """
-
-    min: float
-    max: float
-    mean: float
-    std: float
-    median: float
-    percentile_0_1: float
-    percentile_1: float
-    percentile_2: float | None = None
-    percentile_5: float | None = None
-    percentile_95: float | None = None
-    percentile_98: float | None = None
-    percentile_99: float | None = None
-    percentile_99_9: float | None = None
-
-    @classmethod
-    def from_dict(cls, d: dict) -> Self:
-        """Create BandStats from a dict, interpolating p2/p98 if missing."""
-        if "percentile_2" not in d and "percentile_1" in d and "percentile_5" in d:
-            d["percentile_2"] = d["percentile_1"] + 0.25 * (d["percentile_5"] - d["percentile_1"])
-        if "percentile_98" not in d and "percentile_95" in d and "percentile_99" in d:
-            d["percentile_98"] = d["percentile_95"] + 0.75 * (
-                d["percentile_99"] - d["percentile_95"]
-            )
-        return cls(**d)
-
-
 class GeoBenchv1(Dataset):
     """PyTorch Dataset for GeoBench V1 classification benchmarks.
 
@@ -88,11 +39,6 @@ class GeoBenchv1(Dataset):
         bands: Tuple of source band names (``"04 - Red"``, etc.) to load. If
             ``None``, loads all bands present in the first sample.
         transform: Optional callable applied to each sample dict.
-        normalize: **Deprecated** — kept for API back-compat for one cycle.
-            Always ignored: this class now emits raw float32 values.  Anything
-            other than ``False``/``None``/``"none"`` triggers a
-            :class:`DeprecationWarning`.  Per-channel normalization belongs on
-            :class:`~torchgeo_bench.models.interface.BenchModel`.
     """
 
     def __init__(
@@ -103,7 +49,6 @@ class GeoBenchv1(Dataset):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: object = None,
-        normalize: bool | str | None = None,
     ):
         super().__init__()
         self.root = Path(root)
@@ -111,14 +56,6 @@ class GeoBenchv1(Dataset):
         self.split = split
         self.partition = partition
         self.transform = transform
-
-        if normalize not in (None, False, "none"):
-            warnings.warn(
-                "GeoBenchv1.normalize is deprecated and ignored: this class emits "
-                "raw values; per-channel normalization is now done by BenchModel.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         self.dataset_dir = self.root / dataset_name
         if not self.dataset_dir.exists():
@@ -203,16 +140,6 @@ class GeoBenchv1(Dataset):
         if self.transform is not None:
             sample = self.transform(sample)  # type: ignore[misc]
         return sample
-
-    @cached_property
-    def band_stats(self) -> dict[str, BandStats]:
-        """Load band statistics with caching."""
-        band_stats_file = self.dataset_dir / "band_stats.json"
-        if not band_stats_file.exists():
-            return {}
-        with open(band_stats_file) as f:
-            stats_dict = json.load(f)
-        return {name: BandStats.from_dict(stats) for name, stats in stats_dict.items()}
 
 
 class _V1Dataset(BenchDataset):
