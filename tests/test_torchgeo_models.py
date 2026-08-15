@@ -607,3 +607,31 @@ def test_weights_normalize_only_applies_under_model_native(
     assert torch.allclose(zscore, torch.full_like(zscore, (1000.0 - 1200.0) / 400.0))
     assert torch.allclose(identity, sample)
     assert torch.allclose(native, torch.full_like(native, 500.0))
+
+
+def test_expected_input_unit_derived_from_weights_unit(monkeypatch):
+    """model_native needs expected_input_unit; wrappers only name weights_input_unit."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+    from torchgeo_bench.models._input_units import InputUnit
+
+    class _TinySwin(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.features = nn.Sequential(nn.Sequential(nn.Conv2d(3, 4, 1)))
+            self.head = nn.Identity()
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return images.mean(dim=(2, 3))
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySwin()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+    )
+    # TorchGeoSwinBench declares weights_input_unit="uint8_div255" and no
+    # expected_input_unit; the base class must fill it in.
+    TorchGeoSwinBench(bands=_rgb_bands(), normalization="identity", input_unit_check="ignore")
+    assert TorchGeoSwinBench.expected_input_unit is InputUnit.UINT8

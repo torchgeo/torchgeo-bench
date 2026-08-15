@@ -225,6 +225,13 @@ class _TorchGeoBackboneBench(BenchModel):
         input_unit_check: str = "warn",
         **kwargs: Any,
     ) -> None:
+        # The pretraining scale is already named by weights_input_unit, so
+        # derive expected_input_unit from it rather than making every wrapper
+        # restate it — model_native fails without it.
+        if type(self).expected_input_unit is None and self.weights_input_unit:
+            derived = _UNIT_EXPECTED_SOURCE.get(self.weights_input_unit)
+            if derived is not None:
+                type(self).expected_input_unit = derived
         super().__init__(bands=bands, **kwargs)
         weights = _resolve_torchgeo_weights(weights_class, weights_member)
         self.weights = weights
@@ -452,6 +459,7 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         self.backbone.head = nn.Identity()
         # Adapt the patch-embed projection conv so RGB-pretrained Swin
@@ -502,6 +510,7 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         if pool not in VALID_MODES:
             raise ValueError(f"pool={pool!r} not in {VALID_MODES}")
@@ -587,6 +596,7 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         self.wavelengths = _resolve_dofa_wavelengths(bands, wavelengths)
 
@@ -630,6 +640,7 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         # EarthLoc wraps a ResNet50; adapt its first conv for N-channel input.
         # Results on N!=3 channels are "adapted*" (input-conv weights are
@@ -685,6 +696,7 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
 
     @torch.no_grad()
@@ -726,6 +738,7 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         from ._band_mapping import wavelengths_um
 
