@@ -61,6 +61,12 @@ class BenchModel(nn.Module, ABC):
     pretrain_mean: list[float] | None = None
     pretrain_std: list[float] | None = None
 
+    #: Set by wrappers whose backbone normalises internally (OlmoEarth runs its
+    #: own per-modality ``Normalizer``).  Their ``normalize_inputs`` is already
+    #: the model-native pipeline, so the strategy normaliser is never used and
+    #: must not be validated against ``expected_input_unit``.
+    handles_own_normalization: bool = False
+
     def __init__(
         self,
         bands: list[BandSpec],
@@ -73,6 +79,9 @@ class BenchModel(nn.Module, ABC):
         self.bands: list[BandSpec] = list(bands)
         self.num_channels: int = len(self.bands)
         self.normalization = NormalizationStrategy(normalization)
+        if self.handles_own_normalization:
+            self._normalizer = lambda x: x
+            return
         self._normalizer = build_normalizer(
             self.normalization,
             bands=self.bands,

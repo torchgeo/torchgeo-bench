@@ -671,7 +671,14 @@ _CROMA_S2_12 = [
 
 
 class TorchGeoCromaBench(_TorchGeoBackboneBench):
-    """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``."""
+    """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``.
+
+    CROMA's published preprocessing (github.com/antofuller/CROMA, taken from
+    SatMAE/SeCo) is not fixed pretraining constants: it clips each channel to
+    ``mean +/- std_multiplier * std`` and rescales that window to ``[0, 1]``.
+    ``model_native`` reproduces that using the dataset's own BandSpec stats,
+    which is what the authors compute per dataset.
+    """
 
     weights_input_unit = "reflectance_0_1"
     expected_input_unit = InputUnit.REFLECTANCE_0_1
@@ -686,8 +693,10 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
         auto_resize: bool = True,
         target_size: int | None = 120,
         input_unit_check: str = "warn",
+        std_multiplier: float = 2.0,
         **_kwargs: Any,
     ) -> None:
+        self.std_multiplier = std_multiplier
         super().__init__(
             bands=bands,
             factory=factory,
@@ -698,6 +707,21 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
             input_unit_check=input_unit_check,
             **_kwargs,
         )
+
+    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
+        """Apply CROMA's own preprocessing under model_native.
+
+        Other strategies fall through to the shared implementation, so the
+        normalisation ablation still varies for this model.
+        """
+        if self.normalization is not NormalizationStrategy.MODEL_NATIVE:
+            return super().normalize_inputs(images)
+        n = images.shape[1]
+        mean = torch.tensor([b.mean for b in self.bands], dtype=torch.float32).view(1, n, 1, 1)
+        std = torch.tensor([b.std for b in self.bands], dtype=torch.float32).view(1, n, 1, 1)
+        lo = (mean - self.std_multiplier * std).to(images.device, images.dtype)
+        hi = (mean + self.std_multiplier * std).to(images.device, images.dtype)
+        return ((images - lo) / (hi - lo).clamp_min(1e-8)).clamp(0.0, 1.0)
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:

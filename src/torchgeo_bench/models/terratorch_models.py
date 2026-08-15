@@ -91,6 +91,22 @@ class _TerraTorchBench(BenchModel):
 
 PRITHVI_BANDS: list[str] = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
 
+# Pretraining statistics published with the checkpoints, in HLS DN, ordered as
+# PRITHVI_BANDS (HLS B02, B03, B04, B05, B06, B07).  v2 shares one set across
+# 100M/300M/600M.
+#   v1: hf.co/ibm-nasa-geospatial/Prithvi-EO-1.0-100M  config.json
+#   v2: hf.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M  config.json
+PRITHVI_PRETRAIN_STATS: dict[str, tuple[list[float], list[float]]] = {
+    "v1": (
+        [775.23, 1080.99, 1228.59, 2497.20, 2204.21, 1610.83],
+        [1281.53, 1270.03, 1399.48, 1368.34, 1291.68, 1154.51],
+    ),
+    "v2": (
+        [1087.0, 1342.0, 1433.0, 2734.0, 1958.0, 1363.0],
+        [2248.0, 2179.0, 2178.0, 1850.0, 1242.0, 1049.0],
+    ),
+}
+
 # Canonical band name -> TerraTorch HLSBands member used for patch-embed selection.
 _PRITHVI_HLS_BANDS: dict[str, str] = {
     "blue": "BLUE",
@@ -128,11 +144,23 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         target_size: int | None = 224,
         **kwargs: Any,
     ) -> None:
-        _, selected = select_src_bands(bands, PRITHVI_BANDS, preferred_sensors=("s2",))
+        indices, selected = select_src_bands(bands, PRITHVI_BANDS, preferred_sensors=("s2",))
         backbone_kwargs: dict[str, Any] = {"pretrained": pretrained, "num_frames": 1}
         if len(selected) < len(PRITHVI_BANDS):
             backbone_kwargs["bands"] = [_PRITHVI_HLS_BANDS[name] for name in selected]
         self.backbone_name = backbone_name
+        # model_native standardises with the checkpoint's published statistics.
+        # normalize_inputs runs on the dataset's channels, before _prepare_input
+        # maps them onto Prithvi's band slots, so the arrays are laid out per
+        # dataset channel; bands Prithvi does not consume keep mean 0 / std 1
+        # and are dropped by the mapping anyway.
+        stats = PRITHVI_PRETRAIN_STATS["v1" if "eo_v1" in backbone_name else "v2"]
+        mean = [0.0] * len(bands)
+        std = [1.0] * len(bands)
+        for name, ds_idx in zip(selected, indices, strict=True):
+            pos = PRITHVI_BANDS.index(name)
+            mean[ds_idx], std[ds_idx] = stats[0][pos], stats[1][pos]
+        self.pretrain_mean, self.pretrain_std = mean, std
         super().__init__(
             bands=bands,
             target_size=target_size,
