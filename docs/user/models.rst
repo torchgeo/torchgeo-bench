@@ -16,7 +16,7 @@ Every preset under :file:`src/torchgeo_bench/conf/model/` becomes a
 field resolves to a class re-exported from :mod:`torchgeo_bench.models`.
 
 Random Convolutional Features (RCF) and MOSAIKS
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 :class:`~torchgeo_bench.models.RCFBench` backs two presets that differ only in
 where the frozen filter bank comes from.  They are reported under separate
