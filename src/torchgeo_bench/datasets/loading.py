@@ -171,6 +171,7 @@ def get_datasets(
     image_size: int | None = None,
     interpolation: str = "bilinear",
     bands: str | Iterable[str] | None = "rgb",
+    time_steps: int | None = None,
 ) -> tuple:
     """Load benchmark dataset splits and dataloaders.
 
@@ -190,6 +191,9 @@ def get_datasets(
             ``"bilinear"``, ``"nearest"``).
         bands: ``"rgb"`` (use the dataset's ``rgb_bands``), ``"all"`` /
             ``None`` (load all bands), or an explicit iterable of band names.
+        time_steps: Number of acquisition dates per sample.  Only accepted by
+            multi-temporal wrappers (PASTIS); ``None`` keeps each dataset's
+            own default.
 
     Returns:
         Either ``(train_dataset, train_loader, test_loader)`` or, when
@@ -225,7 +229,11 @@ def get_datasets(
     transform = _make_resize_transform(image_size, interpolation)
     train_partition = partition_name if bench.supports_partitions else "default"
 
-    common = {"bands": bands_tuple, "transform": transform}
+    common: dict = {"bands": bands_tuple, "transform": transform}
+    if time_steps is not None:
+        # Only multi-temporal wrappers accept this; others would not know what
+        # to do with a time axis, so passing it to them is a config error.
+        common["time_steps"] = time_steps
     train_ds = bench.get_dataset("train", partition=train_partition, **common)
     val_ds = bench.get_dataset("val", partition="default", **common)
     test_ds = bench.get_dataset("test", partition="default", **common)

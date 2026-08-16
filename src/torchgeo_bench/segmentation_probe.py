@@ -179,8 +179,12 @@ class SegmentationProbe(nn.Module):
         freeze_backbone: bool = True,
         head_type: str = "linear",
         hidden_dim: int | None = None,
+        temporal_pool: str = "mean",
     ) -> None:
         super().__init__()
+        if temporal_pool not in ("mean", "max"):
+            raise ValueError(f"temporal_pool must be 'mean' or 'max', got {temporal_pool!r}")
+        self.temporal_pool = temporal_pool
         self.backbone = backbone
         self.layer_names = layer_names
         self.freeze_backbone = freeze_backbone
@@ -415,12 +419,19 @@ class SegmentationProbe(nn.Module):
         """Compute segmentation logits from input images.
 
         Args:
-            x: Input tensor of shape ``(B, C, H, W)``.
+            x: ``(B, C, H, W)``, or ``(B, T, C, H, W)`` for a time series.  A
+                time series is folded into the batch, encoded once, and pooled
+                back over ``T`` in feature space — the backbone stays a
+                single-image encoder and the decoder sees one map per sample.
 
         Returns:
             Logits tensor of shape ``(B, num_classes, H, W)``.
         """
         input_h, input_w = x.shape[-2:]
+        steps = 0
+        if x.ndim == 5:
+            batch, steps = x.shape[0], x.shape[1]
+            x = x.reshape(batch * steps, *x.shape[2:])
 
         if self.freeze_backbone:
             self.backbone.eval()
@@ -431,4 +442,12 @@ class SegmentationProbe(nn.Module):
             _ = self.backbone(x)
 
         features = [self._process_feature(self._features[n]) for n in self.layer_names]
+        if steps:
+            features = [self._pool_time(f, steps) for f in features]
         return self.head(features, input_h, input_w)
+
+    def _pool_time(self, feat: torch.Tensor, steps: int) -> torch.Tensor:
+        """Reduce ``(B*T, C, H, W)`` back to ``(B, C, H, W)`` over time."""
+        c, h, w = feat.shape[1:]
+        feat = feat.view(-1, steps, c, h, w)
+        return feat.mean(dim=1) if self.temporal_pool == "mean" else feat.amax(dim=1)
