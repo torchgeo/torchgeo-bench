@@ -225,6 +225,13 @@ class _TorchGeoBackboneBench(BenchModel):
         input_unit_check: str = "warn",
         **kwargs: Any,
     ) -> None:
+        # The pretraining scale is already named by weights_input_unit, so
+        # derive expected_input_unit from it rather than making every wrapper
+        # restate it — model_native fails without it.
+        if type(self).expected_input_unit is None and self.weights_input_unit:
+            derived = _UNIT_EXPECTED_SOURCE.get(self.weights_input_unit)
+            if derived is not None:
+                type(self).expected_input_unit = derived
         super().__init__(bands=bands, **kwargs)
         weights = _resolve_torchgeo_weights(weights_class, weights_member)
         self.weights = weights
@@ -339,10 +346,13 @@ class _TorchGeoBackboneBench(BenchModel):
         # applying unit conversion first would corrupt it (e.g. z-score uses
         # DN-scale mean/std — dividing raw DN by 10 000 before z-scoring
         # produces values ≈ 0 - 1000/500 ≈ -2, i.e. garbage).
-        weights_norm = self._weights_normalize
-        _need_unit_conv = self._weights_target_unit is not None and (
-            weights_norm is not None or self.normalization is NormalizationStrategy.MODEL_NATIVE
-        )
+        # The weights' own Normalize *is* the model-native pipeline, so it runs
+        # only under model_native.  Applying it under every strategy made
+        # dataset.normalization a no-op for each torchgeo model that ships a
+        # transform, silently collapsing the normalization ablation.
+        native = self.normalization is NormalizationStrategy.MODEL_NATIVE
+        weights_norm = self._weights_normalize if native else None
+        _need_unit_conv = self._weights_target_unit is not None and native
         if _need_unit_conv:
             images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
         if weights_norm is not None:
@@ -449,6 +459,7 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         self.backbone.head = nn.Identity()
         # Adapt the patch-embed projection conv so RGB-pretrained Swin
@@ -499,6 +510,7 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         if pool not in VALID_MODES:
             raise ValueError(f"pool={pool!r} not in {VALID_MODES}")
@@ -584,6 +596,7 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         self.wavelengths = _resolve_dofa_wavelengths(bands, wavelengths)
 
@@ -627,6 +640,7 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         # EarthLoc wraps a ResNet50; adapt its first conv for N-channel input.
         # Results on N!=3 channels are "adapted*" (input-conv weights are
@@ -657,7 +671,14 @@ _CROMA_S2_12 = [
 
 
 class TorchGeoCromaBench(_TorchGeoBackboneBench):
-    """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``."""
+    """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``.
+
+    CROMA's published preprocessing (github.com/antofuller/CROMA, taken from
+    SatMAE/SeCo) is not fixed pretraining constants: it clips each channel to
+    ``mean +/- std_multiplier * std`` and rescales that window to ``[0, 1]``.
+    ``model_native`` reproduces that using the dataset's own BandSpec stats,
+    which is what the authors compute per dataset.
+    """
 
     weights_input_unit = "reflectance_0_1"
     expected_input_unit = InputUnit.REFLECTANCE_0_1
@@ -672,8 +693,10 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
         auto_resize: bool = True,
         target_size: int | None = 120,
         input_unit_check: str = "warn",
+        std_multiplier: float = 2.0,
         **_kwargs: Any,
     ) -> None:
+        self.std_multiplier = std_multiplier
         super().__init__(
             bands=bands,
             factory=factory,
@@ -682,7 +705,23 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
+
+    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
+        """Apply CROMA's own preprocessing under model_native.
+
+        Other strategies fall through to the shared implementation, so the
+        normalisation ablation still varies for this model.
+        """
+        if self.normalization is not NormalizationStrategy.MODEL_NATIVE:
+            return super().normalize_inputs(images)
+        n = images.shape[1]
+        mean = torch.tensor([b.mean for b in self.bands], dtype=torch.float32).view(1, n, 1, 1)
+        std = torch.tensor([b.std for b in self.bands], dtype=torch.float32).view(1, n, 1, 1)
+        lo = (mean - self.std_multiplier * std).to(images.device, images.dtype)
+        hi = (mean + self.std_multiplier * std).to(images.device, images.dtype)
+        return ((images - lo) / (hi - lo).clamp_min(1e-8)).clamp(0.0, 1.0)
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
@@ -723,6 +762,7 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         from ._band_mapping import wavelengths_um
 

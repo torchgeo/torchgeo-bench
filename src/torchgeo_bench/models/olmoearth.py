@@ -517,6 +517,8 @@ class OlmoEarthBenchModel(BenchModel):
         self.encoder_model = load_model_from_id(model_id, load_weights=True)
         self.normalizer = Normalizer(std_multiplier=std_multiplier)
 
+    handles_own_normalization = True
+
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
         """Identity — OlmoEarth's internal Normalizer handles raw values."""
         return images
