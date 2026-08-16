@@ -34,6 +34,7 @@ from torchgeo_bench.results import (  # noqa: F401  (EvaluationResult re-exporte
     append_rows_atomic,
     bootstrap_accuracy,
     bootstrap_map,
+    bootstrap_miou,
     metric_row,
     model_results_path,
 )
@@ -462,6 +463,7 @@ def evaluate_segmentation(
     eval_cfg: DictConfig,
     num_classes: int,
     device: torch.device,
+    seed: int,
     collect_preds: bool = False,
     verbose: bool = False,
 ) -> "tuple[torchgeo_bench.segmentation_task.SegMetrics, int, float | None, int | None, torch.Tensor | None]":
@@ -480,6 +482,7 @@ def evaluate_segmentation(
             ``eval`` overrides.
         num_classes: Number of segmentation classes.
         device: Torch device.
+        seed: RNG seed for the mIoU bootstrap when ``eval_cfg.bootstrap`` > 0.
         collect_preds: If True, collect and return test predictions as (N, H, W) tensor.
         verbose: Show training progress.
 
@@ -498,6 +501,7 @@ def evaluate_segmentation(
     )
 
     probe, solver = build_seg_probe_and_solver(model, num_classes, eval_cfg, device, lr)
+    collect_confusions = int(eval_cfg.bootstrap) > 0
     if use_cache and probe.freeze_backbone:
         logger.info("Caching backbone features for train and val splits...")
         train_cache = probe.extract_segmentation_features(train_loader, cache_dtype=cache_dtype)
@@ -514,20 +518,38 @@ def evaluate_segmentation(
             test_cache,
             batch_size=probe_batch_size,
             collect_preds=collect_preds,
+            collect_confusions=collect_confusions,
         )
     else:
         solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=verbose)
-        eval_result = solver.evaluate(test_loader, collect_preds=collect_preds)
+        eval_result = solver.evaluate(
+            test_loader,
+            collect_preds=collect_preds,
+            collect_confusions=collect_confusions,
+        )
     actual_batch_size = (
         probe_batch_size
         if use_cache and probe.freeze_backbone
         else int(train_loader.batch_size or 1)
     )
 
-    if collect_preds:
+    if collect_preds and collect_confusions:
+        metrics, preds, confusion_matrices = eval_result
+    elif collect_preds:
         metrics, preds = eval_result
+        confusion_matrices = None
+    elif collect_confusions:
+        metrics, confusion_matrices = eval_result
+        preds = None
     else:
         metrics, preds = eval_result, None
+        confusion_matrices = None
+    if confusion_matrices is not None:
+        metrics["ci_lower"], metrics["ci_upper"] = bootstrap_miou(
+            confusion_matrices,
+            n_boot=int(eval_cfg.bootstrap),
+            seed=seed,
+        )
     return metrics, sum(probe.channels_list), lr, actual_batch_size, preds
 
 
@@ -726,6 +748,7 @@ def main(cfg: DictConfig) -> None:
                 eval_cfg_merged,
                 num_classes,
                 device,
+                seed=cfg.seed,
                 collect_preds=save_viz,
                 verbose=cfg.verbose,
             )
@@ -735,6 +758,8 @@ def main(cfg: DictConfig) -> None:
                     method=seg_method,
                     metric_name="mIoU",
                     metric_value=metrics.get("mIoU", float("nan")),
+                    ci_lower=metrics.get("ci_lower", float("nan")),
+                    ci_upper=metrics.get("ci_upper", float("nan")),
                     feature_dim=feat_dim,
                     n_counts={
                         "train": len(train_dataset),
