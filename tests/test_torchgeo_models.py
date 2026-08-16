@@ -411,6 +411,46 @@ def test_channel_mismatch_preserves_tiled_normalize_chain(
     assert torch.allclose(normalized[:, 3:], expected.expand(1, 3, 8, 8))
 
 
+def test_resnet_can_convert_to_reflectance_before_skipping_weight_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raw S2 should skip a checkpoint's uint8 scale before ImageNet z-score."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 4, 1)
+            self.fc = nn.Identity()
+
+    class _FakeWeights:
+        transforms = nn.Sequential(
+            Normalize(mean=[0.0], std=[255.0]),
+            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        )
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: _FakeWeights(),
+    )
+
+    model = TorchGeoResNetBench(
+        bands=_rgb_bands(),
+        normalization="model_native",
+        normalization_input_unit="reflectance_0_1",
+        skip_weight_normalize=1,
+        input_unit_check="error",
+    )
+
+    normalized = model.normalize_inputs(torch.full((1, 3, 2, 2), 10000.0))
+    expected = torch.tensor([(1.0 - 0.485) / 0.229, (1.0 - 0.456) / 0.224, (1.0 - 0.406) / 0.225])
+    assert torch.allclose(normalized[0, :, 0, 0], expected)
+
+
 # ---------------------------------------------------------------------------
 # _warn_unit_mismatch
 # ---------------------------------------------------------------------------
