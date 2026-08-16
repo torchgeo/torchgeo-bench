@@ -29,8 +29,11 @@ CONF_DIR = Path(str(files("torchgeo_bench") / "conf"))
 def list_model_configs() -> list[str]:
     """Names accepted by ``model=`` / ``--model``, e.g. ``timm/resnet50``."""
     model_dir = CONF_DIR / "model"
+    # as_posix(): the name is a CLI identifier, so it must be "/"-separated on
+    # every platform.  str(Path) yields "torchgeo\\scalemae_large_fmow" on
+    # Windows, which no documented command or config would match.
     return sorted(
-        str(p.relative_to(model_dir)).removesuffix(".yaml") for p in model_dir.rglob("*.yaml")
+        p.relative_to(model_dir).as_posix().removesuffix(".yaml") for p in model_dir.rglob("*.yaml")
     )
 
 

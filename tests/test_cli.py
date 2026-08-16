@@ -138,3 +138,16 @@ def test_double_plus_override_sets_the_real_key():
     assert "+model" not in cfg
     assert cfg.model.pool == "cls"
     assert float(cfg.model.gsd) == 1.0
+
+
+def test_model_names_are_posix_on_every_platform():
+    """Config names are CLI identifiers, so they must not use OS separators.
+
+    On Windows `str(Path)` produced `torchgeo\\scalemae_large_fmow`, which no
+    documented command, config, or sweep script would match.
+    """
+    from torchgeo_bench.config import list_model_configs
+
+    names = list_model_configs()
+    assert "torchgeo/scalemae_large_fmow" in names
+    assert not any("\\" in n for n in names)
