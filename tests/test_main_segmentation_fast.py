@@ -145,13 +145,16 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
     cache = mock.Mock()
     probe.freeze_backbone = True
     probe.extract_segmentation_features.return_value = cache
-    solver.evaluate_cached.return_value = {
-        "mIoU": 0.42,
-        "fw_IoU": 0.55,
-        "precision": 0.6,
-        "recall": 0.7,
-        "f1": 0.65,
-    }
+    solver.evaluate_cached.return_value = (
+        {
+            "mIoU": 0.42,
+            "fw_IoU": 0.55,
+            "precision": 0.6,
+            "recall": 0.7,
+            "f1": 0.65,
+        },
+        torch.tensor([[[0, 4], [0, 0]], [[0, 0], [0, 4]]]),
+    )
 
     with (
         mock.patch(
