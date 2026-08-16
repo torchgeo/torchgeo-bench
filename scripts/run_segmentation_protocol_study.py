@@ -110,7 +110,7 @@ def _source_hash(root: Path) -> str:
     return hasher.hexdigest()
 
 
-def study_metadata(root: Path) -> dict[str, object]:
+def study_metadata(root: Path, seed: int) -> dict[str, object]:
     """Return the result-affecting study configuration."""
     return {
         "schema_version": 1,
@@ -122,7 +122,7 @@ def study_metadata(root: Path) -> dict[str, object]:
         "image_size": 224,
         "normalization": "bandspec_zscore",
         "partition": "default",
-        "seed": 0,
+        "seed": seed,
         "cache_features": True,
         "cache_dtype": "float16",
     }
@@ -134,6 +134,7 @@ class StudyConfig(RunnerConfig):
 
     raw_dir: Path
     combined_output: Path
+    seed: int
 
 
 class StudyRunner(BaseGpuRunner):
@@ -149,7 +150,7 @@ class StudyRunner(BaseGpuRunner):
         return self.config.raw_dir / f"{job.job_id}.csv"
 
     def _validate_metadata(self) -> None:
-        expected = study_metadata(self.config.root)
+        expected = study_metadata(self.config.root, self.config.seed)
         if self.metadata_path.exists():
             if json.loads(self.metadata_path.read_text()) != expected:
                 raise RuntimeError(f"Incompatible study metadata at {self.metadata_path}.")
@@ -219,6 +220,7 @@ class StudyRunner(BaseGpuRunner):
             "dataset.image_size=224",
             f"dataset.batch_size={loader_batch}",
             f"dataset.num_workers={self.config.num_workers}",
+            f"seed={self.config.seed}",
             f"device=cuda:{gpu}",
             "eval.segmentation.head_type=fpn",
             f"eval.segmentation.epochs={job.variant.epochs}",
@@ -284,6 +286,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--gpus", default="0,1")
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--max-attempts", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--raw-dir", type=Path, default=Path("results/segmentation_protocol/raw"))
     parser.add_argument(
         "--state-dir", type=Path, default=Path("results/segmentation_protocol/state")
@@ -309,6 +312,7 @@ def main() -> None:
         gpus=parse_gpus(args.gpus),
         num_workers=args.num_workers,
         max_attempts=args.max_attempts,
+        seed=args.seed,
     )
     logger.info(
         "Study: %d models x %d datasets x %d variants = %d jobs",

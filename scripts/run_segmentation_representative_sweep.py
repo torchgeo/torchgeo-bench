@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+import hashlib
 import json
 import logging
 import random
@@ -101,13 +102,25 @@ def build_jobs() -> list[Job]:
     return jobs
 
 
-def sweep_metadata(image_size: int) -> dict[str, object]:
+def _source_hash(root: Path) -> str:
+    """Fingerprint benchmark code and packaged configuration."""
+    hasher = hashlib.sha256()
+    paths = sorted((root / "src/torchgeo_bench").rglob("*.py"))
+    paths.extend(sorted((root / "src/torchgeo_bench/conf").rglob("*.yaml")))
+    for path in paths:
+        hasher.update(str(path.relative_to(root)).encode())
+        hasher.update(path.read_bytes())
+    return hasher.hexdigest()
+
+
+def sweep_metadata(root: Path, image_size: int, seed: int) -> dict[str, object]:
     """Return the result-affecting configuration fingerprint."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "source_hash": _source_hash(root),
         "epochs": EPOCHS,
         "image_size": image_size,
-        "seed": 0,
+        "seed": seed,
         "normalization": "bandspec_zscore",
         "interpolation": "bilinear",
         "partition": "default",
@@ -175,7 +188,7 @@ class SweepRunner(BaseGpuRunner):
         )
 
     def _validate_metadata(self) -> None:
-        expected = sweep_metadata(self.config.image_size)
+        expected = sweep_metadata(self.config.root, self.config.image_size, self.config.seed)
         if self.config.output.exists() and self.config.output.stat().st_size > 0:
             if not self.metadata_path.exists():
                 raise RuntimeError(
@@ -196,6 +209,7 @@ class SweepRunner(BaseGpuRunner):
             "failed_jobs": str(self.failed_path),
             "epochs": EPOCHS,
             "image_size": self.config.image_size,
+            "seed": self.config.seed,
         }
 
     def _failed_record(self, job: Job, gpu: int) -> dict:
@@ -214,6 +228,7 @@ class SweepRunner(BaseGpuRunner):
             f"dataset.image_size={self.config.image_size}",
             f"dataset.batch_size={loader_batch}",
             f"dataset.num_workers={self.config.num_workers}",
+            f"seed={self.config.seed}",
             f"device=cuda:{gpu}",
             f"eval.segmentation.head_type={job.head}",
             f"eval.segmentation.epochs={EPOCHS}",
