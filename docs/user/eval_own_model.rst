@@ -209,7 +209,7 @@ Skip the (slow) linear probe and reduce bootstrap samples for a quick trial:
        eval.skip_linear=true eval.bootstrap=100
 
 To write results to a dedicated file instead of the shared
-``results/all_results.csv``, pass ``output=``:
+the per-model file, pass ``output=``:
 
 .. code-block:: console
 
@@ -229,6 +229,6 @@ interrupted run can be continued against the same file:
 Results
 -------
 
-Results are written to ``results/all_results.csv`` by default, or to the
+Results are written to ``results/models/<model name>.csv`` by default, or to the
 path set via ``output=`` (see above).
 For the full column reference and how to read the CSV, see :doc:`results-format`.

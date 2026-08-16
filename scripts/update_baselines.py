@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate tests/fixtures/accuracy_baselines.csv from results/all_results.csv.
+"""Generate tests/fixtures/accuracy_baselines.csv from the per-model results files.
 
 Usage::
 
@@ -14,10 +14,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from torchgeo_bench.results import load_results
+
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_INPUT = _REPO_ROOT / "results" / "all_results.csv"
+_DEFAULT_INPUT = _REPO_ROOT / "results" / "models"
 _DEFAULT_OUTPUT = _REPO_ROOT / "tests" / "fixtures" / "accuracy_baselines.csv"
 
 TARGET_DATASETS = {"m-eurosat", "benv2", "so2sat", "m-pv4ger"}
@@ -147,7 +149,12 @@ def main(argv: list[str] | None = None) -> None:
     """Entry point for the update-baselines script."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=_DEFAULT_INPUT)
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=_DEFAULT_INPUT,
+        help="Per-model results directory, or a single results CSV.",
+    )
     parser.add_argument("--output", type=Path, default=_DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
 
@@ -155,7 +162,7 @@ def main(argv: list[str] | None = None) -> None:
         logger.error("Input not found: %s", args.input)
         sys.exit(1)
 
-    df = pd.read_csv(args.input)
+    df = load_results(args.input) if args.input.is_dir() else pd.read_csv(args.input)
 
     old: pd.DataFrame | None = None
     if args.output.exists():

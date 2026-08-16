@@ -12,7 +12,7 @@ _DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_PATH = Path(__file__).parent / "fixtures" / "accuracy_baselines.csv"
-_ALL_RESULTS = _REPO_ROOT / "results" / "all_results.csv"
+_RESULTS_DIR = _REPO_ROOT / "results" / "models"
 
 _FIXTURE_COLS = {
     "model_config",
@@ -64,7 +64,9 @@ def test_accuracy_check_marker_is_registered() -> None:
     )
 
 
-@pytest.mark.skipif(not _ALL_RESULTS.exists(), reason="results/all_results.csv not found")
+@pytest.mark.skipif(
+    not list(_RESULTS_DIR.glob("*.csv")), reason="no per-model results in results/models"
+)
 def test_update_baselines_script_runs(tmp_path: Path) -> None:
     """Script runs, exits 0, and outputs a CSV with expected columns."""
     out = tmp_path / "out.csv"

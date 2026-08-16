@@ -35,6 +35,7 @@ from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import measure_profile
 from torchgeo_bench.models.interface import BenchModel
+from torchgeo_bench.results import DEFAULT_RESULTS_DIR, model_results_path
 from torchgeo_bench.segmentation_probe import (
     SegmentationProbe,
 )
@@ -995,6 +996,24 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
             os.fsync(f.fileno())
 
 
+def _resolve_output_path(cfg: DictConfig) -> str:
+    """Return the CSV to write: explicit ``output``, else the model's own file.
+
+    Per-model files keep a re-run of one model from rewriting every other
+    model's rows.  ``output=`` still wins so one-off experiment scripts can
+    send their rows to a scratch CSV.
+    """
+    if cfg.get("output"):
+        return str(cfg.output)
+    name = cfg.model.get("name") if "name" in cfg.model else None
+    if not name:
+        raise ValueError(
+            "model config has no 'name', so no per-model results file can be "
+            "derived; set output= explicitly or add a name to the model config."
+        )
+    return str(model_results_path(cfg.get("results_dir", DEFAULT_RESULTS_DIR), name))
+
+
 @hydra.main(config_path="conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
@@ -1013,7 +1032,7 @@ def main(cfg: DictConfig) -> None:
     dataset_names = _expand_dataset_list(cfg.dataset.names)
     device = torch.device(cfg.device)
 
-    output_path = cfg.output
+    output_path = _resolve_output_path(cfg)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     all_rows: list[dict] = []
@@ -1040,7 +1059,7 @@ def main(cfg: DictConfig) -> None:
     completed_runs: set[tuple[str, ...]] = set()
     completed_metrics: dict[str, set[tuple[str, ...]]] = {}
     if cfg.resume and os.path.exists(output_path):
-        existing_df = pd.read_csv(cfg.output)
+        existing_df = pd.read_csv(output_path)
         for col in key_cols:
             if col not in existing_df.columns:
                 existing_df[col] = ""
@@ -1050,7 +1069,7 @@ def main(cfg: DictConfig) -> None:
                 str(metric): _completed_run_keys(existing_df, key_cols, str(metric))
                 for metric in existing_df["metric_name"].dropna().unique()
             }
-        logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
+        logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {output_path}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
     # Selectable input-normalisation strategy; recorded in the CSV so

@@ -101,7 +101,7 @@ See :doc:`results-format` for the exact key schema used by resume mode.
 Inspect the results
 -------------------
 
-By default results land in ``results/all_results.csv``.  That file **ships
+By default results land in ``results/models/<model name>.csv``.  Those files **ship
 pre-populated** with reference results, so to start from a clean slate write to
 your own file with ``output=results/my_run.csv``.  Each row is a flat
 :class:`~torchgeo_bench.main.EvaluationResult`, so you can read it directly with
@@ -111,5 +111,6 @@ pandas:
 
    import pandas as pd
 
-   df = pd.read_csv("results/all_results.csv")
+   from torchgeo_bench.results import load_results
+   df = load_results()
    print(df.groupby(["dataset", "method"])["metric_value"].mean())

@@ -101,6 +101,12 @@ data/
 # Results
 *.csv
 *.json
+# Per-model benchmark results: one CSV per model, tracked so a new model PR
+# adds its own file instead of editing a shared one.
+!results/models/
+!results/models/*.csv
+!results/legacy/
+!results/legacy/*.csv
 !conf/**/*.json
 !**/band_stats.json
 !**/normalizer.json

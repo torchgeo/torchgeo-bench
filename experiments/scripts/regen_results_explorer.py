@@ -1,6 +1,6 @@
 """Regenerate ``docs/_static/results-explorer.html`` from result snapshots.
 
-Reads ``results/all_results.csv``, writes today's snapshot to
+Reads ``results/models/*.csv``, writes today's snapshot to
 ``docs/_static/_results_snapshots/<label>.json``, then re-inlines every
 committed snapshot (newest first) into the explorer HTML and bumps the
 masthead.  Keeps ``knn5`` / ``linear`` / ``profile`` rows; the explorer's
@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CSV_PATH = ROOT / "results" / "all_results.csv"
+RESULTS_DIR = ROOT / "results" / "models"
 HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
 SNAPSHOT_DIR = ROOT / "docs" / "_static" / "_results_snapshots"
 ALLOWED_METHODS = ("knn5", "linear", "profile", "intrinsic_dim")
@@ -82,32 +82,38 @@ NUMERIC = {
 BOOL = {"merge_val"}
 
 
+def _iter_result_rows():
+    """Yield rows from every per-model results CSV."""
+    for path in sorted(RESULTS_DIR.glob("*.csv")):
+        with path.open() as fh:
+            yield from csv.DictReader(fh)
+
+
 def _load_csv_rows(label: str) -> list[dict]:
     rows = []
-    with CSV_PATH.open() as fh:
-        for r in csv.DictReader(fh):
-            if r["method"] not in ALLOWED_METHODS:
+    for r in _iter_result_rows():
+        if r["method"] not in ALLOWED_METHODS:
+            continue
+        if not r.get("metric_value"):
+            continue
+        row = {}
+        for k in COLUMNS:
+            if k == "snapshot":
                 continue
-            if not r.get("metric_value"):
-                continue
-            row = {}
-            for k in COLUMNS:
-                if k == "snapshot":
-                    continue
-                v = r.get(k, "")
-                if v is None or v == "":
+            v = r.get(k, "")
+            if v is None or v == "":
+                row[k] = None
+            elif k in NUMERIC:
+                try:
+                    row[k] = float(v)
+                except ValueError:
                     row[k] = None
-                elif k in NUMERIC:
-                    try:
-                        row[k] = float(v)
-                    except ValueError:
-                        row[k] = None
-                elif k in BOOL:
-                    row[k] = v.lower() in ("true", "1")
-                else:
-                    row[k] = v
-            row["snapshot"] = label
-            rows.append(row)
+            elif k in BOOL:
+                row[k] = v.lower() in ("true", "1")
+            else:
+                row[k] = v
+        row["snapshot"] = label
+        rows.append(row)
     return rows
 
 
@@ -203,7 +209,7 @@ def main() -> None:
     )
     text = re.sub(
         r"Source: <b>[^<]*</b>",
-        "Source: <b>results/all_results.csv</b>",
+        "Source: <b>results/models/*.csv</b>",
         text,
     )
     text = re.sub(
