@@ -71,7 +71,7 @@ class KNNClassifier:
 
     Args:
         n_neighbors: Number of neighbours (k). Clamped to ``min(k, n_train)``
-            on the CPU path; faissknn does not clamp internally.
+            before either backend is constructed.
         device: ``"cpu"`` (default) → the FAISS CPU index. Anything else
             (``"cuda"``, ``"cuda:0"``) requires ``faissknn`` with a GPU FAISS
             backend (installed automatically on Linux x86_64); raises an
@@ -90,7 +90,10 @@ class KNNClassifier:
         metric: Literal["l2", "ip", "cosine"] = "l2",
         use_fp16: bool = False,
     ) -> None:
-        self.n_neighbors = int(n_neighbors)
+        if isinstance(n_neighbors, bool) or not isinstance(n_neighbors, int) or n_neighbors < 1:
+            raise ValueError(f"n_neighbors must be a positive integer, got {n_neighbors!r}.")
+        self.n_neighbors = n_neighbors
+        self._effective_n_neighbors: int | None = None
         self.device = device
         self.metric = metric
         self.use_fp16 = use_fp16
@@ -113,7 +116,12 @@ class KNNClassifier:
                ``(n_samples, n_classes)`` multi-hot multi-label.
         """
         X = np.ascontiguousarray(np.atleast_2d(X).astype(np.float32))
+        if len(X) == 0:
+            raise ValueError("KNNClassifier.fit requires at least one training sample.")
+        if len(y) != len(X):
+            raise ValueError(f"X has {len(X)} samples but y has {len(y)} labels.")
         self._multi_label = y.ndim == 2
+        self._effective_n_neighbors = min(self.n_neighbors, len(X))
 
         if _is_cpu_device(self.device):
             self._fit_cpu(X, y)
@@ -136,8 +144,8 @@ class KNNClassifier:
     def _search_cpu(self, X: np.ndarray) -> np.ndarray:
         assert self._index is not None
         X = np.ascontiguousarray(np.atleast_2d(X).astype(np.float32))
-        k_eff = min(self.n_neighbors, self._index.ntotal)
-        _, indices = self._index.search(X, k_eff)
+        assert self._effective_n_neighbors is not None
+        _, indices = self._index.search(X, self._effective_n_neighbors)
         return indices
 
     def _neighbour_counts(self, indices: np.ndarray) -> np.ndarray:
@@ -185,7 +193,7 @@ class KNNClassifier:
             )
 
         kwargs = {
-            "n_neighbors": self.n_neighbors,
+            "n_neighbors": self._effective_n_neighbors,
             "device": self.device,
             "metric": self.metric,
             "use_fp16": self.use_fp16,

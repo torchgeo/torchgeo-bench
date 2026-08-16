@@ -2,6 +2,8 @@
 
 import builtins
 import logging
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -91,6 +93,40 @@ class TestKNNClassifierSingleLabel:
         clf.fit(X, y)
         preds = clf.predict(X)
         assert preds.shape == (3,)
+
+    def test_gpu_k_is_clamped_before_faissknn_construction(self, monkeypatch: pytest.MonkeyPatch):
+        """FAISS GPU uses -1 neighbor IDs when asked for k > n_train."""
+        constructed: list[object] = []
+
+        class FakeFaissKNNClassifier:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+                constructed.append(self)
+
+            def fit(self, X, y) -> None:
+                del X, y
+
+        monkeypatch.setattr(knn, "gpu_faiss_available", lambda: True)
+        monkeypatch.setitem(
+            sys.modules,
+            "faissknn",
+            SimpleNamespace(
+                FaissKNNClassifier=FakeFaissKNNClassifier,
+                FaissKNNMultilabelClassifier=FakeFaissKNNClassifier,
+            ),
+        )
+        X = np.zeros((3, 2), dtype=np.float32)
+        y = np.array([0, 1, 2], dtype=np.int64)
+
+        KNNClassifier(n_neighbors=10, device="cuda").fit(X, y)
+
+        assert len(constructed) == 1
+        assert constructed[0].kwargs["n_neighbors"] == 3
+
+    @pytest.mark.parametrize("n_neighbors", [0, -1, True, 1.5])
+    def test_rejects_invalid_neighbor_count(self, n_neighbors):
+        with pytest.raises(ValueError, match="positive integer"):
+            KNNClassifier(n_neighbors=n_neighbors)
 
 
 class TestKNNClassifierMultiLabel:
