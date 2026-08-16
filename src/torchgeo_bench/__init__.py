@@ -1,8 +1,10 @@
-"""Public package exports for torchgeo-bench."""
+"""Public package exports for torchgeo-bench.
+
+Heavy submodules (torch, torchgeo, sklearn) load lazily so importing the
+package — and therefore CLI startup — stays fast.
+"""
 
 from importlib.metadata import PackageNotFoundError, version
-
-from .main import bootstrap_map, evaluate_knn, evaluate_logistic
 
 try:
     __version__ = version("torchgeo-bench")
@@ -16,3 +18,11 @@ __all__: list[str] = [
     "evaluate_knn",
     "evaluate_logistic",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in __all__:
+        from torchgeo_bench import main
+
+        return getattr(main, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

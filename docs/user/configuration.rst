@@ -1,12 +1,14 @@
 Configuration
 =============
 
-``torchgeo-bench`` is driven by `Hydra <https://hydra.cc>`_.  The primary
-config lives at :file:`src/torchgeo_bench/conf/config.yaml` and is composed
-with a model preset selected from :file:`src/torchgeo_bench/conf/model/`.
+``torchgeo-bench`` is configured with `OmegaConf <https://omegaconf.readthedocs.io>`_
+YAML files.  The primary config lives at :file:`src/torchgeo_bench/conf/config.yaml`
+and is composed with a model preset selected from
+:file:`src/torchgeo_bench/conf/model/`.
 
 Every value in the config can be overridden on the command line using
-Hydra's dotted-path syntax:
+dotted-path ``key=value`` syntax (common settings also have flags — see
+``torchgeo-bench run --help``):
 
 .. code-block:: console
 

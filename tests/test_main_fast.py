@@ -8,11 +8,11 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
-from hydra import compose, initialize_config_module
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchgeo.datasets import DatasetNotFoundError
 
+from torchgeo_bench.config import compose_config
 from torchgeo_bench.main import main, resolve_model_config
 
 
@@ -34,24 +34,22 @@ class _DictTensorDataset(Dataset):
 
 
 def _compose_cfg(output_path: Path, overrides: Sequence[str] | None = None) -> DictConfig:
-    """Compose Hydra config for fast offline main-path tests."""
+    """Compose the config for fast offline main-path tests."""
     extra = list(overrides or [])
-    with initialize_config_module(config_module="torchgeo_bench.conf", version_base="1.3"):
-        return compose(
-            config_name="config",
-            overrides=[
-                "model=rcf",
-                "dataset.names=[m-eurosat]",
-                "dataset.partition=default",
-                "dataset.batch_size=4",
-                "dataset.num_workers=0",
-                "eval.bootstrap=5",
-                "eval.c_range=[-2,-1,2]",
-                "device=cpu",
-                f"output={output_path}",
-                *extra,
-            ],
-        )
+    return compose_config(
+        [
+            "model=rcf",
+            "dataset.names=[m-eurosat]",
+            "dataset.partition=default",
+            "dataset.batch_size=4",
+            "dataset.num_workers=0",
+            "eval.bootstrap=5",
+            "eval.c_range=[-2,-1,2]",
+            "device=cpu",
+            f"output={output_path}",
+            *extra,
+        ]
+    )
 
 
 def _synthetic_loaders(
@@ -174,7 +172,7 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     assert data_mock.call_args.kwargs["image_size"] == 64
     assert data_mock.call_args.kwargs["interpolation"] == "area"
@@ -211,7 +209,7 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ) as knn_mock,
     ):
-        main.__wrapped__(changed_cfg)
+        main(changed_cfg)
 
     knn_mock.assert_called_once()
     rows = pd.read_csv(out)
@@ -230,7 +228,7 @@ def test_knn_row_emitted(tmp_path: Path):
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     assert "knn5" in df["method"].values
@@ -259,7 +257,7 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ) as knn_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     assert knn_mock.call_args.kwargs["device"] == "cpu"
 
@@ -278,7 +276,7 @@ def test_explicit_gpu_knn_without_gpu_faiss_fails_before_data_loading(tmp_path: 
         mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
         pytest.raises(RuntimeError, match="explicit KNN device 'cuda'"),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     data_mock.assert_not_called()
 
@@ -306,7 +304,7 @@ def test_linear_row_emitted(tmp_path: Path):
             ),
         ),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     assert "linear" in df["method"].values
@@ -323,7 +321,7 @@ def test_resume_skips_completed_knn_row(tmp_path: Path):
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     knn_mock.assert_not_called()
     df = pd.read_csv(out)
@@ -344,7 +342,7 @@ def test_resume_complete_preflight_skips_data_loading_and_model_init(tmp_path: P
         mock.patch("torchgeo_bench.main.get_datasets") as get_datasets_mock,
         mock.patch("torchgeo_bench.main.instantiate") as instantiate_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     get_datasets_mock.assert_not_called()
     instantiate_mock.assert_not_called()
@@ -376,7 +374,7 @@ def test_resume_partial_completion_still_runs_missing_work(tmp_path: Path):
             ),
         ) as linear_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     data_mock.assert_called_once()
     instantiate_mock.assert_called_once()
@@ -404,7 +402,7 @@ def test_non_resume_still_runs_even_with_matching_existing_rows(tmp_path: Path):
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ) as knn_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     data_mock.assert_called_once()
     instantiate_mock.assert_called_once()
@@ -452,7 +450,7 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
             ),
         ) as linear_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     data_mock.assert_called_once()
     instantiate_mock.assert_called_once()
@@ -491,7 +489,7 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     knn_mock.assert_not_called()
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 1
@@ -515,7 +513,7 @@ def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ) as knn_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     knn_mock.assert_called_once()
     df = pd.read_csv(out)
@@ -531,7 +529,7 @@ def test_dataset_not_found_skips(tmp_path: Path):
     with mock.patch(
         "torchgeo_bench.main.get_datasets", side_effect=DatasetNotFoundError("missing")
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     assert not out.exists()
 
@@ -548,7 +546,7 @@ def test_csv_row_has_required_columns(tmp_path: Path):
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     required = {

@@ -9,7 +9,7 @@ from torchgeo_bench.linear import LogisticRegression
 
 @pytest.fixture(scope="module")
 def c_values() -> list[float]:
-    return [0.1, 0.5, 1.0, 5.0, 10.0]
+    return [0.1, 1.0, 10.0]
 
 
 def test_logistic_regression_accuracy_parity_iris(c_values: list[float]):

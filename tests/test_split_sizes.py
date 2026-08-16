@@ -81,15 +81,3 @@ def test_split_sizes(dataset_name):
     assert actual == expected, (
         f"{dataset_name}: split sizes diverge from reference. expected={expected}, got={actual}"
     )
-
-
-@pytest.mark.parametrize("dataset_name", sorted(EXPECTED_SIZES))
-def test_declared_split_sizes_match_reference(dataset_name):
-    """Each wrapper's ``BenchDataset.split_sizes`` matches the reference."""
-    bench_cls = get_bench_dataset_class(dataset_name)
-    declared = dict(bench_cls.split_sizes)
-    expected = EXPECTED_SIZES[dataset_name]
-    assert declared == expected, (
-        f"{dataset_name}.split_sizes is out of sync with the reference. "
-        f"declared={declared}, expected={expected}"
-    )

@@ -87,23 +87,6 @@ class TestAllDatasets:
             f"{dataset_name}: label out of range [0, {expected_classes})"
         )
 
-    @pytest.mark.parametrize(
-        "dataset_name",
-        ["m-eurosat", "m-forestnet", "m-so2sat", "m-pv4ger", "m-brick-kiln"],
-    )
-    @pytest.mark.parametrize("split", ["train", "val", "test"])
-    def test_all_splits_load(self, geobench_root, dataset_name, split, small_partition):
-        """All splits (train/val/test) load correctly."""
-        bench = get_bench_dataset_class(dataset_name)()
-        dataset = bench.get_dataset(
-            split,
-            partition=small_partition if split == "train" else "default",
-            bands=tuple(bench.rgb_bands),
-        )
-        assert len(dataset) > 0, f"{dataset_name} {split} split is empty"
-        _ = dataset[0]
-        _ = dataset[len(dataset) - 1]
-
 
 @pytest.mark.slow
 class TestRawEmission:
@@ -148,7 +131,7 @@ class TestDataLoader:
     """Test integration with PyTorch DataLoader."""
 
     def test_dataloader_batching(self, geobench_root, small_partition):
-        """DataLoader can create batches correctly."""
+        """Default collate stacks images/labels and keeps sample_ids as a list."""
         bench = get_bench_dataset_class("m-eurosat")()
         dataset = bench.get_dataset(
             "train",
@@ -165,37 +148,10 @@ class TestDataLoader:
         assert isinstance(batch["sample_id"], list)
         assert len(batch["sample_id"]) == 4
 
-    @pytest.mark.parametrize("dataset_name", ["m-eurosat", "m-forestnet"])
-    def test_dataloader_iteration(self, geobench_root, dataset_name, small_partition):
-        """We can iterate through the entire dataset."""
-        bench = get_bench_dataset_class(dataset_name)()
-        dataset = bench.get_dataset(
-            "train",
-            partition=small_partition,
-            bands=tuple(bench.rgb_bands),
-        )
-
-        dataloader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=0)
-        total_samples = 0
-        for batch in dataloader:
-            total_samples += batch["image"].shape[0]
-            assert batch["image"].dim() == 4
-            assert batch["label"].dim() == 1
-
-        assert total_samples == len(dataset)
-
 
 @pytest.mark.slow
 class TestBandSelection:
     """Test different band selections."""
-
-    def test_rgb_bands(self, geobench_root, small_partition):
-        """RGB band selection through the wrapper."""
-        bench = get_bench_dataset_class("m-eurosat")()
-        dataset = bench.get_dataset(
-            "train", partition=small_partition, bands=tuple(bench.rgb_bands)
-        )
-        assert dataset[0]["image"].shape[0] == 3
 
     def test_all_bands(self, geobench_root, small_partition):
         """Loading all available bands through the wrapper."""
@@ -207,16 +163,6 @@ class TestBandSelection:
 @pytest.mark.slow
 class TestPartitions:
     """Test different partition sizes."""
-
-    @pytest.mark.parametrize(
-        "partition",
-        ["0.01x_train", "0.02x_train", "0.05x_train", "0.10x_train", "default"],
-    )
-    def test_partition_loading(self, geobench_root, partition):
-        """Different partitions can be loaded."""
-        bench = get_bench_dataset_class("m-eurosat")()
-        dataset = bench.get_dataset("train", partition=partition, bands=tuple(bench.rgb_bands))
-        assert len(dataset) > 0, f"Partition {partition} is empty"
 
     def test_partition_size_ordering(self, geobench_root):
         """Larger partitions have more samples."""

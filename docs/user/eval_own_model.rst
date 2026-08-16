@@ -103,7 +103,7 @@ band-agnostic ViTs, or sensor-conditional routing.
 The framework makes this straightforward.  The pipeline **reinstantiates your
 class once per dataset**, so the ``bands`` argument passed to ``__init__``
 always reflects exactly the channels being loaded for that run.  Every
-:class:`~torchgeo_bench.datasets.base.BandSpec` in that list carries the
+:class:`~torchgeo_bench.datasets.BandSpec` in that list carries the
 dataset-level metadata that is available:
 
 .. list-table::
@@ -153,9 +153,9 @@ For a complete example see ``TorchGeoDOFABench`` in
 ``wavelength_um`` from each ``BandSpec`` at construction and passes the
 resulting list to ``backbone.forward_features(images, wavelengths=...)``.
 
-.. _eval-hydra-config:
+.. _eval-model-config:
 
-Create a Hydra config
+Create a model config
 ---------------------
 
 Create a model YAML file at :file:`src/torchgeo_bench/conf/model/new_model.yaml`.
@@ -175,7 +175,7 @@ The only required key is ``_target_``, which must point to your class:
 .. note::
 
    **Do not put** ``bands`` **in the YAML.**  The pipeline reads the current
-   dataset's :class:`~torchgeo_bench.datasets.base.BandSpec` list at runtime
+   dataset's :class:`~torchgeo_bench.datasets.BandSpec` list at runtime
    and injects it into the constructor automatically.  Adding it to the YAML
    will cause a ``TypeError`` (duplicate keyword argument).
 

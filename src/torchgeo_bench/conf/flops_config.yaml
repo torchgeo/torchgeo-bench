@@ -1,8 +1,5 @@
-defaults:
-  - model: ???
-  - _self_
-
 # Per-sample compute cost (GFLOPs) split into backbone / head / probe.
+# The model group is selected by the CLI (model=<name> / --model, required).
 #
 # There is no dataset axis: `_count_gflops` runs on a synthetic tensor, so
 # backbone GFLOPs at a fixed input shape is identical across datasets.  The
@@ -67,8 +64,3 @@ probe_num_classes: 10
 timing_batch_size: 64
 n_warmup: 3
 n_measure: 20
-
-hydra:
-  run:
-    dir: .
-  output_subdir: null

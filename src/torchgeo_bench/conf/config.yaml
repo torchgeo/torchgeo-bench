@@ -1,8 +1,6 @@
-# Primary Hydra configuration for torchgeo-bench
-
-defaults:
-  - model: rcf
-  - _self_
+# Primary configuration for torchgeo-bench.
+# The model group (conf/model/<name>.yaml) is selected by the CLI
+# (model=<name> / --model) and merged in under the `model` key.
 
 seed: 0
 device: cuda:0
@@ -105,7 +103,3 @@ eval:
     viz_dir: "viz"             # root output directory for visualizations
     n_viz_samples: 8           # number of test samples shown in the sample grid
 
-hydra:
-  run:
-    dir: .
-  output_subdir: null

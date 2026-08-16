@@ -78,7 +78,7 @@ def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int
             scale = window_size / h_tokens
         else:
             # Windowed layers: RoPE always covers one window — no change needed,
-            # but we recompute anyway to keep everything consistent.
+            # so this is a no-op.
             end_x, end_y = window_size, window_size
             scale = 1.0
 

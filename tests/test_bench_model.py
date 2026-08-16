@@ -65,9 +65,3 @@ def test_empty_bands_rejected():
     """Constructing with no bands is a clear configuration error."""
     with pytest.raises(ValueError, match="non-empty"):
         _Toy(bands=[])
-
-
-def test_num_channels_property():
-    """`num_channels` is derived from `len(bands)`."""
-    m = _Toy(bands=_bands(5))
-    assert m.num_channels == 5

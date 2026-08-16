@@ -5,72 +5,60 @@ This module owns the public ``get_datasets`` API used by
 :class:`~.base.BenchDataset` subclass.  All band resolution, resize
 transforms and DataLoader construction live here so the per-dataset wrappers
 stay focused on declaring metadata.
+
+Wrapper modules (and torch) import lazily: ``list_datasets`` reads only the
+registry spec below, and ``get_bench_dataset_class`` imports just the one
+module that defines the requested dataset.
 """
+
+from __future__ import annotations
 
 import logging
 import warnings
-from collections.abc import Callable, Iterable
-
-import torch
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
+from importlib import import_module
+from typing import TYPE_CHECKING
 
 from .base import BenchDataset
-from .benv2 import BENV2
-from .burn_scars import BurnScars
-from .caffe import CaFFe
-from .cloudsen12 import CloudSEN12
-from .dynamic_earthnet import DynamicEarthNet
-from .eurosat import EuroSAT, EuroSATSpatial
-from .flair2 import FLAIR2
-from .forestnet import Forestnet
-from .fotw import FieldsOfTheWorld
-from .kuro_siwo import KuroSiwo
-from .m_bigearthnet import MBigEarthNet
-from .m_brick_kiln import MBrickKiln
-from .m_eurosat import MEurosat
-from .m_forestnet import MForestnet
-from .m_pv4ger import MPv4ger
-from .m_so2sat import MSo2Sat
-from .pastis import PASTIS
-from .so2sat import So2Sat
-from .spacenet2 import SpaceNet2
-from .spacenet7 import SpaceNet7
-from .treesatai import TreeSatAI
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    import torch
+    from torch.utils.data import DataLoader, Dataset
 
 logger = logging.getLogger(__name__)
 
 
-_REGISTRY: dict[str, type[BenchDataset]] = {
-    cls.name: cls
-    for cls in [
-        # V1 classification
-        MEurosat,
-        MForestnet,
-        MSo2Sat,
-        MPv4ger,
-        MBrickKiln,
-        MBigEarthNet,
-        # V2 classification
-        BENV2,
-        TreeSatAI,
-        So2Sat,
-        Forestnet,
-        # V2 segmentation
-        CaFFe,
-        BurnScars,
-        CloudSEN12,
-        DynamicEarthNet,
-        FLAIR2,
-        FieldsOfTheWorld,
-        KuroSiwo,
-        PASTIS,
-        SpaceNet2,
-        SpaceNet7,
-        # torchgeo template
-        EuroSAT,
-        EuroSATSpatial,
-    ]
+# Dataset name -> (submodule, class name).  Kept as strings so that importing
+# this module stays cheap; ``get_bench_dataset_class`` resolves entries on
+# demand and verifies the class's ``name`` attribute matches its key.
+_REGISTRY_SPEC: dict[str, tuple[str, str]] = {
+    # V1 classification
+    "m-eurosat": ("m_eurosat", "MEurosat"),
+    "m-forestnet": ("m_forestnet", "MForestnet"),
+    "m-so2sat": ("m_so2sat", "MSo2Sat"),
+    "m-pv4ger": ("m_pv4ger", "MPv4ger"),
+    "m-brick-kiln": ("m_brick_kiln", "MBrickKiln"),
+    "m-bigearthnet": ("m_bigearthnet", "MBigEarthNet"),
+    # V2 classification
+    "benv2": ("benv2", "BENV2"),
+    "treesatai": ("treesatai", "TreeSatAI"),
+    "so2sat": ("so2sat", "So2Sat"),
+    "forestnet": ("forestnet", "Forestnet"),
+    # V2 segmentation
+    "caffe": ("caffe", "CaFFe"),
+    "burn_scars": ("burn_scars", "BurnScars"),
+    "cloudsen12": ("cloudsen12", "CloudSEN12"),
+    "dynamic_earthnet": ("dynamic_earthnet", "DynamicEarthNet"),
+    "flair2": ("flair2", "FLAIR2"),
+    "fotw": ("fotw", "FieldsOfTheWorld"),
+    "kuro_siwo": ("kuro_siwo", "KuroSiwo"),
+    "pastis": ("pastis", "PASTIS"),
+    "spacenet2": ("spacenet2", "SpaceNet2"),
+    "spacenet7": ("spacenet7", "SpaceNet7"),
+    # torchgeo template
+    "eurosat": ("eurosat", "EuroSAT"),
+    "eurosat-spatial": ("eurosat", "EuroSATSpatial"),
 }
 
 
@@ -86,15 +74,22 @@ def get_bench_dataset_class(name: str) -> type[BenchDataset]:
     Raises:
         KeyError: If *name* is not in the registry.
     """
-    if name not in _REGISTRY:
-        available = ", ".join(sorted(_REGISTRY))
+    if name not in _REGISTRY_SPEC:
+        available = ", ".join(sorted(_REGISTRY_SPEC))
         raise KeyError(f"Unknown dataset '{name}'. Available: {available}")
-    return _REGISTRY[name]
+    module_name, class_name = _REGISTRY_SPEC[name]
+    cls: type[BenchDataset] = getattr(import_module(f".{module_name}", __package__), class_name)
+    if cls.name != name:
+        raise RuntimeError(
+            f"Registry mismatch: entry '{name}' resolved to {class_name} "
+            f"whose declared name is '{cls.name}'."
+        )
+    return cls
 
 
 def list_datasets() -> list[str]:
     """Return sorted names of all registered benchmark datasets."""
-    return sorted(_REGISTRY)
+    return sorted(_REGISTRY_SPEC)
 
 
 def _make_resize_transform(
@@ -110,6 +105,8 @@ def _make_resize_transform(
         raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
     interp_mode = interpolation
     align_corners = False if interp_mode in ("bicubic", "bilinear") else None
+
+    import torch.nn.functional as F
 
     def _resize(sample: dict) -> dict:
         img: torch.Tensor = sample["image"]
@@ -154,6 +151,8 @@ def _make_resize_transform(
 
 
 def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
+    from torch.utils.data import DataLoader
+
     return DataLoader(
         ds,
         batch_size=batch_size,
@@ -179,7 +178,7 @@ def get_datasets(
     the model's responsibility (see :class:`~torchgeo_bench.models.interface.BenchModel`).
 
     Args:
-        dataset_name: Identifier registered in :data:`_REGISTRY`.
+        dataset_name: Identifier registered in ``_REGISTRY_SPEC``.
         partition_name: Partition name (only honoured by datasets where
             :attr:`~.base.BenchDataset.supports_partitions` is ``True``).
         batch_size: Batch size for the returned dataloaders.

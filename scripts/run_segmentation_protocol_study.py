@@ -7,31 +7,25 @@ import hashlib
 import json
 import logging
 import math
-import os
-import queue
 import re
 import subprocess
 import sys
-import threading
-import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-import torch
-from filelock import FileLock, Timeout
+from _seg_sweep_common import (
+    BaseGpuRunner,
+    Model,
+    RunnerConfig,
+    parse_gpus,
+    resolve_path,
+    run_exclusively,
+    torchgeo_bench_cli,
+    write_json_atomic,
+)
 
 logger = logging.getLogger(__name__)
 VAL_PATTERN = re.compile(r"Epoch (\d+) Val mIoU: (\S+)")
-
-
-@dataclass(frozen=True)
-class Model:
-    """Model preset and conservative cache-extraction batch size."""
-
-    config: str
-    name: str
-    loader_batch_size: int
-    probe_batch_size: int
 
 
 @dataclass(frozen=True)
@@ -135,40 +129,21 @@ def study_metadata(root: Path) -> dict[str, object]:
 
 
 @dataclass(frozen=True)
-class StudyConfig:
+class StudyConfig(RunnerConfig):
     """Runtime paths and resource controls."""
 
-    root: Path
-    cli: Path
     raw_dir: Path
-    state_dir: Path
     combined_output: Path
-    gpus: list[int]
-    num_workers: int
-    max_attempts: int
 
 
-class StudyRunner:
+class StudyRunner(BaseGpuRunner):
     """Dynamically schedule protocol-study jobs across GPUs."""
 
+    config: StudyConfig
+
     def __init__(self, config: StudyConfig) -> None:
-        self.config = config
-        self.jobs = build_jobs()
-        self.log_dir = config.state_dir / "logs"
-        self.events_path = config.state_dir / "events.jsonl"
-        self.summary_path = config.state_dir / "summary.json"
-        self.failed_path = config.state_dir / "failed_jobs.json"
+        super().__init__(config, build_jobs())
         self.metadata_path = config.raw_dir.parent / "metadata.json"
-        self.state_lock = threading.Lock()
-        self.failed_jobs: list[dict] = []
-        self.counts = {
-            "total": len(self.jobs),
-            "queued": 0,
-            "running": 0,
-            "completed": 0,
-            "failed": 0,
-            "skipped_existing": 0,
-        }
 
     def _output_path(self, job: Job) -> Path:
         return self.config.raw_dir / f"{job.job_id}.csv"
@@ -185,9 +160,7 @@ class StudyRunner:
                 f"{self.metadata_path} is missing but {len(existing_outputs)} raw outputs exist; "
                 "refusing to assign current metadata to results of unknown provenance."
             )
-        temporary = self.metadata_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(expected, indent=2, sort_keys=True) + "\n")
-        temporary.replace(self.metadata_path)
+        write_json_atomic(self.metadata_path, expected)
 
     def _is_complete(self, job: Job) -> bool:
         path = self._output_path(job)
@@ -229,28 +202,11 @@ class StudyRunner:
                 valid_logs.append(log_path)
         return len(valid_logs) == 1
 
-    def _write_summary_locked(self) -> None:
-        payload = {
-            **self.counts,
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    def _summary_extra(self) -> dict[str, object]:
+        return {
             "raw_dir": str(self.config.raw_dir),
             "combined_output": str(self.config.combined_output),
-            "gpus": self.config.gpus,
         }
-        temporary = self.summary_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        temporary.replace(self.summary_path)
-        self.failed_path.write_text(json.dumps(self.failed_jobs, indent=2, sort_keys=True) + "\n")
-
-    def _write_event(self, event: str, job: Job, **details: object) -> None:
-        record = {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "event": event,
-            "job_id": job.job_id,
-            **details,
-        }
-        with self.state_lock, self.events_path.open("a") as file:
-            file.write(json.dumps(record, sort_keys=True) + "\n")
 
     def _command(self, job: Job, gpu: int, attempt: int) -> list[str]:
         loader_batch = max(1, job.model.loader_batch_size // (2 ** (attempt - 1)))
@@ -283,69 +239,10 @@ class StudyRunner:
         for stale_log in self.log_dir.glob(f"{job.job_id}.attempt*.log"):
             stale_log.unlink()
         for attempt in range(1, self.config.max_attempts + 1):
-            command = self._command(job, gpu, attempt)
-            log_path = self.log_dir / f"{job.job_id}.attempt{attempt}.log"
-            self._write_event(
-                "started",
-                job,
-                gpu=gpu,
-                attempt=attempt,
-                command=command,
-                log=str(log_path),
-            )
-            environment = os.environ.copy()
-            environment["OMP_NUM_THREADS"] = "4"
-            environment["MKL_NUM_THREADS"] = "4"
-            started = time.monotonic()
-            with log_path.open("w") as log:
-                result = subprocess.run(
-                    command,
-                    cwd=self.config.root,
-                    env=environment,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    check=False,
-                )
-            elapsed = time.monotonic() - started
-            self._write_event(
-                "completed" if result.returncode == 0 else "attempt_failed",
-                job,
-                gpu=gpu,
-                attempt=attempt,
-                returncode=result.returncode,
-                elapsed_seconds=round(elapsed, 3),
-                log=str(log_path),
-            )
-            if result.returncode == 0 and self._is_complete(job):
+            if self._run_attempt(job, gpu, attempt) and self._is_complete(job):
                 return True
             output_path.unlink(missing_ok=True)
         return False
-
-    def _worker(self, gpu: int, jobs: queue.Queue[Job]) -> None:
-        while True:
-            try:
-                job = jobs.get_nowait()
-            except queue.Empty:
-                return
-            with self.state_lock:
-                self.counts["queued"] -= 1
-                self.counts["running"] += 1
-                self._write_summary_locked()
-            success = self._run_job(job, gpu)
-            with self.state_lock:
-                self.counts["running"] -= 1
-                self.counts["completed" if success else "failed"] += 1
-                if not success:
-                    self.failed_jobs.append(asdict(job))
-                self._write_summary_locked()
-                logger.info(
-                    "Progress: %d/%d completed, %d failed, %d running",
-                    self.counts["completed"],
-                    self.counts["total"],
-                    self.counts["failed"],
-                    self.counts["running"],
-                )
-            jobs.task_done()
 
     def run(self) -> None:
         """Run pending jobs and generate the combined analysis CSV."""
@@ -354,27 +251,8 @@ class StudyRunner:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._validate_metadata()
 
-        pending: list[Job] = []
-        for job in self.jobs:
-            if self._is_complete(job):
-                self.counts["skipped_existing"] += 1
-            else:
-                pending.append(job)
-        self.counts["queued"] = len(pending)
-        jobs: queue.Queue[Job] = queue.Queue()
-        for job in pending:
-            jobs.put(job)
-        with self.state_lock:
-            self._write_summary_locked()
-
-        workers = [
-            threading.Thread(target=self._worker, args=(gpu, jobs), name=f"gpu-{gpu}")
-            for gpu in self.config.gpus
-        ]
-        for thread in workers:
-            thread.start()
-        for thread in workers:
-            thread.join()
+        pending = self._partition_pending(self._is_complete)
+        self._dispatch(pending)
 
         missing = [job.job_id for job in self.jobs if not self._is_complete(job)]
         if self.counts["failed"] or missing:
@@ -401,21 +279,6 @@ class StudyRunner:
         )
 
 
-def _parse_gpus(value: str) -> list[int]:
-    available = torch.cuda.device_count()
-    gpus = list(range(available)) if value == "all" else [int(item) for item in value.split(",")]
-    if not gpus:
-        raise ValueError("No GPUs selected.")
-    invalid = [gpu for gpu in gpus if gpu < 0 or gpu >= available]
-    if invalid:
-        raise ValueError(f"Invalid GPU indices {invalid}; {available} devices are visible.")
-    return gpus
-
-
-def _resolve(root: Path, path: Path) -> Path:
-    return path if path.is_absolute() else root / path
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpus", default="0,1")
@@ -439,11 +302,11 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     config = StudyConfig(
         root=root,
-        cli=Path(sys.executable).with_name("torchgeo-bench"),
-        raw_dir=_resolve(root, args.raw_dir),
-        state_dir=_resolve(root, args.state_dir),
-        combined_output=_resolve(root, args.output),
-        gpus=_parse_gpus(args.gpus),
+        cli=torchgeo_bench_cli(),
+        raw_dir=resolve_path(root, args.raw_dir),
+        state_dir=resolve_path(root, args.state_dir),
+        combined_output=resolve_path(root, args.output),
+        gpus=parse_gpus(args.gpus),
         num_workers=args.num_workers,
         max_attempts=args.max_attempts,
     )
@@ -459,15 +322,11 @@ def main() -> None:
 
     config.raw_dir.mkdir(parents=True, exist_ok=True)
     config.state_dir.mkdir(parents=True, exist_ok=True)
-    output_lock = FileLock(str(config.raw_dir.parent / "runner.lock"))
-    state_lock = FileLock(str(config.state_dir / "runner.lock"))
-    try:
-        with output_lock.acquire(timeout=0), state_lock.acquire(timeout=0):
-            StudyRunner(config).run()
-    except Timeout as error:
-        raise RuntimeError(
-            "Another protocol study is using the output or state directory."
-        ) from error
+    run_exclusively(
+        StudyRunner(config).run,
+        [config.raw_dir.parent / "runner.lock", config.state_dir / "runner.lock"],
+        "Another protocol study is using the output or state directory.",
+    )
 
 
 if __name__ == "__main__":

@@ -74,17 +74,13 @@ def _subsample(X: np.ndarray, max_samples: int | None, seed: int) -> np.ndarray:
 def _two_nearest_distances(X: torch.Tensor) -> torch.Tensor:
     """Pairwise (d1, d2) for each row, matching torchid's knn precision.
 
-    We deliberately replicate torchid's exact squared-distance formula
-    (``x_sq + y_sq − 2·x·y.T`` then ``clamp_(min=0)``) instead of using
-    ``torch.cdist``.  ``cdist`` is more numerically stable on CUDA, so
-    its distances disagree with torchid's at the underflow boundary —
-    that mismatch was hiding a TwoNN nan we just debugged (sweep 88205,
-    Prithvi v1_100): the dedup said ``d1.min = 9.96e-3, zeros = 0`` but
-    torchid's internal knn produced ``d1 == 0`` for the same rows
-    because its squared-distance formula cancels to a tiny negative,
-    gets clamped to 0, and underflows to 0 in fp32 after ``.sqrt()``.
-
-    Replicating the formula keeps dedup and the estimator agreeing on
+    Replicates torchid's exact squared-distance formula
+    (``x_sq + y_sq − 2·x·y.T`` then ``clamp_(min=0)``) rather than using
+    ``torch.cdist``.  ``cdist`` is more stable on CUDA, so its distances
+    disagree with torchid's at the underflow boundary: torchid's formula
+    can cancel to a tiny negative, clamp to 0, and underflow to 0 in fp32
+    after ``.sqrt()`` for rows this function would otherwise call
+    non-degenerate.  Matching it keeps dedup and the estimator agreeing on
     which rows are degenerate.
     """
     x_sq = (X * X).sum(dim=1, keepdim=True)
@@ -142,8 +138,7 @@ def compute_intrinsic_dim(
 
     Returns:
         Mapping ``{estimator_name: dimension}``.  Estimator-internal
-        exceptions propagate; we no longer swallow them as NaN, because
-        doing so previously hid the TwoNN/fp32-zero-distance bug.
+        exceptions propagate rather than becoming NaN.
     """
     if X.ndim != 2:
         raise ValueError(f"X must be 2D, got shape {X.shape}")
@@ -157,11 +152,7 @@ def compute_intrinsic_dim(
 
     out: dict[str, float] = {}
     for name in estimators:
-        # Estimator-internal exceptions propagate so we actually fix the
-        # bug instead of silently emitting NaN to the CSV.  The only
-        # tolerated "soft" failure path is a numerical NaN/inf in
-        # dimension_ after a clean fit — even there we raise with a full
-        # diagnostic dump so the next person debugging has a real lead.
+        # Only a non-finite dimension_ after a clean fit is a soft failure.
         cls = _load_estimator(name)
         est: Any = cls().fit(X_tensor)
         value = float(est.dimension_)

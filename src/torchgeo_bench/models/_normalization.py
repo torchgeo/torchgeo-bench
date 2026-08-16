@@ -110,7 +110,6 @@ def build_normalizer(
 
         return _f
 
-    # MODEL_NATIVE
     if expected_input_unit is None:
         raise ValueError("model_native normalisation requires expected_input_unit")
     src = detect_input_unit(bands)
@@ -119,7 +118,7 @@ def build_normalizer(
     elif expected_input_unit == InputUnit.REFLECTANCE_0_1:
         convert = lambda x: to_reflectance(x, src)  # noqa: E731
     elif expected_input_unit == InputUnit.UINT8:
-        # bring to [0, 1] equivalent (most uint8-trained models then expect [0, 1] then ImageNet stats)
+        # uint8-trained models want [0, 1] before ImageNet stats, so route through reflectance.
         convert = lambda x: to_reflectance(x, src)  # noqa: E731
     else:
         convert = lambda x: x  # noqa: E731

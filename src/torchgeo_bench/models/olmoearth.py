@@ -1,14 +1,7 @@
-"""OlmoEarth model wrapper for torchgeo-bench.
+"""OlmoEarth (AI2) wrapper for torchgeo-bench.
 
-Wraps the OlmoEarth geospatial foundation model (AI2) for use with the
-BenchModel interface.  Multi-modal: the wrapper auto-selects OlmoEarth's
-``Modality.SENTINEL2_L2A`` / ``SENTINEL1`` / ``LANDSAT`` / ``NAIP`` based
-on the input ``BandSpec.sensor`` field and builds the right channel layout,
-band-set mask, and ``MaskedOlmoEarthSample`` field for each modality.
-
-Mixed-sensor inputs (e.g. m-so2sat with Sentinel-2 + SAR) are handled by
-splitting bands into per-sensor groups and populating the corresponding
-``MaskedOlmoEarthSample`` fields simultaneously.
+Sensor routing, mixed-sensor splitting, and band imputation are documented
+on :class:`OlmoEarthBenchModel`.
 
 Reference implementations (canonical first):
     https://github.com/allenai/olmoearth_pretrain/blob/main/docs/Inference-Quickstart.md
@@ -90,7 +83,7 @@ _MODALITY_INFO: dict[str, dict] = {
             "b01": 10,
             "water_vapour": 11,
             "b09": 11,
-            # B10 (cirrus) — OlmoEarth has no cirrus slot; skip gracefully.
+            # B10 (cirrus) — OlmoEarth has no cirrus slot; skipped.
             "swir_cirrus": None,
             "b10": None,
         },
@@ -206,7 +199,6 @@ _MODALITY_INFO: dict[str, dict] = {
         },
     },
 }
-# Aliases.
 _MODALITY_INFO["naip"] = _MODALITY_INFO["aerial"]
 
 
@@ -331,27 +323,6 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
                 "Select one sensor or add an explicit fusion policy."
             )
     return result
-
-
-def _resolve_modality(bands: list[BandSpec]) -> dict:
-    """Pick the OlmoEarth modality from the input ``BandSpec.sensor`` field.
-
-    Single-sensor convenience wrapper around ``_build_sensor_groups``.
-    Raises if the sensor isn't one we have a layout for, or if the bands
-    span multiple sensors (use ``_build_sensor_groups`` directly instead).
-    """
-    sensor = bands[0].sensor.lower()
-    if not all(b.sensor.lower() == sensor for b in bands):
-        sensors = sorted({b.sensor.lower() for b in bands})
-        raise ValueError(
-            f"OlmoEarth wrapper expects a single sensor per call; got mixed sensors {sensors}."
-        )
-    if sensor not in _MODALITY_INFO:
-        raise ValueError(
-            f"OlmoEarth wrapper has no layout for sensor '{sensor}'.  "
-            f"Supported: {sorted(set(_MODALITY_INFO))}."
-        )
-    return _MODALITY_INFO[sensor]
 
 
 class OlmoEarthBenchModel(BenchModel):

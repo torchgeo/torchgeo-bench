@@ -290,7 +290,7 @@ Training knobs
    * - ``criterion``
      - ``torch.nn.CrossEntropyLoss``
      - Instantiable loss criterion; provide an alternative via the
-       Hydra ``criterion`` block.
+       config ``criterion`` block.
    * - ``hidden_dim``
      - ``256``
      - Projection dimension for ``conv_block`` / ``fpn`` / ``dpt`` heads.

@@ -1,6 +1,6 @@
-"""Module entry point: ``python -m torchgeo_bench`` runs the Hydra benchmark."""
+"""Module entry point: ``python -m torchgeo_bench`` is the same as ``torchgeo-bench``."""
 
-from .main import main
+from .cli import main
 
 if __name__ == "__main__":
-    main()  # type: ignore[misc]  # pragma: no cover
+    main()  # pragma: no cover

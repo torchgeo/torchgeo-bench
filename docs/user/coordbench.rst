@@ -66,7 +66,7 @@ spatial-block cross-validation:
 Benchmarks and probes
 ---------------------
 
-``coord.names`` accepts ``all``, a comma-separated list, a Hydra list, a family
+``coord.names`` accepts ``all``, a comma-separated list, a YAML list, a family
 name, or an individual benchmark name. Available families are ``pdfm``,
 ``air_temp``, ``california_housing``, ``satclip``, ``sustainbench``,
 ``better_together``, ``cdc_places``, ``usavars``, ``country``, ``ecoregions``,
@@ -109,7 +109,7 @@ NumPy arrays and returns a finite ``(N, D)`` feature matrix.
 
 The repository includes a complete Fourier-feature example in
 :file:`examples/coordbench_location_encoder.py`. Run it from the repository
-root by replacing the built-in ``sincos`` target through Hydra:
+root by replacing the built-in ``sincos`` target through a config override:
 
 .. code-block:: console
 

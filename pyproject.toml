@@ -43,7 +43,6 @@ dependencies = [
   "geobenchv2>=0.9",
   "h5py>=3.8",
   "huggingface-hub>=0.20",
-  "hydra-core>=1.3",
   "numpy>=1.24",
   "omegaconf>=2.3",
   "pandas>=2",
@@ -56,7 +55,6 @@ dependencies = [
   "torchgeo>=0.9",
   "torchmetrics>=1.4",
   "torchvision>=0.15",
-  "typer>=0.9",
 ]
 optional-dependencies.all = [
   "torchgeo-bench[cleanlab]",

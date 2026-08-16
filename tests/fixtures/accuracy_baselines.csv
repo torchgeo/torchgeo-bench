@@ -59,3 +59,17 @@ timm/vit/vit_large_patch16_dinov3sat,vit_large_patch16_dinov3sat,m-pv4ger,knn5,a
 timm/vit/vit_large_patch16_dinov3sat,vit_large_patch16_dinov3sat,m-pv4ger,linear,accuracy,rgb,default,0.9529529529529528
 timm/vit/vit_large_patch16_dinov3sat,vit_large_patch16_dinov3sat,so2sat,knn5,accuracy,rgb,default,0.4371196754563894
 timm/vit/vit_large_patch16_dinov3sat,vit_large_patch16_dinov3sat,so2sat,linear,accuracy,rgb,default,0.6511156186612576
+rcf,rcf,m-eurosat,knn5,accuracy,rgb,default,0.611
+rcf,rcf,m-eurosat,linear,accuracy,rgb,default,0.769
+rcf,rcf,m-forestnet,knn5,accuracy,rgb,default,0.2276
+rcf,rcf,m-forestnet,linear,accuracy,rgb,default,0.4693
+imagestats,imagestats,m-eurosat,knn5,accuracy,rgb,default,0.597
+imagestats,imagestats,m-eurosat,linear,accuracy,rgb,default,0.696
+timm/mobilenetv3_small_100,mobilenetv3_small_100,m-eurosat,knn5,accuracy,rgb,default,0.815
+timm/mobilenetv3_small_100,mobilenetv3_small_100,m-eurosat,linear,accuracy,rgb,default,0.933
+timm/mobilenetv3_small_100,mobilenetv3_small_100,m-forestnet,knn5,accuracy,rgb,default,0.3565
+timm/mobilenetv3_small_100,mobilenetv3_small_100,m-forestnet,linear,accuracy,rgb,default,0.4975
+timm/resnet18,resnet18,m-eurosat,knn5,accuracy,rgb,default,0.858
+timm/resnet18,resnet18,m-eurosat,linear,accuracy,rgb,default,0.929
+timm/resnet18,resnet18,m-forestnet,knn5,accuracy,rgb,default,0.3666
+timm/resnet18,resnet18,m-forestnet,linear,accuracy,rgb,default,0.5277

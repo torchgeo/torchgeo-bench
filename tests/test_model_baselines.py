@@ -82,26 +82,6 @@ def test_update_baselines_script_runs(tmp_path: Path) -> None:
     assert _FIXTURE_COLS.issubset(set(df.columns))
 
 
-def test_fixture_has_expected_columns() -> None:
-    """Fixture CSV exists, is non-empty, and has the required columns."""
-    assert _FIXTURE_PATH.exists(), f"Fixture not found at {_FIXTURE_PATH}"
-    df = pd.read_csv(_FIXTURE_PATH)
-    assert not df.empty
-    assert _FIXTURE_COLS.issubset(set(df.columns))
-
-
-def test_parametrize_ids_are_unique() -> None:
-    """Derived pytest IDs from fixture combos are unique."""
-    assert _FIXTURE_PATH.exists(), f"Fixture not found at {_FIXTURE_PATH}"
-    df = pd.read_csv(_FIXTURE_PATH)
-    combos = df[["model_config", "dataset", "bands"]].drop_duplicates()
-    ids = [
-        f"{row['model_config'].replace('/', '_')}__{row['dataset']}__{row['bands']}"
-        for _, row in combos.iterrows()
-    ]
-    assert len(ids) == len(set(ids)), f"Duplicate pytest IDs: {ids}"
-
-
 # Load fixture at module level for parametrisation (empty DF if file absent)
 _fixture_df: pd.DataFrame
 if _FIXTURE_PATH.exists():

@@ -6,7 +6,7 @@ Everything is measured on a **synthetic** tensor: ``_count_gflops`` slices
 ``sample[:1]``, so no dataset is involved and no data is downloaded.  Band
 specs come off the dataset *class attributes* of ``cloudsen12``.
 
-The pipeline **imports** the real eval wiring (``_build_seg_probe_and_solver``,
+The pipeline **imports** the real eval wiring (``build_seg_probe_and_solver``,
 ``measure_profile``, ``_count_gflops``) rather than reimplementing it, so the
 graph that gets measured is the graph the eval runs.
 
@@ -19,20 +19,20 @@ import os
 import warnings
 from datetime import UTC
 
-import hydra
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
+from torchgeo_bench.config import instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.main import _build_seg_probe_and_solver, append_rows_atomic
 from torchgeo_bench.model_profile import (
     _count_gflops,
     _count_params,
     lenient_grad_hooks,
     measure_profile,
 )
+from torchgeo_bench.results import append_rows_atomic
+from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
@@ -86,10 +86,8 @@ def _is_terramind(cfg_model: DictConfig) -> bool:
 # `isinstance(exc, ValueError)` is far too wide: omegaconf's
 # InterpolationKeyError, ValidationError, UnsupportedValueType and
 # ConfigValueError are *all* ValueError subclasses, so a broken model config —
-# a `${seed}` interpolation with no `seed` key, say — was logged as "model is
-# incompatible with this band config", skipped, and the sweep exited 0 with the
-# model silently missing from the CSV.  A benchmark row that is absent by
-# accident but looks deliberate is the outcome most worth engineering against.
+# a `${seed}` interpolation with no `seed` key, say — would be logged as
+# "incompatible with this band config" and silently dropped from the CSV.
 _BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
     # torchgeo_bench.models._band_mapping
     "missing required model band",
@@ -111,9 +109,8 @@ _BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
 def _is_band_incompatibility(exc: BaseException) -> BaseException | None:
     """Return the band-incompatibility cause in *exc*'s chain, or None.
 
-    hydra wraps the target's exception in ``InstantiationException``, so the
-    ``ValueError`` a band-incompatible model raises never arrives unwrapped —
-    the chain has to be walked.  Only genuine band/shape mismatches match;
+    Model constructors may wrap the band-mismatch ``ValueError``, so the
+    exception chain is walked.  Only genuine band/shape mismatches match;
     anything else (a missing checkpoint, an exhausted disk quota, a malformed
     config) is a real failure and must propagate rather than be recorded as a
     skip.
@@ -163,12 +160,7 @@ def _build_model(
                 f"Measuring this pair would map through the wrong band table."
             )
     try:
-        return instantiate(
-            cfg_model,
-            bands=band_specs,
-            normalization=normalization,
-            _convert_="object",
-        )
+        return instantiate(cfg_model, bands=band_specs, normalization=normalization)
     except Exception as exc:
         cause = _is_band_incompatibility(exc)
         if cause is None:
@@ -314,13 +306,44 @@ def _seg_head_gflops(
     return float(counter.get_total_flops()) / 1e9
 
 
-@hydra.main(config_path="conf", config_name="flops_config", version_base=None)
-def main(cfg: DictConfig) -> None:
-    """Measure per-sample compute cost for one model config.
+def _flops_row(
+    base_meta: dict,
+    model: nn.Module,
+    image_size: int,
+    *,
+    task: str,
+    head_type: str = "",
+    **values: object,
+) -> dict:
+    """One compute_cost.csv row; metric slots default to None and are filled per task."""
+    row = {
+        **base_meta,
+        "task": task,
+        "head_type": head_type,
+        "gflops_backbone": None,
+        "gflops_head": None,
+        "gflops_probe": None,
+        "gflops_total": None,
+        "params_backbone_m": None,
+        "params_head_m": None,
+        "params_probe_m": None,
+        "feature_dim": None,
+        "pool": getattr(model, "pool", None),
+        "n_tokens": _n_tokens(model, image_size),
+        "throughput_samples_per_sec": None,
+        "latency_ms_per_batch_p50": None,
+        "peak_gpu_mem_gb": None,
+        "reserved_gpu_mem_gb": None,
+        "timing_batch_size": None,
+        "lenient_grad_hooks": True,
+        "measured_at": _now(),
+    }
+    row.update(values)
+    return row
 
-    Args:
-        cfg: Hydra configuration.
-    """
+
+def main(cfg: DictConfig) -> None:
+    """Measure per-sample compute cost for one model config."""
     output_path = str(cfg.output)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
@@ -342,14 +365,10 @@ def main(cfg: DictConfig) -> None:
 
     completed = _load_completed(output_path) if bool(cfg.resume) else frozenset()
 
-    # _build_seg_probe_and_solver reads segmentation.criterion / lr_scheduler,
-    # which model configs don't carry — they only override `layers` (and
-    # sometimes head_type). So merge the model's eval block over the base
-    # eval config, exactly as the real seg pipeline does.
-    #
-    # Struct mode has to come off first: several model configs carry eval keys
-    # this pipeline has no use for (`c_range`, for instance), and merging them
-    # into a struct config raises ConfigKeyError instead of just ignoring them.
+    # Merge the model's eval block over the base eval config (models only
+    # override `layers` / `head_type`). Struct mode comes off first: model
+    # configs carry eval keys this pipeline ignores (e.g. `c_range`), which
+    # would otherwise raise ConfigKeyError on merge.
     seg_eval_cfg = OmegaConf.create(OmegaConf.to_container(cfg.eval, resolve=True))
     OmegaConf.set_struct(seg_eval_cfg, False)
     if "eval" in cfg.model and cfg.model.eval is not None:
@@ -411,13 +430,9 @@ def main(cfg: DictConfig) -> None:
                 )
             except Exception as exc:
                 # Several wrappers only discover a band mismatch on the first
-                # forward pass rather than at construction: their band mapping
-                # runs inside `_forward_patch_features`, so `_build_model`
-                # returned a perfectly good object and the ValueError surfaces
-                # here.  It is the same skip one stage later, and it must not
-                # abort the invocation — the *other* band config is usually
-                # fine, and aborting is what cost every affected model its `s2`
-                # row in job 14176091.
+                # forward pass (their band mapping runs inside
+                # `_forward_patch_features`). Same skip one stage later; must
+                # not abort — the other band config is usually fine.
                 cause = _is_band_incompatibility(exc)
                 if cause is None:
                     raise
@@ -433,30 +448,25 @@ def main(cfg: DictConfig) -> None:
                 _free(device)
                 continue
             rows.append(
-                {
-                    **base_meta,
-                    "task": "classification",
-                    "head_type": "",
-                    "gflops_backbone": gflops_backbone,
-                    "gflops_head": None,
-                    "gflops_probe": gflops_probe,
-                    "gflops_total": (
+                _flops_row(
+                    base_meta,
+                    model,
+                    image_size,
+                    task="classification",
+                    gflops_backbone=gflops_backbone,
+                    gflops_probe=gflops_probe,
+                    gflops_total=(
                         None if gflops_backbone is None else gflops_backbone + gflops_probe
                     ),
-                    "params_backbone_m": metrics["params_m"],
-                    "params_head_m": None,
-                    "params_probe_m": params_probe_m,
-                    "feature_dim": feature_dim,
-                    "pool": getattr(model, "pool", None),
-                    "n_tokens": _n_tokens(model, image_size),
-                    "throughput_samples_per_sec": metrics["throughput_samples_per_sec"],
-                    "latency_ms_per_batch_p50": metrics["latency_ms_per_batch_p50"],
-                    "peak_gpu_mem_gb": metrics["peak_gpu_mem_gb"],
-                    "reserved_gpu_mem_gb": metrics["reserved_gpu_mem_gb"],
-                    "timing_batch_size": used_batch,
-                    "lenient_grad_hooks": True,
-                    "measured_at": _now(),
-                }
+                    params_backbone_m=metrics["params_m"],
+                    params_probe_m=params_probe_m,
+                    feature_dim=feature_dim,
+                    throughput_samples_per_sec=metrics["throughput_samples_per_sec"],
+                    latency_ms_per_batch_p50=metrics["latency_ms_per_batch_p50"],
+                    peak_gpu_mem_gb=metrics["peak_gpu_mem_gb"],
+                    reserved_gpu_mem_gb=metrics["reserved_gpu_mem_gb"],
+                    timing_batch_size=used_batch,
+                )
             )
             logger.info(
                 "%s/%s classification: backbone=%s GF probe=%.6f GF (D=%d)",
@@ -488,9 +498,9 @@ def main(cfg: DictConfig) -> None:
                 OmegaConf.create({"segmentation": {"head_type": head_type}}),
             )
             try:
-                # _build_seg_probe_and_solver runs _dry_run_channels(), a real
+                # build_seg_probe_and_solver runs _dry_run_channels(), a real
                 # forward pass, so the model must already be on-device.
-                probe, _solver = _build_seg_probe_and_solver(
+                probe, _solver = build_seg_probe_and_solver(
                     model, int(cfg.seg_num_classes), head_cfg, device, 1e-3
                 )
             except (ValueError, RuntimeError) as exc:
@@ -503,29 +513,18 @@ def main(cfg: DictConfig) -> None:
 
             gflops_head = _seg_head_gflops(probe, n_channels, image_size, device)
             rows.append(
-                {
-                    **base_meta,
-                    "num_classes": int(cfg.seg_num_classes),
-                    "task": "segmentation",
-                    "head_type": head_type,
-                    "gflops_backbone": None,
-                    "gflops_head": gflops_head,
-                    "gflops_probe": None,
-                    "gflops_total": None,
-                    "params_backbone_m": _count_params(model),
-                    "params_head_m": _count_params(probe.head),
-                    "params_probe_m": None,
-                    "feature_dim": sum(probe.channels_list),
-                    "pool": getattr(model, "pool", None),
-                    "n_tokens": _n_tokens(model, image_size),
-                    "throughput_samples_per_sec": None,
-                    "latency_ms_per_batch_p50": None,
-                    "peak_gpu_mem_gb": None,
-                    "reserved_gpu_mem_gb": None,
-                    "timing_batch_size": None,
-                    "lenient_grad_hooks": True,
-                    "measured_at": _now(),
-                }
+                _flops_row(
+                    base_meta,
+                    model,
+                    image_size,
+                    task="segmentation",
+                    head_type=head_type,
+                    num_classes=int(cfg.seg_num_classes),
+                    gflops_head=gflops_head,
+                    params_backbone_m=_count_params(model),
+                    params_head_m=_count_params(probe.head),
+                    feature_dim=sum(probe.channels_list),
+                )
             )
             logger.info(
                 "%s/%s segmentation head=%s: head=%.4f GF (taps=%s)",
