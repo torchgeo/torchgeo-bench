@@ -6,3 +6,12 @@ mode: gaussian         # or empirical
 stats_mode: mean       # mean | stdev | all
 seed: ${seed}
 name: rcf
+eval:
+  segmentation:
+    # RCF is a single-scale random filter bank: one tap, at the feature maps
+    # before pooling.  The decoder trains on top of a frozen (untrained) bank,
+    # which is the point of the baseline.
+    layers: ["rcf.spatial"]
+    # (B, 512, H-2, W-2) at stride 1 is ~50 MB per sample in float16, so the
+    # cache that suits strided backbones would need hundreds of GB here.
+    cache_features: false

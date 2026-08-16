@@ -22,6 +22,46 @@ from torchgeo_bench.datasets.base import BandSpec
 from .interface import BenchModel
 
 
+class RCFSpatialFeatures(nn.Module):
+    """The RCF feature maps before pooling, as a hookable module.
+
+    The random filter bank is applied functionally, so there is no submodule a
+    segmentation probe could hook.  This exposes the ``(B, features, H', W')``
+    activations under a stable name (``rcf.spatial``) so a decoder can be
+    trained on them with the filter bank frozen.
+    """
+
+    def __init__(self, parent: "RCF", dilation: int = 1) -> None:
+        super().__init__()
+        self._parent = [parent]  # list to keep it out of the module tree
+        self.dilation = dilation
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Return the positive and negated ReLU responses, concatenated."""
+        rcf = self._parent[0]
+        conv = F.conv2d(
+            x, rcf.weights, bias=rcf.biases, stride=1, padding=0, dilation=self.dilation
+        )
+        return torch.cat((F.relu(conv), F.relu(-conv)), dim=1)
+
+
+class RCFAvgPooled(nn.Module):
+    """Average-pooled view of the RCF feature map, as a hookable module.
+
+    A parameter-free pyramid over one random filter bank: coarser taps see a
+    wider context without stacking learned stages, so the decoder gets scale
+    variation while the encoder stays a fixed random projection.
+    """
+
+    def __init__(self, factor: int) -> None:
+        super().__init__()
+        self.factor = factor
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Return ``x`` average-pooled by ``factor``."""
+        return F.avg_pool2d(x, kernel_size=self.factor, stride=self.factor)
+
+
 class RCF(nn.Module):
     """This model extracts random convolutional features (RCFs) from its input.
 
@@ -79,6 +119,7 @@ class RCF(nn.Module):
         assert features % 2 == 0
         num_patches = features // 2
         self.stats_mode = stats_mode
+        self.emit_multiscale = False
         generator = torch.Generator()
         if seed:
             generator = generator.manual_seed(seed)
@@ -99,6 +140,14 @@ class RCF(nn.Module):
             ),
         )
         self.register_buffer("biases", torch.zeros(num_patches, requires_grad=False) + bias)
+        self.spatial = RCFSpatialFeatures(self)
+        # Parameter-free alternatives to the single full-resolution tap, all
+        # hookable by name so a config can select which the decoder consumes.
+        self.spatial_d2 = RCFSpatialFeatures(self, dilation=2)
+        self.spatial_d4 = RCFSpatialFeatures(self, dilation=4)
+        self.spatial_p2 = RCFAvgPooled(2)
+        self.spatial_p4 = RCFAvgPooled(4)
+        self.spatial_p8 = RCFAvgPooled(8)
 
         if mode == "empirical":
             assert dataset is not None
@@ -177,14 +226,18 @@ class RCF(nn.Module):
         Returns:
             a tensor of size (B, ``self.num_features``)
         """
-        x1a = F.relu(
-            F.conv2d(x, self.weights, bias=self.biases, stride=1, padding=0),
-            inplace=True,
-        )
-        x1b = F.relu(
-            -F.conv2d(x, self.weights, bias=self.biases, stride=1, padding=0),
-            inplace=False,
-        )
+        # Route through the spatial module so a probe hooking `spatial` sees
+        # the same activations this pooling consumes.
+        feats = self.spatial(x)
+        if self.emit_multiscale:
+            # Run the alternative taps so probes hooking them see activations.
+            self.spatial_p2(feats)
+            self.spatial_p4(feats)
+            self.spatial_p8(feats)
+            self.spatial_d2(x)
+            self.spatial_d4(x)
+        half = feats.shape[1] // 2
+        x1a, x1b = feats[:, :half], feats[:, half:]
 
         x1a_mean = torch.mean(x1a, dim=(2, 3), keepdim=False)
         x1b_mean = torch.mean(x1b, dim=(2, 3), keepdim=False)
@@ -262,6 +315,7 @@ class RCFBench(BenchModel):
         stats_mode: str = "mean",
         seed: int | None = None,
         dataset: NonGeoDataset | None = None,
+        multiscale: bool = False,
         **_kwargs,
     ) -> None:
         super().__init__(bands=bands, **_kwargs)
@@ -278,6 +332,12 @@ class RCFBench(BenchModel):
             seed=seed,
             dataset=dataset,
         )
+        self.rcf.emit_multiscale = multiscale
+
+    @property
+    def multiscale(self) -> bool:
+        """Whether the alternative segmentation taps are computed each forward."""
+        return self.rcf.emit_multiscale
 
     def _forward_patch_features(
         self,

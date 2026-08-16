@@ -141,7 +141,10 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _cfg_for_segmentation(
         out,
-        overrides=["eval.segmentation.cache_features=true", "eval.segmentation.batch_size=3"],
+        overrides=[
+            "model.eval.segmentation.cache_features=true",
+            "eval.segmentation.batch_size=3",
+        ],
     )
     probe, solver = _mock_probe_and_solver()
     cache = mock.Mock()

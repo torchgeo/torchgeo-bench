@@ -34,6 +34,8 @@ dataset:
   normalization: bandspec_zscore   # bandspec_zscore | model_native | minmax | minmax_zscore | identity
   bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
   image_size: 224           # e.g., 224; if null, no resizing
+  time_steps: null          # multi-temporal datasets only (pastis): dates per
+                            # sample; null keeps the upstream single-date default
   interpolation: bilinear     # area | bilinear | bicubic | nearest; used if image_size set
 
 # Evaluation settings
@@ -87,6 +89,10 @@ eval:
 
   segmentation:
     head_type: "fpn"
+    # How multi-temporal inputs (B, T, C, H, W) are reduced before the decoder:
+    # the backbone encodes each date, then features are pooled over T.  Only
+    # applies to datasets that actually deliver a time axis.
+    temporal_pool: "mean"   # mean | max
     layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10

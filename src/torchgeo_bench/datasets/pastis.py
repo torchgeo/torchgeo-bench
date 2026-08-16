@@ -1,7 +1,12 @@
 """PASTIS (GeoBench V2) benchmark dataset."""
 
+from collections.abc import Callable
+
+import torch.nn as nn
+from torch.utils.data import Dataset
+
 from .base import BandSpec
-from .geobench_v2 import _V2Dataset
+from .geobench_v2 import GeoBenchv2, _V2Dataset
 
 
 class PASTIS(_V2Dataset):
@@ -39,3 +44,36 @@ class PASTIS(_V2Dataset):
         BandSpec("s1_desc", "vv_vh_desc", "VV/VH_desc", mean=6.189, std=3.2708, min=-21.0469, max=44.75),
     ]
     # fmt: on
+
+    def get_dataset(
+        self,
+        split: str,
+        *,
+        partition: str = "default",
+        bands: tuple[str, ...] | None = None,
+        transform: Callable | None = None,
+        time_steps: int | None = None,
+    ) -> Dataset:
+        """Return a :class:`GeoBenchv2` split, optionally as a time series.
+
+        PASTIS is multi-temporal and upstream defaults to ``num_time_steps=1``,
+        i.e. the last acquisition only.  Crop type is a phenological signal, so
+        a single date discards most of what separates the classes; request more
+        dates and let the probe pool over them.  ``time_steps=None`` keeps the
+        single-date behaviour so existing results stay comparable.
+        """
+        del partition
+        band_order = self.build_band_order(bands)
+        extra: dict = {}
+        if time_steps is not None:
+            extra["num_time_steps"] = int(time_steps)
+            extra["temporal_output_format"] = "TCHW"
+        return GeoBenchv2(
+            root=self.data_root(),
+            dataset_name=self.name,
+            split=split,
+            band_order=band_order,
+            transforms=transform,
+            data_normalizer=nn.Identity,
+            **extra,
+        )

@@ -765,3 +765,74 @@ def test_gpu_tensor_cache_ordered_batches(mock_backbone, dummy_data):
     for _feats, masks in gpu_cache.ordered_batches(batch_size=1):
         total += masks.shape[0]
     assert total == len(cache)
+
+
+def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
+    """fit_cached falls back gracefully to DataLoader path on CPU (no CUDA available in CI)."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+
+    # On CPU, use_amp=False so GPUTensorCache path is skipped; DataLoader fallback runs.
+    val_miou = solver.fit_cached(
+        train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
+    )
+    assert isinstance(val_miou, float)
+    assert 0.0 <= val_miou <= 1.0
+
+
+def test_probe_raises_on_unknown_layer_name(mock_backbone):
+    """A layer name the backbone does not expose must fail, not warn.
+
+    Warning and continuing would build the head from whatever taps happened to
+    resolve and report a multi-scale mIoU for a probe that never ran at that
+    many scales.
+    """
+    with pytest.raises(ValueError, match="Segmentation layers not found"):
+        SegmentationProbe(mock_backbone, ["layer1", "layer_does_not_exist"], NUM_CLASSES)
+
+
+def test_probe_error_lists_available_layers(mock_backbone):
+    """The message must name real modules so the config can be fixed from it."""
+    with pytest.raises(ValueError) as excinfo:
+        SegmentationProbe(mock_backbone, ["nope"], NUM_CLASSES)
+    assert "layer1" in str(excinfo.value)
+
+
+def test_probe_pools_time_series_features(mock_backbone, dummy_data):
+    """A (B, T, C, H, W) input is encoded per date then pooled back to (B, ...).
+
+    PASTIS is multi-temporal and upstream hands back only the last acquisition
+    by default; crop type is phenological, so the probe has to accept a time
+    axis rather than the pipeline silently seeing one date.
+    """
+    probe = SegmentationProbe(mock_backbone, ["layer1", "layer2"], NUM_CLASSES, head_type="fpn")
+    images = dummy_data["image"]
+    single = probe(images)
+    series = probe(images.unsqueeze(1).repeat(1, 3, 1, 1, 1))
+    assert series.shape == single.shape
+    # Repeating one date must pool back to that date's logits.
+    assert torch.allclose(series, single, atol=1e-4)
+
+
+def test_probe_temporal_pool_max_differs_from_mean(mock_backbone, dummy_data):
+    """max and mean pooling must not silently be the same reduction."""
+    images = dummy_data["image"]
+    series = torch.stack([images, images * 0.5], dim=1)
+    mean_probe = SegmentationProbe(
+        mock_backbone, ["layer1"], NUM_CLASSES, head_type="fpn", temporal_pool="mean"
+    )
+    max_probe = SegmentationProbe(
+        mock_backbone, ["layer1"], NUM_CLASSES, head_type="fpn", temporal_pool="max"
+    )
+    max_probe.head.load_state_dict(mean_probe.head.state_dict())
+    assert not torch.allclose(mean_probe(series), max_probe(series), atol=1e-5)
+
+
+def test_probe_rejects_unknown_temporal_pool(mock_backbone):
+    with pytest.raises(ValueError, match="temporal_pool"):
+        SegmentationProbe(mock_backbone, ["layer1"], NUM_CLASSES, temporal_pool="median")

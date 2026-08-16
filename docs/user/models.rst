@@ -15,16 +15,28 @@ Every preset under :file:`src/torchgeo_bench/conf/model/` becomes a
 ``model=…`` selector for the ``run`` subcommand.  A preset's ``_target_``
 field resolves to a class re-exported from :mod:`torchgeo_bench.models`.
 
-Random Convolutional Features (RCF)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Random Convolutional Features (RCF) and MOSAIKS
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:class:`~torchgeo_bench.models.RCFBench`. Gaussian or empirical random
-features in the spirit of MOSAIKS.
+:class:`~torchgeo_bench.models.RCFBench` backs two presets that differ only in
+where the frozen filter bank comes from.  They are reported under separate
+names because calling both "RCF" obscured which filters produced a number:
+
+``rcf``
+   Gaussian random filters.
+
+``mosaiks``
+   MOSAIKS: ZCA-whitened patches sampled from the train split.
 
 .. code-block:: console
 
    $ torchgeo-bench run model=rcf
-   $ torchgeo-bench run model=rcf model.mode=empirical model.features=1024
+   $ torchgeo-bench run model=mosaiks
+   $ torchgeo-bench run model=rcf model.features=1024
+
+For segmentation both expose their pre-pooling feature maps as hookable
+modules (``rcf.spatial`` and the parameter-free ``rcf.spatial_p2/p4/p8``
+average-pooled views), so a decoder can be trained on a frozen bank.
 
 Image statistics baseline
 ^^^^^^^^^^^^^^^^^^^^^^^^^
