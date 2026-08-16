@@ -4,3 +4,9 @@ pretrained: true
 target_size: 224
 name: tt_prithvi_eo_v1_100_cls
 pool: cls
+eval:
+  segmentation:
+    # Isotropic transformer: no spatial pyramid, so tap 4 blocks
+    # spread across depth, deepest first.  Derived by measurement
+    # (experiments/scripts/introspect_seg_layers.py).
+    layers: ["blocks.11", "blocks.8", "blocks.5", "blocks.2"]
