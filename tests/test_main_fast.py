@@ -172,7 +172,7 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     assert data_mock.call_args.kwargs["image_size"] == 64
     assert data_mock.call_args.kwargs["interpolation"] == "area"
@@ -209,7 +209,7 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ) as knn_mock,
     ):
-        main.__wrapped__(changed_cfg)
+        main(changed_cfg)
 
     knn_mock.assert_called_once()
     rows = pd.read_csv(out)

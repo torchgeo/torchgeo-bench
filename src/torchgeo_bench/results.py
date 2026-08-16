@@ -69,6 +69,7 @@ def load_results(
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True, sort=False)
 
+
 def bootstrap_accuracy(
     y_true: np.ndarray,
     y_pred: np.ndarray,
@@ -151,6 +152,10 @@ class EvaluationResult:
     c_range_num: int
     merge_val: bool
     bootstrap: int
+    # Scale-MAE's dataset_overrides vary these per dataset (#215); they are
+    # part of the resume key, so they must round-trip through the CSV.
+    res: float | None = None
+    pool: str | None = None
     # Segmentation-only metrics (None for classification rows)
     fw_iou: float | None = None
     precision: float | None = None

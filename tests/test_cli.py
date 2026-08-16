@@ -123,3 +123,18 @@ def test_unknown_model_suggests_close_names() -> None:
 def test_bad_override_is_not_a_traceback() -> None:
     with pytest.raises(SystemExit, match="bad config override"):
         cli_main(["run", "typo.key=1"])
+
+
+def test_double_plus_override_sets_the_real_key():
+    """`++key=value` must override, not create a literal `+key` node.
+
+    Hydra spelled add as `+key` and add-or-override as `++key`; stripping only
+    one `+` left a `+model` section and silently no-op'd the intended override,
+    which the sweep scripts rely on.
+    """
+    from torchgeo_bench.config import compose_config
+
+    cfg = compose_config(["model=rcf", "++model.pool=cls", "+model.gsd=1.0"])
+    assert "+model" not in cfg
+    assert cfg.model.pool == "cls"
+    assert float(cfg.model.gsd) == 1.0

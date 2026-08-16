@@ -36,7 +36,6 @@ from torchgeo_bench.results import (  # noqa: F401  (EvaluationResult re-exporte
     metric_row,
     model_results_path,
 )
-from torchgeo_bench.segmentation_probe import SegmentationProbe
 from torchgeo_bench.resume import (  # noqa: F401  (re-exported for back-compat)
     KEY_COLS,
     _canonical_key_cell,
@@ -54,6 +53,13 @@ if TYPE_CHECKING:
     from torchgeo_bench.segmentation_task import SegMetrics
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_model_config(model_cfg: DictConfig, dataset_name: str) -> DictConfig:
+    """Apply a dataset-specific partial override to a model configuration."""
+    resolved = OmegaConf.create(OmegaConf.to_container(model_cfg, resolve=True))
+    dataset_overrides = resolved.pop("dataset_overrides", {})
+    return OmegaConf.merge(resolved, dataset_overrides.get(dataset_name, {}))
 
 
 def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
@@ -495,8 +501,6 @@ def evaluate_segmentation(
     return metrics, sum(probe.channels_list), float(seg_cfg.lr), actual_batch_size, preds
 
 
-
-
 def _resolve_output_path(cfg: DictConfig) -> str:
     """Return the CSV to write: explicit ``output``, else the model's own file.
 
@@ -513,7 +517,6 @@ def _resolve_output_path(cfg: DictConfig) -> str:
             "derived; set output= explicitly or add a name to the model config."
         )
     return str(model_results_path(cfg.get("results_dir", DEFAULT_RESULTS_DIR), name))
-
 
 
 def main(cfg: DictConfig) -> None:
@@ -594,7 +597,6 @@ def main(cfg: DictConfig) -> None:
         seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
         plan = _plan_dataset_run(
             cfg=cfg,
-            model_cfg=model_cfg,
             ds_name=ds_name,
             ds_cls=ds_cls,
             knn_k=knn_k,

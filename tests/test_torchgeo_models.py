@@ -17,6 +17,7 @@ from torchgeo_bench.models.torchgeo_models import (
     TorchGeoPanopticonBench,
     TorchGeoResNetBench,
     TorchGeoScaleMAEBench,
+    TorchGeoSwinBench,
     _adapt_first_conv,
     _extract_normalize_transforms,
     _resolve_torchgeo_factory,

@@ -77,7 +77,11 @@ def compose_config(
         if key == "model":
             model_name = value
         elif key.startswith("+"):
-            additions.append(f"{key[1:]}={value}")
+            # Hydra spelled "add" as `+key` and "add-or-override" as `++key`.
+            # Stripping only one `+` turned `++model.pool=cls` into a literal
+            # `+model` node instead of an override — a silent no-op on the real
+            # key, so strip the whole prefix.
+            additions.append(f"{key.lstrip('+')}={value}")
         else:
             dotlist.append(override)
 
