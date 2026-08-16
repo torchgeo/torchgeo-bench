@@ -14,6 +14,7 @@ from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.config import compose_config
 from torchgeo_bench.main import main, resolve_model_config
+from torchgeo_bench.resume import _resume_config_hash
 
 
 class _DictTensorDataset(Dataset):
@@ -104,6 +105,7 @@ def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, 
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
         "num_classes": 10,
+        "config_hash": _resume_config_hash(cfg),
         "metric_name": metric_name,
         "metric_value": 0.1,
     }
@@ -520,6 +522,28 @@ def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
     assert len(df) == 2
     assert pd.isna(df.iloc[0]["num_classes"])
     assert int(df.iloc[1]["num_classes"]) == 10
+
+
+def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
+    """A stale row must not suppress a run with a different random seed."""
+    out = tmp_path / "out.csv"
+    old_cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
+    cfg = _compose_cfg(out, overrides=["resume=true", "seed=7", "eval.skip_linear=true"])
+    pd.DataFrame([_resume_row(old_cfg, method="knn5", metric_name="accuracy")]).to_csv(
+        out, index=False
+    )
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ) as knn_mock,
+    ):
+        main(cfg)
+
+    knn_mock.assert_called_once()
 
 
 def test_dataset_not_found_skips(tmp_path: Path):

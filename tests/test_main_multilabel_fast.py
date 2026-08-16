@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from torchgeo_bench.main import main
+from torchgeo_bench.resume import _resume_config_hash
 
 from .test_main_fast import _compose_cfg, _DictTensorDataset
 
@@ -66,6 +67,7 @@ def _multilabel_resume_row(cfg) -> dict[str, object]:
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
         "num_classes": 43,
+        "config_hash": _resume_config_hash(cfg),
         "metric_name": "micro_mAP",
         "metric_value": 0.2,
     }

@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.main import main
+from torchgeo_bench.resume import _resume_config_hash
 
 from .test_main_fast import _chainable_model_mock, _compose_cfg
 
@@ -65,6 +66,7 @@ def _seg_resume_row(cfg, *, metric_name: str = "mIoU") -> dict[str, object]:
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
         "num_classes": 3,
+        "config_hash": _resume_config_hash(cfg),
         "metric_name": metric_name,
         "metric_value": 0.42,
     }

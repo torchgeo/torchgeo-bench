@@ -188,6 +188,9 @@ class EvaluationResult:
     partition: str
     bands: str
     num_classes: int
+    # Fingerprint of the full config (seed, device, dataset, eval, model); see
+    # ``resume._resume_config_hash``.  Part of the resume key.
+    config_hash: str
     c_range_start: float
     c_range_stop: float
     c_range_num: int
