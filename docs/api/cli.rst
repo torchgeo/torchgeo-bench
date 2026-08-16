@@ -21,6 +21,14 @@ The ``torchgeo-bench`` console script exposes three subcommands:
     Measures per-sample backbone, head, and probe compute. Overrides are
     composed from :file:`src/torchgeo_bench/conf/flops_config.yaml`.
 
+Config composition
+------------------
+
+.. currentmodule:: torchgeo_bench.config
+
+.. autofunction:: compose_config
+.. autofunction:: list_model_configs
+
 Benchmark entry point
 ---------------------
 

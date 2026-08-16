@@ -77,7 +77,7 @@ class EuroSAT(BenchDataset):
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
     ) -> Dataset:
-        """Return the wrapped torchgeo dataset (:attr:`_tg_class`) for the split."""
+        """Return the wrapped torchgeo dataset (``_tg_class``) for the split."""
         del partition
         band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
         return globals()[self._tg_class](

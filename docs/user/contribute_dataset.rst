@@ -48,7 +48,7 @@ Required class-level attributes:
 * ``name`` — unique string identifier used by the dataset registry and CLI
 * ``task`` — ``"classification"`` or ``"segmentation"``
 * ``num_classes`` — integer label count
-* ``bands`` — list of :class:`~torchgeo_bench.datasets.base.BandSpec` objects
+* ``bands`` — list of :class:`~torchgeo_bench.datasets.BandSpec` objects
   supplying per-channel sensor / wavelength / normalisation stats
 * ``split_sizes`` — dict with ``train``, ``val``, and ``test`` keys
 

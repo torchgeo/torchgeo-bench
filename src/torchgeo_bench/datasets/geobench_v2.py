@@ -129,7 +129,7 @@ class _V2Dataset(BenchDataset):
     band_order_strategy: Literal["flat", "by_sensor"] = "flat"
 
     #: Extra keyword arguments forwarded to the upstream loader. Applied last
-    #: in :meth:`get_dataset`, so entries here also override the defaults it
+    #: in ``get_dataset``, so entries here also override the defaults it
     #: builds (e.g. ``return_stacked_image``).
     upstream_kwargs: ClassVar[dict[str, object]] = {}
 

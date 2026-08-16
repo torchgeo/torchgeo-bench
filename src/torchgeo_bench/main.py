@@ -50,7 +50,7 @@ from torchgeo_bench.resume import (  # noqa: F401  (re-exported for back-compat)
 from torchgeo_bench.utils import extract_features
 
 if TYPE_CHECKING:
-    from torchgeo_bench.segmentation_task import SegMetrics
+    import torchgeo_bench.segmentation_task
 
 logger = logging.getLogger(__name__)
 
@@ -432,7 +432,7 @@ def evaluate_segmentation(
     device: torch.device,
     collect_preds: bool = False,
     verbose: bool = False,
-) -> "tuple[SegMetrics, int, float | None, int | None, torch.Tensor | None]":
+) -> "tuple[torchgeo_bench.segmentation_task.SegMetrics, int, float | None, int | None, torch.Tensor | None]":
     """Evaluate segmentation performance using a frozen-backbone segmentation probe.
 
     Trains a lightweight segmentation head on top of the frozen backbone and

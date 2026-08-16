@@ -178,7 +178,7 @@ def get_datasets(
     the model's responsibility (see :class:`~torchgeo_bench.models.interface.BenchModel`).
 
     Args:
-        dataset_name: Identifier registered in :data:`_REGISTRY_SPEC`.
+        dataset_name: Identifier registered in ``_REGISTRY_SPEC``.
         partition_name: Partition name (only honoured by datasets where
             :attr:`~.base.BenchDataset.supports_partitions` is ``True``).
         batch_size: Batch size for the returned dataloaders.

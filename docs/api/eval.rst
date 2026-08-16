@@ -52,6 +52,7 @@ Segmentation
 
 .. currentmodule:: torchgeo_bench.segmentation_task
 .. autoclass:: SegmentationSolver
+.. autoclass:: SegMetrics
 
 Intrinsic dimension
 -------------------
