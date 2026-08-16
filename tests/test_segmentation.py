@@ -118,6 +118,22 @@ def test_probe_unknown_head_type(mock_backbone):
         )
 
 
+def test_probe_rejects_missing_or_duplicate_layers(mock_backbone):
+    """Layer typos must fail before a benchmark starts extracting features."""
+    with pytest.raises(ValueError, match="not found"):
+        SegmentationProbe(
+            backbone=mock_backbone,
+            layer_names=["not_a_layer"],
+            num_classes=NUM_CLASSES,
+        )
+    with pytest.raises(ValueError, match="must be unique"):
+        SegmentationProbe(
+            backbone=mock_backbone,
+            layer_names=["layer1", "layer1"],
+            num_classes=NUM_CLASSES,
+        )
+
+
 def test_build_seg_probe_requires_spatial_layers(mock_backbone):
     """Segmentation evaluation refuses the global-output fallback."""
     eval_cfg = OmegaConf.create(

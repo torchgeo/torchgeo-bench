@@ -190,6 +190,12 @@ class SegmentationProbe(nn.Module):
         self._features: dict[str, torch.Tensor] = {}
         self.hooks: list[Any] = []
 
+        duplicate_layers = {name for name in self.layer_names if self.layer_names.count(name) > 1}
+        if duplicate_layers:
+            raise ValueError(
+                f"Segmentation probe layers must be unique; duplicates: {sorted(duplicate_layers)}."
+            )
+
         found_layers = set()
         for name, module in self.backbone.named_modules():
             if name.startswith("backbone."):

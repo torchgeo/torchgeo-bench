@@ -13,6 +13,7 @@ from torchgeo_bench.main import (
     _expand_dataset_list,
     _filter_completed_metric_rows,
     _normalize_bands_value,
+    _resolve_segmentation_runtime_config,
     evaluate_profile,
 )
 from torchgeo_bench.model_profile import measure_cpu_throughput
@@ -72,6 +73,34 @@ def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
             device=torch.device("cpu"),
             lr=1e-3,
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("epochs", 0, "positive integer"),
+        ("batch_size", 0, "positive integer"),
+        ("lr", 0.0, "finite positive number"),
+        ("cache_features", "true", "must be a boolean"),
+        ("cache_dtype", "bfloat16", "must be one of"),
+    ],
+)
+def test_segmentation_runtime_config_rejects_invalid_values(
+    field: str, value: object, message: str
+) -> None:
+    cfg = OmegaConf.create(
+        {
+            "epochs": 1,
+            "batch_size": 2,
+            "lr": 1e-3,
+            "cache_features": True,
+            "cache_dtype": "float16",
+            field: value,
+        }
+    )
+
+    with pytest.raises(ValueError, match=message):
+        _resolve_segmentation_runtime_config(cfg)
 
 
 def test_measure_cpu_throughput_budget_exceeded_returns_none_metrics() -> None:

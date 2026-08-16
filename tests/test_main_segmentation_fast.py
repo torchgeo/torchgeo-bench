@@ -121,6 +121,47 @@ def test_segmentation_row_emitted(tmp_path: Path):
     assert not df.loc[0, "merge_val"]
 
 
+def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
+    """Cached probes use their own configured batch size, not loader batch size."""
+    out = tmp_path / "out.csv"
+    cfg = _cfg_for_segmentation(
+        out,
+        overrides=["eval.segmentation.cache_features=true", "eval.segmentation.batch_size=3"],
+    )
+    probe, solver = _mock_probe_and_solver()
+    cache = mock.Mock()
+    probe.freeze_backbone = True
+    probe.extract_segmentation_features.return_value = cache
+    solver.evaluate_cached.return_value = {
+        "mIoU": 0.42,
+        "fw_IoU": 0.55,
+        "precision": 0.6,
+        "recall": 0.7,
+        "f1": 0.65,
+    }
+
+    with (
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
+        ),
+        mock.patch(
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
+            return_value=(probe, solver),
+        ),
+    ):
+        main(cfg)
+
+    solver.fit_cached.assert_called_once_with(
+        train_cache=cache,
+        val_cache=cache,
+        batch_size=3,
+        epochs=cfg.eval.segmentation.epochs,
+        verbose=cfg.verbose,
+    )
+    df = pd.read_csv(out)
+    assert df.loc[0, "best_batch_size"] == 3
+
+
 def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _cfg_for_segmentation(out, overrides=["eval.segmentation.save_viz=false"])
