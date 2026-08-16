@@ -9,11 +9,11 @@ import pandas as pd
 import pytest
 import torch
 from hydra import compose, initialize_config_module
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchgeo.datasets import DatasetNotFoundError
 
-from torchgeo_bench.main import main
+from torchgeo_bench.main import main, resolve_model_config
 
 
 class _DictTensorDataset(Dataset):
@@ -117,6 +117,105 @@ def _chainable_model_mock() -> mock.Mock:
     model.to.return_value = model
     model.eval.return_value = model
     return model
+
+
+def test_model_dataset_overrides_are_isolated_and_fall_back() -> None:
+    model_cfg = OmegaConf.create(
+        {
+            "_target_": "example.Model",
+            "name": "example",
+            "image_size": 224,
+            "res": 1.0,
+            "pool": "cls",
+            "dataset_overrides": {
+                "m-eurosat": {"image_size": 64, "res": 3.5},
+                "forestnet": {"image_size": 128, "pool": "mean"},
+            },
+        }
+    )
+
+    eurosat = resolve_model_config(model_cfg, "m-eurosat")
+    fallback = resolve_model_config(model_cfg, "unlisted")
+    forestnet = resolve_model_config(model_cfg, "forestnet")
+
+    assert (eurosat.image_size, eurosat.res, eurosat.pool) == (64, 3.5, "cls")
+    assert (fallback.image_size, fallback.res, fallback.pool) == (224, 1.0, "cls")
+    assert (forestnet.image_size, forestnet.res, forestnet.pool) == (128, 1.0, "mean")
+    assert "dataset_overrides" not in eurosat
+    assert model_cfg.image_size == 224
+
+
+def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -> None:
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
+    OmegaConf.update(
+        cfg,
+        "model.dataset_overrides",
+        {
+            "m-eurosat": {
+                "image_size": 64,
+                "interpolation": "area",
+                "res": 3.5,
+                "pool": "cls",
+            }
+        },
+        force_add=True,
+    )
+    model = _chainable_model_mock()
+
+    with (
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
+        ) as data_mock,
+        mock.patch("torchgeo_bench.main.instantiate", return_value=model) as instantiate_mock,
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
+    ):
+        main.__wrapped__(cfg)
+
+    assert data_mock.call_args.kwargs["image_size"] == 64
+    assert data_mock.call_args.kwargs["interpolation"] == "area"
+    instantiated_cfg = instantiate_mock.call_args.args[0]
+    assert instantiated_cfg.image_size == 64
+    assert instantiated_cfg.res == 3.5
+    assert instantiated_cfg.pool == "cls"
+    assert "interpolation" not in instantiated_cfg
+
+    first_row = pd.read_csv(out).iloc[0]
+    assert first_row["res"] == 3.5
+    assert first_row["pool"] == "cls"
+
+    changed_cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
+    OmegaConf.update(
+        changed_cfg,
+        "model.dataset_overrides",
+        {
+            "m-eurosat": {
+                "image_size": 64,
+                "interpolation": "area",
+                "res": 3.5,
+                "pool": "mean",
+            }
+        },
+        force_add=True,
+    )
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.instantiate", return_value=model),
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ) as knn_mock,
+    ):
+        main.__wrapped__(changed_cfg)
+
+    knn_mock.assert_called_once()
+    rows = pd.read_csv(out)
+    assert set(rows["pool"]) == {"cls", "mean"}
 
 
 def test_knn_row_emitted(tmp_path: Path):

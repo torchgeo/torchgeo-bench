@@ -34,7 +34,7 @@ from torchgeo_bench.datasets.base import BandSpec
 
 from ._input_units import InputUnit, convert_unit, detect_input_unit
 from ._normalization import NormalizationStrategy
-from ._pooling import VALID_MODES, pool_tokens
+from ._pooling import pool_tokens
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -206,9 +206,8 @@ def _warn_unit_mismatch(
 class _TorchGeoBackboneBench(BenchModel):
     """Shared scaffolding for torchgeo pretrained-weights wrappers.
 
-    Subclasses set :attr:`weights_input_unit` and implement
-    :meth:`_load_backbone` returning the headless ``nn.Module`` to call
-    on the normalized input.
+    Subclasses set :attr:`weights_input_unit` and implement their feature
+    extraction from the loaded backbone.
     """
 
     weights_input_unit: str | None = None
@@ -223,6 +222,7 @@ class _TorchGeoBackboneBench(BenchModel):
         auto_resize: bool,
         target_size: int | None,
         input_unit_check: str = "warn",
+        factory_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         # The pretraining scale is already named by weights_input_unit, so
@@ -235,7 +235,8 @@ class _TorchGeoBackboneBench(BenchModel):
         super().__init__(bands=bands, **kwargs)
         weights = _resolve_torchgeo_weights(weights_class, weights_member)
         self.weights = weights
-        self.backbone = self._load_backbone(weights, factory)
+        model_factory = _resolve_torchgeo_factory(factory)
+        self.backbone = model_factory(weights=weights, **(factory_kwargs or {}))
         self.auto_resize = auto_resize
         self.target_size = target_size
         self._weights_normalize = _extract_normalize_transforms(weights)
@@ -256,9 +257,6 @@ class _TorchGeoBackboneBench(BenchModel):
         self._weights_target_unit: InputUnit | None = _UNIT_EXPECTED_SOURCE.get(
             self.weights_input_unit or ""
         )
-
-    def _load_backbone(self, weights, factory: str) -> nn.Module:
-        return _resolve_torchgeo_factory(factory)(weights=weights)
 
     def _tiled_normalize(self, in_chans: int) -> nn.Sequential | None:
         """Build the pretrained normalization chain for ``in_chans`` channels.
@@ -480,21 +478,12 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
 # ---------------------------------------------------------------------------
 
 
-# GSD (m/px) per optical sensor. No SAR: Scale-MAE is RGB-only.
-_SCALEMAE_SENSOR_GSD: dict[str, float] = {
-    "s2": 10.0,
-    "landsat": 30.0,
-    "aerial": 1.0,
-    "naip": 1.0,
-}
-
-
 class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
     """Wrapper for torchgeo ScaleMAE-Large.
 
     ``forward_features()`` returns ``(B, N+1, D)`` tokens; ``pool`` selects
-    between CLS, mean-pooled patch tokens, or their concatenation.  ``res`` is
-    the input GSD (m/px) Scale-MAE conditions its positional embeddings on.
+    between CLS and mean-pooled post-normalization patch tokens. ``res`` is the
+    scale supplied to Scale-MAE's resolution-conditioned positional embedding.
     """
 
     weights_input_unit = "uint8_div255"
@@ -506,37 +495,39 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         factory: str = "scalemae_large_patch16",
         weights_class: str = "ScaleMAELarge16_Weights",
         weights_member: str = "FMOW_RGB",
-        auto_resize: bool = True,
-        target_size: int | None = 224,
+        auto_resize: bool = False,
+        target_size: int | None = None,
+        image_size: int | None = None,
         input_unit_check: str = "warn",
         pool: str = "cls",
-        gsd: float | None = None,
+        res: float = 1.0,
         **_kwargs: Any,
     ) -> None:
+        band_names = tuple(band.name.lower() for band in bands)
+        valid_rgb_orders = {("red", "green", "blue"), ("b04", "b03", "b02")}
+        if band_names not in valid_rgb_orders:
+            raise ValueError(
+                "Scale-MAE FMOW_RGB requires exactly three ordered RGB bands: "
+                "[red, green, blue] or [b04, b03, b02]."
+            )
+        if pool not in ("cls", "mean"):
+            raise ValueError("Scale-MAE pool must be 'cls' or 'mean'.")
+
+        image_size = image_size or target_size or 224
         super().__init__(
             bands=bands,
             factory=factory,
             weights_class=weights_class,
             weights_member=weights_member,
             auto_resize=auto_resize,
-            target_size=target_size,
+            target_size=image_size,
             input_unit_check=input_unit_check,
+            factory_kwargs={"img_size": image_size, "res": float(res)},
             **_kwargs,
         )
-        if pool not in VALID_MODES:
-            raise ValueError(f"pool={pool!r} not in {VALID_MODES}")
+        self.image_size = image_size
+        self.res = float(res)
         self.pool = pool
-        sensor = self.bands[0].sensor.lower()
-        if gsd is None and sensor not in _SCALEMAE_SENSOR_GSD:
-            raise ValueError(
-                f"No GSD known for sensor {sensor!r}; pass gsd= explicitly. "
-                f"Known sensors: {sorted(_SCALEMAE_SENSOR_GSD)}."
-            )
-        self.backbone.res = float(gsd) if gsd is not None else _SCALEMAE_SENSOR_GSD[sensor]
-        # Adapt ScaleMAE's patch-embed projection to N-channel input.
-        # Pretrained on fMoW RGB; adapted weights mean these N-band results
-        # should be marked as "adapted" rather than vanilla pretrained.
-        _adapt_first_conv(self.backbone, "patch_embed.proj", len(bands))
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:

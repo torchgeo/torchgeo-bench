@@ -1,7 +1,6 @@
 """Unit tests for torchgeo wrapper helpers and construction contracts."""
 
 import warnings
-from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -125,7 +124,7 @@ def test_normalize_transform_none_when_absent():
     assert _extract_normalize_transforms(_Weights()) is None
 
 
-def test_scalemae_pooling_cls_and_mean(monkeypatch):
+def install_tiny_scalemae_factory(monkeypatch, transforms: nn.Module | None = None):
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _PatchEmbed(nn.Module):
@@ -134,9 +133,11 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
             self.proj = nn.Conv2d(3, 8, 1)
 
     class _TinyScaleMAE(nn.Module):
-        def __init__(self) -> None:
+        def __init__(self, *, img_size: int, res: float) -> None:
             super().__init__()
             self.patch_embed = _PatchEmbed()
+            self.img_size = img_size
+            self.res = res
 
         def forward_features(self, images: torch.Tensor) -> torch.Tensor:
             batch = images.shape[0]
@@ -144,14 +145,27 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
             patches = torch.ones(batch, 4, 8, device=images.device)
             return torch.cat([cls, patches], dim=1)
 
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyScaleMAE()
-    )
+    calls: list[tuple[dict, _TinyScaleMAE]] = []
+
+    def factory(*, weights, **kwargs):
+        del weights
+        backbone = _TinyScaleMAE(**kwargs)
+        calls.append((kwargs, backbone))
+        return backbone
+
+    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _name: factory)
     monkeypatch.setattr(
         tg_models,
         "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+        lambda _weights_class, _weights_member: SimpleNamespace(
+            transforms=lambda: transforms if transforms is not None else nn.Identity()
+        ),
     )
+    return calls
+
+
+def test_scalemae_pooling_cls_and_mean(monkeypatch):
+    install_tiny_scalemae_factory(monkeypatch)
 
     bands = _rgb_bands()
     cls_model = TorchGeoScaleMAEBench(
@@ -175,49 +189,47 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
     assert torch.allclose(mean_out, torch.full_like(mean_out, 1.0))
 
 
-def _make_tiny_scalemae(monkeypatch, **kwargs):
+def test_scalemae_constructs_selected_grid_without_adapting_rgb_projection(monkeypatch):
     import torchgeo_bench.models.torchgeo_models as tg_models
 
-    class _PatchEmbed(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.proj = nn.Conv2d(3, 8, 1)
-
-    class _TinyScaleMAE(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.patch_embed = _PatchEmbed()
-            self.res = 1.0
-
-        def forward_features(self, images: torch.Tensor) -> torch.Tensor:
-            batch = images.shape[0]
-            return torch.ones(batch, 5, 8, device=images.device)
-
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyScaleMAE()
-    )
+    calls = install_tiny_scalemae_factory(monkeypatch)
     monkeypatch.setattr(
         tg_models,
-        "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+        "_adapt_first_conv",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not adapt")),
     )
-    return TorchGeoScaleMAEBench(normalization="identity", input_unit_check="ignore", **kwargs)
+    model = TorchGeoScaleMAEBench(
+        bands=_rgb_bands(),
+        normalization="identity",
+        input_unit_check="ignore",
+        image_size=64,
+        res=3.5,
+    )
+
+    kwargs, backbone = calls[0]
+    assert kwargs == {"img_size": 64, "res": 3.5}
+    assert backbone is model.backbone
+    assert model.backbone.patch_embed.proj.in_channels == 3
 
 
-def test_scalemae_gsd_from_sensor(monkeypatch):
-    model = _make_tiny_scalemae(monkeypatch, bands=_rgb_bands())
-    assert model.backbone.res == 10.0
+def test_scalemae_rejects_non_rgb_order() -> None:
+    with pytest.raises(ValueError, match="ordered RGB"):
+        TorchGeoScaleMAEBench(bands=list(reversed(_rgb_bands())))
 
 
-def test_scalemae_gsd_override(monkeypatch):
-    model = _make_tiny_scalemae(monkeypatch, bands=_rgb_bands(), gsd=0.3)
-    assert model.backbone.res == 0.3
+def test_scalemae_uses_bandspec_zscore_instead_of_checkpoint_transform(monkeypatch):
+    checkpoint_transform = nn.Sequential(
+        Normalize(mean=[0.0], std=[10000.0]),
+        Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    )
+    install_tiny_scalemae_factory(monkeypatch, transforms=checkpoint_transform)
+    model = TorchGeoScaleMAEBench(
+        bands=_rgb_bands(), normalization="bandspec_zscore", input_unit_check="ignore"
+    )
 
-
-def test_scalemae_unknown_sensor_raises(monkeypatch):
-    bands = [replace(b, sensor="unobtanium") for b in _rgb_bands()]
-    with pytest.raises(ValueError, match="No GSD known"):
-        _make_tiny_scalemae(monkeypatch, bands=bands)
+    at_dataset_mean = torch.full((1, 3, 8, 8), 1500.0)
+    normalized = model.normalize_inputs(at_dataset_mean)
+    assert torch.allclose(normalized, torch.zeros_like(normalized))
 
 
 def test_torchgeo_resnet_forward_shape(monkeypatch):
