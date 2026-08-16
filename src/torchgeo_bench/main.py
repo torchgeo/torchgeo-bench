@@ -92,6 +92,13 @@ def _normalize_bands_value(bands: object) -> str:
     return ",".join(items)
 
 
+def resolve_model_config(model_cfg: DictConfig, dataset_name: str) -> DictConfig:
+    """Apply a dataset-specific partial override to a model configuration."""
+    resolved = OmegaConf.create(OmegaConf.to_container(model_cfg, resolve=True))
+    dataset_overrides = resolved.pop("dataset_overrides", {})
+    return OmegaConf.merge(resolved, dataset_overrides.get(dataset_name, {}))
+
+
 def _canonical_key_cell(value: object) -> str:
     """Canonicalize a single resume-key cell to a comparable string.
 
@@ -253,6 +260,8 @@ class EvaluationResult:
     c_range_num: int
     merge_val: bool
     bootstrap: int
+    res: float | None = None
+    pool: str | None = None
     # Segmentation-only metrics (None for classification rows)
     fw_iou: float | None = None
     precision: float | None = None
@@ -290,6 +299,7 @@ class DatasetRunPlan:
 
 def _plan_dataset_run(
     cfg: DictConfig,
+    model_cfg: DictConfig,
     ds_name: str,
     ds_cls: type,
     knn_k: int,
@@ -299,7 +309,7 @@ def _plan_dataset_run(
     completed_metrics: dict[str, set[tuple[str, ...]]],
 ) -> DatasetRunPlan:
     """Plan which work remains for a dataset before loading data or a model."""
-    model_key = (cfg.model._target_, cfg.model.name, *config_tuple)
+    model_key = (model_cfg._target_, model_cfg.name, *config_tuple)
 
     if ds_cls.task == "segmentation":
         seg_key = (ds_name, seg_method, *model_key)
@@ -1055,6 +1065,8 @@ def main(cfg: DictConfig) -> None:
         "partition",
         "bands",
         "num_classes",
+        "res",
+        "pool",
     )
     completed_runs: set[tuple[str, ...]] = set()
     completed_metrics: dict[str, set[tuple[str, ...]]] = {}
@@ -1077,18 +1089,6 @@ def main(cfg: DictConfig) -> None:
     normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
-    # A model may declare its own input resolution, overriding the global
-    # ``dataset.image_size``.  Resolution-flexible backbones (e.g. OlmoEarth)
-    # set ``image_size: null`` to be evaluated at native resolution; fixed-grid
-    # ViTs omit the field and inherit ``dataset.image_size``.  The key is absent
-    # vs. present-but-null distinction, so a sentinel marks "inherit".
-    _model_image_size = OmegaConf.select(cfg, "model.image_size", default="__inherit__")
-    effective_image_size = (
-        getattr(cfg.dataset, "image_size", None)
-        if _model_image_size == "__inherit__"
-        else _model_image_size
-    )
-
     for ds_name in track(dataset_names, description="Datasets"):
         try:
             ds_cls = get_bench_dataset_class(ds_name)
@@ -1096,15 +1096,26 @@ def main(cfg: DictConfig) -> None:
             logger.warning(f"Skipping dataset {ds_name} (not in registry)")
             continue
 
+        model_cfg = resolve_model_config(cfg.model, ds_name)
+
+        effective_image_size = model_cfg.get("image_size", cfg.dataset.get("image_size"))
+        effective_interpolation = model_cfg.get(
+            "interpolation", cfg.dataset.get("interpolation", "bilinear")
+        )
+        model_res = model_cfg.get("res")
+        model_pool = model_cfg.get("pool")
+
         config_tuple = tuple(
             _canonical_key_cell(v)
             for v in (
                 normalization,
                 effective_image_size,
-                getattr(cfg.dataset, "interpolation", "bilinear"),
+                effective_interpolation,
                 cfg.dataset.partition,
                 bands_value,
                 ds_cls.num_classes,
+                model_res,
+                model_pool,
             )
         )
         eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
@@ -1112,6 +1123,7 @@ def main(cfg: DictConfig) -> None:
         seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
         plan = _plan_dataset_run(
             cfg=cfg,
+            model_cfg=model_cfg,
             ds_name=ds_name,
             ds_cls=ds_cls,
             knn_k=knn_k,
@@ -1137,7 +1149,7 @@ def main(cfg: DictConfig) -> None:
                 num_workers=int(cfg.dataset.get("num_workers", 8)),
                 return_val=True,
                 image_size=effective_image_size,
-                interpolation=getattr(cfg.dataset, "interpolation", "bilinear"),
+                interpolation=effective_interpolation,
                 bands=getattr(cfg.dataset, "bands", "rgb"),
             )
         except (FileNotFoundError, DatasetNotFoundError) as exc:
@@ -1171,9 +1183,9 @@ def main(cfg: DictConfig) -> None:
         # to OmegaConf-ify the BandSpec list.  `_convert_="object"` keeps
         # the rest of the model config as plain Python primitives.
         is_rcf_empirical = (
-            hasattr(cfg.model, "mode")
-            and str(cfg.model._target_).endswith("RCFBench")
-            and str(cfg.model.mode) == "empirical"
+            hasattr(model_cfg, "mode")
+            and str(model_cfg._target_).endswith("RCFBench")
+            and str(model_cfg.mode) == "empirical"
         )
         instantiate_kwargs: dict = {
             "bands": bands_list,
@@ -1182,17 +1194,19 @@ def main(cfg: DictConfig) -> None:
         }
         if is_rcf_empirical:
             instantiate_kwargs["dataset"] = train_dataset
-        model: BenchModel = instantiate(cfg.model, **instantiate_kwargs)
+        # Interpolation belongs to the loader rather than the model constructor.
+        model_cfg.pop("interpolation", None)
+        model: BenchModel = instantiate(model_cfg, **instantiate_kwargs)
         model.to(device).eval()
 
         common_meta = {
             "dataset": ds_name,
             "seed": cfg.seed,
-            "model": cfg.model._target_,
-            "name": cfg.model.name,
+            "model": model_cfg._target_,
+            "name": model_cfg.name,
             "normalization": normalization,
             "image_size": effective_image_size,
-            "interpolation": getattr(cfg.dataset, "interpolation", "bilinear"),
+            "interpolation": effective_interpolation,
             "partition": cfg.dataset.partition,
             "bands": bands_value,
             "num_classes": num_classes,
@@ -1201,6 +1215,8 @@ def main(cfg: DictConfig) -> None:
             "c_range_num": c_num,
             "merge_val": cfg.eval.merge_val,
             "bootstrap": cfg.eval.bootstrap,
+            "res": model_res,
+            "pool": model_pool,
         }
 
         if is_segmentation:
@@ -1259,7 +1275,7 @@ def main(cfg: DictConfig) -> None:
                 _class_names = list(getattr(train_dataset, "classes", None) or []) or None
                 save_segmentation_viz(
                     out_dir=viz_dir,
-                    model_name=cfg.model.name,
+                    model_name=model_cfg.name,
                     dataset_name=ds_name,
                     images=test_imgs_t,
                     gt_masks=test_gts_t,

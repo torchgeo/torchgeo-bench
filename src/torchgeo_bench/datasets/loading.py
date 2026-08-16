@@ -105,7 +105,7 @@ def _make_resize_transform(
     if image_size is None:
         return None
 
-    valid_modes = ("bicubic", "bilinear", "nearest")
+    valid_modes = ("area", "bicubic", "bilinear", "nearest")
     if interpolation not in valid_modes:
         raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
     interp_mode = interpolation

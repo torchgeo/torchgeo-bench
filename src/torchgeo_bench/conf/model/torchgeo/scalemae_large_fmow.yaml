@@ -5,9 +5,52 @@ _target_: torchgeo_bench.models.TorchGeoScaleMAEBench
 factory: scalemae_large_patch16
 weights_class: ScaleMAELarge16_Weights
 weights_member: FMOW_RGB
-auto_resize: true
-target_size: 224
+auto_resize: false
+image_size: 224
+interpolation: area
+res: 1.0
+pool: cls
 name: tgeo_scalemae_large_fmow
+
+# Selected on validation data only. Values are partial overrides of this
+# model config and are applied independently for each benchmark dataset.
+dataset_overrides:
+  m-eurosat:
+    image_size: 64
+    res: 3.5
+  so2sat:
+    image_size: 32
+    res: 7.0
+  m-so2sat:
+    image_size: 32
+    res: 7.0
+  eurosat-spatial:
+    image_size: 64
+    res: 3.5
+  m-brick-kiln:
+    image_size: 64
+    res: 10.0
+  m-bigearthnet:
+    image_size: 112
+    res: 2.0
+  treesatai:
+    image_size: 144
+    res: 1.5555556
+    pool: mean
+  m-pv4ger:
+    image_size: 96
+    res: 0.3333333
+  benv2:
+    image_size: 112
+    res: 2.0
+  forestnet:
+    image_size: 128
+    res: 1.75
+    pool: mean
+  m-forestnet:
+    image_size: 288
+    res: 0.7777778
+
 eval:
   segmentation:
     # ViT-Large (24 blocks, 1024ch). Coarse-to-fine: deepest block first.
