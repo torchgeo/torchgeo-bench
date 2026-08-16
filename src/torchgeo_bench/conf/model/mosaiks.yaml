@@ -4,7 +4,7 @@
 # Identical to rcf.yaml otherwise, so the pair isolates the filter source.
 _target_: torchgeo_bench.models.RCFBench
 features: 512
-kernel_size: 3
+kernel_size: 3   # k3 matched or beat k5 in the filter-source ablation
 mode: empirical        # sample filters from train patches (MOSAIKS)
 stats_mode: mean       # mean | stdev | all
 seed: ${seed}
