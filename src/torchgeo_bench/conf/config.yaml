@@ -4,8 +4,15 @@
 
 seed: 0
 device: cuda:0
-output: null   # explicit CSV path; null writes to <results_dir>/<model name>.csv
+output: null   # explicit CSV path; null writes knn/linear/seg rows to <results_dir>/<model name>.csv
+              # (and profile/intrinsic_dim rows to their own dirs below); non-null routes ALL row types here
 results_dir: results/models
+# Profile/intrinsic_dim rows are one-time model+hardware measurements, so by
+# default they land in their own per-model files instead of results_dir,
+# where a routine metrics rerun would rewrite/diff them unnecessarily.
+# Ignored when `output` is set explicitly (see above).
+profile_results_dir: results/profiles
+intrinsic_dim_results_dir: results/intrinsic_dim
 verbose: false
 resume: false  # if true, skip dataset+method combinations already in output CSV
 mode: image    # image (default GeoBench pipeline) | coord (CoordBench location-encoder track)

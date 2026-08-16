@@ -5,7 +5,22 @@ import pytest
 from omegaconf import OmegaConf
 
 from torchgeo_bench.main import _resolve_output_path
-from torchgeo_bench.results import load_results, model_results_path, sanitize_name
+from torchgeo_bench.results import (
+    DEFAULT_INTRINSIC_DIM_RESULTS_DIR,
+    DEFAULT_PROFILE_RESULTS_DIR,
+    DEFAULT_RESULTS_DIR,
+    load_results,
+    model_results_path,
+    sanitize_name,
+)
+
+
+def test_default_results_dirs_are_distinct():
+    dirs = {DEFAULT_RESULTS_DIR, DEFAULT_PROFILE_RESULTS_DIR, DEFAULT_INTRINSIC_DIM_RESULTS_DIR}
+    assert len(dirs) == 3
+    assert DEFAULT_RESULTS_DIR == "results/models"
+    assert DEFAULT_PROFILE_RESULTS_DIR == "results/profiles"
+    assert DEFAULT_INTRINSIC_DIM_RESULTS_DIR == "results/intrinsic_dim"
 
 
 def test_sanitize_name_replaces_unsafe_characters():

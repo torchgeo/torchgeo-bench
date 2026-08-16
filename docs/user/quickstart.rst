@@ -103,7 +103,10 @@ Inspect the results
 
 By default results land in ``results/models/<model name>.csv``.  Those files **ship
 pre-populated** with reference results, so to start from a clean slate write to
-your own file with ``output=results/my_run.csv``.  Each row is a flat
+your own file with ``output=results/my_run.csv``.  Profile/intrinsic-dim
+measurements go to their own ``results/profiles/`` and
+``results/intrinsic_dim/`` files -- see :doc:`results-format` for why they're
+split out.  Each row is a flat
 :class:`~torchgeo_bench.main.EvaluationResult`, so you can read it directly with
 pandas:
 

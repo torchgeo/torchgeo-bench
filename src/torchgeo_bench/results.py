@@ -5,8 +5,12 @@ downstream consumers in ``scripts/`` and ``experiments/``, so treat it as
 frozen: append-only, never reorder.
 
 Each run writes to ``results/models/<model name>.csv`` rather than one shared
-CSV, so adding or re-running a model touches only that model's file.  Use
-:func:`load_results` to read the whole benchmark back as a single DataFrame.
+CSV, so adding or re-running a model touches only that model's file.  Profile
+and intrinsic-dim rows -- one-time model+hardware measurements -- are split
+into their own ``results/profiles/<model name>.csv`` and
+``results/intrinsic_dim/<model name>.csv`` files so a routine metrics rerun
+doesn't touch them.  Use :func:`load_results` to read a whole directory back
+as a single DataFrame.
 """
 
 import io
@@ -23,6 +27,12 @@ import torch
 logger = logging.getLogger(__name__)
 
 DEFAULT_RESULTS_DIR = "results/models"
+# Profile (throughput/latency/params) and intrinsic-dim rows are one-time
+# model+hardware measurements, so they live in their own per-model files
+# instead of the metrics file that routine classification/segmentation
+# sweeps rewrite.
+DEFAULT_PROFILE_RESULTS_DIR = "results/profiles"
+DEFAULT_INTRINSIC_DIM_RESULTS_DIR = "results/intrinsic_dim"
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
