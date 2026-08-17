@@ -191,6 +191,16 @@ _CLAY_WAVELENGTH_BY_BAND: dict[str, float] = dict(
     zip(CLAY_BANDS, _CLAY_WAVELENGTHS_UM, strict=True)
 )
 
+# Sentinel-2-L2A per-band pretraining stats, raw DN scale, from Clay's own
+# https://github.com/Clay-foundation/model/blob/main/configs/metadata.yaml
+# (nir/swir16/swir22 renamed to this file's nir/swir1/swir2).
+_CLAY_PRETRAIN_MEAN_BY_BAND: dict[str, float] = dict(
+    zip(CLAY_BANDS, [1105.0, 1355.0, 1552.0, 2743.0, 2388.0, 1835.0], strict=True)
+)
+_CLAY_PRETRAIN_STD_BY_BAND: dict[str, float] = dict(
+    zip(CLAY_BANDS, [1809.0, 1757.0, 1888.0, 1742.0, 1470.0, 1379.0], strict=True)
+)
+
 
 class TerraTorchClayBench(_TerraTorchBench):
     """Clay v1.5 — S2 bands @ 256, conditioned on per-band ``waves`` (µm) and ``gsd``.
@@ -204,7 +214,9 @@ class TerraTorchClayBench(_TerraTorchBench):
     ``waves`` values exactly as they were.
     """
 
-    expected_input_unit = InputUnit.REFLECTANCE_0_1
+    # Clay's published mean/std (see _CLAY_PRETRAIN_MEAN_BY_BAND) are raw S2
+    # digital numbers, not 0-1 reflectance.
+    expected_input_unit = InputUnit.S2_DN
 
     def __init__(
         self,
@@ -219,8 +231,18 @@ class TerraTorchClayBench(_TerraTorchBench):
     ) -> None:
         # Resolved before super().__init__ so a band set with no Clay band at
         # all raises before the pretrained checkpoint is downloaded.
-        _, model_bands = select_src_bands(bands, CLAY_BANDS, preferred_sensors=("s2",))
+        indices, model_bands = select_src_bands(bands, CLAY_BANDS, preferred_sensors=("s2",))
         self.backbone_name = backbone_name
+        # model_native standardises with Clay's published per-band statistics.
+        # normalize_inputs runs on the dataset's raw channels, before
+        # _prepare_input maps them onto Clay's band slots; bands Clay does not
+        # consume keep mean 0 / std 1 and are dropped by the mapping anyway.
+        mean = [0.0] * len(bands)
+        std = [1.0] * len(bands)
+        for name, ds_idx in zip(model_bands, indices, strict=True):
+            mean[ds_idx] = _CLAY_PRETRAIN_MEAN_BY_BAND[name]
+            std[ds_idx] = _CLAY_PRETRAIN_STD_BY_BAND[name]
+        self.pretrain_mean, self.pretrain_std = mean, std
         super().__init__(
             bands=bands,
             target_size=target_size,
