@@ -445,6 +445,7 @@ def build_seg_probe_and_solver(
         num_classes=num_classes,
         head_type=eval_cfg.segmentation.head_type,
         freeze_backbone=True,
+        temporal_pool=str(eval_cfg.segmentation.get("temporal_pool", "mean")),
     )
     criterion = instantiate(eval_cfg.segmentation.criterion)
     criterion_ignore = getattr(criterion, "ignore_index", None)
