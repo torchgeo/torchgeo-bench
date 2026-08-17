@@ -29,6 +29,8 @@ from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import measure_cpu_throughput, measure_profile
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.results import (  # noqa: F401  (EvaluationResult re-exported)
+    DEFAULT_INTRINSIC_DIM_RESULTS_DIR,
+    DEFAULT_PROFILE_RESULTS_DIR,
     DEFAULT_RESULTS_DIR,
     EvaluationResult,
     append_rows_atomic,
@@ -572,6 +574,36 @@ def _resolve_output_path(cfg: DictConfig) -> str:
     return str(model_results_path(cfg.get("results_dir", DEFAULT_RESULTS_DIR), name))
 
 
+def _resolve_side_output_path(
+    cfg: DictConfig, output_path: str, dir_key: str, default_dir: str
+) -> str:
+    """Return the CSV for a one-time measurement kind (profile/intrinsic_dim).
+
+    Mirrors :func:`_resolve_output_path`'s "``output=`` wins" rule: when the
+    caller set an explicit ``output``, every row type -- knn/linear/seg as
+    well as profile/intrinsic_dim -- lands in that single file, unchanged
+    from prior behavior. Only the default per-model routing path splits
+    profile/intrinsic_dim into their own directory.
+    """
+    if cfg.get("output"):
+        return output_path
+    name = cfg.model.get("name") if "name" in cfg.model else None
+    if not name:
+        raise ValueError(
+            "model config has no 'name', so no per-model results file can be "
+            "derived; set output= explicitly or add a name to the model config."
+        )
+    return str(model_results_path(cfg.get(dir_key, default_dir), name))
+
+
+def _merge_completed_metrics(
+    base: dict[str, set[tuple[str, ...]]], other: dict[str, set[tuple[str, ...]]]
+) -> None:
+    """Union ``other``'s per-metric resume-key sets into ``base`` in place."""
+    for metric_name, keys in other.items():
+        base.setdefault(metric_name, set()).update(keys)
+
+
 def main(cfg: DictConfig) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)
@@ -592,9 +624,18 @@ def main(cfg: DictConfig) -> None:
     device = torch.device(cfg.device)
 
     output_path = _resolve_output_path(cfg)
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    profile_output_path = _resolve_side_output_path(
+        cfg, output_path, "profile_results_dir", DEFAULT_PROFILE_RESULTS_DIR
+    )
+    intrinsic_dim_output_path = _resolve_side_output_path(
+        cfg, output_path, "intrinsic_dim_results_dir", DEFAULT_INTRINSIC_DIM_RESULTS_DIR
+    )
+    for path in {output_path, profile_output_path, intrinsic_dim_output_path}:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
     all_rows: list[dict] = []
+    id_out_rows: list[dict] = []
+    profile_out_rows: list[dict] = []
     model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
     if model_eval is not None and model_eval.get("c_range", None) is not None:
         c_start, c_stop, c_num = model_eval.c_range
@@ -610,6 +651,14 @@ def main(cfg: DictConfig) -> None:
         completed_runs, completed_metrics = load_completed(output_path)
         logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {output_path}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
+    if cfg.resume:
+        # Profile/intrinsic_dim rows may live in their own per-model files
+        # (default routing, no explicit output=); merge their completed
+        # metrics in too so resume still skips already-measured work.
+        for side_path in {profile_output_path, intrinsic_dim_output_path} - {output_path}:
+            if os.path.exists(side_path):
+                _, side_metrics = load_completed(side_path)
+                _merge_completed_metrics(completed_metrics, side_metrics)
 
     # Selectable input-normalisation strategy; recorded in the CSV so
     # ablations across strategies are distinguishable.
@@ -902,7 +951,7 @@ def main(cfg: DictConfig) -> None:
                 )
                 if cfg.resume:
                     id_rows = _filter_completed_metric_rows(id_rows, completed_metrics, key_cols)
-                all_rows.extend(id_rows)
+                id_out_rows.extend(id_rows)
 
             if not plan.skip_profile:
                 profile_cfg = cfg.eval.profile
@@ -926,9 +975,14 @@ def main(cfg: DictConfig) -> None:
                     profile_rows = _filter_completed_metric_rows(
                         profile_rows, completed_metrics, key_cols
                     )
-                all_rows.extend(profile_rows)
+                profile_out_rows.extend(profile_rows)
 
         append_rows_atomic(output_path, all_rows)
         all_rows.clear()
+        append_rows_atomic(intrinsic_dim_output_path, id_out_rows)
+        id_out_rows.clear()
+        append_rows_atomic(profile_output_path, profile_out_rows)
+        profile_out_rows.clear()
 
-    logger.info(f"Benchmark complete. Results appended to {output_path}")
+    result_paths = ", ".join(sorted({output_path, intrinsic_dim_output_path, profile_output_path}))
+    logger.info(f"Benchmark complete. Results appended to {result_paths}")

@@ -229,6 +229,12 @@ interrupted run can be continued against the same file:
 Results
 -------
 
-Results are written to ``results/models/<model name>.csv`` by default, or to the
-path set via ``output=`` (see above).
+Results are written to ``results/models/<model name>.csv`` by default (or to
+the path set via ``output=``, see above). Profile and intrinsic-dim rows --
+one-time model+hardware measurements enabled by ``eval.profile.enabled`` /
+``eval.intrinsic_dim.enabled`` -- go to their own
+``results/profiles/<model name>.csv`` and
+``results/intrinsic_dim/<model name>.csv`` files instead, so a routine
+metrics rerun never touches them. Setting ``output=`` explicitly sends
+every row type to that one file.
 For the full column reference and how to read the CSV, see :doc:`results-format`.

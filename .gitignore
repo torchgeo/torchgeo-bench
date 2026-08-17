@@ -6,6 +6,12 @@ results/contributed/*.csv
 # adds its own file instead of editing a shared one.
 !results/models/
 !results/models/*.csv
+# Profile/intrinsic-dim rows are one-time model+hardware measurements, split
+# out of results/models/ so routine metrics reruns don't touch them.
+!results/profiles/
+!results/profiles/*.csv
+!results/intrinsic_dim/
+!results/intrinsic_dim/*.csv
 !results/legacy/
 !results/legacy/*.csv
 experiments/scripts/*
@@ -24,6 +30,7 @@ experiments/scripts/*
 !experiments/scripts/cleanlab_per_class_multilabel.py
 !experiments/scripts/cleanlab_per_class_singlelabel.py
 !experiments/scripts/analyze_compute_cost.py
+!experiments/scripts/migrate_split_profile_intrinsic_dim.py
 !experiments/scripts/cost/
 experiments/scripts/cost/*
 !experiments/scripts/cost/gpu_prices.yaml
@@ -114,6 +121,12 @@ data/
 # adds its own file instead of editing a shared one.
 !results/models/
 !results/models/*.csv
+# Profile/intrinsic-dim rows are one-time model+hardware measurements, split
+# out of results/models/ so routine metrics reruns don't touch them.
+!results/profiles/
+!results/profiles/*.csv
+!results/intrinsic_dim/
+!results/intrinsic_dim/*.csv
 !results/legacy/
 !results/legacy/*.csv
 !conf/**/*.json

@@ -1,6 +1,7 @@
 """Regenerate ``docs/_static/results-explorer.html`` from result snapshots.
 
-Reads ``results/models/*.csv``, writes today's snapshot to
+Reads ``results/models/*.csv``, ``results/profiles/*.csv``, and
+``results/intrinsic_dim/*.csv``, writes today's snapshot to
 ``docs/_static/_results_snapshots/<label>.json``, then re-inlines every
 committed snapshot (newest first) into the explorer HTML and bumps the
 masthead.  Keeps ``knn5`` / ``linear`` / ``profile`` rows; the explorer's
@@ -20,6 +21,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "results" / "models"
+# Profile/intrinsic_dim rows live in their own per-model files, separate
+# from the knn5/linear/seg metrics files under RESULTS_DIR.
+PROFILE_RESULTS_DIR = ROOT / "results" / "profiles"
+INTRINSIC_DIM_RESULTS_DIR = ROOT / "results" / "intrinsic_dim"
 HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
 SNAPSHOT_DIR = ROOT / "docs" / "_static" / "_results_snapshots"
 ALLOWED_METHODS = ("knn5", "linear", "profile", "intrinsic_dim")
@@ -83,8 +88,11 @@ BOOL = {"merge_val"}
 
 
 def _iter_result_rows():
-    """Yield rows from every per-model results CSV."""
-    for path in sorted(RESULTS_DIR.glob("*.csv")):
+    """Yield rows from every per-model results CSV across all three dirs."""
+    paths = sorted(RESULTS_DIR.glob("*.csv"))
+    paths += sorted(PROFILE_RESULTS_DIR.glob("*.csv"))
+    paths += sorted(INTRINSIC_DIM_RESULTS_DIR.glob("*.csv"))
+    for path in paths:
         with path.open() as fh:
             yield from csv.DictReader(fh)
 
@@ -209,7 +217,7 @@ def main() -> None:
     )
     text = re.sub(
         r"Source: <b>[^<]*</b>",
-        "Source: <b>results/models/*.csv</b>",
+        "Source: <b>results/{models,profiles,intrinsic_dim}/*.csv</b>",
         text,
     )
     text = re.sub(

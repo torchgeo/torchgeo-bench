@@ -85,7 +85,9 @@ torchgeo-bench run dataset.names=[m-eurosat] device=cpu
 Results are appended to `results/models/<model name>.csv`, which **ship pre-populated
 with reference results** — to start from a clean slate, write to your own file
 with `output=results/my_run.csv`. Re-run with `resume=true` to skip
-already-completed rows.
+already-completed rows. One-time profile/intrinsic-dim measurements go to their
+own `results/profiles/` and `results/intrinsic_dim/` files instead, so routine
+metrics reruns don't touch them.
 
 ## CoordBench — location encoders
 
