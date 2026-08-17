@@ -45,3 +45,13 @@ def test_output_stats_values():
     assert torch.allclose(feats[0, n], torch.tensor(0.0), atol=1e-5)
     assert torch.allclose(feats[0, 2 * n], torch.tensor(3.0))
     assert torch.allclose(feats[0, 3 * n], torch.tensor(3.0))
+
+
+def test_single_pixel_image():
+    """1×1 spatial images produce finite statistics with zero population std."""
+    model = ImageStatsBench(bands=_bands(2))
+    x = torch.tensor([[[[5.0]], [[9.0]]]])  # (1, 2, 1, 1)
+    feats = model(x)
+    assert feats.shape == (1, 8)
+    assert torch.isfinite(feats).all()
+    assert torch.equal(feats[0, 2:4], torch.zeros(2))

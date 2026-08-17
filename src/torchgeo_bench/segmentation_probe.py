@@ -377,30 +377,36 @@ class SegmentationProbe(nn.Module):
         Returns:
             A :class:`CachedFeaturesDataset` with one entry per sample.
         """
+        was_training = self.backbone.training
         self.backbone.eval()
-        # Accumulate per-batch tensors layer-wise, then cat once at the end.
-        # This avoids N individual per-sample allocations during GPU transfer.
-        batches_per_layer: list[list[torch.Tensor]] = [[] for _ in self.layer_names]
-        all_masks: list[torch.Tensor] = []
-        device = self._backbone_device()
+        try:
+            # Accumulate per-batch tensors layer-wise, then cat once at the end.
+            # This avoids N individual per-sample allocations during GPU transfer.
+            batches_per_layer: list[list[torch.Tensor]] = [[] for _ in self.layer_names]
+            all_masks: list[torch.Tensor] = []
+            device = self._backbone_device()
 
-        for batch in dataloader:
-            if isinstance(batch, dict):
-                images = batch["image"].to(device)
-                masks = batch["mask"]
-            else:
-                images, masks = batch[0].to(device), batch[1]
+            for batch in dataloader:
+                if isinstance(batch, dict):
+                    images = batch["image"].to(device)
+                    masks = batch["mask"]
+                else:
+                    images, masks = batch[0].to(device), batch[1]
 
-            if masks.ndim == 4:
-                masks = masks.squeeze(1)
-            masks = masks.long()
-            self._features.clear()
-            _ = self.backbone(images)
+                if masks.ndim == 4:
+                    masks = masks.squeeze(1)
+                masks = masks.long()
+                self._features.clear()
+                _ = self.backbone(images)
 
-            for li, n in enumerate(self.layer_names):
-                feat = self._process_feature(self._features[n]).to(dtype=cache_dtype, device="cpu")
-                batches_per_layer[li].append(feat)
-            all_masks.append(masks.cpu())
+                for li, n in enumerate(self.layer_names):
+                    feat = self._process_feature(self._features[n]).to(
+                        dtype=cache_dtype, device="cpu"
+                    )
+                    batches_per_layer[li].append(feat)
+                all_masks.append(masks.cpu())
+        finally:
+            self.backbone.train(was_training)
 
         layer_tensors = [torch.cat(batches) for batches in batches_per_layer]
         masks_tensor = torch.cat(all_masks)
