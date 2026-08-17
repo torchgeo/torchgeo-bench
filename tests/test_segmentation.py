@@ -728,6 +728,7 @@ def test_extract_segmentation_features_restores_backbone_mode(mock_backbone, dum
 
     assert probe.backbone.training
 
+
 # ---------------------------------------------------------------------------
 # GPUTensorCache
 # ---------------------------------------------------------------------------
