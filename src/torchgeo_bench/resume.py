@@ -63,16 +63,28 @@ def _resume_config_hash(cfg: DictConfig) -> str:
 
     Resume must not treat a row from a different model/evaluation setup as
     complete merely because its display metadata happens to match.
+
+    ``eval.profile`` and ``eval.intrinsic_dim`` are excluded: both are
+    additive, independently-gated passes (their own ``skip_profile``/
+    ``skip_id`` resume keys already track completion), not settings that
+    change what a knn/linear row measures. Hashing them would mean flipping
+    ``eval.profile.enabled=true`` for a follow-up profiling pass changes the
+    fingerprint and makes resume treat already-computed knn/linear rows as a
+    different config -- rerunning and duplicating them instead of skipping.
     """
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
     assert isinstance(dataset_cfg, dict)
     dataset_cfg.pop("names", None)
+    eval_cfg = OmegaConf.to_container(cfg.eval, resolve=True)
+    assert isinstance(eval_cfg, dict)
+    eval_cfg.pop("profile", None)
+    eval_cfg.pop("intrinsic_dim", None)
     payload = {
         "version": 1,
         "seed": cfg.seed,
         "device": cfg.device,
         "dataset": dataset_cfg,
-        "eval": OmegaConf.to_container(cfg.eval, resolve=True),
+        "eval": eval_cfg,
         "model": OmegaConf.to_container(cfg.model, resolve=True),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
