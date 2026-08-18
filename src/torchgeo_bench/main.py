@@ -732,6 +732,7 @@ def main(cfg: DictConfig) -> None:
                 image_size=effective_image_size,
                 interpolation=effective_interpolation,
                 bands=getattr(cfg.dataset, "bands", "rgb"),
+                time_steps=cfg.dataset.get("time_steps", None),
             )
         except (FileNotFoundError, DatasetNotFoundError) as exc:
             logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
