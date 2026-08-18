@@ -57,6 +57,46 @@ reused by both KNN and the linear probe.
 5. Embeddings and labels are concatenated across batches into NumPy
    arrays for downstream evaluation.
 
+Feature-spectrum diagnostics
+----------------------------
+
+When ``eval.intrinsic_dim.enabled=true``, each selected split also emits five
+scale-invariant diagnostics from the **centered** embedding matrix.  Let
+``s_i`` be its singular values and let
+
+.. math::
+
+   p_i = \frac{s_i^2}{\sum_j s_j^2}
+
+be the fraction of feature variance carried by principal component ``i``.
+The reported metrics are:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 68
+
+   * - Metric
+     - Definition
+   * - ``effective_rank``
+     - :math:`\exp(-\sum_{i:p_i>0} p_i \log p_i)`, the exponential spectral entropy.
+   * - ``participation_ratio``
+     - :math:`1 / \sum_i p_i^2`, an alternative effective dimensionality.
+   * - ``pc1_variance_ratio``
+     - :math:`p_1`, the variance explained by the leading principal component.
+   * - ``pc10_variance_ratio``
+     - :math:`\sum_{i=1}^{\min(10,d)} p_i`, the cumulative variance explained by
+       the first ten components (or all components when ``d < 10``).
+   * - ``spectral_anisotropy``
+     - :math:`(d p_1 - 1)/(d - 1)`, leading-component dominance normalized so an
+       isotropic ``d``-dimensional spectrum is 0 and a rank-one spectrum is 1.
+       The one-dimensional convention is 0 because no direction can dominate
+       another.
+
+The same deterministic ``max_samples`` cap and seed used for intrinsic
+dimension are applied before centering. Non-finite inputs, fewer than two
+samples, and zero total variance raise an error rather than producing a
+plausible-looking diagnostic.
+
 KNN (k=5)
 ---------
 

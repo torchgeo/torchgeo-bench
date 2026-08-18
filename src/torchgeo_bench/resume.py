@@ -14,6 +14,8 @@ from dataclasses import dataclass
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf
 
+from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
+
 logger = logging.getLogger(__name__)
 
 KEY_COLS = (
@@ -226,11 +228,13 @@ def _plan_dataset_run(
 
     id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
     id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
-    id_metric_names = (
-        [f"id_{est}_{split}" for split in id_cfg.splits for est in id_cfg.estimators]
-        if id_enabled
-        else []
-    )
+    id_metric_names = []
+    if id_enabled:
+        for split in id_cfg.splits:
+            id_metric_names.extend(f"id_{est}_{split}" for est in id_cfg.estimators)
+            id_metric_names.extend(
+                f"spectrum_{metric}_{split}" for metric in FEATURE_SPECTRUM_METRICS
+            )
     skip_id = (not id_enabled) or bool(
         cfg.resume
         and id_metric_names

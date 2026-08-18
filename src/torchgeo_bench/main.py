@@ -23,7 +23,11 @@ from torchgeo_bench.datasets import (
     get_datasets,
     list_datasets,
 )
-from torchgeo_bench.intrinsic_dim import DegenerateManifoldError, compute_intrinsic_dim
+from torchgeo_bench.intrinsic_dim import (
+    DegenerateManifoldError,
+    compute_feature_spectrum,
+    compute_intrinsic_dim,
+)
 from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import measure_cpu_throughput, measure_profile
@@ -372,8 +376,11 @@ def evaluate_intrinsic_dim(
 ) -> list[dict]:
     """Compute intrinsic-dimension metrics over selected splits and return CSV rows.
 
-    Each (split, estimator) yields one row with ``method="intrinsic_dim"`` and
-    ``metric_name=f"id_{estimator}_{split}"``.
+    Each (split, estimator) yields one ``id_<estimator>_<split>`` row. Five
+    centered feature-spectrum diagnostics are also emitted per split with a
+    ``spectrum_<metric>_<split>`` name. All rows use
+    ``method="intrinsic_dim"`` so they share the existing side-output and
+    resume path.
     """
     rows: list[dict] = []
     for split_name in selected_splits:
@@ -415,6 +422,18 @@ def evaluate_intrinsic_dim(
                     method="intrinsic_dim",
                     metric_name=f"id_{est_name}_{split_name}",
                     metric_value=float(dim),
+                    feature_dim=feature_dim,
+                    n_counts=n_counts,
+                )
+            )
+        spectrum = compute_feature_spectrum(X, max_samples=max_samples, seed=seed)
+        for metric_name, value in spectrum.items():
+            rows.append(
+                metric_row(
+                    common_meta,
+                    method="intrinsic_dim",
+                    metric_name=f"spectrum_{metric_name}_{split_name}",
+                    metric_value=value,
                     feature_dim=feature_dim,
                     n_counts=n_counts,
                 )

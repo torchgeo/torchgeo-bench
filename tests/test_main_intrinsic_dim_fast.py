@@ -44,6 +44,43 @@ def test_intrinsic_dim_rows_emitted(tmp_path: Path):
     assert not id_df.empty
     assert "id_twonn_train" in id_df["metric_name"].values
     assert "id_mle_train" in id_df["metric_name"].values
+    assert {
+        "spectrum_effective_rank_train",
+        "spectrum_participation_ratio_train",
+        "spectrum_pc1_variance_ratio_train",
+        "spectrum_pc10_variance_ratio_train",
+        "spectrum_spectral_anisotropy_train",
+    }.issubset(set(id_df["metric_name"]))
+
+
+def test_spectrum_rows_do_not_require_torchid_estimators(tmp_path: Path):
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(
+        out,
+        overrides=[
+            "eval.skip_linear=true",
+            "eval.intrinsic_dim.enabled=true",
+            "eval.intrinsic_dim.estimators=[]",
+            "eval.intrinsic_dim.splits=[train]",
+            "eval.intrinsic_dim.max_samples=100",
+        ],
+    )
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
+        mock.patch("torchgeo_bench.main.compute_intrinsic_dim") as id_mock,
+    ):
+        main(cfg)
+
+    id_mock.assert_not_called()
+    df = pd.read_csv(out)
+    spectrum_rows = df[df["metric_name"].str.startswith("spectrum_")]
+    assert len(spectrum_rows) == 5
 
 
 def test_intrinsic_dim_resume_per_estimator(tmp_path: Path):
@@ -63,6 +100,11 @@ def test_intrinsic_dim_resume_per_estimator(tmp_path: Path):
     seed_rows = [
         _resume_row(cfg, method="knn5", metric_name="accuracy"),
         _resume_row(cfg, method="intrinsic_dim", metric_name="id_twonn_train"),
+        _resume_row(
+            cfg,
+            method="intrinsic_dim",
+            metric_name="spectrum_effective_rank_train",
+        ),
     ]
     pd.DataFrame(seed_rows).to_csv(out, index=False)
 
@@ -86,3 +128,5 @@ def test_intrinsic_dim_resume_per_estimator(tmp_path: Path):
     id_df = df[df["method"] == "intrinsic_dim"]
     assert int((id_df["metric_name"] == "id_twonn_train").sum()) == 1
     assert int((id_df["metric_name"] == "id_mle_train").sum()) == 1
+    assert int((id_df["metric_name"] == "spectrum_effective_rank_train").sum()) == 1
+    assert len(id_df[id_df["metric_name"].str.startswith("spectrum_")]) == 5

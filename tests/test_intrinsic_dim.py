@@ -9,11 +9,14 @@ import pytest
 import torch
 
 from torchgeo_bench.intrinsic_dim import (
+    FEATURE_SPECTRUM_METRICS,
     DegenerateManifoldError,
+    DegenerateSpectrumError,
     _drop_zero_distance_rows,
     _load_estimator,
     _resolve_device,
     _subsample,
+    compute_feature_spectrum,
     compute_intrinsic_dim,
 )
 
@@ -75,6 +78,76 @@ class TestComputeBasic:
     def test_empty_estimator_list_returns_empty(self) -> None:
         out = compute_intrinsic_dim(np.zeros((10, 3)), estimators=[])
         assert out == {}
+
+
+class TestFeatureSpectrum:
+    def test_isotropic_features(self) -> None:
+        X = np.vstack([np.eye(4), -np.eye(4)])
+
+        metrics = compute_feature_spectrum(X, max_samples=None)
+
+        assert set(metrics) == set(FEATURE_SPECTRUM_METRICS)
+        assert metrics["effective_rank"] == pytest.approx(4.0)
+        assert metrics["participation_ratio"] == pytest.approx(4.0)
+        assert metrics["pc1_variance_ratio"] == pytest.approx(0.25)
+        assert metrics["pc10_variance_ratio"] == pytest.approx(1.0)
+        assert metrics["spectral_anisotropy"] == pytest.approx(0.0)
+
+    def test_rank_one_features(self) -> None:
+        samples = np.arange(-3, 4, dtype=np.float64)
+        direction = np.array([1.0, -2.0, 3.0, 0.5])
+        X = np.outer(samples, direction)
+
+        metrics = compute_feature_spectrum(X, max_samples=None)
+
+        assert metrics["effective_rank"] == pytest.approx(1.0)
+        assert metrics["participation_ratio"] == pytest.approx(1.0)
+        assert metrics["pc1_variance_ratio"] == pytest.approx(1.0)
+        assert metrics["pc10_variance_ratio"] == pytest.approx(1.0)
+        assert metrics["spectral_anisotropy"] == pytest.approx(1.0)
+
+    def test_known_low_rank_spectrum(self) -> None:
+        X = np.zeros((6, 12), dtype=np.float64)
+        X[0:2, 0] = [3.0, -3.0]
+        X[2:4, 1] = [2.0, -2.0]
+        X[4:6, 2] = [1.0, -1.0]
+        proportions = np.array([9.0, 4.0, 1.0]) / 14.0
+
+        metrics = compute_feature_spectrum(X + 100.0, max_samples=None)
+
+        expected_effective_rank = np.exp(-np.sum(proportions * np.log(proportions)))
+        expected_participation_ratio = 1.0 / np.sum(proportions**2)
+        expected_anisotropy = (12 * proportions[0] - 1) / 11
+        assert metrics["effective_rank"] == pytest.approx(expected_effective_rank)
+        assert metrics["participation_ratio"] == pytest.approx(expected_participation_ratio)
+        assert metrics["pc1_variance_ratio"] == pytest.approx(proportions[0])
+        assert metrics["pc10_variance_ratio"] == pytest.approx(1.0)
+        assert metrics["spectral_anisotropy"] == pytest.approx(expected_anisotropy)
+
+    @pytest.mark.parametrize(
+        "X,match",
+        [
+            (np.ones((5, 3)), "zero total variance"),
+            (np.ones((1, 3)), "at least two samples"),
+            (np.array([[0.0, np.nan], [1.0, 2.0]]), "finite values"),
+        ],
+    )
+    def test_degenerate_inputs_fail_clearly(self, X: np.ndarray, match: str) -> None:
+        error = DegenerateSpectrumError if "zero total variance" in match else ValueError
+        with pytest.raises(error, match=match):
+            compute_feature_spectrum(X, max_samples=None)
+
+    def test_subsampling_is_deterministic(self) -> None:
+        X = np.random.default_rng(0).normal(size=(100, 8))
+        first = compute_feature_spectrum(X, max_samples=20, seed=17)
+        second = compute_feature_spectrum(X, max_samples=20, seed=17)
+
+        assert first == second
+
+    def test_subsampling_requires_two_samples(self) -> None:
+        X = np.random.default_rng(0).normal(size=(10, 3))
+        with pytest.raises(ValueError, match="at least 2"):
+            compute_feature_spectrum(X, max_samples=1)
 
 
 # ---- error paths (mocked torchid) ----------------------------------------
