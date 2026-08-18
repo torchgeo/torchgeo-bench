@@ -106,6 +106,14 @@ class TestFeatureSpectrum:
         assert metrics["pc10_variance_ratio"] == pytest.approx(1.0)
         assert metrics["spectral_anisotropy"] == pytest.approx(1.0)
 
+    def test_single_feature_uses_zero_anisotropy_convention(self) -> None:
+        X = np.arange(5, dtype=np.float64)[:, None]
+
+        metrics = compute_feature_spectrum(X, max_samples=None)
+
+        assert metrics["effective_rank"] == pytest.approx(1.0)
+        assert metrics["spectral_anisotropy"] == pytest.approx(0.0)
+
     def test_known_low_rank_spectrum(self) -> None:
         X = np.zeros((6, 12), dtype=np.float64)
         X[0:2, 0] = [3.0, -3.0]
@@ -127,6 +135,8 @@ class TestFeatureSpectrum:
     @pytest.mark.parametrize(
         "X,match",
         [
+            (np.ones(5), "2D"),
+            (np.empty((2, 0)), "at least one feature"),
             (np.ones((5, 3)), "zero total variance"),
             (np.ones((1, 3)), "at least two samples"),
             (np.array([[0.0, np.nan], [1.0, 2.0]]), "finite values"),
