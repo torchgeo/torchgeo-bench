@@ -1,0 +1,91 @@
+model,dataset,normalization,image_size,raw_hw,model_input_hw,effective_image_size,internal_resizes,internal_shapes,dataset_resized,total_resizes,feat_dim,feat_checksum,status,error
+tt_clay_v1_5_base,m-so2sat,bandspec_zscore,null,32x32,32x32,None,1,32x32->256x256,0,1,768,-8.908173e-01,ok,
+tt_clay_v1_5_base,m-eurosat,bandspec_zscore,null,64x64,64x64,None,1,64x64->256x256,0,1,768,1.459722e+01,ok,
+tt_clay_v1_5_base,m-bigearthnet,bandspec_zscore,null,120x120,120x120,None,1,120x120->256x256,0,1,768,1.920307e+00,ok,
+tt_clay_v1_5_base,m-so2sat,bandspec_zscore,224,32x32,224x224,224,1,224x224->256x256,1,2,768,-8.904885e-01,ok,
+tt_clay_v1_5_base,m-eurosat,bandspec_zscore,224,64x64,224x224,224,1,224x224->256x256,1,2,768,1.457771e+01,ok,
+tt_clay_v1_5_base,m-bigearthnet,bandspec_zscore,224,120x120,224x224,224,1,224x224->256x256,1,2,768,1.976360e+00,ok,
+tt_clay_v1_5_base,m-so2sat,model_native,null,32x32,32x32,None,1,32x32->256x256,0,1,768,-8.708789e+00,ok,
+tt_clay_v1_5_base,m-eurosat,model_native,null,64x64,64x64,None,1,64x64->256x256,0,1,768,2.102078e+01,ok,
+tt_clay_v1_5_base,m-bigearthnet,model_native,null,120x120,120x120,None,1,120x120->256x256,0,1,768,2.017349e+00,ok,
+tt_clay_v1_5_base,m-so2sat,model_native,224,32x32,224x224,224,1,224x224->256x256,1,2,768,-8.708946e+00,ok,
+tt_clay_v1_5_base,m-eurosat,model_native,224,64x64,224x224,224,1,224x224->256x256,1,2,768,2.099771e+01,ok,
+tt_clay_v1_5_base,m-bigearthnet,model_native,224,120x120,224x224,224,1,224x224->256x256,1,2,768,2.043244e+00,ok,
+tgeo_croma_base,m-so2sat,bandspec_zscore,null,,,,,,,,,,skip,no bands_map entry
+tgeo_croma_base,m-eurosat,bandspec_zscore,null,,,,,,,,,,fail,RuntimeError: The size of tensor a (64) must match the size of tensor b (225) at non-singleton dimension 3
+tgeo_croma_base,m-bigearthnet,bandspec_zscore,null,120x120,120x120,None,0,,0,0,768,1.454061e+01,ok,
+tgeo_croma_base,m-so2sat,bandspec_zscore,224,,,,,,,,,,skip,no bands_map entry
+tgeo_croma_base,m-eurosat,bandspec_zscore,224,64x64,224x224,224,1,224x224->120x120,1,2,768,2.240425e+01,ok,
+tgeo_croma_base,m-bigearthnet,bandspec_zscore,224,120x120,224x224,224,1,224x224->120x120,1,2,768,1.552701e+01,ok,
+tgeo_croma_base,m-so2sat,model_native,null,,,,,,,,,,skip,no bands_map entry
+tgeo_croma_base,m-eurosat,model_native,null,,,,,,,,,,fail,RuntimeError: The size of tensor a (64) must match the size of tensor b (225) at non-singleton dimension 3
+tgeo_croma_base,m-bigearthnet,model_native,null,120x120,120x120,None,0,,0,0,768,1.644884e+00,ok,
+tgeo_croma_base,m-so2sat,model_native,224,,,,,,,,,,skip,no bands_map entry
+tgeo_croma_base,m-eurosat,model_native,224,64x64,224x224,224,1,224x224->120x120,1,2,768,-1.476810e+01,ok,
+tgeo_croma_base,m-bigearthnet,model_native,224,120x120,224x224,224,1,224x224->120x120,1,2,768,-5.120049e+00,ok,
+tgeo_dofa_base,m-so2sat,bandspec_zscore,null,,,,,,,,,,fail,RuntimeError: The size of tensor a (4) must match the size of tensor b (196) at non-singleton dimension 1
+tgeo_dofa_base,m-eurosat,bandspec_zscore,null,,,,,,,,,,fail,RuntimeError: The size of tensor a (16) must match the size of tensor b (196) at non-singleton dimension 1
+tgeo_dofa_base,m-bigearthnet,bandspec_zscore,null,,,,,,,,,,fail,RuntimeError: The size of tensor a (49) must match the size of tensor b (196) at non-singleton dimension 1
+tgeo_dofa_base,m-so2sat,bandspec_zscore,224,32x32,224x224,224,0,,1,1,768,-1.072418e-06,ok,
+tgeo_dofa_base,m-eurosat,bandspec_zscore,224,64x64,224x224,224,0,,1,1,768,-1.589244e-06,ok,
+tgeo_dofa_base,m-bigearthnet,bandspec_zscore,224,120x120,224x224,224,0,,1,1,768,1.022549e-05,ok,
+tgeo_dofa_base,m-so2sat,model_native,null,,,,,,,,,,fail,ValueError: model_native normalisation requires expected_input_unit
+tgeo_dofa_base,m-eurosat,model_native,null,,,,,,,,,,fail,ValueError: model_native normalisation requires expected_input_unit
+tgeo_dofa_base,m-bigearthnet,model_native,null,,,,,,,,,,fail,ValueError: model_native normalisation requires expected_input_unit
+tgeo_dofa_base,m-so2sat,model_native,224,,,,,,,,,,fail,ValueError: model_native normalisation requires expected_input_unit
+tgeo_dofa_base,m-eurosat,model_native,224,,,,,,,,,,fail,ValueError: model_native normalisation requires expected_input_unit
+tgeo_dofa_base,m-bigearthnet,model_native,224,,,,,,,,,,fail,ValueError: model_native normalisation requires expected_input_unit
+olmoearth_v1_nano,m-so2sat,bandspec_zscore,null,32x32,32x32,None,1,32x32->64x64,0,1,128,1.731009e+01,ok,
+olmoearth_v1_nano,m-eurosat,bandspec_zscore,null,64x64,64x64,None,0,,0,0,128,1.696583e+01,ok,
+olmoearth_v1_nano,m-bigearthnet,bandspec_zscore,null,120x120,120x120,None,0,,0,0,128,2.230895e+01,ok,
+olmoearth_v1_nano,m-so2sat,bandspec_zscore,224,32x32,224x224,224,0,,1,1,128,1.562928e+01,ok,
+olmoearth_v1_nano,m-eurosat,bandspec_zscore,224,64x64,224x224,224,0,,1,1,128,1.689012e+01,ok,
+olmoearth_v1_nano,m-bigearthnet,bandspec_zscore,224,120x120,224x224,224,0,,1,1,128,2.167880e+01,ok,
+olmoearth_v1_nano,m-so2sat,model_native,null,32x32,32x32,None,1,32x32->64x64,0,1,128,1.731009e+01,ok,
+olmoearth_v1_nano,m-eurosat,model_native,null,64x64,64x64,None,0,,0,0,128,1.696583e+01,ok,
+olmoearth_v1_nano,m-bigearthnet,model_native,null,120x120,120x120,None,0,,0,0,128,2.230895e+01,ok,
+olmoearth_v1_nano,m-so2sat,model_native,224,32x32,224x224,224,0,,1,1,128,1.562928e+01,ok,
+olmoearth_v1_nano,m-eurosat,model_native,224,64x64,224x224,224,0,,1,1,128,1.689012e+01,ok,
+olmoearth_v1_nano,m-bigearthnet,model_native,224,120x120,224x224,224,0,,1,1,128,2.167880e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-so2sat,bandspec_zscore,null,32x32,32x32,None,0,,0,0,768,6.411214e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-eurosat,bandspec_zscore,null,64x64,64x64,None,0,,0,0,768,8.482895e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-bigearthnet,bandspec_zscore,null,120x120,120x120,None,0,,0,0,768,7.048987e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-so2sat,bandspec_zscore,224,32x32,224x224,224,1,224x224->256x256,1,2,768,9.485485e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-eurosat,bandspec_zscore,224,64x64,224x224,224,1,224x224->256x256,1,2,768,6.828668e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-bigearthnet,bandspec_zscore,224,120x120,224x224,224,1,224x224->256x256,1,2,768,5.102295e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-so2sat,model_native,null,32x32,32x32,None,0,,0,0,768,1.021933e+02,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-eurosat,model_native,null,64x64,64x64,None,0,,0,0,768,1.020512e+02,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-bigearthnet,model_native,null,120x120,120x120,None,0,,0,0,768,9.566035e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-so2sat,model_native,224,32x32,224x224,224,1,224x224->256x256,1,2,768,-1.410546e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-eurosat,model_native,224,64x64,224x224,224,1,224x224->256x256,1,2,768,-2.789257e+01,ok,
+tgeo_swinv2t_s2rgb_satlas_mi,m-bigearthnet,model_native,224,120x120,224x224,224,1,224x224->256x256,1,2,768,-1.039851e+02,ok,
+tgeo_scalemae_large_fmow,m-so2sat,bandspec_zscore,null,32x32,32x32,32,0,,0,0,1024,2.479250e+01,ok,
+tgeo_scalemae_large_fmow,m-eurosat,bandspec_zscore,null,64x64,64x64,64,0,,0,0,1024,2.526130e+01,ok,
+tgeo_scalemae_large_fmow,m-bigearthnet,bandspec_zscore,null,120x120,112x112,112,0,,1,1,1024,2.631141e+01,ok,
+tgeo_scalemae_large_fmow,m-so2sat,model_native,null,32x32,32x32,32,0,,0,0,1024,2.308853e+01,ok,
+tgeo_scalemae_large_fmow,m-eurosat,model_native,null,64x64,64x64,64,0,,0,0,1024,2.288190e+01,ok,
+tgeo_scalemae_large_fmow,m-bigearthnet,model_native,null,120x120,112x112,112,0,,1,1,1024,2.200220e+01,ok,
+tt_prithvi_eo_v2_300,m-so2sat,bandspec_zscore,null,32x32,32x32,None,1,14x14->2x2,0,1,1024,1.161975e+02,ok,
+tt_prithvi_eo_v2_300,m-eurosat,bandspec_zscore,null,64x64,64x64,None,1,14x14->4x4,0,1,1024,2.923521e+01,ok,
+tt_prithvi_eo_v2_300,m-bigearthnet,bandspec_zscore,null,120x120,120x120,None,1,14x14->7x7,0,1,1024,1.034616e+02,ok,
+tt_prithvi_eo_v2_300,m-so2sat,bandspec_zscore,224,32x32,224x224,224,0,,1,1,1024,1.181611e+02,ok,
+tt_prithvi_eo_v2_300,m-eurosat,bandspec_zscore,224,64x64,224x224,224,0,,1,1,1024,3.308389e+01,ok,
+tt_prithvi_eo_v2_300,m-bigearthnet,bandspec_zscore,224,120x120,224x224,224,0,,1,1,1024,1.031866e+02,ok,
+tt_prithvi_eo_v2_300,m-so2sat,model_native,null,32x32,32x32,None,1,14x14->2x2,0,1,1024,1.466302e+02,ok,
+tt_prithvi_eo_v2_300,m-eurosat,model_native,null,64x64,64x64,None,1,14x14->4x4,0,1,1024,1.245411e+02,ok,
+tt_prithvi_eo_v2_300,m-bigearthnet,model_native,null,120x120,120x120,None,1,14x14->7x7,0,1,1024,1.085531e+02,ok,
+tt_prithvi_eo_v2_300,m-so2sat,model_native,224,32x32,224x224,224,0,,1,1,1024,1.419099e+02,ok,
+tt_prithvi_eo_v2_300,m-eurosat,model_native,224,64x64,224x224,224,0,,1,1,1024,1.237214e+02,ok,
+tt_prithvi_eo_v2_300,m-bigearthnet,model_native,224,120x120,224x224,224,0,,1,1,1024,1.103837e+02,ok,
+vit_large_patch16_dinov3,m-so2sat,bandspec_zscore,null,32x32,32x32,None,0,,0,0,1024,-2.592653e+01,ok,
+vit_large_patch16_dinov3,m-eurosat,bandspec_zscore,null,64x64,64x64,None,0,,0,0,1024,-3.973840e+01,ok,
+vit_large_patch16_dinov3,m-bigearthnet,bandspec_zscore,null,,,,,,,,,,fail,AssertionError: Input height (120) should be divisible by patch size (16).
+vit_large_patch16_dinov3,m-so2sat,bandspec_zscore,224,32x32,224x224,224,1,224x224->256x256,1,2,1024,-3.420266e+01,ok,
+vit_large_patch16_dinov3,m-eurosat,bandspec_zscore,224,64x64,224x224,224,1,224x224->256x256,1,2,1024,-3.713400e+01,ok,
+vit_large_patch16_dinov3,m-bigearthnet,bandspec_zscore,224,120x120,224x224,224,1,224x224->256x256,1,2,1024,-3.270958e+01,ok,
+vit_large_patch16_dinov3,m-so2sat,model_native,null,32x32,32x32,None,0,,0,0,1024,-2.926803e+01,ok,
+vit_large_patch16_dinov3,m-eurosat,model_native,null,64x64,64x64,None,0,,0,0,1024,-4.340818e+01,ok,
+vit_large_patch16_dinov3,m-bigearthnet,model_native,null,,,,,,,,,,fail,AssertionError: Input height (120) should be divisible by patch size (16).
+vit_large_patch16_dinov3,m-so2sat,model_native,224,32x32,224x224,224,1,224x224->256x256,1,2,1024,-3.835589e+01,ok,
+vit_large_patch16_dinov3,m-eurosat,model_native,224,64x64,224x224,224,1,224x224->256x256,1,2,1024,-3.858274e+01,ok,
+vit_large_patch16_dinov3,m-bigearthnet,model_native,224,120x120,224x224,224,1,224x224->256x256,1,2,1024,-3.438774e+01,ok,

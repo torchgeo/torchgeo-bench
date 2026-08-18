@@ -131,6 +131,9 @@ data/
 !results/intrinsic_dim/*.csv
 !results/legacy/
 !results/legacy/*.csv
+# Crossed resize/normalization sweep outputs, one CSV per (model, protocol).
+!results/sweeps/
+!results/sweeps/**
 !conf/**/*.json
 !**/band_stats.json
 !**/normalizer.json
