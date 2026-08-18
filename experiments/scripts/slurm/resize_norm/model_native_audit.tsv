@@ -1,0 +1,47 @@
+convnext_large_dinov3	init_fail	ValueError: model_native normalisation requires expected_input_unit
+olmoearth_v1_1_base	ok	
+olmoearth_v1_1_nano	ok	
+olmoearth_v1_1_tiny	ok	
+olmoearth_v1_2_base	ok	
+olmoearth_v1_2_nano	ok	
+olmoearth_v1_2_small	ok	
+olmoearth_v1_2_tiny	ok	
+olmoearth_v1_base	ok	
+olmoearth_v1_large	ok	
+olmoearth_v1_nano	ok	
+olmoearth_v1_tiny	ok	
+tgeo_croma_base	ok	
+tgeo_croma_large	ok	
+tgeo_dofa_base	init_fail	ValueError: model_native normalisation requires expected_input_unit
+tgeo_dofa_large	init_fail	ValueError: model_native normalisation requires expected_input_unit
+tgeo_earthloc_s2_resnet50	ok	
+tgeo_panopticon	forward_fail	ValueError: model_native normalisation is undefined for this model: it declares expected_input_unit='reflectance_0_1' but no pretrain_mean/pretrain_std, and it does not supply its own normaliser.  Converting units without standardising leaves raw sensor values.  Set pretrain_mean/pretrain_std on the wrapper, or evaluate it with dataset.normalization=bandspec_zscore.
+tgeo_resnet152_s2rgb_satlas_mi	ok	
+tgeo_resnet152_s2rgb_satlas_si	ok	
+tgeo_resnet18_s2rgb_moco	ok	
+tgeo_resnet18_s2rgb_seco	ok	
+tgeo_resnet50_fmow_gassl	ok	
+tgeo_resnet50_s2all_moco	ok	
+tgeo_resnet50_s2rgb_moco	ok	
+tgeo_resnet50_s2rgb_satlas_mi	ok	
+tgeo_resnet50_s2rgb_satlas_si	ok	
+tgeo_resnet50_s2rgb_seco	ok	
+tgeo_scalemae_large_fmow	forward_fail	AssertionError: Input height (224) doesn't match model (64).
+tgeo_swinv2b_naip_satlas_mi	ok	
+tgeo_swinv2b_naip_satlas_si	ok	
+tgeo_swinv2b_s2rgb_satlas_mi	ok	
+tgeo_swinv2b_s2rgb_satlas_si	ok	
+tgeo_swinv2t_s2rgb_satlas_mi	ok	
+tgeo_swinv2t_s2rgb_satlas_si	ok	
+tt_clay_v1_5_base	ok	
+tt_prithvi_eo_v1_100	ok	
+tt_prithvi_eo_v2_100_tl	ok	
+tt_prithvi_eo_v2_300	ok	
+tt_prithvi_eo_v2_300_tl	ok	
+tt_prithvi_eo_v2_600	ok	
+tt_terramind_v1_base	ok	
+tt_terramind_v1_base_rgb	ok	
+tt_terramind_v1_large	ok	
+tt_terramind_v1_large_rgb	ok	
+vit_large_patch16_dinov3	ok	
+vit_large_patch16_dinov3sat	ok	

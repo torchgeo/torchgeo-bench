@@ -48,6 +48,8 @@ experiments/scripts/slurm/*
 !experiments/scripts/slurm/olmoearth_sweep.sh
 !experiments/scripts/slurm/olmoearth_sweep.jobs
 !experiments/scripts/slurm/olmoearth_v1_1_sweep.jobs
+!experiments/scripts/slurm/resize_norm/
+!experiments/scripts/slurm/resize_norm/**
 !experiments/scripts/slurm/slow_tests.sh
 !experiments/scripts/slurm/smoke_imports.sh
 figures/

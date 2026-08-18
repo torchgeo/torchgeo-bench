@@ -1,0 +1,8 @@
+tgeo_croma_base
+tgeo_croma_large
+tgeo_dofa_base
+tgeo_dofa_large
+tgeo_earthloc_s2_resnet50
+tgeo_panopticon
+tgeo_scalemae_large_fmow
+tt_clay_v1_5_base
