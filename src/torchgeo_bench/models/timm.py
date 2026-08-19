@@ -15,6 +15,38 @@ logger = logging.getLogger(__name__)
 
 _VALID_INPUT_NORMALIZATIONS = ("bands_zscore", "imagenet", "timm_default", "none")
 
+# Visible-light wavelength windows (micrometres) used to identify the red/
+# green/blue bands by physical wavelength rather than by name -- datasets
+# name their optical bands inconsistently (``"red"`` vs Sentinel-2's native
+# ``"b04"``), but ``BandSpec.wavelength_um`` is populated consistently.
+_BLUE_UM = (0.45, 0.515)
+_GREEN_UM = (0.515, 0.60)
+_RED_UM = (0.60, 0.70)
+
+
+def _rgb_first_permutation(bands: list[BandSpec]) -> list[int] | None:
+    """Return a channel permutation with red/green/blue moved to the front.
+
+    ``None`` if the band list doesn't contain exactly one band in each of
+    the red/green/blue wavelength windows -- e.g. a SAR-only or otherwise
+    non-optical band set, where there is nothing to reorder.
+    """
+    windows = {"red": _RED_UM, "green": _GREEN_UM, "blue": _BLUE_UM}
+    matches: dict[str, list[int]] = {"red": [], "green": [], "blue": []}
+    for i, band in enumerate(bands):
+        if band.wavelength_um is None:
+            continue
+        for key, (lo, hi) in windows.items():
+            if lo <= band.wavelength_um < hi:
+                matches[key].append(i)
+
+    if any(len(idx) != 1 for idx in matches.values()):
+        return None
+
+    rgb_idx = [matches["red"][0], matches["green"][0], matches["blue"][0]]
+    rest = [i for i in range(len(bands)) if i not in rgb_idx]
+    return rgb_idx + rest
+
 
 class TimmPatchBenchModel(BenchModel):
     """BenchModel wrapper for any timm backbone.
@@ -110,6 +142,18 @@ class TimmPatchBenchModel(BenchModel):
             global_pool=global_pool,
         )
 
+        # timm's first-conv channel adaptation for in_chans > 3 (see
+        # ``timm.models._manipulate.adapt_input_conv``) doesn't average the
+        # pretrained RGB kernel across the extra channels -- it *tiles*
+        # [R, G, B] across channel indices 0, 1, 2, 3, ... To land the
+        # pretrained R/G/B kernel weights on the physically-matching red/
+        # green/blue bands (rather than whatever order the dataset happens
+        # to declare them, e.g. Sentinel-2's native B02/B03/B04 = blue/
+        # green/red), permute the input channels once at construction.
+        self._channel_perm: list[int] | None = None
+        if self.pretrained and self.num_channels != 3:
+            self._channel_perm = _rgb_first_permutation(self.bands)
+
         default_cfg = getattr(self.backbone, "default_cfg", {}) or {}
         cfg_input_size = default_cfg.get("input_size", None)
         inferred_size: int | None = None
@@ -186,12 +230,19 @@ class TimmPatchBenchModel(BenchModel):
         std = self._rgb_std.to(dtype=images.dtype)  # type: ignore[attr-defined]
         return (scaled - mean) / std
 
+    def _permute_channels(self, images: torch.Tensor) -> torch.Tensor:
+        """Reorder input channels so red/green/blue lead, if identifiable."""
+        if self._channel_perm is None:
+            return images
+        return images[:, self._channel_perm, :, :]
+
     @torch.no_grad()
     def _forward_patch_features(
         self,
         images: torch.Tensor,
     ) -> torch.Tensor:
         """Return pooled patch embeddings of shape ``(B, K)`` from normalized inputs."""
+        images = self._permute_channels(images)
         if self.auto_resize and self.target_size is not None:
             h, w = images.shape[-2], images.shape[-1]
             if h != self.target_size or w != self.target_size:
