@@ -516,6 +516,50 @@ def test_s1_sensor_tag_aliases_to_sar_modality() -> None:
 
 
 @requires_olmoearth
+def test_treesatai_vv_vh_ratio_band_routes_to_sar_modality() -> None:
+    """treesatai declares vv, vh, AND a derived vv/vh ratio band under
+    sensor="s1" -- the ratio band has no physical polarization of its own
+    but must still resolve to a known slot instead of raising "can't map
+    BandSpec names"."""
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    bands = [
+        BandSpec(
+            sensor="s1",
+            name="vv",
+            source_name="vv",
+            mean=60197.8,
+            std=17913.3,
+            min=0.0,
+            max=65535.0,
+        ),
+        BandSpec(
+            sensor="s1",
+            name="vh",
+            source_name="vh",
+            mean=65496.9,
+            std=1326.41,
+            min=0.0,
+            max=65535.0,
+        ),
+        BandSpec(
+            sensor="s1",
+            name="vv_vh",
+            source_name="vv/vh",
+            mean=88.73,
+            std=2409.44,
+            min=0.0,
+            max=65535.0,
+        ),
+    ]
+    model = OlmoEarthBenchModel(bands=bands, model_size="nano", normalization="identity")
+    model.eval()
+    out = model.forward_patch_features(torch.rand(2, 3, 64, 64) * 30.0)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
 def test_invalid_model_size_at_construction_not_forward() -> None:
     """Invalid model_size must fail in __init__ before any model loading call."""
     import olmoearth_pretrain_minimal as oepm
