@@ -68,7 +68,7 @@ they work with ``dataset.bands=all`` out of the box (pretrained
    b1's feature geometry makes the fit unstable across the whole
    ``c_range`` grid rather than diverging outright — so it lands on a poor
    but finite ``best_c`` instead of raising
-   :class:`~torchgeo_bench.main.LinearProbeDivergedError`. Treat
+   ``LinearProbeDivergedError``. Treat
    ``efficientnet_b1`` linear numbers as noise until the probe gains
    feature standardization; other EfficientNet variants (b0, b2-b4) are
    unaffected.
