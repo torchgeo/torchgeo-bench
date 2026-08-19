@@ -85,6 +85,31 @@ _BAND_ALIASES: dict[str, str] = {
 }
 
 
+#: True Sentinel-2 (MSI) centre wavelengths in micrometres, by canonical band
+#: name -- the same constants already hardcoded per-dataset in
+#: ``datasets/eurosat.py`` and similar. Most classification datasets here are
+#: Sentinel-2 derived, so this is the right default for any dataset that
+#: doesn't ship its own ``wavelength_um`` (e.g. a Landsat dataset's nir/swir
+#: bands are close enough in practice to be a useful fallback, not exact --
+#: see ``wavelengths_um``'s docstring). Values: ESA Sentinel-2 MSI spectral
+#: response, S2A center wavelengths.
+S2_WAVELENGTHS_UM: dict[str, float] = {
+    "coastal": 0.443,
+    "blue": 0.490,
+    "green": 0.560,
+    "red": 0.665,
+    "rededge1": 0.705,
+    "rededge2": 0.740,
+    "rededge3": 0.783,
+    "nir": 0.842,
+    "nir_narrow": 0.865,
+    "watervapor": 0.945,
+    "cirrus": 1.375,
+    "swir1": 1.610,
+    "swir2": 2.190,
+}
+
+
 def canonical_band_name(name: str) -> str:
     """Map an input band name to the canonical short name."""
     key = name.strip().lower().replace(" ", "")
@@ -216,15 +241,31 @@ def map_to_model_bands(
 def wavelengths_um(bands: list[BandSpec], default_um: float | None = None) -> list[float]:
     """Return per-band centre wavelengths in micrometres.
 
-    Missing wavelengths raise by default. Passing ``default_um`` is an explicit
-    opt-in for callers running a known fallback ablation.
+    A band missing ``wavelength_um`` (e.g. a Landsat dataset that didn't
+    bother declaring it, since most datasets here are Sentinel-2) falls back
+    to :data:`S2_WAVELENGTHS_UM` by canonical band name -- most datasets
+    genuinely are Sentinel-2, and even for Landsat the true wavelengths are
+    close enough (nir 0.842 vs. ~0.865 um) to be a useful default rather than
+    a hard stop. Only a band whose canonical name has no known S2 wavelength
+    either (e.g. SAR) raises, unless the caller passes an explicit
+    ``default_um`` for that case.
     """
-    missing = [b.name for b in bands if b.wavelength_um is None]
-    if missing and default_um is None:
-        raise ValueError(
-            f"Missing wavelengths for {missing}. Pass explicit wavelengths or default_um "
-            "only for a deliberate fallback ablation."
-        )
-    return [
-        float(b.wavelength_um) if b.wavelength_um is not None else float(default_um) for b in bands
+    still_missing = [
+        b.name
+        for b in bands
+        if b.wavelength_um is None and canonical_band_name(b.name) not in S2_WAVELENGTHS_UM
     ]
+    if still_missing and default_um is None:
+        raise ValueError(
+            f"Missing wavelengths for {still_missing}: not in S2_WAVELENGTHS_UM either. "
+            "Pass explicit wavelengths or default_um only for a deliberate fallback ablation."
+        )
+    resolved = []
+    for b in bands:
+        if b.wavelength_um is not None:
+            resolved.append(float(b.wavelength_um))
+        elif canonical_band_name(b.name) in S2_WAVELENGTHS_UM:
+            resolved.append(S2_WAVELENGTHS_UM[canonical_band_name(b.name)])
+        else:
+            resolved.append(float(default_um))
+    return resolved

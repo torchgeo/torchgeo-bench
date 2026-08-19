@@ -5,6 +5,7 @@ import torch
 
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models._band_mapping import (
+    S2_WAVELENGTHS_UM,
     canonical_band_name,
     map_to_model_bands,
     select_src_bands,
@@ -175,6 +176,28 @@ class TestWavelengthsUm:
         bands = [_band("red", 0.665), _band("vv", None)]
         wls = wavelengths_um(bands, default_um=1.5)
         assert wls == [0.665, 1.5]
+
+    def test_falls_back_to_s2_wavelength_by_canonical_name(self) -> None:
+        """A Landsat dataset's nir/swir bands with no declared wavelength_um
+        (m_forestnet.py) must not hard-fail -- most datasets here are
+        Sentinel-2, so its true wavelength is a reasonable default."""
+        bands = [
+            _band("nir", None, sensor="landsat"),
+            _band("swir_1", None, sensor="landsat"),
+            _band("swir_2", None, sensor="landsat"),
+        ]
+        assert wavelengths_um(bands) == [
+            S2_WAVELENGTHS_UM["nir"],
+            S2_WAVELENGTHS_UM["swir1"],
+            S2_WAVELENGTHS_UM["swir2"],
+        ]
+
+    def test_sar_still_raises_without_s2_default_or_explicit_default(self) -> None:
+        """SAR has no canonical S2 wavelength -- must still raise, not
+        silently invent an optical wavelength for radar backscatter."""
+        bands = [_band("red", 0.665), _band("vv", None, sensor="sar")]
+        with pytest.raises(ValueError, match="Missing wavelengths"):
+            wavelengths_um(bands)
 
 
 class TestDofaWavelengths:
