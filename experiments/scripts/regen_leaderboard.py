@@ -18,10 +18,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from torchgeo_bench.results import load_results
+
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
-CSV_PATH = ROOT / "results" / "all_results.csv"
+CSV_PATH = ROOT / "results" / "models"
 COMPUTE_PATH = ROOT / "results" / "compute_cost.csv"
 TEMPLATE_PATH = ROOT / "experiments" / "scripts" / "ranking_explorer.template.html"
 HTML_PATH = ROOT / "docs" / "_static" / "ranking_explorer.html"
@@ -38,14 +40,25 @@ LANDSAT_SUB_SUFFIX = "_landsat_as_s2"
 # Datasets excluded from the leaderboard only (all_results.csv is untouched).
 DROPPED_DATASETS = frozenset({"m-pv4ger", "m-brick-kiln"})
 
+# The plain (S2L2A) TerraMind configs were additionally swept with
+# ``dataset.bands=rgb``, which forces their S2L2A-modality pathway onto
+# RGB-only input -- a real, off-modality measurement, not a duplicate of the
+# dedicated ``_rgb`` config. For the RGB cell, only the ``_rgb`` config's row
+# is authoritative; drop this off-modality artifact before alias resolution.
+TERRAMIND_OFF_MODALITY = frozenset({"tt_terramind_v1_base", "tt_terramind_v1_large"})
+
 # Raw metric name -> canonical name registered in the evaluma metric registry.
-METRIC_MAP = {"accuracy": "accuracy", "micro_mAP": "map"}
-METRIC_BOUNDS = {"accuracy": (0.0, 1.0), "map": (0.0, 1.0)}
+METRIC_MAP = {"accuracy": "accuracy", "micro_mAP": "map", "mIoU": "miou"}
+METRIC_BOUNDS = {"accuracy": (0.0, 1.0), "map": (0.0, 1.0), "miou": (0.0, 1.0)}
 DEFAULT_RANDOM_SEED = 0
 SMALL_N_MODELS = 8
 
-TASK_ORDER = ["classification"]
-PROBE_ORDER = ["linear", "knn5"]
+# Segmentation methods are recorded as ``seg-<head>`` rows; every other method
+# value is a classification probe.
+SEGMENTATION_METHOD_PREFIX = "seg-"
+
+TASK_ORDER = ["classification", "segmentation"]
+PROBE_ORDER = ["linear", "knn5", "seg-linear", "seg-fpn", "seg-dpt", "seg-conv_block"]
 BANDCLASS_ORDER = ["RGB", "Multispectral"]
 
 # ``*_rgb`` is a band-specific TerraMind configuration, not a different model.
@@ -114,10 +127,18 @@ DATASET_DISPLAY = {
     "so2sat": "So2Sat · V2",
     "forestnet": "ForestNet · V2",
     "eurosat-spatial": "EuroSAT spatial",
+    "burn_scars": "Burn Scars · V2",
+    "caffe": "CAFFE · V2",
+    "cloudsen12": "CloudSEN12 · V2",
+    "dynamic_earthnet": "Dynamic EarthNet · V2",
+    "flair2": "FLAIR #2 · V2",
+    "fotw": "Fields of the World · V2",
+    "kuro_siwo": "Kuro Siwo · V2",
+    "pastis": "PASTIS · V2",
 }
 
 # Canonical metric name -> the label a reader needs to interpret the column.
-METRIC_LABEL = {"accuracy": "Top-1 accuracy", "map": "Micro mAP"}
+METRIC_LABEL = {"accuracy": "Top-1 accuracy", "map": "Micro mAP", "miou": "mIoU"}
 
 AGG_META = {
     "avg_rank": {"label": "Average rank", "direction": "lower-is-better", "unit": "rank"},
@@ -166,6 +187,10 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
     df = df[~df["dataset"].isin(DROPPED_DATASETS)]
     name = df["name"].astype(str)
 
+    off_modality = name.isin(TERRAMIND_OFF_MODALITY) & (df["bands"].astype(str) == "rgb")
+    df = df[~off_modality].copy()
+    name = df["name"].astype(str)
+
     ablation = pd.Series(False, index=df.index)
     for tag in ABLATION_TAGS:
         ablation |= name.str.contains(tag, regex=False)
@@ -185,7 +210,8 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
 
     df["bandclass"] = (df["bands"].astype(str) == "rgb").map({True: "RGB", False: "Multispectral"})
     df["probe"] = df["method"].astype(str)
-    df["task"] = "classification"
+    is_segmentation = df["probe"].str.startswith(SEGMENTATION_METHOD_PREFIX)
+    df["task"] = is_segmentation.map({True: "segmentation", False: "classification"})
     df["normalization"] = df["normalization"].astype("string").str.strip()
     missing_norm = df["normalization"].isna() | (df["normalization"] == "")
     if missing_norm.any():
@@ -314,7 +340,9 @@ def build_view(
                 {
                     "model": model,
                     "display": resolve_meta(model)[0],
-                    "n_tasks": int(zscore["dataset"].nunique()),
+                    "n_tasks": int(
+                        max(native["dataset"].nunique(), zscore["dataset"].nunique())
+                    ),
                 }
             )
 
@@ -617,7 +645,11 @@ def inline_into_html(html_text: str, blocks: dict[str, object]) -> str:
 def main() -> None:
     """Parse CLI arguments and write a rendered explorer page."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--csv", default=str(CSV_PATH), help="Path to all_results.csv.")
+    parser.add_argument(
+        "--csv",
+        default=str(CSV_PATH),
+        help="Path to a per-model results directory (default) or a single all_results.csv file.",
+    )
     parser.add_argument("--compute", default=str(COMPUTE_PATH), help="Path to compute_cost.csv.")
     parser.add_argument(
         "--template", default=str(TEMPLATE_PATH), help="Hand-authored ranking explorer template."
@@ -634,7 +666,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    raw = pd.read_csv(args.csv, low_memory=False)
+    csv_path = Path(args.csv)
+    raw = load_results(csv_path) if csv_path.is_dir() else pd.read_csv(csv_path, low_memory=False)
     compute_raw = pd.read_csv(args.compute, low_memory=False)
     rankings, sensitivity, default_slice = assemble(
         harmonize(raw),

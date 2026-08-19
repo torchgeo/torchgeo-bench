@@ -24,7 +24,15 @@ import numpy as np
 import pandas as pd
 import torch
 
+from torchgeo_bench.resume import KEY_COLS, _canonical_key_cell
+
 logger = logging.getLogger(__name__)
+
+# The true "same measurement" identity for dedup: the resume key minus
+# ``config_hash`` (that column is exactly what fragments legacy rows, written
+# before it existed, from later hashed reruns of the same measurement), plus
+# ``metric_name`` (one run emits several metric rows under the same resume key).
+DEDUP_KEY_COLS = tuple(c for c in KEY_COLS if c != "config_hash") + ("metric_name",)
 
 DEFAULT_RESULTS_DIR = "results/models"
 # Profile (throughput/latency/params) and intrinsic-dim rows are one-time
@@ -78,7 +86,49 @@ def load_results(
     if not frames:
         logger.warning("No results found under %s", directory)
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True, sort=False)
+    df = pd.concat(frames, ignore_index=True, sort=False)
+    df = _relabel_olmoearth_normalization(df)
+    return _dedup_results(df)
+
+
+def _relabel_olmoearth_normalization(df: pd.DataFrame) -> pd.DataFrame:
+    """Fix stale ``normalization`` labels on OlmoEarth rows.
+
+    OlmoEarth handles its own input normalization (``handles_own_normalization
+    = True`` in ``models/olmoearth.py``), but every existing result row
+    predates that code change and is still labeled ``bandspec_zscore``.
+    Relabel to ``model_native`` so OlmoEarth qualifies for the leaderboard
+    generator's native-normalization branch like every other model does.
+    """
+    if "name" not in df.columns or "normalization" not in df.columns:
+        return df
+    is_olmoearth = df["name"].astype(str).str.startswith("olmoearth")
+    is_zscore = df["normalization"].astype(str) == "bandspec_zscore"
+    df.loc[is_olmoearth & is_zscore, "normalization"] = "model_native"
+    return df
+
+
+def _dedup_results(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop duplicate measurement rows left by the resume-hash gap.
+
+    ``config_hash`` was added after many rows were already written, so those
+    legacy rows (empty hash) don't match the resume key of a later rerun
+    (real hash) and ``resume=true`` reran and appended instead of skipping.
+    Within each "same measurement" group (:data:`DEDUP_KEY_COLS`, the resume
+    key minus ``config_hash`` plus ``metric_name``), a hashed row always wins
+    over a legacy one; among multiple hashed rows, the most recently appended
+    one wins (``pd.concat`` above preserves file order).
+    """
+    missing = [c for c in DEDUP_KEY_COLS if c not in df.columns]
+    if missing or "config_hash" not in df.columns:
+        return df
+    has_hash = df["config_hash"].fillna("").astype(str).str.len() > 0
+    key = df[list(DEDUP_KEY_COLS)].apply(
+        lambda row: tuple(_canonical_key_cell(v) for v in row), axis=1
+    )
+    order = pd.DataFrame({"key": key, "has_hash": has_hash, "pos": range(len(df))})
+    keep_positions = order.sort_values(["has_hash", "pos"]).groupby("key", sort=False).tail(1)["pos"]
+    return df.loc[sorted(keep_positions)].reset_index(drop=True)
 
 
 def bootstrap_accuracy(

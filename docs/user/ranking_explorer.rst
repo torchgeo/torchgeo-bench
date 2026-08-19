@@ -13,17 +13,17 @@ Ranking explorer
    </p>
 
 Benchmark results are spread across papers, repositories, and follow-up runs.
-The Ranking Explorer is a static, classification-only comparison of frozen
-geospatial foundation models under one evaluation protocol. It is intended as a
-shared, inspectable record that the community can use to converge on reliable
-performance information—not a declaration of a final winner.
+The Ranking Explorer is a static comparison of frozen geospatial foundation
+models under one evaluation protocol, covering both classification and
+segmentation tasks. It is intended as a shared, inspectable record that the
+community can use to converge on reliable performance information—not a
+declaration of a final winner.
 
-Rankings are summaries: choose how datasets are combined, then choose the probe
-and input bands whose results are being summarized. Task remains visible and is
-disabled until a build includes more than classification. If a result is wrong,
-missing, or implausible, please `open an issue
-<https://github.com/torchgeo/torchgeo-bench/issues>`__ with the model, view,
-and any supporting evidence. General feedback is welcome too.
+Rankings are summaries: choose the task (classification or segmentation), how
+datasets are combined, then the probe and input bands whose results are being
+summarized. If a result is wrong, missing, or implausible, please `open an
+issue <https://github.com/torchgeo/torchgeo-bench/issues>`__ with the model,
+view, and any supporting evidence. General feedback is welcome too.
 
 The aggregation choices answer different questions:
 
@@ -54,14 +54,19 @@ carry their own direction, so the vertical axis reads ``Worse ←`` to
 ``→ More compute``. Zero or unmeasured values are omitted from the log-scale
 plot and listed below it.
 
-The final rank-sensitivity heatmap is a fixed Average-rank overview of all
-available views. Every cell first finds the models present in both views, then
-re-ranks those shared models using each view's *full* dataset set before
-calculating tie-aware Kendall τ-b. Thus, values near +1 mean that two views
-produce the same ordering, 0 means little ordering agreement, and -1 means a
-reversal. The row and column labels identify the compared views; each cell also
-reports its shared-model count and both dataset counts, and a dagger marks a
-small shared roster.
+The final rank-sensitivity heatmap is an Average-rank comparison across
+whichever views you select — preset buttons cover "classification only",
+"segmentation only", and "everything" (including cross-task pairs), and a
+"Customize which views to compare" panel exposes a checkbox per view for a
+fully custom selection. Every cell first finds the models present in both
+views, then re-ranks those shared models using each view's *full* dataset set
+before calculating tie-aware Kendall τ-b. Thus, values near +1 mean that two
+views produce the same ordering, 0 means little ordering agreement, and -1
+means a reversal. The row and column labels identify the compared views; each
+cell also reports its shared-model count and both dataset counts, and a
+dagger marks a small shared roster — cross-task cells are usually small
+because classification and segmentation rosters mostly don't overlap, so read
+those with extra caution.
 
 The hand-edited source is
 :file:`experiments/scripts/ranking_explorer.template.html`. The generator

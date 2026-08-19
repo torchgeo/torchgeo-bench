@@ -137,18 +137,54 @@ def test_terramind_alias_applies_during_harmonization() -> None:
 
 
 def test_alias_collision_raises_before_coverage_selection() -> None:
+    # Multispectral bands so the TerraMind off-modality filter (bands=="rgb"
+    # only) doesn't remove the plain config's rows before the collision check.
     pytest.importorskip("evaluma")
     rows = []
     for dataset in DATASETS:
         rows.extend(
             [
-                _row("tt_terramind_v1_base", dataset, "linear", "rgb", 0.8, "model_native"),
-                _row("tt_terramind_v1_base_rgb", dataset, "linear", "rgb", 0.7, "model_native"),
-                _row("peer", dataset, "linear", "rgb", 0.6, "bandspec_zscore"),
+                _row(
+                    "tt_terramind_v1_base", dataset, "linear", "blue,green,red,nir", 0.8, "model_native"
+                ),
+                _row(
+                    "tt_terramind_v1_base_rgb",
+                    dataset,
+                    "linear",
+                    "blue,green,red,nir",
+                    0.7,
+                    "model_native",
+                ),
+                _row("peer", dataset, "linear", "blue,green,red,nir", 0.6, "bandspec_zscore"),
             ]
         )
     with pytest.raises(ValueError, match="Duplicate leaderboard cells"):
-        rl.build_view(rl.harmonize(pd.DataFrame(rows)), "classification", "linear", "RGB")
+        rl.build_view(
+            rl.harmonize(pd.DataFrame(rows)), "classification", "linear", "Multispectral"
+        )
+
+
+def test_terramind_off_modality_rgb_rows_are_dropped() -> None:
+    """The plain config's incidental bands=rgb sweep is an off-modality artifact.
+
+    The dedicated ``_rgb`` config's row survives, and the plain config's
+    ``bands=all`` (multispectral) row is untouched.
+    """
+    raw = pd.DataFrame(
+        [
+            _row("tt_terramind_v1_base", "d1", "linear", "rgb", 0.5, "model_native"),
+            _row("tt_terramind_v1_base_rgb", "d1", "linear", "rgb", 0.8, "model_native"),
+            _row("tt_terramind_v1_base", "d1", "linear", "all", 0.7, "model_native"),
+            _row("tt_terramind_v1_large", "d1", "linear", "rgb", 0.4, "model_native"),
+        ]
+    )
+    out = rl.harmonize(raw)
+    rgb_rows = out[out["bandclass"] == "RGB"]
+    assert set(rgb_rows["source_model"]) == {"tt_terramind_v1_base_rgb"}
+    assert rgb_rows["score"].iloc[0] == pytest.approx(0.8)
+    multispectral_rows = out[out["bandclass"] == "Multispectral"]
+    assert set(multispectral_rows["source_model"]) == {"tt_terramind_v1_base"}
+    assert multispectral_rows["score"].iloc[0] == pytest.approx(0.7)
 
 
 def test_missing_normalization_is_rejected() -> None:
@@ -177,6 +213,28 @@ def test_incomplete_zscore_is_excluded_even_when_native_is_partial() -> None:
     bench, excluded = rl.build_view(_harmonized(), "classification", "linear", "RGB")
     assert "excluded" not in set(bench.models_)
     assert {row["model"]: row["n_tasks"] for row in excluded}["excluded"] == 2
+
+
+def test_excluded_n_tasks_reflects_native_coverage_not_just_zscore() -> None:
+    """A model with no zscore rows (e.g. OlmoEarth, relabeled to model_native)
+    that is nonetheless incomplete must report its native coverage, not 0."""
+    pytest.importorskip("evaluma")
+    raw = _raw_df()
+    raw = pd.concat(
+        [
+            raw,
+            pd.DataFrame(
+                [
+                    _row("native_partial", "d1", "linear", "rgb", 0.5, "model_native"),
+                    _row("native_partial", "d2", "linear", "rgb", 0.5, "model_native"),
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    _bench, excluded = rl.build_view(rl.harmonize(raw), "classification", "linear", "RGB")
+    by_model = {row["model"]: row["n_tasks"] for row in excluded}
+    assert by_model["native_partial"] == 2
 
 
 def test_compute_join_is_strict_and_alias_aware() -> None:

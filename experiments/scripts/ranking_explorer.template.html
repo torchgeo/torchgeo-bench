@@ -17,12 +17,11 @@
     }
     * { box-sizing: border-box; }
     body { margin: 0; color: var(--text); background: var(--paper); font-family: "Source Serif 4", Georgia, serif; }
-    .sans, select, .tabulator, .panel, .foot { font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
+    .sans, select, .tabulator, .panel { font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
     .wrap { max-width: 1220px; margin: 0 auto; padding: 28px 24px 72px; }
     .masthead { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #000; padding-bottom: 10px; margin-bottom: 22px; }
     .wordmark { font-size: 22px; font-weight: 700; color: #000; }
     .wordmark small { margin-left: 10px; color: var(--muted); font: 700 11px/1 Inter, sans-serif; letter-spacing: .16em; text-transform: uppercase; }
-    .kicker { margin: 0 0 10px; color: var(--claret); font: 700 12px/1.2 Inter, sans-serif; letter-spacing: .12em; text-transform: uppercase; }
     h1 { margin: 0 0 12px; font-size: 32px; line-height: 1.12; }
     .standfirst { max-width: 900px; margin: 0 0 13px; font-size: 19px; line-height: 1.45; }
     .intro { max-width: 920px; margin: 0 0 20px; font-size: 15px; line-height: 1.55; }
@@ -64,6 +63,16 @@
     .excluded li { padding-left: 0; }
     .panel { position: relative; margin-top: 28px; padding: 16px; background: rgba(255,255,255,.58); border: 1px solid var(--soft-rule); }
     .panel .lede { margin-bottom: 12px; }
+    .preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .preset-btn { padding: 5px 12px; color: var(--text); background: var(--white); border: 1px solid var(--rule); border-radius: 2px; cursor: pointer; font: 600 12px/1.4 Inter, sans-serif; }
+    .preset-btn:hover { border-color: var(--claret); color: var(--claret); }
+    .preset-btn.active { color: #fff; background: var(--claret); border-color: var(--claret); }
+    .sensitivity-custom-toggle { margin-bottom: 12px; font: 13px/1.5 Inter, sans-serif; color: var(--muted); }
+    .sensitivity-custom-toggle summary { cursor: pointer; color: var(--blue); font-weight: 600; }
+    .sensitivity-custom { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
+    .sensitivity-custom fieldset { margin: 0; padding: 8px 10px; border: 1px solid var(--soft-rule); border-radius: 2px; }
+    .sensitivity-custom legend { padding: 0 4px; color: var(--claret); font: 700 11px Inter, sans-serif; text-transform: uppercase; letter-spacing: .06em; }
+    .sensitivity-custom label { display: block; margin: 3px 0; font-size: 12.5px; }
     svg { display: block; width: 100%; height: auto; overflow: visible; }
     .axis { stroke: var(--rule); stroke-width: 1; }
     .grid { stroke: var(--soft-rule); stroke-dasharray: 2 3; }
@@ -81,20 +90,19 @@
     .chart-tooltip { position: absolute; z-index: 2; display: none; max-width: 270px; padding: 8px 10px; color: var(--text); background: rgba(255,255,255,.98); border: 1px solid var(--rule); box-shadow: 0 8px 20px rgba(38,42,51,.12); font: 11px/1.45 Inter, sans-serif; pointer-events: none; }
     .omitted { min-height: 18px; margin: 10px 0 0; color: var(--muted); font: 12px/1.5 Inter, sans-serif; }
     .empty { padding: 24px 0 4px; color: var(--muted); font: 13px/1.5 Inter, sans-serif; }
-    .foot { margin-top: 34px; padding-top: 12px; color: var(--muted); border-top: 1px solid var(--rule); font-size: 12px; line-height: 1.6; }
     @media (max-width: 620px) { .wrap { padding-inline: 14px; } h1 { font-size: 27px; } .panel { padding: 12px; } }
   </style>
 </head>
 <body>
   <main class="wrap">
-    <header class="masthead"><div class="wordmark">torchgeo-bench <small>ranking explorer</small></div><span class="sans">classification benchmarks</span></header>
-    <p class="kicker">Frozen foundation-model evaluation</p>
+    <header class="masthead"><div class="wordmark">torchgeo-bench <small>ranking explorer</small></div><span class="sans">classification &amp; segmentation benchmarks</span></header>
     <h1>Torchgeo-Bench Geospatial Foundation Model Ranking</h1>
     <p class="standfirst">Geospatial foundation models are pretrained backbones, with the promise of being easily adaptable to various earth observation downstream tasks. Torchgeo-Bench is a collective effort to provide transparent and fair evaluations of these models on established protocols such that the community can gain a better understanding of model performance across tasks.</p>
-    <p class="intro">The table summarizes per-dataset scores, and three settings provide different views of the results:</p>
+    <p class="intro">The table summarizes per-dataset scores, and four settings provide different views of the results:</p>
     <ul class="intro-list">
       <li><strong>Aggregation</strong> sets how the per-dataset scores are combined into a single number.</li>
-      <li><strong>Probe</strong> sets how frozen embeddings become predictions, either a fitted linear classifier or KNN-5.</li>
+      <li><strong>Task</strong> switches between classification (per-image label) and segmentation (per-pixel mIoU) benchmarks.</li>
+      <li><strong>Probe</strong> sets how frozen embeddings become predictions: a fitted linear classifier or KNN-5 for classification, or a linear/DPT/FPN/conv-block decoder head for segmentation.</li>
       <li><strong>Bands</strong> sets the input modality for the backbone that configures the required bands and order, either RGB or the available multispectral channels.</li>
     </ul>
     <p class="intro">Each setting is a separate experiment rather than a filter applied to one result, so the table can reorder when you change one of them. A model is ranked only when it has a result on every eligible dataset in the selected view, and the models that fall short are named below the table. The <a href="../user/ranking_explorer.html">evaluation setup</a> documents the protocol, the coverage rules, and how each aggregation is computed.</p>
@@ -128,12 +136,16 @@
 
     <section class="panel" aria-labelledby="sensitivity-heading">
       <h2 id="sensitivity-heading">Ranking sensitivity across views</h2>
-      <p class="lede">This fixed overview uses average rank, so it remains stable while you inspect a table slice. Each cell asks whether the same models land in the same order in two experiments. It keeps only models available in both views, re-ranks them using every dataset available in each view, and then calculates tie-aware Kendall τ-b. +1 means the same order, 0 little agreement, and −1 a reversal.</p>
-      <p class="lede">Each cell reports τ-b, shared models (<em>n</em>), and datasets in its row and column views (<em>d</em>). A dagger marks a small shared roster.</p>
+      <p class="lede">Pick which experiments to compare, using average rank. Each cell asks whether the same models land in the same order in two views: it keeps only models available in both, re-ranks them using every dataset available in each, and then calculates tie-aware Kendall τ-b. +1 means the same order, 0 little agreement, and −1 a reversal.</p>
+      <p class="lede">Each cell reports τ-b, shared models (<em>n</em>), and datasets in its row and column views (<em>d</em>). A dagger marks a small shared roster — read those cells with caution, especially across tasks where few models overlap.</p>
+      <div id="sensitivity-presets" class="preset-row" role="group" aria-label="Sensitivity matrix presets"></div>
+      <details class="sensitivity-custom-toggle">
+        <summary>Customize which views to compare</summary>
+        <div id="sensitivity-custom" class="sensitivity-custom"></div>
+      </details>
       <div id="sensitivity" aria-live="polite"></div>
     </section>
 
-    <footer class="foot">Classification only. The page is a static rendering of precomputed rankings and measured 224-pixel backbone GFLOPs; it does not estimate missing compute.</footer>
   </main>
 
   <script>
@@ -142,12 +154,18 @@
     const DEFAULT_SLICE = {};
 
     const AGGREGATION_LABELS = {avg_rank: "Average rank", elo: "ELO", improvability: "Improvability"};
+    const TASK_LABELS = {classification: "Classification", segmentation: "Segmentation"};
+    const PROBE_LABELS = {
+      linear: "Linear probe", knn5: "KNN-5",
+      "seg-linear": "Linear probe", "seg-dpt": "DPT", "seg-fpn": "FPN", "seg-conv_block": "Conv block",
+    };
     const AGGREGATION_PROSE = {
-      avg_rank: "Rank models within every dataset, then average those positions. A narrow win counts the same as a large one, so datasets with different score ranges do not dominate. A score of 1 is best.",
-      elo: "Treat each dataset as a set of head-to-head comparisons: a model wins when its raw score is higher. One rating summarizes those results; the interval is a bootstrapped 95% confidence interval. Higher is better.",
-      improvability: "Compare every model with the best score on each dataset. The result is the share of its remaining error that must disappear to tie the leader, averaged across datasets. A score of 0 is best.",
+      avg_rank: "Average rank first orders the models separately on each dataset by the performance metric, then averages each model's per-dataset rank into a final ranking. Because only the ordering matters, a narrow win counts the same as a wide one, and datasets with different score ranges carry equal weight in the average. The best possible score is 1.",
+      elo: "ELO treats every dataset as a round of head-to-head comparisons, where the model with the higher raw score wins the pairing. Wins and losses across all datasets are pooled into a single rating, and the displayed interval is a bootstrapped 95% confidence interval around it.",
+      improvability: "Improvability computes, for each dataset, how much of a model's error would have to disappear for it to match the leader's error there, expressed as a percentage. That percentage is then averaged across datasets, so a model that already matches the leader everywhere scores 0.",
     };
     const SENSITIVITY_AGGREGATION = "avg_rank";
+    let sensitivitySelection = null; // Set of view keys; lazily seeded from the default task on first render.
     const controls = {
       aggregation: document.getElementById("sel-aggregation"),
       task: document.getElementById("sel-task"),
@@ -162,8 +180,8 @@
     }
 
     function labelViewLines(view) {
-      const task = view.task === "classification" ? "Classification" : view.task;
-      const probe = view.probe === "linear" ? "Linear probe" : view.probe === "knn5" ? "KNN-5" : view.probe;
+      const task = TASK_LABELS[view.task] || view.task;
+      const probe = PROBE_LABELS[view.probe] || view.probe;
       return [task, probe, view.bandclass];
     }
 
@@ -185,10 +203,10 @@
 
     function populateControls() {
       const tasks = values(RANKINGS);
-      state.task = fillSelect(controls.task, tasks, state.task);
+      state.task = fillSelect(controls.task, tasks, state.task, TASK_LABELS);
       controls.task.disabled = tasks.length < 2;
       const probes = values(RANKINGS[state.task]);
-      state.probe = fillSelect(controls.probe, probes, state.probe);
+      state.probe = fillSelect(controls.probe, probes, state.probe, PROBE_LABELS);
       const bands = values(RANKINGS[state.task][state.probe]);
       state.bandclass = fillSelect(controls.bandclass, bands, state.bandclass);
       const aggregations = values(RANKINGS[state.task][state.probe][state.bandclass]);
@@ -240,8 +258,9 @@
         groups.get(metric).push(datasetMeta[dataset]?.label || dataset);
       });
       const entries = [...groups.entries()];
+      const lead = label => label.charAt(0).toLowerCase() + label.slice(1);
       document.getElementById("metric-key").textContent = entries.length === 1
-        ? `Every dataset column is ${entries[0][0].toLowerCase()}`
+        ? `Every dataset column is ${lead(entries[0][0])}`
         : entries.map(([metric, labels]) => `${metric}: ${labels.join(", ")}`).join("; ");
     }
 
@@ -374,13 +393,69 @@
       return `rgb(${rgb.join(",")})`;
     }
 
+    function sensitivityPreset(name) {
+      const allViews = SENSITIVITY.views || [];
+      const keys = name === "all" ? allViews : allViews.filter(view => view.task === name);
+      return new Set(keys.map(view => view.key));
+    }
+
+    function setsEqual(a, b) {
+      return a.size === b.size && [...a].every(key => b.has(key));
+    }
+
+    function renderSensitivityPickers() {
+      const allViews = SENSITIVITY.views || [];
+      const tasks = [...new Set(allViews.map(view => view.task))];
+      const presets = [...tasks.map(task => ({key: task, label: `${TASK_LABELS[task] || task} only`})), {key: "all", label: "Everything"}];
+
+      const presetHost = document.getElementById("sensitivity-presets");
+      presetHost.replaceChildren(...presets.map(preset => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = setsEqual(sensitivitySelection, sensitivityPreset(preset.key)) ? "preset-btn active" : "preset-btn";
+        button.textContent = preset.label;
+        button.addEventListener("click", () => { sensitivitySelection = sensitivityPreset(preset.key); renderSensitivity(); });
+        return button;
+      }));
+
+      const customHost = document.getElementById("sensitivity-custom");
+      customHost.replaceChildren(...tasks.map(task => {
+        const group = document.createElement("fieldset");
+        const legend = document.createElement("legend");
+        legend.textContent = TASK_LABELS[task] || task;
+        group.appendChild(legend);
+        allViews.filter(view => view.task === task).forEach(view => {
+          const label = document.createElement("label");
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = sensitivitySelection.has(view.key);
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) sensitivitySelection.add(view.key); else sensitivitySelection.delete(view.key);
+            renderSensitivity();
+          });
+          label.appendChild(checkbox);
+          label.append(` ${labelViewLines(view).join(" · ")}`);
+          group.appendChild(label);
+        });
+        return group;
+      }));
+    }
+
     function renderSensitivity() {
+      if (sensitivitySelection === null) sensitivitySelection = sensitivityPreset(state.task);
+      renderSensitivityPickers();
       const target = document.getElementById("sensitivity");
       const aggregation = SENSITIVITY.by_aggregation?.[SENSITIVITY_AGGREGATION]
         ? SENSITIVITY_AGGREGATION
         : values(SENSITIVITY.by_aggregation)[0];
-      const matrix = SENSITIVITY.by_aggregation?.[aggregation], views = SENSITIVITY.views || [];
-      if (!matrix || !views.length) { target.innerHTML = '<p class="empty">No comparable views are available.</p>'; return; }
+      const fullMatrix = SENSITIVITY.by_aggregation?.[aggregation], allViews = SENSITIVITY.views || [];
+      const indices = allViews.map((_, index) => index).filter(index => sensitivitySelection.has(allViews[index].key));
+      const views = indices.map(index => allViews[index]);
+      if (!fullMatrix || views.length < 2) {
+        target.innerHTML = '<p class="empty">Select at least two views to compare.</p>';
+        return;
+      }
+      const matrix = indices.map(rowIndex => indices.map(columnIndex => fullMatrix[rowIndex][columnIndex]));
       const n = views.length, cell = Math.max(76, Math.min(110, Math.floor(580 / n)));
       const left = 156, top = 70, width = left + cell * n + 12, height = top + cell * n + 10;
       const svg = svgElement("svg", {viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Kendall tau-b ranking sensitivity matrix"});
