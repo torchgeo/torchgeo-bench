@@ -12,6 +12,7 @@ from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.datasets.m_eurosat import MEurosat
 from torchgeo_bench.datasets.m_so2sat import MSo2Sat
 from torchgeo_bench.models.torchgeo_models import (
+    _DOFA_SAR_WAVELENGTH_UM,
     TorchGeoCromaBench,
     TorchGeoDOFABench,
     TorchGeoPanopticonBench,
@@ -20,6 +21,7 @@ from torchgeo_bench.models.torchgeo_models import (
     TorchGeoSwinBench,
     _adapt_first_conv,
     _extract_normalize_transforms,
+    _resolve_dofa_wavelengths,
     _resolve_torchgeo_factory,
     _resolve_torchgeo_weights,
     _warn_unit_mismatch,
@@ -258,6 +260,32 @@ def test_torchgeo_resnet_forward_shape(monkeypatch):
     assert out.ndim == 2
     assert out.shape[0] == 2
     assert torch.isfinite(out).all()
+
+
+def _sar_band(name: str) -> BandSpec:
+    return BandSpec(
+        sensor="s1", name=name, source_name=name.upper(), mean=0.0, std=1.0, min=-1.0, max=1.0
+    )
+
+
+def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
+    """SAR bands (sensor s1/sar) with no wavelength get DOFA's own 3.75um
+    placeholder (github.com/zhu-xlab/DOFA waves.json key "2") instead of
+    raising, since radar backscatter has no optical wavelength to declare."""
+    bands = _s2_multispectral_bands()[:3] + [_sar_band("vh"), _sar_band("vv")]
+    wavelengths = _resolve_dofa_wavelengths(bands, None)
+    assert wavelengths[-2:] == [_DOFA_SAR_WAVELENGTH_UM, _DOFA_SAR_WAVELENGTH_UM]
+    assert wavelengths[:3] == [b.wavelength_um for b in bands[:3]]
+
+
+def test_dofa_wavelengths_still_raises_for_non_sar_missing_wavelength() -> None:
+    """A non-SAR band with no wavelength is a real data-declaration gap, not
+    something DOFA has a documented default for -- must still raise."""
+    bad_band = BandSpec(
+        sensor="dem", name="elevation", source_name="DEM", mean=0.0, std=1.0, min=0.0, max=1.0
+    )
+    with pytest.raises(ValueError, match="DOFA wavelengths missing"):
+        _resolve_dofa_wavelengths([bad_band], None)
 
 
 def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:

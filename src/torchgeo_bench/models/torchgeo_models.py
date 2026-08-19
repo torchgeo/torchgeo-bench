@@ -580,18 +580,32 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
 # ---------------------------------------------------------------------------
 
 
+#: DOFA's own pretraining wave table (github.com/zhu-xlab/DOFA,
+#: ``pretraining/datasets/waves.json``) assigns both channels of its 2-band
+#: Sentinel-1 (VH, VV) modality this placeholder wavelength: ``"2": [3.75,
+#: 3.75]``. Radar backscatter has no optical wavelength, so this is a
+#: deliberate, sourced placeholder from the original authors -- not a guess
+#: -- used to give the wavelength-conditioned hypernetwork a fixed token for
+#: "this is the SAR modality" rather than raising.
+_DOFA_SAR_WAVELENGTH_UM = 3.75
+_SAR_SENSORS = frozenset({"s1", "sar"})
+
+
 def _resolve_dofa_wavelengths(
     bands: list[BandSpec],
     wavelengths: list[float] | None,
 ) -> list[float]:
     """Return one DOFA wavelength per selected input channel.
 
-    Raises on any ``BandSpec`` lacking ``wavelength_um`` rather than silently
-    defaulting to ~green (0.6 µm).  DOFA's wavelength embedding is the only
-    way the model "knows" what spectral channel each tensor index represents;
-    a silent default would assign green-band weights to e.g. SAR backscatter
-    channels and quietly produce garbage features.  Callers that genuinely
-    want a default must pass an explicit ``wavelengths=`` list.
+    Raises on any non-SAR ``BandSpec`` lacking ``wavelength_um`` rather than
+    silently defaulting to ~green (0.6 µm).  DOFA's wavelength embedding is
+    the only way the model "knows" what spectral channel each tensor index
+    represents; a silent default would assign green-band weights to e.g.
+    thermal or elevation channels and quietly produce garbage features. SAR
+    bands (``sensor in {"s1", "sar"}``) are the one documented exception:
+    they get DOFA's own placeholder, :data:`_DOFA_SAR_WAVELENGTH_UM`.
+    Callers that want a different default must pass an explicit
+    ``wavelengths=`` list.
     """
     if wavelengths is not None:
         if len(wavelengths) != len(bands):
@@ -601,14 +615,17 @@ def _resolve_dofa_wavelengths(
             )
         return [float(w) for w in wavelengths]
 
-    missing = [b.name for b in bands if b.wavelength_um is None]
+    missing = [b.name for b in bands if b.wavelength_um is None and b.sensor not in _SAR_SENSORS]
     if missing:
         raise ValueError(
             f"DOFA wavelengths missing for {missing}: every BandSpec must have a "
             f"`wavelength_um` set.  SAR / non-optical channels need either an "
             f"explicit wavelength or to be filtered out of the input."
         )
-    return [float(b.wavelength_um) for b in bands]
+    return [
+        _DOFA_SAR_WAVELENGTH_UM if b.wavelength_um is None else float(b.wavelength_um)
+        for b in bands
+    ]
 
 
 class TorchGeoDOFABench(_TorchGeoBackboneBench):
