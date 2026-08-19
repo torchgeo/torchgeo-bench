@@ -24,7 +24,9 @@ from torchgeo_bench.datasets import (
     list_datasets,
 )
 from torchgeo_bench.intrinsic_dim import (
+    FEATURE_SPECTRUM_METRICS,
     DegenerateManifoldError,
+    DegenerateSpectrumError,
     compute_feature_spectrum,
     compute_intrinsic_dim,
 )
@@ -373,6 +375,7 @@ def evaluate_intrinsic_dim(
     feature_dim: int,
     n_counts: dict[str, int],
     verbose: bool = False,
+    only_metrics: frozenset[str] | None = None,
 ) -> list[dict]:
     """Compute intrinsic-dimension metrics over selected splits and return CSV rows.
 
@@ -381,6 +384,12 @@ def evaluate_intrinsic_dim(
     ``spectrum_<metric>_<split>`` name. All rows use
     ``method="intrinsic_dim"`` so they share the existing side-output and
     resume path.
+
+    ``only_metrics``, when given, restricts computation to metric names not
+    already present on disk -- resuming a run that's missing only the newer
+    spectrum rows shouldn't re-run the far more expensive torchid estimators
+    just to recompute rows that already exist and would be filtered out
+    anyway. ``None`` computes everything (a fresh, non-resumed run).
     """
     rows: list[dict] = []
     for split_name in selected_splits:
@@ -397,6 +406,8 @@ def evaluate_intrinsic_dim(
         # non-finite dimension, which would otherwise cost the other rows too.
         dims: dict[str, float] = {}
         for est_name in estimators:
+            if only_metrics is not None and f"id_{est_name}_{split_name}" not in only_metrics:
+                continue
             try:
                 dims.update(
                     compute_intrinsic_dim(
@@ -426,8 +437,26 @@ def evaluate_intrinsic_dim(
                     n_counts=n_counts,
                 )
             )
-        spectrum = compute_feature_spectrum(X, max_samples=max_samples, seed=seed)
+
+        spectrum_names = {f"spectrum_{metric}_{split_name}" for metric in FEATURE_SPECTRUM_METRICS}
+        if only_metrics is not None and only_metrics.isdisjoint(spectrum_names):
+            continue
+        try:
+            spectrum = compute_feature_spectrum(X, max_samples=max_samples, seed=seed)
+        except DegenerateSpectrumError as exc:
+            logger.warning(
+                f"[intrinsic-dim] spectrum split={split_name} model={common_meta.get('model')} "
+                f"dataset={common_meta.get('dataset')} bands={common_meta.get('bands')} "
+                f"norm={common_meta.get('normalization')}: degenerate features, writing NaN. "
+                f"Diagnostic: {exc}"
+            )
+            spectrum = {metric: float("nan") for metric in FEATURE_SPECTRUM_METRICS}
         for metric_name, value in spectrum.items():
+            if (
+                only_metrics is not None
+                and f"spectrum_{metric_name}_{split_name}" not in only_metrics
+            ):
+                continue
             rows.append(
                 metric_row(
                     common_meta,
@@ -1009,6 +1038,7 @@ def main(cfg: DictConfig) -> None:
                     feature_dim=feature_dim,
                     n_counts=n_counts,
                     verbose=cfg.verbose,
+                    only_metrics=plan.id_missing_metrics if cfg.resume else None,
                 )
                 if cfg.resume:
                     id_rows = _filter_completed_metric_rows(id_rows, completed_metrics, key_cols)

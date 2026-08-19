@@ -192,6 +192,7 @@ class DatasetRunPlan:
     skip_linear: bool
     skip_id: bool
     skip_profile: bool
+    id_missing_metrics: frozenset[str] = frozenset()
 
 
 def _plan_dataset_run(
@@ -235,11 +236,15 @@ def _plan_dataset_run(
             id_metric_names.extend(
                 f"spectrum_{metric}_{split}" for metric in FEATURE_SPECTRUM_METRICS
             )
-    skip_id = (not id_enabled) or bool(
-        cfg.resume
-        and id_metric_names
-        and all(id_key in completed_metrics.get(metric, set()) for metric in id_metric_names)
+    # Per-metric, not just per-dataset: a run that already has its (expensive)
+    # torchid estimator rows but is missing only the (cheap) newer spectrum
+    # rows shouldn't have to redo the estimators just to backfill the rest.
+    id_missing_metrics = frozenset(
+        metric
+        for metric in id_metric_names
+        if not (cfg.resume and id_key in completed_metrics.get(metric, set()))
     )
+    skip_id = (not id_enabled) or bool(id_metric_names and not id_missing_metrics)
 
     profile_cfg = getattr(cfg.eval, "profile", None)
     profile_enabled = bool(profile_cfg and profile_cfg.get("enabled", False))
@@ -259,4 +264,5 @@ def _plan_dataset_run(
         skip_linear=skip_linear,
         skip_id=skip_id,
         skip_profile=skip_profile,
+        id_missing_metrics=id_missing_metrics,
     )

@@ -87,9 +87,13 @@ The reported metrics are:
      - :math:`\sum_{i=1}^{\min(10,d)} p_i`, the cumulative variance explained by
        the first ten components (or all components when ``d < 10``).
    * - ``spectral_anisotropy``
-     - :math:`(d p_1 - 1)/(d - 1)`, leading-component dominance normalized so an
-       isotropic ``d``-dimensional spectrum is 0 and a rank-one spectrum is 1.
-       The one-dimensional convention is 0 because no direction can dominate
+     - :math:`(d_{\text{eff}} p_1 - 1)/(d_{\text{eff}} - 1)`, leading-component
+       dominance normalized so an isotropic spectrum is 0 and a rank-one
+       spectrum is 1, where :math:`d_{\text{eff}} = \min(d, n - 1)` is the
+       number of singular values centering can leave nonzero. Normalizing by
+       the raw feature dimension ``d`` instead would give small splits
+       (``n <= d``) an anisotropy floor above zero even for isotropic data.
+       The ``d_eff <= 1`` convention is 0 because no direction can dominate
        another.
 
 The same deterministic ``max_samples`` cap and seed used for intrinsic

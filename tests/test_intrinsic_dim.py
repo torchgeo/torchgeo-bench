@@ -79,6 +79,13 @@ class TestComputeBasic:
         out = compute_intrinsic_dim(np.zeros((10, 3)), estimators=[])
         assert out == {}
 
+    def test_rejects_invalid_max_samples_same_as_feature_spectrum(self) -> None:
+        # compute_feature_spectrum validates max_samples explicitly; without
+        # the same check here, a bad value (e.g. a negative int) would just
+        # silently misbehave in _subsample instead of failing clearly.
+        with pytest.raises(ValueError, match="max_samples must be an integer"):
+            compute_intrinsic_dim(np.zeros((10, 3)), estimators=[], max_samples=-1)
+
 
 class TestFeatureSpectrum:
     def test_isotropic_features(self) -> None:
@@ -115,10 +122,13 @@ class TestFeatureSpectrum:
         assert metrics["spectral_anisotropy"] == pytest.approx(0.0)
 
     def test_known_low_rank_spectrum(self) -> None:
-        X = np.zeros((6, 12), dtype=np.float64)
-        X[0:2, 0] = [3.0, -3.0]
-        X[2:4, 1] = [2.0, -2.0]
-        X[4:6, 2] = [1.0, -1.0]
+        # n - 1 = 17 >= d = 12 here, so effective_dim == d and the ambient
+        # feature dimension is the binding constraint on anisotropy.
+        block = np.zeros((6, 12), dtype=np.float64)
+        block[0:2, 0] = [3.0, -3.0]
+        block[2:4, 1] = [2.0, -2.0]
+        block[4:6, 2] = [1.0, -1.0]
+        X = np.tile(block, (3, 1))
         proportions = np.array([9.0, 4.0, 1.0]) / 14.0
 
         metrics = compute_feature_spectrum(X + 100.0, max_samples=None)
@@ -158,6 +168,20 @@ class TestFeatureSpectrum:
         X = np.random.default_rng(0).normal(size=(10, 3))
         with pytest.raises(ValueError, match="at least 2"):
             compute_feature_spectrum(X, max_samples=1)
+
+    def test_small_split_isotropic_still_maps_to_zero(self) -> None:
+        # n=6 rows in d=64 ambient features: after centering, only n - 1 = 5
+        # singular values are nonzero. Centered standard-basis rows are a
+        # regular simplex -- equidistant, so those 5 singular values are
+        # exactly equal (isotropic). Normalizing by the raw feature dimension
+        # d=64 instead of effective_dim = min(d, n - 1) = 5 would give this an
+        # anisotropy floor well above zero, even though it's isotropic.
+        X = np.zeros((6, 64))
+        X[:, :6] = np.eye(6)
+
+        metrics = compute_feature_spectrum(X, max_samples=None)
+
+        assert metrics["spectral_anisotropy"] == pytest.approx(0.0, abs=1e-9)
 
 
 # ---- error paths (mocked torchid) ----------------------------------------

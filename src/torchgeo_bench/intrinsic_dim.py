@@ -86,6 +86,16 @@ def _subsample(X: np.ndarray, max_samples: int | None, seed: int) -> np.ndarray:
     return X[idx]
 
 
+def _validate_max_samples(max_samples: int | None) -> None:
+    """Reject a ``max_samples`` that would make ``_subsample`` misbehave."""
+    if max_samples is not None and (
+        isinstance(max_samples, bool) or not isinstance(max_samples, int) or max_samples < 2
+    ):
+        raise ValueError(
+            f"max_samples must be an integer of at least 2 or None, got {max_samples!r}"
+        )
+
+
 def compute_feature_spectrum(
     X: np.ndarray,
     max_samples: int | None = 10_000,
@@ -96,8 +106,12 @@ def compute_feature_spectrum(
     The squared singular values of the centered feature matrix are normalized
     into variance proportions ``p``. Effective rank is ``exp(H(p))``;
     participation ratio is ``1 / sum(p**2)``. Spectral anisotropy normalizes
-    leading-component dominance against the isotropic ``1 / d`` baseline:
-    ``(d * p[0] - 1) / (d - 1)``.
+    leading-component dominance against the isotropic ``1 / d_eff`` baseline,
+    where ``d_eff = min(d, n - 1)`` is the number of singular values centering
+    can leave nonzero: ``(d_eff * p[0] - 1) / (d_eff - 1)``. Using the raw
+    feature dimension ``d`` here would give small splits (``n <= d``, common
+    for val/test) an anisotropy floor above zero even for isotropic data,
+    making the score incomparable across datasets with different split sizes.
 
     Args:
         X: Feature matrix of shape ``(n_samples, n_features)``.
@@ -122,12 +136,7 @@ def compute_feature_spectrum(
         raise ValueError(f"X must contain at least one feature, got shape {X.shape}")
     if not np.isfinite(X).all():
         raise ValueError("X must contain only finite values")
-    if max_samples is not None and (
-        isinstance(max_samples, bool) or not isinstance(max_samples, int) or max_samples < 2
-    ):
-        raise ValueError(
-            f"max_samples must be an integer of at least 2 or None, got {max_samples!r}"
-        )
+    _validate_max_samples(max_samples)
 
     Xs = np.asarray(_subsample(X, max_samples, seed), dtype=np.float64)
     centered = Xs - Xs.mean(axis=0, keepdims=True)
@@ -147,13 +156,13 @@ def compute_feature_spectrum(
     pc1_variance_ratio = float(proportions[0])
     pc10_variance_ratio = float(proportions[:10].sum())
 
-    feature_dim = Xs.shape[1]
-    if feature_dim == 1:
+    effective_dim = min(Xs.shape[1], Xs.shape[0] - 1)
+    if effective_dim <= 1:
         spectral_anisotropy = 0.0
     else:
         spectral_anisotropy = float(
             np.clip(
-                (feature_dim * pc1_variance_ratio - 1.0) / (feature_dim - 1.0),
+                (effective_dim * pc1_variance_ratio - 1.0) / (effective_dim - 1.0),
                 0.0,
                 1.0,
             )
@@ -239,6 +248,7 @@ def compute_intrinsic_dim(
     """
     if X.ndim != 2:
         raise ValueError(f"X must be 2D, got shape {X.shape}")
+    _validate_max_samples(max_samples)
     if not estimators:
         return {}
 
