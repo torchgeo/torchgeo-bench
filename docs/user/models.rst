@@ -239,18 +239,36 @@ not help:
   one input unit for the whole tensor and correctly refuses to guess one
   across sensors.  ``bandspec_zscore`` has no such restriction and covers
   these datasets fine.
-* **OlmoEarth has no sensor layout for some SAR band sets.**  The
-  OlmoEarth wrapper routes each channel to a modality-specific patch
-  embedding by sensor; datasets whose SAR bands don't match a defined
-  layout raise rather than silently misrouting the tensor.
 * **Scale-MAE is RGB-only by construction.**  ``FMOW_RGB`` requires
   exactly three ordered RGB bands and rejects any other input outright,
   so it has no multispectral path at all.
-* **A few dataset/model band mismatches.**  Some datasets don't declare a
-  ``coastal`` band that CROMA/Panopticon require, and a couple of
-  datasets have ``nir``/``swir`` bands with no ``wavelength_um`` set,
-  which DOFA needs (see the SAR-specific exception in
-  ``torchgeo_bench.models.torchgeo_models._resolve_dofa_wavelengths``).
+
+Three other gaps looked like the same kind of permanent limit but turned
+out to be fixable, and are handled automatically now:
+
+* **OlmoEarth's SAR sensor tag.**  Datasets declare Sentinel-1 bands under
+  either ``sensor="s1"`` (so2sat, benv2, treesatai) or ``sensor="sar"``
+  (m-so2sat, kuro_siwo) -- OlmoEarth's own pretraining does cover
+  Sentinel-1, the wrapper's sensor-layout table just only had the
+  ``"sar"`` key registered.  ``"s1"`` is now an alias for the same
+  layout.
+* **A missing ``coastal`` band.**  Most GeoBench Sentinel-2 datasets
+  don't ship a coastal-aerosol band, which CROMA requires.  Rather than
+  zero-filling or raising, ``torchgeo_bench.models._band_mapping.map_to_model_bands``
+  now substitutes the spectrally-nearest available band by default --
+  blue (0.49 um) for coastal aerosol (0.443 um) -- an approximation, not
+  the real band, but a better stand-in than zero.  Override or disable
+  via its ``band_fallbacks`` argument.
+* **A dataset's optical bands with no ``wavelength_um`` set.**  DOFA and
+  Panopticon need a wavelength per channel; a Landsat dataset that never
+  bothered declaring one (most datasets here are Sentinel-2 anyway) now
+  falls back to the true Sentinel-2 centre wavelength for that band name
+  via ``torchgeo_bench.models._band_mapping.S2_WAVELENGTHS_UM``,
+  close enough to be useful (Landsat nir is 0.865 um vs. Sentinel-2's
+  0.842 um) rather than a hard stop. SAR bands still have no optical
+  wavelength to fall back to and raise unless the caller passes one
+  explicitly -- see the SAR-specific placeholder in
+  ``torchgeo_bench.models.torchgeo_models._resolve_dofa_wavelengths``.
 
 Closing any of these needs a design decision or a small feature (a
 mixed-unit policy for ``model_native``, an OlmoEarth SAR layout, a

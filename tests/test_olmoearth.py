@@ -485,6 +485,37 @@ def test_mixed_s2_sar_forward_pass() -> None:
 
 
 @requires_olmoearth
+def test_s1_sensor_tag_aliases_to_sar_modality() -> None:
+    """so2sat/benv2/treesatai declare SAR bands under sensor="s1" (m-so2sat/
+    kuro_siwo use "sar") -- both must route to the same Sentinel-1 modality
+    rather than "s1" raising "no layout for sensor"."""
+    from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    bands = [
+        BandSpec(
+            sensor="s1", name="vv", source_name="VV", mean=-19.4, std=5.6, min=-66.5, max=24.3
+        ),
+        BandSpec(
+            sensor="s1", name="vh", source_name="VH", mean=-12.6, std=5.1, min=-65.3, max=33.6
+        ),
+    ]
+    model = OlmoEarthBenchModel(bands=bands, model_size="nano", normalization="identity")
+    assert len(model._sensor_groups) == 1
+    s1_group = model._sensor_groups[0]
+    assert s1_group["sensor"] == "s1"
+    assert s1_group["modality"] == Modality.SENTINEL1
+    assert s1_group["sample_field"] == "sentinel1"
+    assert s1_group["channels"] == 2
+    assert model.input_res == 10
+    model.eval()
+    out = model.forward_patch_features(torch.rand(2, 2, 64, 64) * 30.0)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
 def test_invalid_model_size_at_construction_not_forward() -> None:
     """Invalid model_size must fail in __init__ before any model loading call."""
     import olmoearth_pretrain_minimal as oepm
