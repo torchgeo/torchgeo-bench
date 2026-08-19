@@ -3,7 +3,6 @@
 from unittest import mock
 
 import numpy as np
-
 import pytest
 
 from torchgeo_bench.main import LinearProbeDivergedError, evaluate_logistic
