@@ -178,6 +178,10 @@ _MODALITY_INFO: dict[str, dict] = {
             "vh_lee": 1,
             "vh_lee_real": 1,
             "vh_lee_imag": 1,
+            # treesatai's derived VV/VH ratio band -- not a real physical
+            # channel, so it wins whichever slot it lands on (vh, matching
+            # the existing "later variant overwrites" convention above).
+            "vv_vh": 1,
         },
     },
     # NAIP / aerial: no dedicated OlmoEarth modality, route RGB through
