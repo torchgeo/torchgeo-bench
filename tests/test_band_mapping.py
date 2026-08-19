@@ -78,6 +78,24 @@ class TestMapToModelBands:
         assert torch.equal(out[:, 3], torch.zeros(1, 4, 4))
         assert missing == [False, False, False, True, True, True]
 
+    def test_missing_coastal_falls_back_to_blue_by_default(self) -> None:
+        """A dataset with no coastal-aerosol band (most GeoBench S2 datasets)
+        must not hard-fail a coastal-requiring model (CROMA) -- blue is the
+        spectrally nearest available band, so substitute it instead of
+        zero-filling or raising."""
+        src = [_band("red"), _band("green"), _band("blue")]
+        x = torch.arange(3 * 4 * 4, dtype=torch.float32).reshape(1, 3, 4, 4)
+        out, missing = map_to_model_bands(x, src, ["coastal", "blue"])
+        assert torch.equal(out[:, 0], x[:, 2])  # coastal <- blue (src[2])
+        assert torch.equal(out[:, 1], x[:, 2])  # blue <- blue
+        assert missing == [False, False]  # fallback-filled, not zero-filled
+
+    def test_band_fallbacks_can_be_disabled(self) -> None:
+        src = [_band("red"), _band("green"), _band("blue")]
+        x = torch.zeros(1, 3, 4, 4)
+        with pytest.raises(ValueError, match="Missing required model band"):
+            map_to_model_bands(x, src, ["coastal"], band_fallbacks={})
+
     def test_alias_resolution(self) -> None:
         src = [_band("B04"), _band("B03"), _band("B02")]
         x = torch.zeros(2, 3, 2, 2)

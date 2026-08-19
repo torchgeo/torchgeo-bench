@@ -145,6 +145,15 @@ def select_src_bands(
     return indices, selected
 
 
+#: When a target band is absent, substitute this spectrally-nearest
+#: neighbor's data instead of zero-filling or raising. Coastal aerosol
+#: (0.443 um) is the only band this currently applies to -- it sits right
+#: next to blue (0.49 um) in the spectrum, and a real (if approximate) blue
+#: reading is a better stand-in for a required "coastal" slot than a zeroed
+#: channel. Callers can override or disable via ``band_fallbacks``.
+DEFAULT_BAND_FALLBACKS: dict[str, str] = {"coastal": "blue"}
+
+
 def map_to_model_bands(
     images: torch.Tensor,
     src_bands: list[BandSpec],
@@ -152,11 +161,19 @@ def map_to_model_bands(
     *,
     allow_missing: bool = False,
     preferred_sensors: tuple[str, ...] = (),
+    band_fallbacks: dict[str, str] | None = None,
 ) -> tuple[torch.Tensor, list[bool]]:
     """Rearrange ``images`` from src band order to ``target_band_names``, zero-filling gaps.
 
+    A target band missing from ``src_bands`` first tries
+    ``band_fallbacks`` (default :data:`DEFAULT_BAND_FALLBACKS`) -- copying a
+    spectrally-nearest neighbor's real data -- before falling through to
+    zero-fill (``allow_missing=True``) or raising. Pass ``band_fallbacks={}``
+    to disable.
+
     Returns ``(mapped, missing)`` where ``missing[i]`` is True iff slot
-    ``i`` was zero-filled.
+    ``i`` was zero-filled (a fallback-substituted slot is *not* counted as
+    missing, since it carries real, if approximate, data).
     """
     if images.shape[1] != len(src_bands):
         raise ValueError(
@@ -164,12 +181,24 @@ def map_to_model_bands(
             f"src_bands has {len(src_bands)} entries."
         )
     src_index = resolve_src_indices(src_bands, preferred_sensors=preferred_sensors)
+    fallbacks = DEFAULT_BAND_FALLBACKS if band_fallbacks is None else band_fallbacks
 
     B, _, H, W = images.shape
     out = torch.zeros(B, len(target_band_names), H, W, device=images.device, dtype=images.dtype)
     missing: list[bool] = []
     for j, name in enumerate(target_band_names):
-        idx = src_index.get(canonical_band_name(name))
+        canon = canonical_band_name(name)
+        idx = src_index.get(canon)
+        if idx is None and canon in fallbacks:
+            fallback_idx = src_index.get(canonical_band_name(fallbacks[canon]))
+            if fallback_idx is not None:
+                logger.warning(
+                    "map_to_model_bands: %r missing from source bands; substituting %r "
+                    "(spectrally nearest available band) instead of zero-fill.",
+                    name,
+                    fallbacks[canon],
+                )
+                idx = fallback_idx
         if idx is None:
             if not allow_missing:
                 available = [canonical_band_name(b.name) for b in src_bands]
