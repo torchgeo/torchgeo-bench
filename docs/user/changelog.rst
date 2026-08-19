@@ -1,6 +1,19 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+Added
+^^^^^
+
+* NWPU-RESISC45 (``resisc45``) via torchgeo: 31,500 RGB scenes, 45 classes, on
+  torchgeo's published 18,900 / 6,300 / 6,300 split.  Downloadable with
+  ``torchgeo-bench download resisc45``.  It is the most-divergent benchmark in
+  the GFM literature, so having it under a fixed protocol is the point.
+* ``scripts/compute_band_statistics.py`` computes the per-band ``BandSpec``
+  statistics a new dataset needs, from its train split only.
+
 0.5.0 (2026-08-10)
 ------------------
 

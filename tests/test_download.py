@@ -11,6 +11,7 @@ from torchgeo_bench.download import (
     download_eurosat,
     download_geobench_v1,
     download_geobench_v2,
+    download_resisc45,
 )
 
 
@@ -96,3 +97,21 @@ def test_download_eurosat_creates_target_and_downloads_splits(tmp_path: Path) ->
     assert (out / "eurosat").exists()
     called_splits = [kwargs["split"] for _, kwargs in eurosat_mock.call_args_list]
     assert called_splits == ["train", "val", "test"]
+
+
+def test_download_resisc45_creates_target_and_downloads_splits(tmp_path: Path) -> None:
+    out = tmp_path / "data"
+    with mock.patch("torchgeo_bench.download.RESISC45") as resisc_mock:
+        download_resisc45(out)
+
+    assert (out / "resisc45").exists()
+    called_splits = [kwargs["split"] for _, kwargs in resisc_mock.call_args_list]
+    assert called_splits == ["train", "val", "test"]
+
+
+def test_download_resisc45_verifies_the_archive_checksum(tmp_path: Path) -> None:
+    """The archive comes from a pinned HF revision; a truncated zip must fail loudly."""
+    with mock.patch("torchgeo_bench.download.RESISC45") as resisc_mock:
+        download_resisc45(tmp_path)
+
+    assert all(kwargs["checksum"] for _, kwargs in resisc_mock.call_args_list)

@@ -10,6 +10,7 @@ Three targets:
   HF repos. Defaults to the benchmark-supported datasets; override with
   ``--datasets``. Each dataset goes to ``<output>/geobenchv2/<name>``.
 - ``eurosat`` — torchgeo's EuroSAT downloader, into ``<output>/eurosat``.
+- ``resisc45`` — torchgeo's NWPU-RESISC45 downloader, into ``<output>/resisc45``.
 """
 
 import logging
@@ -18,7 +19,7 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 from rich.progress import track
-from torchgeo.datasets import EuroSAT
+from torchgeo.datasets import RESISC45, EuroSAT
 
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
 
@@ -139,3 +140,19 @@ def download_eurosat(output_dir: Path) -> None:
     for split in ("train", "val", "test"):
         EuroSAT(root=str(target), split=split, download=True)
     logger.info("EuroSAT download complete.")
+
+
+def download_resisc45(output_dir: Path) -> None:
+    """Download torchgeo's NWPU-RESISC45 into ``output_dir/resisc45`` for all splits.
+
+    The three splits share one 427MB archive, so only the first call fetches
+    it; the rest just read their split file.  ``checksum=True`` because the
+    archive is served from a pinned Hugging Face revision and a truncated
+    download would otherwise surface as missing classes much later.
+    """
+    target = Path(output_dir) / "resisc45"
+    target.mkdir(parents=True, exist_ok=True)
+    logger.info("Downloading torchgeo RESISC45 -> %s", target)
+    for split in ("train", "val", "test"):
+        RESISC45(root=str(target), split=split, download=True, checksum=True)
+    logger.info("RESISC45 download complete.")
