@@ -222,6 +222,40 @@ SAM 3 vision encoder
    $ pip install 'torchgeo-bench[sam3]'
    $ torchgeo-bench run model=sam3_encoder dataset.bands=[red,green,blue]
 
+.. _multispectral-coverage-gaps:
+
+Multispectral coverage gaps
+----------------------------
+
+Most models run cleanly on every classification dataset with
+``dataset.bands=all``.  A few combinations fail for reasons that are
+capability limits rather than missing sweeps -- running them again will
+not help:
+
+* **``model_native`` normalization on mixed-sensor bands.**  ``benv2``,
+  ``so2sat``, ``m-so2sat``, and ``forestnet`` mix Sentinel-1 SAR with
+  Sentinel-2 optical bands (or, for ``forestnet``, aerial NAIP as well),
+  each at a different native scale.  ``model_native`` normalization needs
+  one input unit for the whole tensor and correctly refuses to guess one
+  across sensors.  ``bandspec_zscore`` has no such restriction and covers
+  these datasets fine.
+* **OlmoEarth has no sensor layout for some SAR band sets.**  The
+  OlmoEarth wrapper routes each channel to a modality-specific patch
+  embedding by sensor; datasets whose SAR bands don't match a defined
+  layout raise rather than silently misrouting the tensor.
+* **Scale-MAE is RGB-only by construction.**  ``FMOW_RGB`` requires
+  exactly three ordered RGB bands and rejects any other input outright,
+  so it has no multispectral path at all.
+* **A few dataset/model band mismatches.**  Some datasets don't declare a
+  ``coastal`` band that CROMA/Panopticon require, and a couple of
+  datasets have ``nir``/``swir`` bands with no ``wavelength_um`` set,
+  which DOFA needs (see the SAR-specific exception in
+  ``torchgeo_bench.models.torchgeo_models._resolve_dofa_wavelengths``).
+
+Closing any of these needs a design decision or a small feature (a
+mixed-unit policy for ``model_native``, an OlmoEarth SAR layout, a
+per-dataset wavelength fix) rather than another backfill run.
+
 Adding a new model
 ------------------
 
