@@ -242,6 +242,16 @@ not help:
 * **Scale-MAE is RGB-only by construction.**  ``FMOW_RGB`` requires
   exactly three ordered RGB bands and rejects any other input outright,
   so it has no multispectral path at all.
+* **CROMA needs a full 12-band Sentinel-2 input.**  ``forestnet`` /
+  ``m-forestnet`` only ship 6 of those 12 bands (no coastal aerosol, no
+  red-edge, no water vapour) -- too large a gap for the single-band
+  spectral-neighbor substitution below to paper over without the result
+  being mostly approximated bands rather than real ones.
+* **OlmoEarth can't fuse aerial and Sentinel-2 into one input.**
+  ``treesatai`` ships aerial RGB, Sentinel-2 optical, *and* Sentinel-1
+  SAR bands together under ``dataset.bands=all``; OlmoEarth's wrapper
+  intentionally refuses to route two different sensors onto the same
+  ``sentinel2_l2a`` slot rather than silently picking (or blending) one.
 
 Three other gaps looked like the same kind of permanent limit but turned
 out to be fixable, and are handled automatically now:
