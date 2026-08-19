@@ -1,8 +1,6 @@
-"""Unit test for the Hydra `instantiate(cfg.model, bands=..., _convert_="object")` contract."""
+"""Unit test for the `instantiate(cfg.model, bands=...)` contract."""
 
-from hydra import compose, initialize_config_module
-from hydra.utils import instantiate
-
+from torchgeo_bench.config import compose_config, instantiate
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models.interface import BenchModel
 
@@ -23,12 +21,11 @@ def _bands() -> list[BandSpec]:
 
 
 def test_instantiate_preserves_bandspec_objects():
-    """`_convert_="object"` keeps BandSpec dataclasses intact (not OmegaConf'd)."""
-    with initialize_config_module(config_module="torchgeo_bench.conf", version_base="1.3"):
-        cfg = compose(config_name="config", overrides=["model=rcf"])
+    """Kwargs bypass OmegaConf, so BandSpec dataclasses reach the constructor intact."""
+    cfg = compose_config(["model=rcf"])
 
     bands = _bands()
-    model = instantiate(cfg.model, bands=bands, _convert_="object")
+    model = instantiate(cfg.model, bands=bands)
 
     assert isinstance(model, BenchModel)
     assert isinstance(model.bands, list)

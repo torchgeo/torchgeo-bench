@@ -2,6 +2,18 @@ paper/
 results/*
 !results/contributed/
 results/contributed/*.csv
+# Per-model benchmark results: one CSV per model, tracked so a new model PR
+# adds its own file instead of editing a shared one.
+!results/models/
+!results/models/*.csv
+# Profile/intrinsic-dim rows are one-time model+hardware measurements, split
+# out of results/models/ so routine metrics reruns don't touch them.
+!results/profiles/
+!results/profiles/*.csv
+!results/intrinsic_dim/
+!results/intrinsic_dim/*.csv
+!results/legacy/
+!results/legacy/*.csv
 experiments/scripts/*
 !experiments/scripts/viz_results.py
 !experiments/scripts/repack_geobench_v1.py
@@ -9,14 +21,18 @@ experiments/scripts/*
 !experiments/scripts/regen_results_explorer.py
 !experiments/scripts/regen_leaderboard.py
 !experiments/scripts/ranking_explorer.template.html
+!experiments/scripts/extract_dataset_geography.py
 !experiments/scripts/test_knn_gpu_smoke.py
 !experiments/scripts/cleanlab_extract_probs.py
 !experiments/scripts/run_cleanlab_audit.py
 !experiments/scripts/render_flagged_gallery.py
+!experiments/scripts/introspect_seg_layers.py
+!experiments/scripts/audit_model_native.py
 !experiments/scripts/eurosat_family_dedup.py
 !experiments/scripts/cleanlab_per_class_multilabel.py
 !experiments/scripts/cleanlab_per_class_singlelabel.py
 !experiments/scripts/analyze_compute_cost.py
+!experiments/scripts/migrate_split_profile_intrinsic_dim.py
 !experiments/scripts/cost/
 experiments/scripts/cost/*
 !experiments/scripts/cost/gpu_prices.yaml
@@ -103,10 +119,23 @@ data/
 # Results
 *.csv
 *.json
+# Per-model benchmark results: one CSV per model, tracked so a new model PR
+# adds its own file instead of editing a shared one.
+!results/models/
+!results/models/*.csv
+# Profile/intrinsic-dim rows are one-time model+hardware measurements, split
+# out of results/models/ so routine metrics reruns don't touch them.
+!results/profiles/
+!results/profiles/*.csv
+!results/intrinsic_dim/
+!results/intrinsic_dim/*.csv
+!results/legacy/
+!results/legacy/*.csv
 !conf/**/*.json
 !**/band_stats.json
 !**/normalizer.json
 !docs/_static/_results_snapshots/*.json
+!docs/_static/_dataset_geography/*.json
 
 # Logs
 *.log

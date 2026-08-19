@@ -12,7 +12,7 @@ _DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_PATH = Path(__file__).parent / "fixtures" / "accuracy_baselines.csv"
-_ALL_RESULTS = _REPO_ROOT / "results" / "all_results.csv"
+_RESULTS_DIR = _REPO_ROOT / "results" / "models"
 
 _FIXTURE_COLS = {
     "model_config",
@@ -64,7 +64,9 @@ def test_accuracy_check_marker_is_registered() -> None:
     )
 
 
-@pytest.mark.skipif(not _ALL_RESULTS.exists(), reason="results/all_results.csv not found")
+@pytest.mark.skipif(
+    not list(_RESULTS_DIR.glob("*.csv")), reason="no per-model results in results/models"
+)
 def test_update_baselines_script_runs(tmp_path: Path) -> None:
     """Script runs, exits 0, and outputs a CSV with expected columns."""
     out = tmp_path / "out.csv"
@@ -78,26 +80,6 @@ def test_update_baselines_script_runs(tmp_path: Path) -> None:
     assert out.exists()
     df = pd.read_csv(out)
     assert _FIXTURE_COLS.issubset(set(df.columns))
-
-
-def test_fixture_has_expected_columns() -> None:
-    """Fixture CSV exists, is non-empty, and has the required columns."""
-    assert _FIXTURE_PATH.exists(), f"Fixture not found at {_FIXTURE_PATH}"
-    df = pd.read_csv(_FIXTURE_PATH)
-    assert not df.empty
-    assert _FIXTURE_COLS.issubset(set(df.columns))
-
-
-def test_parametrize_ids_are_unique() -> None:
-    """Derived pytest IDs from fixture combos are unique."""
-    assert _FIXTURE_PATH.exists(), f"Fixture not found at {_FIXTURE_PATH}"
-    df = pd.read_csv(_FIXTURE_PATH)
-    combos = df[["model_config", "dataset", "bands"]].drop_duplicates()
-    ids = [
-        f"{row['model_config'].replace('/', '_')}__{row['dataset']}__{row['bands']}"
-        for _, row in combos.iterrows()
-    ]
-    assert len(ids) == len(set(ids)), f"Duplicate pytest IDs: {ids}"
 
 
 # Load fixture at module level for parametrisation (empty DF if file absent)

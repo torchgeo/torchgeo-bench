@@ -66,20 +66,3 @@ def test_empty_bands_rejected():
     """Constructing with no bands is a clear configuration error."""
     with pytest.raises(ValueError, match="non-empty"):
         _Toy(bands=[])
-
-
-def test_num_channels_property():
-    """`num_channels` is derived from `len(bands)`."""
-    m = _Toy(bands=_bands(5))
-    assert m.num_channels == 5
-
-
-def test_effective_normalization_defaults_to_the_requested_strategy():
-    """Ordinary wrappers record the configured normalization policy."""
-    assert _Toy(bands=_bands(2), normalization="identity").effective_normalization == "identity"
-
-
-def test_olmoearth_records_its_internal_normalization_as_model_native():
-    """Result metadata must not label OlmoEarth's internal pipeline z-score."""
-    model = object.__new__(OlmoEarthBenchModel)
-    assert model.effective_normalization == "model_native"

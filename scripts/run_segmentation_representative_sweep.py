@@ -3,21 +3,25 @@
 
 import argparse
 import csv
+import hashlib
 import json
 import logging
-import os
-import queue
 import random
 import signal
 import subprocess
-import sys
-import threading
-import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-import torch
-from filelock import FileLock, Timeout
+from _seg_sweep_common import (
+    BaseGpuRunner,
+    Model,
+    RunnerConfig,
+    parse_gpus,
+    resolve_path,
+    run_exclusively,
+    torchgeo_bench_cli,
+    write_json_atomic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +40,6 @@ DATASETS = [
 HEADS = ["linear", "conv_block", "fpn", "dpt"]
 BANDS = ["rgb", "all"]
 EPOCHS = 10
-
-
-@dataclass(frozen=True)
-class Model:
-    """Model preset and conservative per-process batch sizes."""
-
-    config: str
-    name: str
-    loader_batch_size: int
-    probe_batch_size: int
 
 
 @dataclass(frozen=True)
@@ -108,13 +102,25 @@ def build_jobs() -> list[Job]:
     return jobs
 
 
-def sweep_metadata(image_size: int) -> dict[str, object]:
+def _source_hash(root: Path) -> str:
+    """Fingerprint benchmark code and packaged configuration."""
+    hasher = hashlib.sha256()
+    paths = sorted((root / "src/torchgeo_bench").rglob("*.py"))
+    paths.extend(sorted((root / "src/torchgeo_bench/conf").rglob("*.yaml")))
+    for path in paths:
+        hasher.update(str(path.relative_to(root)).encode())
+        hasher.update(path.read_bytes())
+    return hasher.hexdigest()
+
+
+def sweep_metadata(root: Path, image_size: int, seed: int) -> dict[str, object]:
     """Return the result-affecting configuration fingerprint."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "source_hash": _source_hash(root),
         "epochs": EPOCHS,
         "image_size": image_size,
-        "seed": 0,
+        "seed": seed,
         "normalization": "bandspec_zscore",
         "interpolation": "bilinear",
         "partition": "default",
@@ -129,44 +135,25 @@ def sweep_metadata(image_size: int) -> dict[str, object]:
 
 
 @dataclass(frozen=True)
-class SweepConfig:
+class SweepConfig(RunnerConfig):
     """Runtime configuration for the multi-GPU sweep."""
 
-    root: Path
-    cli: Path
     output: Path
-    state_dir: Path
-    gpus: list[int]
     image_size: int
-    num_workers: int
-    max_attempts: int
     seed: int
 
 
-class SweepRunner:
+class SweepRunner(BaseGpuRunner):
     """Dynamically schedule independent benchmark jobs across GPUs."""
 
+    config: SweepConfig
+    subprocess_env = BaseGpuRunner.subprocess_env | {"TOKENIZERS_PARALLELISM": "false"}
+
     def __init__(self, config: SweepConfig) -> None:
-        self.config = config
-        self.log_dir = config.state_dir / "logs"
-        self.events_path = config.state_dir / "events.jsonl"
-        self.summary_path = config.state_dir / "summary.json"
-        self.failed_path = config.state_dir / "failed_jobs.json"
+        super().__init__(config, build_jobs())
         self.metadata_path = Path(f"{config.output}.sweep.json")
-        self.stop_requested = threading.Event()
-        self.state_lock = threading.Lock()
-        self.jobs = build_jobs()
-        self.failed_jobs: list[dict] = []
-        self.counts = {
-            "candidate_total": len(MODELS) * len(DATASETS) * len(HEADS) * len(BANDS),
-            "unsupported": len(UNSUPPORTED_INPUTS) * len(HEADS),
-            "total": len(self.jobs),
-            "queued": 0,
-            "running": 0,
-            "completed": 0,
-            "failed": 0,
-            "skipped_existing": 0,
-        }
+        self.counts["candidate_total"] = len(MODELS) * len(DATASETS) * len(HEADS) * len(BANDS)
+        self.counts["unsupported"] = len(UNSUPPORTED_INPUTS) * len(HEADS)
 
     @staticmethod
     def _normalized_size(value: str) -> str:
@@ -201,7 +188,7 @@ class SweepRunner:
         )
 
     def _validate_metadata(self) -> None:
-        expected = sweep_metadata(self.config.image_size)
+        expected = sweep_metadata(self.config.root, self.config.image_size, self.config.seed)
         if self.config.output.exists() and self.config.output.stat().st_size > 0:
             if not self.metadata_path.exists():
                 raise RuntimeError(
@@ -214,34 +201,19 @@ class SweepRunner:
                     f"{self.config.output} was created by an incompatible sweep configuration."
                 )
             return
-        temporary = self.metadata_path.with_suffix(f"{self.metadata_path.suffix}.tmp")
-        temporary.write_text(json.dumps(expected, indent=2, sort_keys=True) + "\n")
-        temporary.replace(self.metadata_path)
+        write_json_atomic(self.metadata_path, expected)
 
-    def _write_event(self, event: str, job: Job | None, **details: object) -> None:
-        record = {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "event": event,
-            "job_id": job.job_id if job else None,
-            **details,
-        }
-        with self.state_lock, self.events_path.open("a") as file:
-            file.write(json.dumps(record, sort_keys=True) + "\n")
-
-    def _write_summary_locked(self) -> None:
-        payload = {
-            **self.counts,
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    def _summary_extra(self) -> dict[str, object]:
+        return {
             "results": str(self.config.output),
             "failed_jobs": str(self.failed_path),
-            "gpus": self.config.gpus,
             "epochs": EPOCHS,
             "image_size": self.config.image_size,
+            "seed": self.config.seed,
         }
-        temp = self.summary_path.with_suffix(".tmp")
-        temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        temp.replace(self.summary_path)
-        self.failed_path.write_text(json.dumps(self.failed_jobs, indent=2, sort_keys=True) + "\n")
+
+    def _failed_record(self, job: Job, gpu: int) -> dict:
+        return {**asdict(job), "job_id": job.job_id, "gpu": gpu}
 
     def _command(self, job: Job, gpu: int, attempt: int) -> list[str]:
         divisor = 2 ** (attempt - 1)
@@ -256,6 +228,7 @@ class SweepRunner:
             f"dataset.image_size={self.config.image_size}",
             f"dataset.batch_size={loader_batch}",
             f"dataset.num_workers={self.config.num_workers}",
+            f"seed={self.config.seed}",
             f"device=cuda:{gpu}",
             f"eval.segmentation.head_type={job.head}",
             f"eval.segmentation.epochs={EPOCHS}",
@@ -266,96 +239,6 @@ class SweepRunner:
             "resume=true",
         ]
 
-    def _run_job(self, job: Job, gpu: int) -> bool:
-        for attempt in range(1, self.config.max_attempts + 1):
-            log_path = self.log_dir / f"{job.job_id}.attempt{attempt}.log"
-            command = self._command(job, gpu, attempt)
-            environment = os.environ.copy()
-            environment["OMP_NUM_THREADS"] = "4"
-            environment["MKL_NUM_THREADS"] = "4"
-            environment["TOKENIZERS_PARALLELISM"] = "false"
-            self._write_event(
-                "started",
-                job,
-                gpu=gpu,
-                attempt=attempt,
-                command=command,
-                log=str(log_path),
-            )
-            started = time.monotonic()
-            with log_path.open("w") as log:
-                process = subprocess.run(
-                    command,
-                    cwd=self.config.root,
-                    env=environment,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    check=False,
-                )
-            elapsed = time.monotonic() - started
-            if process.returncode == 0:
-                self._write_event(
-                    "completed",
-                    job,
-                    gpu=gpu,
-                    attempt=attempt,
-                    elapsed_seconds=round(elapsed, 3),
-                    log=str(log_path),
-                )
-                return True
-            self._write_event(
-                "attempt_failed",
-                job,
-                gpu=gpu,
-                attempt=attempt,
-                returncode=process.returncode,
-                elapsed_seconds=round(elapsed, 3),
-                log=str(log_path),
-            )
-            if self.stop_requested.is_set():
-                break
-        return False
-
-    def _worker(self, gpu: int, jobs: queue.Queue[Job]) -> None:
-        while not self.stop_requested.is_set():
-            try:
-                job = jobs.get_nowait()
-            except queue.Empty:
-                return
-            with self.state_lock:
-                self.counts["queued"] -= 1
-                self.counts["running"] += 1
-                self._write_summary_locked()
-            success = self._run_job(job, gpu)
-            with self.state_lock:
-                self.counts["running"] -= 1
-                if success:
-                    self.counts["completed"] += 1
-                else:
-                    self.counts["failed"] += 1
-                    self.failed_jobs.append(
-                        {
-                            **asdict(job),
-                            "job_id": job.job_id,
-                            "gpu": gpu,
-                        }
-                    )
-                self._write_summary_locked()
-                finished = self.counts["completed"] + self.counts["failed"]
-                logger.info(
-                    "Progress: %d/%d finished, %d failed, %d running",
-                    finished,
-                    self.counts["total"] - self.counts["skipped_existing"],
-                    self.counts["failed"],
-                    self.counts["running"],
-                )
-            jobs.task_done()
-
-    def request_stop(self, signum: int, _frame: object) -> None:
-        """Stop assigning jobs after currently running commands finish."""
-        self.stop_requested.set()
-        self._write_event("stop_requested", None, signal=signum)
-
     def run(self) -> None:
         """Run all pending combinations and update state after every job."""
         self.config.output.parent.mkdir(parents=True, exist_ok=True)
@@ -364,30 +247,10 @@ class SweepRunner:
         self._validate_metadata()
 
         existing = self._completed_keys()
-        pending: list[Job] = []
-        for job in self.jobs:
-            if self._result_key(job) in existing:
-                self.counts["skipped_existing"] += 1
-            else:
-                pending.append(job)
-
+        pending = self._partition_pending(lambda job: self._result_key(job) in existing)
         random.Random(self.config.seed).shuffle(pending)
-        jobs: queue.Queue[Job] = queue.Queue()
-        for job in pending:
-            jobs.put(job)
-        self.counts["queued"] = len(pending)
-        with self.state_lock:
-            self._write_summary_locked()
         self._write_event("sweep_started", None, pending=len(pending), total=self.counts["total"])
-
-        workers = [
-            threading.Thread(target=self._worker, args=(gpu, jobs), name=f"gpu-{gpu}")
-            for gpu in self.config.gpus
-        ]
-        for thread in workers:
-            thread.start()
-        for thread in workers:
-            thread.join()
+        self._dispatch(pending)
 
         with self.state_lock:
             self._write_summary_locked()
@@ -404,23 +267,6 @@ class SweepRunner:
                 f"Sweep incomplete: {self.counts['failed']} failed jobs and "
                 f"{len(missing)} missing result rows. See {self.failed_path}."
             )
-
-
-def parse_gpus(value: str) -> list[int]:
-    """Parse ``all`` or a comma-separated list of visible CUDA device indices."""
-    available = torch.cuda.device_count()
-    if value == "all":
-        gpus = list(range(available))
-    else:
-        gpus = [int(item) for item in value.split(",") if item]
-    if not gpus:
-        raise ValueError("No GPUs selected.")
-    invalid = [gpu for gpu in gpus if gpu < 0 or gpu >= available]
-    if invalid:
-        raise ValueError(
-            f"GPU indices {invalid} are invalid; {available} CUDA devices are visible."
-        )
-    return gpus
 
 
 def ensure_datasets(config: SweepConfig, *, download_missing: bool) -> None:
@@ -460,21 +306,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_path(root: Path, path: Path) -> Path:
-    """Resolve a path relative to the repository root."""
-    return path if path.is_absolute() else root / path
-
-
 def main() -> None:
     """Run the configured sweep."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
     root = Path(__file__).resolve().parents[1]
-    cli = Path(sys.executable).with_name("torchgeo-bench")
-    if not cli.is_file():
-        raise FileNotFoundError(
-            f"{cli} does not exist. Activate the torchgeo-bench environment first."
-        )
+    cli = torchgeo_bench_cli(require=True)
 
     output = resolve_path(
         root,
@@ -523,15 +360,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, runner.request_stop)
     config.state_dir.mkdir(parents=True, exist_ok=True)
     config.output.parent.mkdir(parents=True, exist_ok=True)
-    output_lock = FileLock(f"{config.output}.runner.lock")
-    state_lock = FileLock(str(config.state_dir / "runner.lock"))
-    try:
-        with output_lock.acquire(timeout=0), state_lock.acquire(timeout=0):
-            runner.run()
-    except Timeout as error:
-        raise RuntimeError(
-            f"Another sweep is writing {config.output} or {config.state_dir}."
-        ) from error
+    run_exclusively(
+        runner.run,
+        [f"{config.output}.runner.lock", config.state_dir / "runner.lock"],
+        f"Another sweep is writing {config.output} or {config.state_dir}.",
+    )
 
 
 if __name__ == "__main__":

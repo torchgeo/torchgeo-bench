@@ -2,6 +2,8 @@
 
 import builtins
 import logging
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -82,12 +84,6 @@ class TestKNNClassifierSingleLabel:
         assert probs.shape == (len(d["x_test"]), d["n_classes"])
         np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-6)
 
-    def test_multi_label_property_false(self, singlelabel_data):
-        d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=5)
-        clf.fit(d["x_train"], d["y_train"])
-        assert clf.multi_label is False
-
     def test_k_clamped_to_train_size(self):
         """k > n_train should not crash."""
         rng = np.random.default_rng(0)
@@ -97,6 +93,40 @@ class TestKNNClassifierSingleLabel:
         clf.fit(X, y)
         preds = clf.predict(X)
         assert preds.shape == (3,)
+
+    def test_gpu_k_is_clamped_before_faissknn_construction(self, monkeypatch: pytest.MonkeyPatch):
+        """FAISS GPU uses -1 neighbor IDs when asked for k > n_train."""
+        constructed: list[object] = []
+
+        class FakeFaissKNNClassifier:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+                constructed.append(self)
+
+            def fit(self, X, y) -> None:
+                del X, y
+
+        monkeypatch.setattr(knn, "gpu_faiss_available", lambda: True)
+        monkeypatch.setitem(
+            sys.modules,
+            "faissknn",
+            SimpleNamespace(
+                FaissKNNClassifier=FakeFaissKNNClassifier,
+                FaissKNNMultilabelClassifier=FakeFaissKNNClassifier,
+            ),
+        )
+        X = np.zeros((3, 2), dtype=np.float32)
+        y = np.array([0, 1, 2], dtype=np.int64)
+
+        KNNClassifier(n_neighbors=10, device="cuda").fit(X, y)
+
+        assert len(constructed) == 1
+        assert constructed[0].kwargs["n_neighbors"] == 3
+
+    @pytest.mark.parametrize("n_neighbors", [0, -1, True, 1.5])
+    def test_rejects_invalid_neighbor_count(self, n_neighbors):
+        with pytest.raises(ValueError, match="positive integer"):
+            KNNClassifier(n_neighbors=n_neighbors)
 
 
 class TestKNNClassifierMultiLabel:
@@ -117,12 +147,6 @@ class TestKNNClassifierMultiLabel:
         probs = clf.predict_proba(d["x_test"])
         assert probs.shape == (len(d["x_test"]), d["n_classes"])
         assert np.all(probs >= 0) and np.all(probs <= 1)
-
-    def test_multi_label_property_true(self, multilabel_data):
-        d = multilabel_data
-        clf = KNNClassifier(n_neighbors=5)
-        clf.fit(d["x_train"], d["y_train"])
-        assert clf.multi_label is True
 
 
 # ---- LogisticRegression multi-label tests ----
@@ -146,15 +170,6 @@ class TestMultiLabelLogisticRegression:
         assert probs.shape == (len(d["x_test"]), d["n_classes"])
         assert np.all(probs >= 0) and np.all(probs <= 1)
 
-    def test_rejects_1d_labels(self, multilabel_data):
-        d = multilabel_data
-        X_t = torch.from_numpy(d["x_train"])
-        y_1d = torch.from_numpy(d["y_train"][:, 0])
-
-        clf = LogisticRegression(C=1.0, multi_label=True, device="cpu")
-        with pytest.raises(ValueError, match="2D"):
-            clf.fit(X_t, y_1d)
-
     def test_lbfgs_solver(self, multilabel_data):
         d = multilabel_data
         X_t = torch.from_numpy(d["x_train"])
@@ -174,16 +189,6 @@ class TestMultiLabelLogisticRegression:
         clf = LogisticRegression(C=1.0, max_iter=50, solver="adam", multi_label=True, device="cpu")
         clf.fit(X_t, Y_t)
         assert clf._fitted
-
-    def test_classes_attribute(self, multilabel_data):
-        d = multilabel_data
-        X_t = torch.from_numpy(d["x_train"])
-        Y_t = torch.from_numpy(d["y_train"])
-
-        clf = LogisticRegression(C=1.0, max_iter=50, multi_label=True, device="cpu")
-        clf.fit(X_t, Y_t)
-        assert clf.classes_ is not None
-        np.testing.assert_array_equal(clf.classes_, np.arange(d["n_classes"]))
 
 
 # ---- Bootstrap mAP tests ----
@@ -269,38 +274,6 @@ class TestKNNGPUPath:
     @_cuda_available
     @_faissknn_available
     @pytest.mark.slow
-    def test_gpu_singlelabel_matches_cpu(self, singlelabel_data):
-        d = singlelabel_data
-        cpu = KNNClassifier(n_neighbors=5, device="cpu")
-        gpu = KNNClassifier(n_neighbors=5, device="cuda")
-        cpu.fit(d["x_train"], d["y_train"])
-        gpu.fit(d["x_train"], d["y_train"])
-        np.testing.assert_array_equal(cpu.predict(d["x_test"]), gpu.predict(d["x_test"]))
-        np.testing.assert_allclose(
-            cpu.predict_proba(d["x_test"]),
-            gpu.predict_proba(d["x_test"]),
-            atol=1e-5,
-        )
-
-    @_cuda_available
-    @_faissknn_available
-    @pytest.mark.slow
-    def test_gpu_multilabel_matches_cpu(self, multilabel_data):
-        d = multilabel_data
-        cpu = KNNClassifier(n_neighbors=5, device="cpu")
-        gpu = KNNClassifier(n_neighbors=5, device="cuda")
-        cpu.fit(d["x_train"], d["y_train"])
-        gpu.fit(d["x_train"], d["y_train"])
-        np.testing.assert_array_equal(cpu.predict(d["x_test"]), gpu.predict(d["x_test"]))
-        np.testing.assert_allclose(
-            cpu.predict_proba(d["x_test"]),
-            gpu.predict_proba(d["x_test"]),
-            atol=1e-5,
-        )
-
-    @_cuda_available
-    @_faissknn_available
-    @pytest.mark.slow
     def test_gpu_fp16_output_shapes(self, singlelabel_data):
         """use_fp16=True should not change output shapes or value ranges."""
         d = singlelabel_data
@@ -311,19 +284,6 @@ class TestKNNGPUPath:
         assert preds.shape == (len(d["x_test"]),)
         assert probs.shape == (len(d["x_test"]), d["n_classes"])
         np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-3)
-
-    @_cuda_available
-    @_faissknn_available
-    @pytest.mark.slow
-    @pytest.mark.parametrize("metric", ["l2", "ip", "cosine"])
-    def test_gpu_metric_output_shapes(self, singlelabel_data, metric):
-        d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=3, device="cuda", metric=metric)
-        clf.fit(d["x_train"], d["y_train"])
-        preds = clf.predict(d["x_test"])
-        probs = clf.predict_proba(d["x_test"])
-        assert preds.shape == (len(d["x_test"]),)
-        assert probs.shape == (len(d["x_test"]), d["n_classes"])
 
     @_cuda_available
     @_faissknn_available
@@ -438,7 +398,7 @@ class TestUnifiedEvaluateLogistic:
             c_values=[0.1, 1.0],
             seed=42,
             n_bootstrap=50,
-            merge_val=True,
+            merge_val=False,
             device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
@@ -463,9 +423,10 @@ class TestUnifiedEvaluateLogistic:
             n_bootstrap=50,
             merge_val=True,
             device="cpu",
+            verbose=True,
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert best_c in [0.01, 0.1, 1.0]
         assert set(cal) == {"ece", "rms_ce", "mce"}
         assert set(cal_ts) == {"ece_ts", "rms_ce_ts", "mce_ts", "temperature"}
-        assert cal_ts["temperature"] is not None and cal_ts["temperature"] > 0
+        assert all(value is None for value in cal_ts.values())

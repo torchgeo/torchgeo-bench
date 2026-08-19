@@ -2,7 +2,6 @@
 
 import logging
 from contextlib import suppress
-from dataclasses import dataclass
 from typing import Self
 
 import numpy as np
@@ -10,13 +9,6 @@ import torch
 from torch import Tensor
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class _TrainStats:
-    losses: list[float]
-    final_loss: float
-    n_epochs: int
 
 
 class LogisticRegression:
@@ -29,15 +21,6 @@ class LogisticRegression:
 
         loss = (1/n) * CrossEntropy + (1/n) * 0.5/C * ||W||^2
 
-    Differences from the previous version (speed-oriented but same math):
-
-    - LBFGS uses its internal iteration loop (one external ``.step``).
-    - Adam uses on-device manual batching (no DataLoader overhead).
-    - Inference paths use ``torch.inference_mode``.
-    - Optional TF32 for CUDA matmul (single linear layer still benefits slightly).
-    - Coefficients and intercept are exposed via properties (no copying at fit time).
-
-    Args match previous class unless noted.
     """
 
     def __init__(
@@ -77,12 +60,10 @@ class LogisticRegression:
         self.use_tf32 = use_tf32
         self.multi_label = multi_label
 
-        # Will be set during fit
         self._fitted = False
         self._model: torch.nn.Linear | None = None
         self.classes_: np.ndarray | None = None
         self.n_iter_ = 0
-        self._train_stats: _TrainStats | None = None
 
         if self.random_state is not None:
             torch.manual_seed(self.random_state)
@@ -130,7 +111,6 @@ class LogisticRegression:
             if y.ndim != 1:
                 raise ValueError(f"y must be 1D (n_samples,); got shape {tuple(y.shape)}")
 
-        # Move once, keep contiguous
         X_tensor = X.to(self.device, dtype=torch.float32, non_blocking=True).contiguous()
 
         n_samples, n_features = X_tensor.shape
@@ -159,7 +139,6 @@ class LogisticRegression:
             criterion = torch.nn.BCEWithLogitsLoss(reduction="mean")
         else:
             criterion = torch.nn.CrossEntropyLoss(reduction="mean")
-        losses: list[float] = []
 
         # Regularization factor matches sklearn scaling exactly.
         # BCE mean divides by (n_samples * n_classes), so scale reg to match.
@@ -169,7 +148,6 @@ class LogisticRegression:
             reg = 0.5 * (1.0 / self.C) / float(n_samples)
 
         if self.solver == "lbfgs":
-            # Single .step with LBFGS internal loop -> far less Python overhead
             optimizer = torch.optim.LBFGS(
                 model.parameters(),
                 lr=self.lr,
@@ -190,11 +168,7 @@ class LogisticRegression:
                 loss.backward()
                 return loss
 
-            loss_tensor = optimizer.step(closure)
-            final_loss = float(loss_tensor.detach())
-            losses.append(final_loss)
-
-            # Extract LBFGS n_iter from optimizer state.
+            optimizer.step(closure)
             first_param = next(iter(model.parameters()))
             state = optimizer.state[first_param]
             self.n_iter_ = int(state.get("n_iter", self.max_iter))
@@ -206,7 +180,6 @@ class LogisticRegression:
 
             batch_size = min(self.batch_size, n_samples)
             for epoch in range(self.max_iter):
-                # on-device shuffle and slicing
                 perm = torch.randperm(n_samples, device=self.device)
                 epoch_loss_sum = 0.0
 
@@ -222,11 +195,9 @@ class LogisticRegression:
                     loss = loss + reg * W.mul(W).sum()
                     loss.backward()
                     optimizer.step()
-                    # accumulate loss (on device) then pull scalar once
                     epoch_loss_sum += loss.detach().item() * int(xb.shape[0])
 
                 epoch_loss = epoch_loss_sum / float(n_samples)
-                losses.append(epoch_loss)
 
                 if epoch_loss + self.tol < best_loss:
                     best_loss = epoch_loss
@@ -240,10 +211,8 @@ class LogisticRegression:
             else:
                 self.n_iter_ = self.max_iter
 
-        # Mark fitted; coefficients accessed lazily via properties.
         model.eval()
         self._fitted = True
-        self._train_stats = _TrainStats(losses=losses, final_loss=losses[-1], n_epochs=self.n_iter_)
         return self
 
     @property

@@ -91,17 +91,46 @@ class _TerraTorchBench(BenchModel):
 
 PRITHVI_BANDS: list[str] = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
 
+# Pretraining statistics published with the checkpoints, in HLS DN, ordered as
+# PRITHVI_BANDS (HLS B02, B03, B04, B05, B06, B07).  v2 shares one set across
+# 100M/300M/600M.
+#   v1: hf.co/ibm-nasa-geospatial/Prithvi-EO-1.0-100M  config.json
+#   v2: hf.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M  config.json
+PRITHVI_PRETRAIN_STATS: dict[str, tuple[list[float], list[float]]] = {
+    "v1": (
+        [775.23, 1080.99, 1228.59, 2497.20, 2204.21, 1610.83],
+        [1281.53, 1270.03, 1399.48, 1368.34, 1291.68, 1154.51],
+    ),
+    "v2": (
+        [1087.0, 1342.0, 1433.0, 2734.0, 1958.0, 1363.0],
+        [2248.0, 2179.0, 2178.0, 1850.0, 1242.0, 1049.0],
+    ),
+}
+
+# Canonical band name -> TerraTorch HLSBands member used for patch-embed selection.
+_PRITHVI_HLS_BANDS: dict[str, str] = {
+    "blue": "BLUE",
+    "green": "GREEN",
+    "red": "RED",
+    "nir_narrow": "NIR_NARROW",
+    "swir1": "SWIR_1",
+    "swir2": "SWIR_2",
+}
+
 
 class TerraTorchPrithviBench(_TerraTorchBench):
-    """IBM/NASA Prithvi-EO v1/v2 — auto-maps dataset bands onto 6 HLS slots @ 224.
+    """IBM/NASA Prithvi-EO v1/v2 — maps dataset bands onto its HLS slots @ 224.
 
     ``expected_input_unit = S2_DN``: under ``model_native`` the wrapper
     rescales the input to S2 DN scale before band-mapping.  Per-version
     pretraining mean/std are deliberately *not* applied here — they
-    correspond to the post-mapped 6-band layout, while strategy
-    normalisation runs on the dataset's raw channel count.  The BandSpec
-    z-score (default) and minmax strategies compose cleanly with the
-    band-mapping zero-fill that follows.
+    correspond to the post-mapped layout, while strategy normalisation runs
+    on the dataset's raw channel count.
+
+    Datasets that lack some of :data:`PRITHVI_BANDS` (RGB-only, for instance)
+    use TerraTorch's ``model_bands=`` patch-embed selection, which keeps the
+    pretrained weights for the bands that are present and drops the rest,
+    rather than zero-filling the missing channels.
     """
 
     expected_input_unit = InputUnit.S2_DN
@@ -115,16 +144,35 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         target_size: int | None = 224,
         **kwargs: Any,
     ) -> None:
+        indices, selected = select_src_bands(bands, PRITHVI_BANDS, preferred_sensors=("s2",))
+        backbone_kwargs: dict[str, Any] = {"pretrained": pretrained, "num_frames": 1}
+        if len(selected) < len(PRITHVI_BANDS):
+            backbone_kwargs["bands"] = [_PRITHVI_HLS_BANDS[name] for name in selected]
         self.backbone_name = backbone_name
+        # model_native standardises with the checkpoint's published statistics.
+        # normalize_inputs runs on the dataset's channels, before _prepare_input
+        # maps them onto Prithvi's band slots, so the arrays are laid out per
+        # dataset channel; bands Prithvi does not consume keep mean 0 / std 1
+        # and are dropped by the mapping anyway.
+        stats = PRITHVI_PRETRAIN_STATS["v1" if "eo_v1" in backbone_name else "v2"]
+        mean = [0.0] * len(bands)
+        std = [1.0] * len(bands)
+        for name, ds_idx in zip(selected, indices, strict=True):
+            pos = PRITHVI_BANDS.index(name)
+            mean[ds_idx], std[ds_idx] = stats[0][pos], stats[1][pos]
+        self.pretrain_mean, self.pretrain_std = mean, std
         super().__init__(
             bands=bands,
             target_size=target_size,
-            backbone_kwargs={"pretrained": pretrained, "num_frames": 1},
+            backbone_kwargs=backbone_kwargs,
             **kwargs,
         )
+        self.model_bands = selected
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
-        mapped, _ = map_to_model_bands(images, self.bands, PRITHVI_BANDS, preferred_sensors=("s2",))
+        mapped, _ = map_to_model_bands(
+            images, self.bands, self.model_bands, preferred_sensors=("s2",)
+        )
         return mapped
 
 
@@ -143,6 +191,16 @@ _CLAY_WAVELENGTH_BY_BAND: dict[str, float] = dict(
     zip(CLAY_BANDS, _CLAY_WAVELENGTHS_UM, strict=True)
 )
 
+# Sentinel-2-L2A per-band pretraining stats, raw DN scale, from Clay's own
+# https://github.com/Clay-foundation/model/blob/main/configs/metadata.yaml
+# (nir/swir16/swir22 renamed to this file's nir/swir1/swir2).
+_CLAY_PRETRAIN_MEAN_BY_BAND: dict[str, float] = dict(
+    zip(CLAY_BANDS, [1105.0, 1355.0, 1552.0, 2743.0, 2388.0, 1835.0], strict=True)
+)
+_CLAY_PRETRAIN_STD_BY_BAND: dict[str, float] = dict(
+    zip(CLAY_BANDS, [1809.0, 1757.0, 1888.0, 1742.0, 1470.0, 1379.0], strict=True)
+)
+
 
 class TerraTorchClayBench(_TerraTorchBench):
     """Clay v1.5 — S2 bands @ 256, conditioned on per-band ``waves`` (µm) and ``gsd``.
@@ -156,7 +214,9 @@ class TerraTorchClayBench(_TerraTorchBench):
     ``waves`` values exactly as they were.
     """
 
-    expected_input_unit = InputUnit.REFLECTANCE_0_1
+    # Clay's published mean/std (see _CLAY_PRETRAIN_MEAN_BY_BAND) are raw S2
+    # digital numbers, not 0-1 reflectance.
+    expected_input_unit = InputUnit.S2_DN
 
     def __init__(
         self,
@@ -171,8 +231,18 @@ class TerraTorchClayBench(_TerraTorchBench):
     ) -> None:
         # Resolved before super().__init__ so a band set with no Clay band at
         # all raises before the pretrained checkpoint is downloaded.
-        _, model_bands = select_src_bands(bands, CLAY_BANDS, preferred_sensors=("s2",))
+        indices, model_bands = select_src_bands(bands, CLAY_BANDS, preferred_sensors=("s2",))
         self.backbone_name = backbone_name
+        # model_native standardises with Clay's published per-band statistics.
+        # normalize_inputs runs on the dataset's raw channels, before
+        # _prepare_input maps them onto Clay's band slots; bands Clay does not
+        # consume keep mean 0 / std 1 and are dropped by the mapping anyway.
+        mean = [0.0] * len(bands)
+        std = [1.0] * len(bands)
+        for name, ds_idx in zip(model_bands, indices, strict=True):
+            mean[ds_idx] = _CLAY_PRETRAIN_MEAN_BY_BAND[name]
+            std[ds_idx] = _CLAY_PRETRAIN_STD_BY_BAND[name]
+        self.pretrain_mean, self.pretrain_std = mean, std
         super().__init__(
             bands=bands,
             target_size=target_size,
@@ -223,7 +293,6 @@ TERRAMIND_MODALITY_BANDS: dict[str, dict[str, str]] = {
     "RGB": {"red": "RED", "green": "GREEN", "blue": "BLUE"},
 }
 
-TERRAMIND_S2L2A_BANDS: list[str] = list(TERRAMIND_MODALITY_BANDS["S2L2A"])
 
 _TERRAMIND_MODALITY_KEYS = {"S2L2A": "untok_sen2l2a@224", "RGB": "untok_sen2rgb@224"}
 _TERRAMIND_NATIVE_UNITS = {"S2L2A": InputUnit.S2_DN, "RGB": InputUnit.UINT8}

@@ -103,7 +103,7 @@ band-agnostic ViTs, or sensor-conditional routing.
 The framework makes this straightforward.  The pipeline **reinstantiates your
 class once per dataset**, so the ``bands`` argument passed to ``__init__``
 always reflects exactly the channels being loaded for that run.  Every
-:class:`~torchgeo_bench.datasets.base.BandSpec` in that list carries the
+:class:`~torchgeo_bench.datasets.BandSpec` in that list carries the
 dataset-level metadata that is available:
 
 .. list-table::
@@ -153,9 +153,9 @@ For a complete example see ``TorchGeoDOFABench`` in
 ``wavelength_um`` from each ``BandSpec`` at construction and passes the
 resulting list to ``backbone.forward_features(images, wavelengths=...)``.
 
-.. _eval-hydra-config:
+.. _eval-model-config:
 
-Create a Hydra config
+Create a model config
 ---------------------
 
 Create a model YAML file at :file:`src/torchgeo_bench/conf/model/new_model.yaml`.
@@ -175,7 +175,7 @@ The only required key is ``_target_``, which must point to your class:
 .. note::
 
    **Do not put** ``bands`` **in the YAML.**  The pipeline reads the current
-   dataset's :class:`~torchgeo_bench.datasets.base.BandSpec` list at runtime
+   dataset's :class:`~torchgeo_bench.datasets.BandSpec` list at runtime
    and injects it into the constructor automatically.  Adding it to the YAML
    will cause a ``TypeError`` (duplicate keyword argument).
 
@@ -209,7 +209,7 @@ Skip the (slow) linear probe and reduce bootstrap samples for a quick trial:
        eval.skip_linear=true eval.bootstrap=100
 
 To write results to a dedicated file instead of the shared
-``results/all_results.csv``, pass ``output=``:
+the per-model file, pass ``output=``:
 
 .. code-block:: console
 
@@ -229,6 +229,12 @@ interrupted run can be continued against the same file:
 Results
 -------
 
-Results are written to ``results/all_results.csv`` by default, or to the
-path set via ``output=`` (see above).
+Results are written to ``results/models/<model name>.csv`` by default (or to
+the path set via ``output=``, see above). Profile and intrinsic-dim rows --
+one-time model+hardware measurements enabled by ``eval.profile.enabled`` /
+``eval.intrinsic_dim.enabled`` -- go to their own
+``results/profiles/<model name>.csv`` and
+``results/intrinsic_dim/<model name>.csv`` files instead, so a routine
+metrics rerun never touches them. Setting ``output=`` explicitly sends
+every row type to that one file.
 For the full column reference and how to read the CSV, see :doc:`results-format`.

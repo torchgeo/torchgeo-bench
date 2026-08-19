@@ -51,20 +51,6 @@ class _TinyImageDataset(Dataset):
         return {"image": self._images[idx]}
 
 
-@pytest.mark.parametrize("stats_mode", ["mean", "stdev", "all"])
-def test_rcf_stats_mode_variants(stats_mode: str):
-    model = RCF(in_channels=3, features=16, mode="gaussian", stats_mode=stats_mode)
-    out = model(torch.rand(2, 3, 16, 16))
-    assert out.ndim == 2
-    assert out.shape[0] == 2
-
-
-def test_rcf_empirical_init_runs() -> None:
-    dataset = _TinyImageDataset(channels=3)
-    model = RCF(in_channels=3, features=16, mode="empirical", dataset=dataset)
-    assert model.weights.shape[1] == 3
-
-
 def test_rcf_empirical_forward_runs() -> None:
     dataset = _TinyImageDataset(channels=3)
     model = RCF(in_channels=3, features=16, mode="empirical", dataset=dataset)

@@ -27,7 +27,7 @@ class ImageStatsBench(BenchModel):
         feats = torch.cat(
             [
                 torch.mean(images, dim=(2, 3)),
-                torch.std(images, dim=(2, 3)),
+                torch.std(images, dim=(2, 3), correction=0),
                 torch.amax(images, dim=(2, 3)),
                 torch.amin(images, dim=(2, 3)),
             ],

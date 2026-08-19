@@ -155,10 +155,7 @@ def main() -> None:
     for ds in args.datasets:
         for split in args.splits:
             for p in sorted(args.probs_dir.glob(f"{ds}__*_{split}.npz")):
-                try:
-                    report_dataset(p, args.out_dir, top_k=args.top_k)
-                except Exception:
-                    logger.exception("[%s] failed", p)
+                report_dataset(p, args.out_dir, top_k=args.top_k)
 
 
 if __name__ == "__main__":

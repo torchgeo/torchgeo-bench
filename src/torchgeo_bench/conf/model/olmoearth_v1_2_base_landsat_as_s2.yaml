@@ -11,3 +11,9 @@ min_image_size: 64
 sensor_remap:
   landsat: s2  # m-forestnet's uint8 composites do better through the S2 normalizer
 name: olmoearth_v1_2_base_landsat_as_s2
+eval:
+  segmentation:
+    # Isotropic transformer: no spatial pyramid, so tap 4 blocks
+    # spread across depth, deepest first.  Derived by measurement
+    # (experiments/scripts/introspect_seg_layers.py).
+    layers: ["encoder_model.encoder.blocks.11", "encoder_model.encoder.blocks.8", "encoder_model.encoder.blocks.5", "encoder_model.encoder.blocks.2"]

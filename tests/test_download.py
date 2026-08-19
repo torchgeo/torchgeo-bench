@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
 from torchgeo_bench.download import (
     DEFAULT_V2_DATASETS,
     download_eurosat,
@@ -61,17 +62,30 @@ def test_download_geobench_v2_subset(tmp_path: Path) -> None:
     dl_mock.assert_called_once_with("burn_scars", out / "geobenchv2")
 
 
-def test_download_geobench_v2_rejects_empty_subset(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="at least one GeoBench V2"):
-        download_geobench_v2(tmp_path, datasets=[])
-
-
 def test_download_geobench_v2_defaults_to_registry_list(tmp_path: Path) -> None:
     out = tmp_path / "data"
     with mock.patch("torchgeo_bench.download.download_geobench_v2_dataset") as dl_mock:
         download_geobench_v2(out, datasets=None)
 
     assert dl_mock.call_count == len(DEFAULT_V2_DATASETS)
+    assert tuple(list_v2_datasets()) == DEFAULT_V2_DATASETS
+
+
+def test_download_geobench_v2_rejects_empty_selection(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        download_geobench_v2(tmp_path, datasets=[])
+
+
+def test_download_geobench_v2_rejects_unknown_dataset(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Unknown GeoBench V2"):
+        download_geobench_v2(tmp_path, datasets=["not-a-dataset"])
+
+
+def test_download_geobench_v2_deduplicates_names(tmp_path: Path) -> None:
+    with mock.patch("torchgeo_bench.download.download_geobench_v2_dataset") as dl_mock:
+        download_geobench_v2(tmp_path, datasets=["burn_scars", "burn_scars"])
+
+    dl_mock.assert_called_once_with("burn_scars", tmp_path / "geobenchv2")
 
 
 def test_download_eurosat_creates_target_and_downloads_splits(tmp_path: Path) -> None:

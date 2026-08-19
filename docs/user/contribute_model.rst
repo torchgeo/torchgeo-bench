@@ -29,7 +29,7 @@ Then fork the repository on GitHub and create a feature branch:
 
 For the model implementation and YAML config steps, follow
 :doc:`eval_own_model` (Sections :ref:`eval-implement` and
-:ref:`eval-hydra-config`).  The remainder of this page covers integration,
+:ref:`eval-model-config`).  The remainder of this page covers integration,
 tests, and the PR submission.
 
 .. _contrib-integrate:
@@ -38,7 +38,7 @@ Integrate into the package
 --------------------------
 
 Once your model class is working locally, move it into torchgeo-bench and export
-it so the Hydra registry can resolve ``_target_``.
+it so config composition can resolve ``_target_``.
 
 **1. Place the module** under :file:`src/torchgeo_bench/models/`:
 
@@ -58,7 +58,7 @@ it so the Hydra registry can resolve ``_target_``.
        "NewModel",
    ]
 
-**3. Update the Hydra config** ``_target_`` to the package path:
+**3. Update the model config** ``_target_`` to the package path:
 
 .. code-block:: yaml
 
@@ -191,7 +191,7 @@ For V2 datasets:
        dataset.names=[benv2,treesatai,so2sat,forestnet] \
        output=results/contributed/new_model.csv resume=true
 
-The CSV schema is identical to :file:`results/all_results.csv` — see
+The CSV schema is identical to the per-model results files — see
 :doc:`results-format` for the full column reference.
 
 .. _contrib-lint:

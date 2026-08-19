@@ -9,9 +9,9 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
-import geobench_v2.datasets as _gb_v2
+import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 
@@ -19,7 +19,7 @@ from .base import BenchDataset
 
 logger = logging.getLogger(__name__)
 
-V2_ROOT = Path(os.environ.get("GEOBENCH_V2_ROOT", "data/geobenchv2"))
+V2_ROOT = Path("data/geobenchv2")
 
 
 # Map dataset name → upstream class name on ``geobench_v2.datasets``.
@@ -47,10 +47,6 @@ _V2_VAL_AS_VAL: frozenset[str] = frozenset({"kuro_siwo"})
 def list_v2_datasets() -> list[str]:
     """Return the sorted set of dataset names handled by the V2 adapter."""
     return sorted(_V2_REGISTRY)
-
-
-def _resolve_class(dataset_name: str) -> type[Dataset]:
-    return getattr(_gb_v2, _V2_REGISTRY[dataset_name])
 
 
 class GeoBenchv2(Dataset):
@@ -84,7 +80,11 @@ class GeoBenchv2(Dataset):
                 f"Unknown GeoBench V2 dataset '{dataset_name}'. "
                 f"Available: {', '.join(list_v2_datasets())}"
             )
-        cls = _resolve_class(dataset_name)
+        # Deferred: importing geobench_v2 costs ~2 s, so pay it only when a
+        # V2 dataset is actually constructed (never at CLI startup).
+        import geobench_v2.datasets as _gb_v2
+
+        cls: type[Dataset] = getattr(_gb_v2, _V2_REGISTRY[dataset_name])
         upstream_split = (
             "val"
             if split == "val" and dataset_name in _V2_VAL_AS_VAL
@@ -122,10 +122,16 @@ class _V2Dataset(BenchDataset):
     expects ``band_order`` as a ``dict``) opt in by setting
     ``band_order_strategy = "by_sensor"``. Wrappers that need to remap the
     upstream sample dict (e.g. ``KuroSiwo`` collapsing a temporal axis) override
-    :meth:`canonicalize_sample`.
+    :meth:`canonicalize_sample`; wrappers that need extra (or different)
+    upstream constructor arguments declare them in :attr:`upstream_kwargs`.
     """
 
     band_order_strategy: Literal["flat", "by_sensor"] = "flat"
+
+    #: Extra keyword arguments forwarded to the upstream loader. Applied last
+    #: in ``get_dataset``, so entries here also override the defaults it
+    #: builds (e.g. ``return_stacked_image``).
+    upstream_kwargs: ClassVar[dict[str, object]] = {}
 
     @classmethod
     def data_root(cls) -> Path:
@@ -198,6 +204,7 @@ class _V2Dataset(BenchDataset):
         }
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True
+        kwargs.update(self.upstream_kwargs)
 
         return GeoBenchv2(
             root=self.data_root(),
@@ -207,3 +214,36 @@ class _V2Dataset(BenchDataset):
             transforms=chained,
             **kwargs,
         )
+
+
+class _OffsetMaskV2Dataset(_V2Dataset):
+    """Base for V2 wrappers whose upstream masks carry a vestigial ``+1`` offset.
+
+    The SpaceNet building-footprint tasks are natively 2-class
+    ``{0: no-building, 1: building}``. Upstream GeoBench applies
+    ``mask = mask + 1`` (*"to have a true background class"*), declaring 3
+    classes ``('background', 'no-building', 'building')`` and shipping masks
+    valued ``{1, 2}`` — the added ``background`` class 0 never actually occurs,
+    giving segmentation heads a never-correct label to escape to on low-signal
+    tiles. :meth:`canonicalize_sample` reverses the offset.
+
+    See https://github.com/The-AI-Alliance/GEO-Bench-2 (``geobench_v2/datasets/
+    spacenet2.py`` and ``spacenet7.py``: ``sample["mask"] = ... + 1``).
+    """
+
+    def canonicalize_sample(self, sample: dict) -> dict:
+        """Reverse GeoBench's ``+1`` offset: mask ``1 -> 0``, ``2 -> 1``.
+
+        Upstream ships masks valued ``{1: no-building, 2: building}`` after
+        adding 1 to the native ``{0, 1}`` labels. Subtracting one recovers the
+        native 2-class labels and drops the never-used ``background`` (0). The
+        ``clamp(min=0)`` is defensive: if GeoBench ever emitted its reserved
+        class 0, it folds into ``no-building`` (the correct default for a pixel
+        with no building) rather than wrapping to ``-1``. Runs before any resize
+        transform; masks are integer class ids so the shift is exact.
+        """
+        mask = sample.get("mask")
+        if mask is not None:
+            mask = torch.as_tensor(mask)
+            sample["mask"] = (mask - 1).clamp_(min=0)
+        return sample

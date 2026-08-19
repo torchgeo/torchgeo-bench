@@ -37,6 +37,18 @@ def test_invalid_interpolation_raises_instead_of_falling_back() -> None:
         _make_resize_transform(224, "bilnear")
 
 
+def test_area_interpolation_resizes_to_requested_grid() -> None:
+    transform = _make_resize_transform(2, "area")
+    assert transform is not None
+
+    image = torch.arange(16, dtype=torch.float32).reshape(1, 4, 4)
+    result = transform({"image": image})
+
+    assert result["image"].shape == (1, 2, 2)
+    expected = torch.tensor([[[2.5, 4.5], [10.5, 12.5]]])
+    assert torch.allclose(result["image"], expected)
+
+
 def test_resize_handles_temporal_images_and_singleton_channel_masks() -> None:
     transform = _make_resize_transform(4, "bilinear")
     assert transform is not None

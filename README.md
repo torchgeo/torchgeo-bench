@@ -8,7 +8,7 @@
 A lightweight benchmarking framework for evaluating **frozen** geospatial
 foundation models on GeoBench V1/V2 and location encoders on CoordBench. Plug
 in a backbone or coordinate encoder and run consistent downstream probes through
-Hydra.
+OmegaConf configs.
 
 - **Frozen-backbone evaluation** — KNN-5, L-BFGS logistic regression, and
   linear / conv / FPN / DPT segmentation probes.
@@ -16,12 +16,12 @@ Hydra.
   full multispectral / multi-modal stacks.
 - **CoordBench built in** — coordinate-only regression and classification with
   random, spatial-block, and official holdouts.
-- **Hydra-driven** — sweep models, datasets, partitions, image sizes, and
+- **Config-driven** — sweep models, datasets, partitions, image sizes, and
   bands without code changes.
 - **Resumable** — `resume=true` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
 - **Bring your own model** — copy
   [`contrib_template.py`](src/torchgeo_bench/models/contrib_template.py),
-  implement `_forward_patch_features`, and add a one-file Hydra config.
+  implement `_forward_patch_features`, and add a one-file model config.
   See the [Stage 1 guide](https://torchgeo.org/torchgeo-bench/user/eval_own_model.html)
   for a full walkthrough, or the
   [Stage 2 guide](https://torchgeo.org/torchgeo-bench/user/contribute_model.html)
@@ -82,10 +82,12 @@ fall back to CPU:
 torchgeo-bench run dataset.names=[m-eurosat] device=cpu
 ```
 
-Results are appended to `results/all_results.csv`, which **ships pre-populated
+Results are appended to `results/models/<model name>.csv`, which **ship pre-populated
 with reference results** — to start from a clean slate, write to your own file
 with `output=results/my_run.csv`. Re-run with `resume=true` to skip
-already-completed rows.
+already-completed rows. One-time profile/intrinsic-dim measurements go to their
+own `results/profiles/` and `results/intrinsic_dim/` files instead, so routine
+metrics reruns don't touch them.
 
 ## CoordBench — location encoders
 
@@ -112,7 +114,7 @@ SINR, via `rshf`) need the `coordbench` extra:
 `pip install "torchgeo-bench[coordbench]"`,
 then `model=climplicit` (etc.). Results land in
 `results/coordbench_results.csv`. Add your own encoder by subclassing
-`LocationEncoder` (implement `_encode`) and pointing a Hydra `model` config's
+`LocationEncoder` (implement `_encode`) and pointing a `model` config's
 `_target_` at it. See the
 [CoordBench guide](https://torchgeo.org/torchgeo-bench/user/coordbench.html)
 and the runnable

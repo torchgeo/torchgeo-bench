@@ -1,12 +1,18 @@
-# Primary Hydra configuration for torchgeo-bench
-
-defaults:
-  - model: rcf
-  - _self_
+# Primary configuration for torchgeo-bench.
+# The model group (conf/model/<name>.yaml) is selected by the CLI
+# (model=<name> / --model) and merged in under the `model` key.
 
 seed: 0
 device: cuda:0
-output: results/all_results.csv
+output: null   # explicit CSV path; null writes knn/linear/seg rows to <results_dir>/<model name>.csv
+              # (and profile/intrinsic_dim rows to their own dirs below); non-null routes ALL row types here
+results_dir: results/models
+# Profile/intrinsic_dim rows are one-time model+hardware measurements, so by
+# default they land in their own per-model files instead of results_dir,
+# where a routine metrics rerun would rewrite/diff them unnecessarily.
+# Ignored when `output` is set explicitly (see above).
+profile_results_dir: results/profiles
+intrinsic_dim_results_dir: results/intrinsic_dim
 verbose: false
 resume: false  # if true, skip dataset+method combinations already in output CSV
 mode: image    # image (default GeoBench pipeline) | coord (CoordBench location-encoder track)
@@ -35,7 +41,9 @@ dataset:
   normalization: bandspec_zscore   # bandspec_zscore | model_native | minmax | minmax_zscore | identity
   bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
   image_size: 224           # e.g., 224; if null, no resizing
-  interpolation: bilinear     # bilinear | bicubic | nearest; used if image_size set
+  time_steps: null          # multi-temporal datasets only (pastis): dates per
+                            # sample; null keeps the upstream single-date default
+  interpolation: bilinear     # area | bilinear | bicubic | nearest; used if image_size set
 
 # Evaluation settings
 eval:
@@ -54,7 +62,7 @@ eval:
   calibration:
     n_bins_knn: null       # null = knn_k + 1
     n_bins_linear: 15
-    temp_scale: true       # adds ece_ts/rms_ce_ts/mce_ts/temperature columns
+    temp_scale: false      # requires merge_val=false so validation remains held out
 
   # Optional intrinsic dimension (ID) metrics on extracted embeddings.
   # Computed alongside KNN/linear probing when enabled. Adds rows with
@@ -88,6 +96,10 @@ eval:
 
   segmentation:
     head_type: "fpn"
+    # How multi-temporal inputs (B, T, C, H, W) are reduced before the decoder:
+    # the backbone encodes each date, then features are pooled over T.  Only
+    # applies to datasets that actually deliver a time axis.
+    temporal_pool: "mean"   # mean | max
     layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
     epochs: 10
@@ -104,7 +116,3 @@ eval:
     viz_dir: "viz"             # root output directory for visualizations
     n_viz_samples: 8           # number of test samples shown in the sample grid
 
-hydra:
-  run:
-    dir: .
-  output_subdir: null

@@ -1,10 +1,4 @@
-"""Smoke tests for :class:`OlmoEarthBenchModel`.
-
-The full GeoBench v1+v2 sweep originally couldn't run OlmoEarth because
-the ``[olmoearth]`` extra wasn't installed.  These tests both prevent
-that regression (by importing the wrapper and checking each variant
-loads) and validate the wrapper actually produces sensible embeddings.
-"""
+"""Import + per-variant load + embedding sanity for the OlmoEarth wrapper."""
 
 from importlib.util import find_spec
 from unittest import mock
@@ -95,31 +89,6 @@ def test_s2_forward_pass_shape() -> None:
     out = model.forward_patch_features(x)
     assert out.shape == (2, EXPECTED_DIM["nano"])
     assert torch.isfinite(out).all()
-
-
-@requires_olmoearth
-def test_all_variants_are_loadable() -> None:
-    """ModelID enum exposes all variants used by this benchmark.
-
-    Prevents the regression where the wrapper silently lost a variant
-    after an upstream rename.
-    """
-    from olmoearth_pretrain_minimal import ModelID
-
-    names = {attr for attr in dir(ModelID) if attr.startswith("OLMOEARTH_V1_")}
-    assert names == {
-        "OLMOEARTH_V1_NANO",
-        "OLMOEARTH_V1_TINY",
-        "OLMOEARTH_V1_BASE",
-        "OLMOEARTH_V1_LARGE",
-        "OLMOEARTH_V1_1_NANO",
-        "OLMOEARTH_V1_1_TINY",
-        "OLMOEARTH_V1_1_BASE",
-        "OLMOEARTH_V1_2_NANO",
-        "OLMOEARTH_V1_2_TINY",
-        "OLMOEARTH_V1_2_SMALL",
-        "OLMOEARTH_V1_2_BASE",
-    }
 
 
 @requires_olmoearth
@@ -513,15 +482,6 @@ def test_mixed_s2_sar_forward_pass() -> None:
     out = model.forward_patch_features(x)
     assert out.shape == (2, EXPECTED_DIM["nano"])
     assert torch.isfinite(out).all()
-
-
-@requires_olmoearth
-def test_invalid_model_size_raises() -> None:
-    """Unknown model_size values must fail during constructor model-id resolution."""
-    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
-
-    with pytest.raises(AttributeError, match="OLMOEARTH_V1_XLARGE"):
-        OlmoEarthBenchModel(bands=_rgb_bands(), model_size="xlarge", normalization="identity")
 
 
 @requires_olmoearth

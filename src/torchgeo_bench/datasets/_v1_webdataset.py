@@ -22,7 +22,6 @@ import io
 import json
 import logging
 import os
-import pickle
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
@@ -31,6 +30,8 @@ from typing import Literal
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+from ._metadata import unpickle_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -79,20 +80,6 @@ def ensure_sharded_root(
             f"{target}; check the repo layout."
         )
     return target
-
-
-class _StubUnpickler(pickle.Unpickler):
-    def find_class(self, module: str, name: str) -> type:  # type: ignore[override]
-        if module == "geobench.dataset":
-            return type(name, (), {})
-        return super().find_class(module, name)
-
-
-def _safe_unpickle(b: bytes) -> dict:
-    try:
-        return pickle.loads(b)
-    except (ModuleNotFoundError, AttributeError):
-        return _StubUnpickler(io.BytesIO(b)).load()
 
 
 class GeoBenchv1Sharded(Dataset):
@@ -157,7 +144,7 @@ class GeoBenchv1Sharded(Dataset):
             return f.read(size)
 
     def _load_meta(self, sample_id: str) -> dict:
-        return _safe_unpickle(self._read(self._index[sample_id]["meta.pkl"]))
+        return unpickle_metadata(self._read(self._index[sample_id]["meta.pkl"]))
 
     def __len__(self) -> int:
         return len(self.sample_ids)
@@ -166,7 +153,7 @@ class GeoBenchv1Sharded(Dataset):
         sid = self.sample_ids[idx]
         parts = self._index[sid]
         bands_dict = dict(np.load(io.BytesIO(self._read(parts["bands.npz"]))))
-        meta = _safe_unpickle(self._read(parts["meta.pkl"]))
+        meta = unpickle_metadata(self._read(parts["meta.pkl"]))
 
         bands_data = []
         available = list(bands_dict)

@@ -179,8 +179,12 @@ class SegmentationProbe(nn.Module):
         freeze_backbone: bool = True,
         head_type: str = "linear",
         hidden_dim: int | None = None,
+        temporal_pool: str = "mean",
     ) -> None:
         super().__init__()
+        if temporal_pool not in ("mean", "max"):
+            raise ValueError(f"temporal_pool must be 'mean' or 'max', got {temporal_pool!r}")
+        self.temporal_pool = temporal_pool
         self.backbone = backbone
         self.layer_names = layer_names
         self.freeze_backbone = freeze_backbone
@@ -189,6 +193,12 @@ class SegmentationProbe(nn.Module):
 
         self._features: dict[str, torch.Tensor] = {}
         self.hooks: list[Any] = []
+
+        duplicate_layers = {name for name in self.layer_names if self.layer_names.count(name) > 1}
+        if duplicate_layers:
+            raise ValueError(
+                f"Segmentation probe layers must be unique; duplicates: {sorted(duplicate_layers)}."
+            )
 
         found_layers = set()
         for name, module in self.backbone.named_modules():
@@ -200,7 +210,18 @@ class SegmentationProbe(nn.Module):
 
         missing_layers = set(self.layer_names) - found_layers
         if missing_layers:
-            logger.warning(f"The following layers were not found in the backbone: {missing_layers}")
+            # Warning-and-continue would train the head on however many taps
+            # happened to resolve, quietly reporting a multi-scale probe that
+            # never ran.  A wrong layer name is a config bug, so fail on it.
+            available = [
+                name.replace("backbone.", "", 1) if name.startswith("backbone.") else name
+                for name, _ in self.backbone.named_modules()
+            ]
+            raise ValueError(
+                f"Segmentation layers not found in backbone: {sorted(missing_layers)}. "
+                f"Set eval.segmentation.layers for this model to names it exposes, e.g. "
+                f"{[n for n in available if n][:8]}."
+            )
 
         if self.freeze_backbone:
             for param in self.backbone.parameters():
@@ -360,30 +381,36 @@ class SegmentationProbe(nn.Module):
         Returns:
             A :class:`CachedFeaturesDataset` with one entry per sample.
         """
+        was_training = self.backbone.training
         self.backbone.eval()
-        # Accumulate per-batch tensors layer-wise, then cat once at the end.
-        # This avoids N individual per-sample allocations during GPU transfer.
-        batches_per_layer: list[list[torch.Tensor]] = [[] for _ in self.layer_names]
-        all_masks: list[torch.Tensor] = []
-        device = self._backbone_device()
+        try:
+            # Accumulate per-batch tensors layer-wise, then cat once at the end.
+            # This avoids N individual per-sample allocations during GPU transfer.
+            batches_per_layer: list[list[torch.Tensor]] = [[] for _ in self.layer_names]
+            all_masks: list[torch.Tensor] = []
+            device = self._backbone_device()
 
-        for batch in dataloader:
-            if isinstance(batch, dict):
-                images = batch["image"].to(device)
-                masks = batch["mask"]
-            else:
-                images, masks = batch[0].to(device), batch[1]
+            for batch in dataloader:
+                if isinstance(batch, dict):
+                    images = batch["image"].to(device)
+                    masks = batch["mask"]
+                else:
+                    images, masks = batch[0].to(device), batch[1]
 
-            if masks.ndim == 4:
-                masks = masks.squeeze(1)
-            masks = masks.long()
-            self._features.clear()
-            _ = self.backbone(images)
+                if masks.ndim == 4:
+                    masks = masks.squeeze(1)
+                masks = masks.long()
+                self._features.clear()
+                _ = self.backbone(images)
 
-            for li, n in enumerate(self.layer_names):
-                feat = self._process_feature(self._features[n]).to(dtype=cache_dtype, device="cpu")
-                batches_per_layer[li].append(feat)
-            all_masks.append(masks.cpu())
+                for li, n in enumerate(self.layer_names):
+                    feat = self._process_feature(self._features[n]).to(
+                        dtype=cache_dtype, device="cpu"
+                    )
+                    batches_per_layer[li].append(feat)
+                all_masks.append(masks.cpu())
+        finally:
+            self.backbone.train(was_training)
 
         layer_tensors = [torch.cat(batches) for batches in batches_per_layer]
         masks_tensor = torch.cat(all_masks)
@@ -398,12 +425,19 @@ class SegmentationProbe(nn.Module):
         """Compute segmentation logits from input images.
 
         Args:
-            x: Input tensor of shape ``(B, C, H, W)``.
+            x: ``(B, C, H, W)``, or ``(B, T, C, H, W)`` for a time series.  A
+                time series is folded into the batch, encoded once, and pooled
+                back over ``T`` in feature space — the backbone stays a
+                single-image encoder and the decoder sees one map per sample.
 
         Returns:
             Logits tensor of shape ``(B, num_classes, H, W)``.
         """
         input_h, input_w = x.shape[-2:]
+        steps = 0
+        if x.ndim == 5:
+            batch, steps = x.shape[0], x.shape[1]
+            x = x.reshape(batch * steps, *x.shape[2:])
 
         if self.freeze_backbone:
             self.backbone.eval()
@@ -414,4 +448,12 @@ class SegmentationProbe(nn.Module):
             _ = self.backbone(x)
 
         features = [self._process_feature(self._features[n]) for n in self.layer_names]
+        if steps:
+            features = [self._pool_time(f, steps) for f in features]
         return self.head(features, input_h, input_w)
+
+    def _pool_time(self, feat: torch.Tensor, steps: int) -> torch.Tensor:
+        """Reduce ``(B*T, C, H, W)`` back to ``(B, C, H, W)`` over time."""
+        c, h, w = feat.shape[1:]
+        feat = feat.view(-1, steps, c, h, w)
+        return feat.mean(dim=1) if self.temporal_pool == "mean" else feat.amax(dim=1)

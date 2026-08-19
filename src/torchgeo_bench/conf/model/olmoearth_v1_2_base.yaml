@@ -14,3 +14,9 @@ normalize: false
 image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
 min_image_size: 64
 name: olmoearth_v1_2_base
+eval:
+  segmentation:
+    # Isotropic transformer: no spatial pyramid, so tap 4 blocks
+    # spread across depth, deepest first.  Derived by measurement
+    # (experiments/scripts/introspect_seg_layers.py).
+    layers: ["encoder_model.encoder.blocks.11", "encoder_model.encoder.blocks.8", "encoder_model.encoder.blocks.5", "encoder_model.encoder.blocks.2"]

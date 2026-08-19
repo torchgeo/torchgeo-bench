@@ -9,14 +9,15 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.main import (
-    _build_seg_probe_and_solver,
     _completed_run_keys,
     _expand_dataset_list,
     _filter_completed_metric_rows,
-    _measure_cpu_throughput,
     _normalize_bands_value,
+    _resolve_segmentation_runtime_config,
     evaluate_profile,
 )
+from torchgeo_bench.model_profile import measure_cpu_throughput
+from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 
 class _ImageOnlyDataset(Dataset):
@@ -65,7 +66,7 @@ def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
         }
     )
     with pytest.raises(ValueError, match="requires eval.segmentation.layers"):
-        _build_seg_probe_and_solver(
+        build_seg_probe_and_solver(
             model=torch.nn.Identity(),
             num_classes=2,
             eval_cfg=eval_cfg,
@@ -74,20 +75,48 @@ def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("epochs", 0, "positive integer"),
+        ("batch_size", 0, "positive integer"),
+        ("lr", 0.0, "finite positive number"),
+        ("cache_features", "true", "must be a boolean"),
+        ("cache_dtype", "bfloat16", "must be one of"),
+    ],
+)
+def test_segmentation_runtime_config_rejects_invalid_values(
+    field: str, value: object, message: str
+) -> None:
+    cfg = OmegaConf.create(
+        {
+            "epochs": 1,
+            "batch_size": 2,
+            "lr": 1e-3,
+            "cache_features": True,
+            "cache_dtype": "float16",
+            field: value,
+        }
+    )
+
+    with pytest.raises(ValueError, match=message):
+        _resolve_segmentation_runtime_config(cfg)
+
+
 def test_measure_cpu_throughput_budget_exceeded_returns_none_metrics() -> None:
     model = torch.nn.Sequential(torch.nn.Conv2d(3, 4, kernel_size=1), torch.nn.ReLU())
     sample = torch.rand(4, 3, 8, 8)
-    metrics = _measure_cpu_throughput(
+    metrics = measure_cpu_throughput(
         model,
         sample,
-        cpu_batch_size=2,
+        batch_size=2,
         n_warmup=1,
         n_measure=1,
         time_budget_s=0.0,
     )
     assert metrics == {
-        "throughput_samples_per_sec": None,
-        "latency_ms_per_batch_p50": None,
+        "throughput_samples_per_sec_cpu": None,
+        "latency_ms_per_batch_p50_cpu": None,
     }
 
 
@@ -104,6 +133,7 @@ def test_evaluate_profile_adds_cpu_metrics_branch() -> None:
         "partition": "default",
         "bands": "rgb",
         "num_classes": 10,
+        "config_hash": "test-config-hash",
         "c_range_start": -2,
         "c_range_stop": 2,
         "c_range_num": 3,
@@ -113,14 +143,14 @@ def test_evaluate_profile_adds_cpu_metrics_branch() -> None:
 
     with (
         mock.patch(
-            "torchgeo_bench.main.measure_profile",
+            "torchgeo_bench.model_profile.measure_profile",
             return_value={"params_m": 0.1, "throughput_samples_per_sec": 20.0},
         ),
         mock.patch(
-            "torchgeo_bench.main._measure_cpu_throughput",
+            "torchgeo_bench.model_profile.measure_cpu_throughput",
             return_value={
-                "throughput_samples_per_sec": 3.0,
-                "latency_ms_per_batch_p50": 12.0,
+                "throughput_samples_per_sec_cpu": 3.0,
+                "latency_ms_per_batch_p50_cpu": 12.0,
             },
         ),
     ):

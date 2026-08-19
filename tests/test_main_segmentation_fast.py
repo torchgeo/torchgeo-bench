@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.main import main
+from torchgeo_bench.resume import _resume_config_hash
 
 from .test_main_fast import _chainable_model_mock, _compose_cfg
 
@@ -65,6 +66,7 @@ def _seg_resume_row(cfg, *, metric_name: str = "mIoU") -> dict[str, object]:
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
         "num_classes": 3,
+        "config_hash": _resume_config_hash(cfg),
         "metric_name": metric_name,
         "metric_value": 0.42,
     }
@@ -88,13 +90,25 @@ def _mock_probe_and_solver():
     probe.channels_list = [16, 32]
     solver = mock.Mock()
     solver.fit.return_value = None
-    solver.evaluate.return_value = {
+    metrics = {
         "mIoU": 0.42,
         "fw_IoU": 0.55,
         "precision": 0.6,
         "recall": 0.7,
         "f1": 0.65,
     }
+    confusions = torch.tensor([[[0, 4], [0, 0]], [[0, 0], [0, 4]]])
+
+    def evaluate(*_args, collect_preds: bool = False, collect_confusions: bool = False, **_kwargs):
+        if collect_preds and collect_confusions:
+            return metrics, torch.zeros(2, 64, 64, dtype=torch.long), confusions
+        if collect_preds:
+            return metrics, torch.zeros(2, 64, 64, dtype=torch.long)
+        if collect_confusions:
+            return metrics, confusions
+        return metrics
+
+    solver.evaluate.side_effect = evaluate
     return probe, solver
 
 
@@ -107,17 +121,63 @@ def test_segmentation_row_emitted(tmp_path: Path):
             "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
         ),
         mock.patch(
-            "torchgeo_bench.main._build_seg_probe_and_solver",
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
             return_value=_mock_probe_and_solver(),
         ),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     assert df["method"].str.startswith("seg-").any()
     assert "miou" in set(df["metric_name"].str.lower())
     assert df.loc[0, "best_lr"] == 1e-3
     assert df.loc[0, "best_batch_size"] == 2
+    assert not df.loc[0, "merge_val"]
+    assert df.loc[0, "ci_lower"] < df.loc[0, "ci_upper"]
+
+
+def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
+    """Cached probes use their own configured batch size, not loader batch size."""
+    out = tmp_path / "out.csv"
+    cfg = _cfg_for_segmentation(
+        out,
+        overrides=["eval.segmentation.cache_features=true", "eval.segmentation.batch_size=3"],
+    )
+    probe, solver = _mock_probe_and_solver()
+    cache = mock.Mock()
+    probe.freeze_backbone = True
+    probe.extract_segmentation_features.return_value = cache
+    solver.evaluate_cached.return_value = (
+        {
+            "mIoU": 0.42,
+            "fw_IoU": 0.55,
+            "precision": 0.6,
+            "recall": 0.7,
+            "f1": 0.65,
+        },
+        torch.tensor([[[0, 4], [0, 0]], [[0, 0], [0, 4]]]),
+    )
+
+    with (
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
+        ),
+        mock.patch(
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
+            return_value=(probe, solver),
+        ),
+    ):
+        main(cfg)
+
+    solver.fit_cached.assert_called_once_with(
+        train_cache=cache,
+        val_cache=cache,
+        batch_size=3,
+        epochs=cfg.eval.segmentation.epochs,
+        verbose=cfg.verbose,
+    )
+    df = pd.read_csv(out)
+    assert df.loc[0, "best_batch_size"] == 3
 
 
 def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):
@@ -129,12 +189,12 @@ def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):
             "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
         ),
         mock.patch(
-            "torchgeo_bench.main._build_seg_probe_and_solver",
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
             return_value=_mock_probe_and_solver(),
         ),
-        mock.patch("torchgeo_bench.main.save_segmentation_viz") as viz_mock,
+        mock.patch("torchgeo_bench.segmentation_viz.save_segmentation_viz") as viz_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     viz_mock.assert_not_called()
 
@@ -148,9 +208,9 @@ def test_segmentation_resume_skips_complete_run(tmp_path: Path):
     with (
         mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
         mock.patch("torchgeo_bench.main.instantiate", return_value=model) as instantiate_mock,
-        mock.patch("torchgeo_bench.main._build_seg_probe_and_solver") as build_mock,
+        mock.patch("torchgeo_bench.segmentation_task.build_seg_probe_and_solver") as build_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     data_mock.assert_not_called()
     instantiate_mock.assert_not_called()
@@ -167,6 +227,7 @@ def test_segmentation_viz_called_when_enabled(tmp_path: Path):
     )
     probe, solver = _mock_probe_and_solver()
     preds = torch.zeros(4, 64, 64, dtype=torch.long)
+    solver.evaluate.side_effect = None
     solver.evaluate.return_value = (
         {
             "mIoU": 0.42,
@@ -176,15 +237,19 @@ def test_segmentation_viz_called_when_enabled(tmp_path: Path):
             "f1": 0.65,
         },
         preds,
+        torch.tensor([[[0, 4], [0, 0]], [[0, 0], [0, 4]]]),
     )
 
     with (
         mock.patch(
             "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
         ),
-        mock.patch("torchgeo_bench.main._build_seg_probe_and_solver", return_value=(probe, solver)),
-        mock.patch("torchgeo_bench.main.save_segmentation_viz") as viz_mock,
+        mock.patch(
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
+            return_value=(probe, solver),
+        ),
+        mock.patch("torchgeo_bench.segmentation_viz.save_segmentation_viz") as viz_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     viz_mock.assert_called_once()

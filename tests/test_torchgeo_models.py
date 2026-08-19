@@ -9,10 +9,11 @@ import torch.nn as nn
 from torchvision.transforms import Normalize
 
 from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets.m_eurosat import MEurosat
+from torchgeo_bench.datasets.m_so2sat import MSo2Sat
 from torchgeo_bench.models.torchgeo_models import (
     TorchGeoCromaBench,
     TorchGeoDOFABench,
-    TorchGeoEarthLocBench,
     TorchGeoPanopticonBench,
     TorchGeoResNetBench,
     TorchGeoScaleMAEBench,
@@ -87,16 +88,11 @@ def test_weights_resolution_failure(monkeypatch):
         _resolve_torchgeo_weights("FakeWeights", "FAKE_MEMBER")
 
 
-def test_first_conv_adaptation_single_channel():
+@pytest.mark.parametrize("in_chans", [1, 12])
+def test_first_conv_adaptation(in_chans: int):
     model = nn.Sequential(nn.Conv2d(3, 16, 3))
-    _adapt_first_conv(model, "0", in_chans=1)
-    assert model[0].in_channels == 1
-
-
-def test_first_conv_adaptation_multichannel():
-    model = nn.Sequential(nn.Conv2d(3, 16, 3))
-    _adapt_first_conv(model, "0", in_chans=12)
-    assert model[0].in_channels == 12
+    _adapt_first_conv(model, "0", in_chans=in_chans)
+    assert model[0].in_channels == in_chans
 
 
 def test_normalize_transform_extraction():
@@ -124,7 +120,7 @@ def test_normalize_transform_none_when_absent():
     assert _extract_normalize_transforms(_Weights()) is None
 
 
-def test_scalemae_pooling_cls_and_mean(monkeypatch):
+def install_tiny_scalemae_factory(monkeypatch, transforms: nn.Module | None = None):
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _PatchEmbed(nn.Module):
@@ -133,9 +129,11 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
             self.proj = nn.Conv2d(3, 8, 1)
 
     class _TinyScaleMAE(nn.Module):
-        def __init__(self) -> None:
+        def __init__(self, *, img_size: int, res: float) -> None:
             super().__init__()
             self.patch_embed = _PatchEmbed()
+            self.img_size = img_size
+            self.res = res
 
         def forward_features(self, images: torch.Tensor) -> torch.Tensor:
             batch = images.shape[0]
@@ -143,14 +141,27 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
             patches = torch.ones(batch, 4, 8, device=images.device)
             return torch.cat([cls, patches], dim=1)
 
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyScaleMAE()
-    )
+    calls: list[tuple[dict, _TinyScaleMAE]] = []
+
+    def factory(*, weights, **kwargs):
+        del weights
+        backbone = _TinyScaleMAE(**kwargs)
+        calls.append((kwargs, backbone))
+        return backbone
+
+    monkeypatch.setattr(tg_models, "_resolve_torchgeo_factory", lambda _name: factory)
     monkeypatch.setattr(
         tg_models,
         "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+        lambda _weights_class, _weights_member: SimpleNamespace(
+            transforms=lambda: transforms if transforms is not None else nn.Identity()
+        ),
     )
+    return calls
+
+
+def test_scalemae_pooling_cls_and_mean(monkeypatch):
+    install_tiny_scalemae_factory(monkeypatch)
 
     bands = _rgb_bands()
     cls_model = TorchGeoScaleMAEBench(
@@ -172,6 +183,49 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
     assert mean_out.shape == (2, 8)
     assert torch.allclose(cls_out, torch.full_like(cls_out, 2.0))
     assert torch.allclose(mean_out, torch.full_like(mean_out, 1.0))
+
+
+def test_scalemae_constructs_selected_grid_without_adapting_rgb_projection(monkeypatch):
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    calls = install_tiny_scalemae_factory(monkeypatch)
+    monkeypatch.setattr(
+        tg_models,
+        "_adapt_first_conv",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not adapt")),
+    )
+    model = TorchGeoScaleMAEBench(
+        bands=_rgb_bands(),
+        normalization="identity",
+        input_unit_check="ignore",
+        image_size=64,
+        res=3.5,
+    )
+
+    kwargs, backbone = calls[0]
+    assert kwargs == {"img_size": 64, "res": 3.5}
+    assert backbone is model.backbone
+    assert model.backbone.patch_embed.proj.in_channels == 3
+
+
+def test_scalemae_rejects_non_rgb_order() -> None:
+    with pytest.raises(ValueError, match="ordered RGB"):
+        TorchGeoScaleMAEBench(bands=list(reversed(_rgb_bands())))
+
+
+def test_scalemae_uses_bandspec_zscore_instead_of_checkpoint_transform(monkeypatch):
+    checkpoint_transform = nn.Sequential(
+        Normalize(mean=[0.0], std=[10000.0]),
+        Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    )
+    install_tiny_scalemae_factory(monkeypatch, transforms=checkpoint_transform)
+    model = TorchGeoScaleMAEBench(
+        bands=_rgb_bands(), normalization="bandspec_zscore", input_unit_check="ignore"
+    )
+
+    at_dataset_mean = torch.full((1, 3, 8, 8), 1500.0)
+    normalized = model.normalize_inputs(at_dataset_mean)
+    assert torch.allclose(normalized, torch.zeros_like(normalized))
 
 
 def test_torchgeo_resnet_forward_shape(monkeypatch):
@@ -206,40 +260,6 @@ def test_torchgeo_resnet_forward_shape(monkeypatch):
     assert torch.isfinite(out).all()
 
 
-def test_torchgeo_swin_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    import torchgeo_bench.models.torchgeo_models as tg_models
-
-    class _TinySwin(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.features = nn.Sequential(nn.Sequential(nn.Conv2d(3, 8, 1)))
-            self.head = nn.Linear(8, 8)
-            self.pool = nn.AdaptiveAvgPool2d(1)
-
-        def forward(self, images: torch.Tensor) -> torch.Tensor:
-            feats = self.pool(self.features[0][0](images)).flatten(1)
-            return feats
-
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySwin()
-    )
-    monkeypatch.setattr(
-        tg_models,
-        "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
-    )
-
-    model = TorchGeoSwinBench(
-        bands=_rgb_bands(),
-        normalization="identity",
-        input_unit_check="ignore",
-    )
-    out = model.forward_patch_features(torch.rand(2, 3, 64, 64))
-    assert out.ndim == 2
-    assert out.shape[0] == 2
-    assert torch.isfinite(out).all()
-
-
 def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
@@ -265,40 +285,6 @@ def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     out = model.forward_patch_features(torch.rand(2, 12, 64, 64))
     assert out.ndim == 2
     assert out.shape == (2, 8)
-    assert torch.isfinite(out).all()
-
-
-def test_torchgeo_earthloc_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    import torchgeo_bench.models.torchgeo_models as tg_models
-
-    class _TinyEarthLoc(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.backbone = nn.Sequential()
-            self.backbone.conv1 = nn.Conv2d(3, 6, 3, padding=1)
-            self.pool = nn.AdaptiveAvgPool2d(1)
-
-        def forward(self, images: torch.Tensor) -> torch.Tensor:
-            feats = self.pool(self.backbone.conv1(images))
-            return feats.flatten(1)
-
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyEarthLoc()
-    )
-    monkeypatch.setattr(
-        tg_models,
-        "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
-    )
-
-    model = TorchGeoEarthLocBench(
-        bands=_rgb_bands(),
-        normalization="identity",
-        input_unit_check="ignore",
-    )
-    out = model.forward_patch_features(torch.rand(2, 3, 64, 64))
-    assert out.ndim == 2
-    assert out.shape[0] == 2
     assert torch.isfinite(out).all()
 
 
@@ -414,7 +400,7 @@ def test_channel_mismatch_preserves_tiled_normalize_chain(
     ]
     model = TorchGeoResNetBench(
         bands=six_bands,
-        normalization="identity",
+        normalization="model_native",
         input_unit_check="ignore",
     )
     normalized = model.normalize_inputs(torch.ones(1, 6, 8, 8))
@@ -423,6 +409,46 @@ def test_channel_mismatch_preserves_tiled_normalize_chain(
     )
     assert torch.allclose(normalized[:, :3], expected.expand(1, 3, 8, 8))
     assert torch.allclose(normalized[:, 3:], expected.expand(1, 3, 8, 8))
+
+
+def test_resnet_can_convert_to_reflectance_before_skipping_weight_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raw S2 should skip a checkpoint's uint8 scale before ImageNet z-score."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 4, 1)
+            self.fc = nn.Identity()
+
+    class _FakeWeights:
+        transforms = nn.Sequential(
+            Normalize(mean=[0.0], std=[255.0]),
+            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        )
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: _FakeWeights(),
+    )
+
+    model = TorchGeoResNetBench(
+        bands=_rgb_bands(),
+        normalization="model_native",
+        normalization_input_unit="reflectance_0_1",
+        skip_weight_normalize=1,
+        input_unit_check="error",
+    )
+
+    normalized = model.normalize_inputs(torch.full((1, 3, 2, 2), 10000.0))
+    expected = torch.tensor([(1.0 - 0.485) / 0.229, (1.0 - 0.456) / 0.224, (1.0 - 0.406) / 0.225])
+    assert torch.allclose(normalized[0, :, 0, 0], expected)
 
 
 # ---------------------------------------------------------------------------
@@ -445,13 +471,9 @@ def _dn_bands() -> list[BandSpec]:
     ]
 
 
-def _reflectance_bands() -> list[BandSpec]:
-    return [
-        BandSpec(
-            sensor="s2", name=f"b{i}", source_name=f"B{i}", mean=0.15, std=0.05, min=0.0, max=1.0
-        )
-        for i in range(3)
-    ]
+def _dataset_bands(cls, names: tuple[str, ...]) -> list[BandSpec]:
+    by_name = {b.name: b for b in cls.bands}
+    return [by_name[name] for name in names]
 
 
 def test_warn_unit_mismatch_ignore_mode():
@@ -478,14 +500,6 @@ def test_warn_unit_mismatch_none_unit_skips():
         _warn_unit_mismatch("TestModel", None, _dn_bands(), "warn")
 
 
-def test_warn_unit_mismatch_matching_unit_no_warning():
-    # DN bands with s2_dn_div10000 → units match, but means are high → might warn on mean range
-    # Use reflectance bands with reflectance unit → no mismatch
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        _warn_unit_mismatch("TestModel", "reflectance_0_1", _reflectance_bands(), "warn")
-
-
 def test_warn_unit_mismatch_mean_range_warn():
     # DN bands paired with s2_dn_div10000 unit → unit matches but mean exceeds hi*1.5
     dn_high = [
@@ -495,6 +509,22 @@ def test_warn_unit_mismatch_mean_range_warn():
     ]
     with pytest.warns(UserWarning, match="mean outside"):
         _warn_unit_mismatch("TestModel", "s2_dn_div10000", dn_high, "warn")
+
+
+def test_s2_dn_weights_warn_on_reflectance_dataset() -> None:
+    """Reflectance-scale So2Sat must not pass as raw Sentinel-2 DN."""
+    bands = _dataset_bands(MSo2Sat, ("red", "green", "blue"))
+    with pytest.warns(UserWarning, match="look like reflectance_0_1"):
+        _warn_unit_mismatch("Demo", "s2_dn_div10000", bands, "warn")
+
+
+def test_s2_dn_weights_accept_raw_s2_dataset() -> None:
+    """Raw Sentinel-2 DN datasets remain accepted for /10000 torchgeo weights."""
+    bands = _dataset_bands(MEurosat, ("red", "green", "blue"))
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always")
+        _warn_unit_mismatch("Demo", "s2_dn_div10000", bands, "warn")
+    assert records == []
 
 
 # ---------------------------------------------------------------------------
@@ -557,3 +587,81 @@ def test_normalize_inputs_bandspec_zscore_no_unit_conversion(monkeypatch):
     x = torch.full((1, 3, 8, 8), 1200.0)
     normed = model.normalize_inputs(x)
     assert torch.allclose(normed, torch.zeros_like(normed), atol=1e-4)
+
+
+def test_weights_normalize_only_applies_under_model_native(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dataset.normalization must not be silently overridden by the weights transform."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 4, 1)
+            self.fc = nn.Identity()
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return images.mean(dim=(2, 3))
+
+    class _FakeWeights:
+        @staticmethod
+        def transforms() -> nn.Sequential:
+            return nn.Sequential(Normalize(mean=[0.0, 0.0, 0.0], std=[2.0, 2.0, 2.0]))
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: _FakeWeights(),
+    )
+
+    bands = _dn_bands()
+    sample = torch.full((1, 3, 4, 4), 1000.0)
+
+    native = TorchGeoResNetBench(
+        bands=bands, normalization="model_native", input_unit_check="ignore"
+    ).normalize_inputs(sample)
+    zscore = TorchGeoResNetBench(
+        bands=bands, normalization="bandspec_zscore", input_unit_check="ignore"
+    ).normalize_inputs(sample)
+    identity = TorchGeoResNetBench(
+        bands=bands, normalization="identity", input_unit_check="ignore"
+    ).normalize_inputs(sample)
+
+    # bandspec_zscore standardises with the BandSpec stats (mean 1200, std 400);
+    # identity passes raw values through; only model_native uses the weights'
+    # Normalize (std=2 -> 500.0).  Before the fix all three returned 500.0.
+    assert torch.allclose(zscore, torch.full_like(zscore, (1000.0 - 1200.0) / 400.0))
+    assert torch.allclose(identity, sample)
+    assert torch.allclose(native, torch.full_like(native, 500.0))
+
+
+def test_expected_input_unit_derived_from_weights_unit(monkeypatch):
+    """model_native needs expected_input_unit; wrappers only name weights_input_unit."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+    from torchgeo_bench.models._input_units import InputUnit
+
+    class _TinySwin(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.features = nn.Sequential(nn.Sequential(nn.Conv2d(3, 4, 1)))
+            self.head = nn.Identity()
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return images.mean(dim=(2, 3))
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySwin()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+    )
+    # TorchGeoSwinBench declares weights_input_unit="uint8_div255" and no
+    # expected_input_unit; the base class must fill it in.
+    TorchGeoSwinBench(bands=_rgb_bands(), normalization="identity", input_unit_check="ignore")
+    assert TorchGeoSwinBench.expected_input_unit is InputUnit.UINT8

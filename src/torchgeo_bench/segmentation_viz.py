@@ -341,3 +341,19 @@ def save_segmentation_viz(
     cm_path = os.path.join(dest, f"{dataset_name}_confusion.png")
     Image.fromarray(cm_arr).save(cm_path)
     logger.info(f"Saved confusion matrix → {cm_path}")
+
+
+def collect_viz_inputs(test_loader: "object") -> tuple[torch.Tensor, torch.Tensor]:
+    """Gather test images and GT masks for visualization (cheap pass, no backbone)."""
+    images, masks = [], []
+    for batch in test_loader:  # type: ignore[attr-defined]
+        if isinstance(batch, dict):
+            images.append(batch["image"])
+            mask = batch["mask"]
+        else:
+            images.append(batch[0])
+            mask = batch[1]
+        if mask.ndim == 4:
+            mask = mask.squeeze(1)
+        masks.append(mask.long())
+    return torch.cat(images, dim=0), torch.cat(masks, dim=0)

@@ -99,7 +99,6 @@ class TimmPatchBenchModel(BenchModel):
         self.use_cls_token = use_cls_token
         self.input_normalization = input_normalization
 
-        # When using CLS token, disable timm's internal pooling.
         if self.use_cls_token and global_pool != "":
             global_pool = ""
 
@@ -111,7 +110,6 @@ class TimmPatchBenchModel(BenchModel):
             global_pool=global_pool,
         )
 
-        # Determine default input size from timm config; store square size.
         default_cfg = getattr(self.backbone, "default_cfg", {}) or {}
         cfg_input_size = default_cfg.get("input_size", None)
         inferred_size: int | None = None
@@ -205,7 +203,7 @@ class TimmPatchBenchModel(BenchModel):
                 )
         x = self.backbone(images)
 
-        # timm usually returns (B, C); be defensive about (B, C, h, w) and (B, N, C).
+        # timm returns (B, C) for pooled models, (B, C, h, w) or (B, N, C) otherwise.
         if x.ndim == 4:
             x = F.adaptive_avg_pool2d(x, 1).flatten(1)
         elif x.ndim == 3:

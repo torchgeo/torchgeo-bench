@@ -34,7 +34,7 @@ from torchgeo_bench.datasets.base import BandSpec
 
 from ._input_units import InputUnit, convert_unit, detect_input_unit
 from ._normalization import NormalizationStrategy
-from ._pooling import VALID_MODES, pool_tokens
+from ._pooling import pool_tokens
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -206,9 +206,8 @@ def _warn_unit_mismatch(
 class _TorchGeoBackboneBench(BenchModel):
     """Shared scaffolding for torchgeo pretrained-weights wrappers.
 
-    Subclasses set :attr:`weights_input_unit` and implement
-    :meth:`_load_backbone` returning the headless ``nn.Module`` to call
-    on the normalized input.
+    Subclasses set :attr:`weights_input_unit` and implement their feature
+    extraction from the loaded backbone.
     """
 
     weights_input_unit: str | None = None
@@ -222,21 +221,64 @@ class _TorchGeoBackboneBench(BenchModel):
         weights_member: str,
         auto_resize: bool,
         target_size: int | None,
+        normalization_input_unit: str | None = None,
+        skip_weight_normalize: int = 0,
         input_unit_check: str = "warn",
+        factory_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
+        # The pretraining scale is already named by weights_input_unit, so
+        # derive expected_input_unit from it rather than making every wrapper
+        # restate it — model_native fails without it.
+        if type(self).expected_input_unit is None and self.weights_input_unit:
+            derived = _UNIT_EXPECTED_SOURCE.get(self.weights_input_unit)
+            if derived is not None:
+                type(self).expected_input_unit = derived
         super().__init__(bands=bands, **kwargs)
+        if normalization_input_unit is not None:
+            if normalization_input_unit not in _UNIT_EXPECTED_SOURCE:
+                raise ValueError(
+                    "normalization_input_unit must be one of "
+                    f"{tuple(_UNIT_EXPECTED_SOURCE)}, got {normalization_input_unit!r}."
+                )
+            self.normalization_input_unit = normalization_input_unit
+        else:
+            self.normalization_input_unit = self.weights_input_unit
+        if (
+            isinstance(skip_weight_normalize, bool)
+            or not isinstance(skip_weight_normalize, int)
+            or skip_weight_normalize < 0
+        ):
+            raise ValueError(
+                "skip_weight_normalize must be a non-negative integer, "
+                f"got {skip_weight_normalize!r}."
+            )
         weights = _resolve_torchgeo_weights(weights_class, weights_member)
         self.weights = weights
-        self.backbone = self._load_backbone(weights, factory)
+        model_factory = _resolve_torchgeo_factory(factory)
+        self.backbone = model_factory(weights=weights, **(factory_kwargs or {}))
         self.auto_resize = auto_resize
         self.target_size = target_size
-        self._weights_normalize = _extract_normalize_transforms(weights)
+        weights_normalize = _extract_normalize_transforms(weights)
+        if weights_normalize is not None:
+            if skip_weight_normalize > len(weights_normalize):
+                raise ValueError(
+                    f"skip_weight_normalize={skip_weight_normalize} exceeds the "
+                    f"{len(weights_normalize)} Normalize layers supplied by {weights_member}."
+                )
+            self._weights_normalize = nn.Sequential(
+                *list(weights_normalize)[skip_weight_normalize:]
+            )
+        else:
+            self._weights_normalize = None
         if input_unit_check not in ("warn", "ignore", "error"):
             raise ValueError(
                 f"input_unit_check must be one of warn|ignore|error, got {input_unit_check!r}."
             )
-        _warn_unit_mismatch(type(self).__name__, self.weights_input_unit, bands, input_unit_check)
+        if normalization_input_unit is None:
+            _warn_unit_mismatch(
+                type(self).__name__, self.weights_input_unit, bands, input_unit_check
+            )
 
         # Pre-compute the unit conversion needed to bring dataset inputs
         # into the scale the weights' Normalize was calibrated for.  No-op
@@ -247,11 +289,8 @@ class _TorchGeoBackboneBench(BenchModel):
         # values, producing near-zero inputs.
         self._dataset_input_unit = detect_input_unit(self.bands)
         self._weights_target_unit: InputUnit | None = _UNIT_EXPECTED_SOURCE.get(
-            self.weights_input_unit or ""
+            self.normalization_input_unit or ""
         )
-
-    def _load_backbone(self, weights, factory: str) -> nn.Module:
-        return _resolve_torchgeo_factory(factory)(weights=weights)
 
     def _tiled_normalize(self, in_chans: int) -> nn.Sequential | None:
         """Build the pretrained normalization chain for ``in_chans`` channels.
@@ -339,10 +378,13 @@ class _TorchGeoBackboneBench(BenchModel):
         # applying unit conversion first would corrupt it (e.g. z-score uses
         # DN-scale mean/std — dividing raw DN by 10 000 before z-scoring
         # produces values ≈ 0 - 1000/500 ≈ -2, i.e. garbage).
-        weights_norm = self._weights_normalize
-        _need_unit_conv = self._weights_target_unit is not None and (
-            weights_norm is not None or self.normalization is NormalizationStrategy.MODEL_NATIVE
-        )
+        # The weights' own Normalize *is* the model-native pipeline, so it runs
+        # only under model_native.  Applying it under every strategy made
+        # dataset.normalization a no-op for each torchgeo model that ships a
+        # transform, silently collapsing the normalization ablation.
+        native = self.normalization is NormalizationStrategy.MODEL_NATIVE
+        weights_norm = self._weights_normalize if native else None
+        _need_unit_conv = self._weights_target_unit is not None and native
         if _need_unit_conv:
             images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
         if weights_norm is not None:
@@ -393,6 +435,8 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
         weights_member: str = "SENTINEL2_RGB_MOCO",
         auto_resize: bool = False,
         target_size: int | None = 224,
+        normalization_input_unit: str | None = None,
+        skip_weight_normalize: int = 0,
         input_unit_check: str = "warn",
         **_kwargs: Any,
     ) -> None:
@@ -403,6 +447,8 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=target_size,
+            normalization_input_unit=normalization_input_unit,
+            skip_weight_normalize=skip_weight_normalize,
             input_unit_check=input_unit_check,
             **_kwargs,
         )
@@ -449,6 +495,7 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         self.backbone.head = nn.Identity()
         # Adapt the patch-embed projection conv so RGB-pretrained Swin
@@ -473,7 +520,8 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
     """Wrapper for torchgeo ScaleMAE-Large.
 
     ``forward_features()`` returns ``(B, N+1, D)`` tokens; ``pool`` selects
-    between CLS, mean-pooled patch tokens, or their concatenation.
+    between CLS and mean-pooled post-normalization patch tokens. ``res`` is the
+    scale supplied to Scale-MAE's resolution-conditioned positional embedding.
     """
 
     weights_input_unit = "uint8_div255"
@@ -485,28 +533,39 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         factory: str = "scalemae_large_patch16",
         weights_class: str = "ScaleMAELarge16_Weights",
         weights_member: str = "FMOW_RGB",
-        auto_resize: bool = True,
-        target_size: int | None = 224,
+        auto_resize: bool = False,
+        target_size: int | None = None,
+        image_size: int | None = None,
         input_unit_check: str = "warn",
-        pool: str = "mean",
+        pool: str = "cls",
+        res: float = 1.0,
         **_kwargs: Any,
     ) -> None:
+        band_names = tuple(band.name.lower() for band in bands)
+        valid_rgb_orders = {("red", "green", "blue"), ("b04", "b03", "b02")}
+        if band_names not in valid_rgb_orders:
+            raise ValueError(
+                "Scale-MAE FMOW_RGB requires exactly three ordered RGB bands: "
+                "[red, green, blue] or [b04, b03, b02]."
+            )
+        if pool not in ("cls", "mean"):
+            raise ValueError("Scale-MAE pool must be 'cls' or 'mean'.")
+
+        image_size = image_size or target_size or 224
         super().__init__(
             bands=bands,
             factory=factory,
             weights_class=weights_class,
             weights_member=weights_member,
             auto_resize=auto_resize,
-            target_size=target_size,
+            target_size=image_size,
             input_unit_check=input_unit_check,
+            factory_kwargs={"img_size": image_size, "res": float(res)},
+            **_kwargs,
         )
-        if pool not in VALID_MODES:
-            raise ValueError(f"pool={pool!r} not in {VALID_MODES}")
+        self.image_size = image_size
+        self.res = float(res)
         self.pool = pool
-        # Adapt ScaleMAE's patch-embed projection to N-channel input.
-        # Pretrained on fMoW RGB; adapted weights mean these N-band results
-        # should be marked as "adapted" rather than vanilla pretrained.
-        _adapt_first_conv(self.backbone, "patch_embed.proj", len(bands))
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
@@ -584,6 +643,7 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         self.wavelengths = _resolve_dofa_wavelengths(bands, wavelengths)
 
@@ -627,6 +687,7 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         # EarthLoc wraps a ResNet50; adapt its first conv for N-channel input.
         # Results on N!=3 channels are "adapted*" (input-conv weights are
@@ -657,7 +718,14 @@ _CROMA_S2_12 = [
 
 
 class TorchGeoCromaBench(_TorchGeoBackboneBench):
-    """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``."""
+    """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``.
+
+    CROMA's published preprocessing (github.com/antofuller/CROMA, taken from
+    SatMAE/SeCo) is not fixed pretraining constants: it clips each channel to
+    ``mean +/- std_multiplier * std`` and rescales that window to ``[0, 1]``.
+    ``model_native`` reproduces that using the dataset's own BandSpec stats,
+    which is what the authors compute per dataset.
+    """
 
     weights_input_unit = "reflectance_0_1"
     expected_input_unit = InputUnit.REFLECTANCE_0_1
@@ -672,8 +740,10 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
         auto_resize: bool = True,
         target_size: int | None = 120,
         input_unit_check: str = "warn",
+        std_multiplier: float = 2.0,
         **_kwargs: Any,
     ) -> None:
+        self.std_multiplier = std_multiplier
         super().__init__(
             bands=bands,
             factory=factory,
@@ -682,7 +752,23 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
+
+    def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
+        """Apply CROMA's own preprocessing under model_native.
+
+        Other strategies fall through to the shared implementation, so the
+        normalisation ablation still varies for this model.
+        """
+        if self.normalization is not NormalizationStrategy.MODEL_NATIVE:
+            return super().normalize_inputs(images)
+        n = images.shape[1]
+        mean = torch.tensor([b.mean for b in self.bands], dtype=torch.float32).view(1, n, 1, 1)
+        std = torch.tensor([b.std for b in self.bands], dtype=torch.float32).view(1, n, 1, 1)
+        lo = (mean - self.std_multiplier * std).to(images.device, images.dtype)
+        hi = (mean + self.std_multiplier * std).to(images.device, images.dtype)
+        return ((images - lo) / (hi - lo).clamp_min(1e-8)).clamp(0.0, 1.0)
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
@@ -723,6 +809,7 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         from ._band_mapping import wavelengths_um
 

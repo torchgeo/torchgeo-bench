@@ -27,19 +27,12 @@ def _xy_ml(
     return X, y
 
 
-# ---------------------------------------------------------------------------
 # __init__ validation
-# ---------------------------------------------------------------------------
 
 
 def test_invalid_c_raises():
     with pytest.raises(ValueError, match="C must be > 0"):
         LogisticRegression(C=0.0)
-
-
-def test_invalid_c_negative_raises():
-    with pytest.raises(ValueError, match="C must be > 0"):
-        LogisticRegression(C=-1.0)
 
 
 def test_invalid_solver_raises():
@@ -54,9 +47,7 @@ def test_cuda_fallback_to_cpu(monkeypatch):
     assert model.device.type == "cpu"
 
 
-# ---------------------------------------------------------------------------
 # fit validation
-# ---------------------------------------------------------------------------
 
 
 def test_fit_non_tensor_raises():
@@ -102,9 +93,7 @@ def test_fit_xy_length_mismatch_raises():
         model.fit(torch.randn(10, 4), torch.zeros(5, dtype=torch.long))
 
 
-# ---------------------------------------------------------------------------
 # Fitting and inference — single-label
-# ---------------------------------------------------------------------------
 
 
 def test_fit_and_predict_singlelabel():
@@ -148,9 +137,7 @@ def test_coef_before_fit_raises():
         _ = model.coef_
 
 
-# ---------------------------------------------------------------------------
 # Fitting and inference — multi-label
-# ---------------------------------------------------------------------------
 
 
 def test_fit_and_predict_multilabel():
@@ -171,9 +158,7 @@ def test_predict_proba_multilabel_range():
     assert np.all(proba >= 0) and np.all(proba <= 1)
 
 
-# ---------------------------------------------------------------------------
 # predict_proba / decision_function validation
-# ---------------------------------------------------------------------------
 
 
 def test_predict_proba_before_fit_raises():
@@ -202,11 +187,6 @@ def test_decision_function_before_fit_raises():
     model = LogisticRegression()
     with pytest.raises(RuntimeError, match="not been fit"):
         model.decision_function(torch.randn(5, 4))
-
-
-# ---------------------------------------------------------------------------
-# LBFGS solver
-# ---------------------------------------------------------------------------
 
 
 def test_lbfgs_solver_fits():

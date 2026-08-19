@@ -33,10 +33,10 @@ Glossary
        directory per dataset under ``data/geobenchv2/``.  V2 datasets
        use no prefix (``benv2``, ``treesatai``, ``pastis``, ...).
 
-   Hydra
-       The configuration framework used to compose model and run
+   OmegaConf
+       The YAML configuration library used to compose model and run
        configs.  See :doc:`configuration` for the override syntax and
-       https://hydra.cc for the full documentation.
+       https://omegaconf.readthedocs.io for the full documentation.
 
    intrinsic dimension
        The geometric / statistical dimension of a manifold of feature

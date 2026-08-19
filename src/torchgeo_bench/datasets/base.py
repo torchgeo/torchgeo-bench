@@ -8,48 +8,29 @@ Datasets always live under ``data/`` (relative to the current working
 directory). Each family base class (``_V1Dataset``, ``_V2Dataset``) and the
 torchgeo :class:`~torchgeo_bench.datasets.eurosat.EuroSAT` wrapper exposes its
 own :meth:`BenchDataset.data_root` returning the family-specific subdirectory.
+
+This module is import-cheap: :class:`BandSpec` is re-exported from the
+dependency-free :mod:`torchgeo_bench.bands`, and torch is only imported for
+type checking.
 """
+
+from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from torch.utils.data import DataLoader, Dataset
+from torchgeo_bench.bands import BandSpec
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from torch.utils.data import Dataset
+
+__all__ = ["BandSpec", "BenchDataset"]
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class BandSpec:
-    """Metadata for a single spectral band in a dataset.
-
-    Args:
-        sensor: Sensor family identifier (e.g. ``"s2"``, ``"landsat"``,
-            ``"aerial"``, ``"sar"``, ``"planet"``, ``"worldview"``).
-        name: Canonical short band name used in the public API
-            (e.g. ``"red"``, ``"b02"``, ``"nir"``, ``"vv"``).
-        source_name: Band key as it appears in the data files. For V1 HDF5
-            files this is the long form (``"04 - Red"``); for V2 datasets
-            this is typically the uppercase band code (``"B04"``).
-        mean: Train-split mean pixel value (raw units, no normalization).
-        std: Train-split standard deviation.
-        min: Train-split minimum pixel value.
-        max: Train-split maximum pixel value.
-        wavelength_um: Approximate centre wavelength in micrometres.
-            ``None`` for non-optical bands (SAR, DEM, elevation).
-    """
-
-    sensor: str
-    name: str
-    source_name: str
-    mean: float
-    std: float
-    min: float
-    max: float
-    wavelength_um: float | None = None
 
 
 class BenchDataset(ABC):
@@ -141,25 +122,3 @@ class BenchDataset(ABC):
             bands: Tuple of canonical band names to load. ``None`` loads all.
             transform: Optional sample transform callable.
         """
-
-    def get_dataloader(
-        self,
-        split: str,
-        *,
-        batch_size: int = 32,
-        num_workers: int = 8,
-        shuffle: bool | None = None,
-        pin_memory: bool = True,
-        **dataset_kwargs,
-    ) -> DataLoader:
-        """Convenience wrapper: build a :class:`~torch.utils.data.DataLoader`."""
-        ds = self.get_dataset(split, **dataset_kwargs)
-        if shuffle is None:
-            shuffle = split == "train"
-        return DataLoader(
-            ds,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-        )

@@ -1,10 +1,33 @@
 Results format
 ==============
 
-All evaluation runs append rows to a single CSV file (default
-``results/all_results.csv``).  Each row is a flattened
-:class:`~torchgeo_bench.main.EvaluationResult` describing a single
-``(dataset, method, model, config)`` measurement.
+All evaluation runs append rows to per-model CSV files.  Each row is a
+flattened :class:`~torchgeo_bench.main.EvaluationResult` describing a single
+``(dataset, method, model, config)`` measurement.  Rows are split by *kind*
+across three directories, keyed by ``<model name>.csv``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 25 50
+
+   * - Directory
+     - Row ``method``\ s
+     - Contents
+   * - ``results/models/``
+     - ``knn5``, ``linear``, ``seg-*``
+     - Classification/segmentation metrics -- rewritten on every metrics rerun.
+   * - ``results/profiles/``
+     - ``profile``
+     - Throughput/latency/param-count measurements -- one-time per model+hardware.
+   * - ``results/intrinsic_dim/``
+     - ``intrinsic_dim``
+     - Intrinsic-dimension estimates -- one-time per model.
+
+Profile and intrinsic-dim rows are one-time model+hardware measurements, so
+they are kept out of the metrics file: rerunning a classification sweep
+(new dataset, fixed metric, etc.) only touches ``results/models/``, instead
+of also rewriting/diffing the expensive one-off profile and intrinsic-dim
+rows every time.
 
 Sample rows
 -----------
@@ -47,12 +70,14 @@ Method values
 ================== ==================================================================================
 ``method``         Meaning
 ================== ==================================================================================
-``knn5``           KNN-5 classification (multilabel KNN for ``m-bigearthnet``).
-``linear``         L-BFGS logistic regression with C-sweep on the validation set.
+``knn5``           KNN-5 classification (multilabel KNN for ``m-bigearthnet``). -> ``results/models/``
+``linear``         L-BFGS logistic regression with C-sweep on the validation set. -> ``results/models/``
 ``intrinsic_dim``  Optional intrinsic-dimension metrics on extracted embeddings (requires
-                   the ``[id]`` extra and ``eval.intrinsic_dim.enabled=true``).
+                   the ``[id]`` extra and ``eval.intrinsic_dim.enabled=true``). -> ``results/intrinsic_dim/``
+``profile``        Optional throughput/latency/param-count measurement (requires
+                   ``eval.profile.enabled=true``). -> ``results/profiles/``
 ``seg-<head>``     Segmentation probe with the configured head (``linear`` / ``conv_block`` /
-                   ``fpn`` / ``dpt``).
+                   ``fpn`` / ``dpt``). -> ``results/models/``
 ================== ==================================================================================
 
 CSV schema
@@ -108,9 +133,12 @@ per GPU or per dataset) at the same output file without corrupting it.
 Resume mode
 -----------
 
-When ``resume=true``, the runner reads the existing CSV at startup and
-skips any combination that already has a matching row.  The de-dup key
-is:
+When ``resume=true``, the runner reads the existing CSV(s) at startup and
+skips any combination that already has a matching row.  Since profile and
+intrinsic-dim rows may live in their own files (see above), resume reads
+all three files -- ``results/models/<name>.csv``,
+``results/profiles/<name>.csv``, and ``results/intrinsic_dim/<name>.csv``
+-- and unions their completed-metric keys.  The de-dup key is:
 
 .. code-block:: python
 

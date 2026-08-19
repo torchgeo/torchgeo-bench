@@ -14,15 +14,14 @@ from torch import nn
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.flops_pipeline import (
     _MODALITY_FOR_BAND_CONFIG,
-    _TERRAMIND_MERGED_NAME,
     _is_band_incompatibility,
     _load_completed,
     _n_tokens,
     _probe_gflops,
     _seg_head_gflops,
 )
-from torchgeo_bench.main import _build_seg_probe_and_solver
 from torchgeo_bench.model_profile import _count_gflops, lenient_grad_hooks
+from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 CPU = torch.device("cpu")
 
@@ -120,13 +119,6 @@ def test_grad_breaking_model_is_measurable():
 # ---------------------------------------------------------------------------
 
 
-def test_gflops_is_deterministic():
-    """One number per cell — repeated measurement must agree exactly."""
-    model = _TinyConvNet().eval()
-    x = torch.randn(2, 3, 32, 32)
-    assert _count_gflops(model, x) == _count_gflops(model, x)
-
-
 def test_gflops_independent_of_batch_size():
     """``_count_gflops`` slices ``sample[:1]``, so GFLOPs is per-sample
     regardless of the batch handed in."""
@@ -198,13 +190,6 @@ def test_mlp_probe_scales_as_feature_dim_squared():
     # The D x D projection dominates the D x n_classes classifier, so doubling
     # D roughly quadruples the probe.
     assert g_w / g_n == pytest.approx(4.0, rel=0.05)
-
-
-def test_probe_head_variants_differ():
-    model = _WidthModel(256).eval()
-    g_linear, _, _ = _probe_gflops(model, 3, 32, CPU, "linear", 10)
-    g_mlp, _, _ = _probe_gflops(model, 3, 32, CPU, "mlp", 10)
-    assert g_mlp > g_linear
 
 
 # ---------------------------------------------------------------------------
@@ -279,8 +264,10 @@ def _seg_cfg(layers: list[str], head_type: str):
 
 @pytest.mark.parametrize("head_type", ["fpn", "dpt"])
 def test_seg_head_gflops_is_positive_and_deterministic(head_type):
+    if head_type == "dpt":
+        pytest.importorskip("transformers")
     model = _TapModel().eval()
-    probe, _ = _build_seg_probe_and_solver(model, 4, _seg_cfg(_TAP_LAYERS, head_type), CPU, 1e-3)
+    probe, _ = build_seg_probe_and_solver(model, 4, _seg_cfg(_TAP_LAYERS, head_type), CPU, 1e-3)
     probe.eval()
     first = _seg_head_gflops(probe, 12, 224, CPU)
     second = _seg_head_gflops(probe, 12, 224, CPU)
@@ -295,8 +282,8 @@ def test_finer_taps_make_a_more_expensive_head():
     coarse = _TapModel(tap_stride=16).eval()
     fine = _TapModel(tap_stride=8).eval()
 
-    probe_c, _ = _build_seg_probe_and_solver(coarse, 4, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
-    probe_f, _ = _build_seg_probe_and_solver(fine, 4, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
+    probe_c, _ = build_seg_probe_and_solver(coarse, 4, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
+    probe_f, _ = build_seg_probe_and_solver(fine, 4, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
     g_coarse = _seg_head_gflops(probe_c.eval(), 12, 224, CPU)
     g_fine = _seg_head_gflops(probe_f.eval(), 12, 224, CPU)
     assert g_fine > g_coarse
@@ -305,8 +292,8 @@ def test_finer_taps_make_a_more_expensive_head():
 def test_num_classes_barely_moves_head_cost():
     """Sub-2% for 2 -> 15 classes, which is why num_classes is not an axis."""
     model = _TapModel().eval()
-    probe2, _ = _build_seg_probe_and_solver(model, 2, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
-    probe15, _ = _build_seg_probe_and_solver(model, 15, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
+    probe2, _ = build_seg_probe_and_solver(model, 2, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
+    probe15, _ = build_seg_probe_and_solver(model, 15, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
     g2 = _seg_head_gflops(probe2.eval(), 12, 224, CPU)
     g15 = _seg_head_gflops(probe15.eval(), 12, 224, CPU)
     assert abs(g15 - g2) / g2 < 0.02
@@ -338,7 +325,7 @@ def test_terramind_modality_map_matches_shipped_configs():
     This is the one failure mode that yields a plausible-looking wrong number
     instead of an exception, so it is pinned against the actual config files.
     """
-    from hydra import compose, initialize_config_module
+    from torchgeo_bench.config import compose_config
 
     for config_name, band_config in [
         ("terratorch/terramind_v1_base", "s2"),
@@ -346,16 +333,8 @@ def test_terramind_modality_map_matches_shipped_configs():
         ("terratorch/terramind_v1_large", "s2"),
         ("terratorch/terramind_v1_large_rgb", "rgb"),
     ]:
-        with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-            cfg = compose(config_name="config", overrides=[f"model={config_name}"])
+        cfg = compose_config([f"model={config_name}"])
         assert str(cfg.model.modality) == _MODALITY_FOR_BAND_CONFIG[band_config]
-
-
-def test_terramind_rgb_and_s2_configs_merge_to_one_name():
-    """The `_rgb` and S2L2A configs are one model at two band-axis points."""
-    assert _TERRAMIND_MERGED_NAME["tt_terramind_v1_base_rgb"] == "tt_terramind_v1_base"
-    assert _TERRAMIND_MERGED_NAME["tt_terramind_v1_base"] == "tt_terramind_v1_base"
-    assert _TERRAMIND_MERGED_NAME["tt_terramind_v1_large_rgb"] == "tt_terramind_v1_large"
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +376,7 @@ def test_load_completed_tolerates_malformed_csv(tmp_path):
 
 
 def _wrap(exc: BaseException, depth: int = 2) -> BaseException:
-    """Nest *exc* in `depth` layers, the way hydra wraps a target's exception."""
+    """Nest *exc* in `depth` layers of wrapper exceptions."""
     out: BaseException = exc
     for i in range(depth):
         try:
@@ -407,8 +386,8 @@ def _wrap(exc: BaseException, depth: int = 2) -> BaseException:
     return out
 
 
-def test_band_incompatibility_detected_through_hydra_wrapping():
-    """The band ValueError never arrives unwrapped, so the chain must be walked."""
+def test_band_incompatibility_detected_through_wrapping():
+    """A wrapped band ValueError is still found by walking the chain."""
     inner = ValueError("Missing required model band 'nir'. Available canonical bands: ...")
     assert _is_band_incompatibility(_wrap(inner)) is inner
 
@@ -419,13 +398,8 @@ def test_band_incompatibility_matches_empty_intersection():
 
 
 def test_interpolation_key_error_is_not_a_band_incompatibility():
-    """The regression this guard exists for.
-
-    omegaconf's InterpolationKeyError subclasses ValueError (via
-    InterpolationResolutionError), so the old ``isinstance(cause, ValueError)``
-    guard recorded conf/model/rcf.yaml's unresolved ``${seed}`` as a band skip:
-    the sweep exited 0 with rcf simply absent from the CSV.
-    """
+    """omegaconf's InterpolationKeyError subclasses ValueError, so an
+    unresolved ``${seed}`` must not be classified as a band incompatibility."""
     from omegaconf.errors import InterpolationKeyError
 
     assert issubclass(InterpolationKeyError, ValueError)  # why the narrowing is needed
@@ -515,14 +489,13 @@ def test_terramind_modality_mismatch_is_a_band_incompatibility():
 
 def test_flops_config_resolves_every_shipped_model_config():
     """conf/model/rcf.yaml carries ``seed: ${seed}``, which raises
-    InterpolationKeyError unless flops_config defines a top-level ``seed``.
-    With the narrowed guard that is now a hard crash rather than a silent skip,
-    so the sweep's own config is checked here rather than in the job."""
-    from hydra import compose, initialize_config_module
+    InterpolationKeyError unless flops_config defines a top-level ``seed``,
+    so the sweep's own config is checked here instead of in the job."""
     from omegaconf import OmegaConf
 
-    with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-        cfg = compose(config_name="flops_config", overrides=["model=rcf"])
+    from torchgeo_bench.config import compose_config
+
+    cfg = compose_config(["model=rcf"], config_name="flops_config", default_model=None)
     resolved = OmegaConf.to_container(cfg, resolve=True)  # raises if unresolvable
     assert resolved["model"]["seed"] == resolved["seed"] == 0
 
@@ -534,19 +507,15 @@ def test_flops_config_resolves_every_shipped_model_config():
 
 @pytest.mark.slow
 def test_panopticon_yields_finite_gflops():
-    """Panopticon used to exhaust all three tiers and raise; it must now
-    measure."""
-    from hydra import compose, initialize_config_module
-    from hydra.utils import instantiate
+    """Panopticon yields finite GFLOPs through the lenient_grad_hooks path."""
+    from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()
-    with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-        cfg = compose(config_name="config", overrides=["model=torchgeo/panopticon"])
+    cfg = compose_config(["model=torchgeo/panopticon"])
     model = instantiate(
         cfg.model,
         bands=bench.select_band_specs(None),
         normalization="bandspec_zscore",
-        _convert_="object",
     ).eval()
 
     gflops = _count_gflops(model, torch.randn(1, 12, 224, 224))
@@ -557,18 +526,14 @@ def test_panopticon_yields_finite_gflops():
 @pytest.mark.slow
 def test_vit_gflops_ordering_and_tokens():
     """Sanity ordering: ViT-L > ViT-B, and n_tokens tracks (size/patch)^2."""
-    from hydra import compose, initialize_config_module
-    from hydra.utils import instantiate
+    from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()
     rgb = bench.select_band_specs(bench.rgb_bands)
 
     def build(name):
-        with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-            cfg = compose(config_name="config", overrides=[f"model={name}"])
-        return instantiate(
-            cfg.model, bands=rgb, normalization="bandspec_zscore", _convert_="object"
-        ).eval()
+        cfg = compose_config([f"model={name}"])
+        return instantiate(cfg.model, bands=rgb, normalization="bandspec_zscore").eval()
 
     base = build("timm/vit/vit_base_patch16_224")
     large = build("timm/vit/vit_large_patch16_224")

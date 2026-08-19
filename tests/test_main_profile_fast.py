@@ -36,7 +36,7 @@ def test_profile_rows_emitted(tmp_path: Path):
         ),
         mock.patch("torchgeo_bench.main.measure_profile", return_value=metrics),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     profile_df = df[df["method"] == "profile"]
@@ -78,7 +78,7 @@ def test_profile_resume_partial_does_not_skip(tmp_path: Path):
         ),
         mock.patch("torchgeo_bench.main.measure_profile", return_value=metrics),
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     df = pd.read_csv(out)
     profile_df = df[df["method"] == "profile"]
@@ -108,6 +108,6 @@ def test_profile_resume_complete_skips(tmp_path: Path):
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.measure_profile") as profile_mock,
     ):
-        main.__wrapped__(cfg)
+        main(cfg)
 
     profile_mock.assert_not_called()

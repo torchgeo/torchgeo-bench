@@ -70,7 +70,6 @@ def test_schema_drift_removed_column_keeps_old_values(tmp_path):
 def test_empty_rows_is_noop(tmp_path):
     path = str(tmp_path / "out.csv")
     append_rows_atomic(path, [])
-    # File should not be created when there's nothing to write.
     with pytest.raises(FileNotFoundError):
         open(path).close()
 

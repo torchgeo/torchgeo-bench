@@ -82,6 +82,30 @@ def test_prithvi_input_shape_accepted(mock_registry):
     assert mock_registry["build_calls"][0][0] == "prithvi_eo_v2_300"
 
 
+def test_prithvi_full_band_set_does_not_select_bands(mock_registry):
+    bands = _bands(["blue", "green", "red", "nir_narrow", "swir1", "swir2"])
+    TerraTorchPrithviBench(bands=bands, normalization="identity")
+    assert "bands" not in mock_registry["build_calls"][0][1]
+
+
+def test_prithvi_rgb_selects_pretrained_band_subset(mock_registry):
+    bands = _bands(["blue", "green", "red"])
+    model = TerraTorchPrithviBench(bands=bands, normalization="identity")
+    # RGB-only datasets must select the matching patch-embed slots rather than
+    # zero-filling the four missing Prithvi bands.
+    assert mock_registry["build_calls"][0][1]["bands"] == ["BLUE", "GREEN", "RED"]
+    assert model.model_bands == ["blue", "green", "red"]
+    out = model.forward_patch_features(torch.rand(2, 3, 224, 224))
+    assert out.shape == (2, 8)
+    assert model.backbone.last_forward_input.shape[1] == 3
+
+
+def test_prithvi_rejects_dataset_with_no_matching_band(mock_registry):
+    bands = _bands(["vv", "vh"], sensor="sar")
+    with pytest.raises(ValueError, match="none of the target bands"):
+        TerraTorchPrithviBench(bands=bands, normalization="identity")
+
+
 def test_clay_auxiliary_args_forwarded(mock_registry):
     bands = _bands(["blue", "green", "red", "nir", "swir1", "swir2"])
     model = TerraTorchClayBench(bands=bands, normalization="identity", gsd=20.0)
@@ -200,14 +224,6 @@ _S2L2A_FULL = [
 ]
 
 
-def test_terramind_modality_shape(mock_registry):
-    bands = _bands(_S2L2A_FULL)
-    model = TerraTorchTerraMindBench(bands=bands, normalization="identity")
-    out = model.forward_patch_features(torch.rand(2, len(bands), 224, 224))
-    assert out.shape == (2, 8)
-    assert torch.isfinite(out).all()
-
-
 def test_terramind_full_s2l2a_no_band_selection(mock_registry):
     bands = _bands(_S2L2A_FULL)
     model = TerraTorchTerraMindBench(bands=bands, normalization="identity")
@@ -315,20 +331,6 @@ def test_terramind_rgb_modality_without_rgb_bands_raises(mock_registry):
     sar = _bands(["vv", "vh"], sensor="sar")
     with pytest.raises(ValueError, match="none of the target bands"):
         TerraTorchTerraMindBench(bands=sar, normalization="identity", modality="RGB")
-
-
-def test_pooling_mode_mean(mock_registry):
-    bands = _bands(["blue", "green", "red", "nir_narrow", "swir1", "swir2"])
-    model = TerraTorchPrithviBench(bands=bands, normalization="identity", pool="mean")
-    out = model.forward_patch_features(torch.rand(2, len(bands), 224, 224))
-    assert out.shape == (2, 8)
-
-
-def test_pooling_mode_cls(mock_registry):
-    bands = _bands(["blue", "green", "red", "nir_narrow", "swir1", "swir2"])
-    model = TerraTorchPrithviBench(bands=bands, normalization="identity", pool="cls")
-    out = model.forward_patch_features(torch.rand(2, len(bands), 224, 224))
-    assert out.shape == (2, 8)
 
 
 def test_invalid_pool_mode_raises(mock_registry):

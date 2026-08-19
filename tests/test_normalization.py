@@ -80,9 +80,15 @@ def test_minmax_zscore_produces_finite():
 
 
 def test_model_native_s2dn_to_reflectance():
-    """model_native with S2 DN bands + REFLECTANCE expected unit → divides by 10000."""
+    """model_native converts DN to reflectance when pretrain stats are declared."""
     bands = _bands([10000.0])
-    fn = build_normalizer("model_native", bands, expected_input_unit=InputUnit.REFLECTANCE_0_1)
+    fn = build_normalizer(
+        "model_native",
+        bands,
+        expected_input_unit=InputUnit.REFLECTANCE_0_1,
+        pretrain_mean=[0.0],
+        pretrain_std=[1.0],
+    )
     x = torch.tensor([[[[10000.0]]]])
     out = fn(x)
     assert torch.allclose(out, torch.ones(1, 1, 1, 1), atol=1e-5)
@@ -110,9 +116,29 @@ def test_model_native_requires_expected_unit():
 
 
 def test_model_native_s2dn_target():
-    """model_native with S2_DN target is a no-op on DN data."""
+    """model_native with S2_DN target is a no-op on DN data, given pretrain stats."""
     bands = _bands([10000.0])
-    fn = build_normalizer("model_native", bands, expected_input_unit=InputUnit.S2_DN)
+    fn = build_normalizer(
+        "model_native",
+        bands,
+        expected_input_unit=InputUnit.S2_DN,
+        pretrain_mean=[0.0],
+        pretrain_std=[1.0],
+    )
     x = torch.tensor([[[[5000.0]]]])
     out = fn(x)
     assert torch.allclose(out, x, atol=1e-5)
+
+
+def test_model_native_without_pretrain_stats_raises_on_use():
+    """Unit conversion alone is not a normalisation.
+
+    Without pretrain stats model_native used to hand the backbone raw DN, which
+    collapsed features (Prithvi scored an identical 0.264 on treesatai at 86M,
+    304M and 631M parameters).  Building is allowed so wrappers can install
+    their own normaliser afterwards; using this one must fail.
+    """
+    bands = _bands([10000.0])
+    fn = build_normalizer("model_native", bands, expected_input_unit=InputUnit.S2_DN)
+    with pytest.raises(ValueError, match="model_native normalisation is undefined"):
+        fn(torch.tensor([[[[5000.0]]]]))

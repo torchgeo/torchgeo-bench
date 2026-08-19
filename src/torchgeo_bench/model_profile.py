@@ -44,10 +44,7 @@ def lenient_grad_hooks() -> Iterator[None]:
     contexts in :func:`_count_gflops` fail identically.
 
     Swallowing the assertion loses module-level breakdown for those
-    modules, not FLOPs: the dispatch-layer totals are unaffected.  This is
-    verified in ``tests/test_flops_pipeline.py`` by asserting that a model
-    which already works returns **bit-identical** GFLOPs with and without
-    this context manager engaged.
+    modules, not FLOPs: the dispatch-layer totals are unaffected.
 
     ``module_tracker`` binds the symbol at import time
     (``from torch.autograd.graph import register_multi_grad_hook``), so
@@ -153,14 +150,10 @@ def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
     try:
         return _measure_with_autograd()
     except AssertionError as exc:
-        # 'Expected gradient function to be set' even after enable_grad +
-        # requires_grad=True on the input *and* with lenient_grad_hooks
-        # engaged.  The lenient patch already neutralises every
-        # module_tracker assertion we know of (it is what makes Panopticon
-        # measurable), so reaching here means the assertion comes from
-        # somewhere else entirely.  Raise a typed signal so the caller can
-        # record gflops=None for this specific model without a generic
-        # swallow.
+        # The lenient patch neutralises every module_tracker assertion we
+        # know of, so reaching here means the assertion no longer comes from
+        # module_tracker; raise a typed signal the caller can record as
+        # gflops=None.
         if "Expected gradient function" not in str(exc):
             raise
         raise NotImplementedError(
@@ -223,10 +216,7 @@ def measure_profile(
     latency_p50 = median(per_batch_ms)
     peak_gb = torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None
     reserved_gb = torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None
-    # Catch only the typed signal _count_gflops raises for known-
-    # incompatible models (currently Panopticon).  Any other exception
-    # propagates so we keep investigating new failure modes instead of
-    # silently writing None.
+    # Only the typed NotImplementedError from _count_gflops is tolerated.
     try:
         gflops: float | None = _count_gflops(model, sample_batch)
     except NotImplementedError as exc:
@@ -242,3 +232,61 @@ def measure_profile(
         "params_m": float(params_m),
         "gflops": gflops,
     }
+
+
+def measure_cpu_throughput(
+    model: nn.Module,
+    sample: torch.Tensor,
+    *,
+    batch_size: int,
+    n_warmup: int,
+    n_measure: int,
+    time_budget_s: float,
+) -> dict[str, float | None]:
+    """Wall-clock-budgeted CPU pass; returns ``*_cpu`` throughput and latency.
+
+    The model and a fresh batch are moved to CPU for the duration, then moved
+    back so the rest of the pipeline can keep using CUDA.  If even the first
+    warmup pass exceeds ``time_budget_s`` (big ViT-L backbones can take
+    minutes per batch on CPU), the metrics are returned as None with a
+    warning instead of burning the budget.
+    """
+    none_result: dict[str, float | None] = {
+        "throughput_samples_per_sec_cpu": None,
+        "latency_ms_per_batch_p50_cpu": None,
+    }
+    cpu_dev = torch.device("cpu")
+    # rcf/imagestats baselines have no parameters; use the input sample's
+    # device as the restoration target since model.to() is a no-op anyway.
+    first_param = next(iter(model.parameters()), None)
+    orig_dev = first_param.device if first_param is not None else sample.device
+    cpu_sample = sample[:batch_size].detach().to(cpu_dev)
+    model.to(cpu_dev)
+    try:
+        t0 = time.perf_counter()
+        with torch.inference_mode():
+            for _ in range(n_warmup):
+                model(cpu_sample)
+                if time.perf_counter() - t0 > time_budget_s:
+                    logger.warning(
+                        f"[profile] CPU warmup exceeded {time_budget_s}s budget on "
+                        f"{type(model).__name__}; skipping CPU throughput."
+                    )
+                    return none_result
+            per_batch_ms: list[float] = []
+            t_loop = time.perf_counter()
+            for _ in range(n_measure):
+                tb = time.perf_counter()
+                model(cpu_sample)
+                per_batch_ms.append((time.perf_counter() - tb) * 1000.0)
+                if time.perf_counter() - t0 > time_budget_s:
+                    break
+            elapsed = time.perf_counter() - t_loop
+        if not per_batch_ms:
+            return none_result
+        return {
+            "throughput_samples_per_sec_cpu": (batch_size * len(per_batch_ms)) / elapsed,
+            "latency_ms_per_batch_p50_cpu": median(per_batch_ms),
+        }
+    finally:
+        model.to(orig_dev)

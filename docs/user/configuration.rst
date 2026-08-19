@@ -1,12 +1,14 @@
 Configuration
 =============
 
-``torchgeo-bench`` is driven by `Hydra <https://hydra.cc>`_.  The primary
-config lives at :file:`src/torchgeo_bench/conf/config.yaml` and is composed
-with a model preset selected from :file:`src/torchgeo_bench/conf/model/`.
+``torchgeo-bench`` is configured with `OmegaConf <https://omegaconf.readthedocs.io>`_
+YAML files.  The primary config lives at :file:`src/torchgeo_bench/conf/config.yaml`
+and is composed with a model preset selected from
+:file:`src/torchgeo_bench/conf/model/`.
 
 Every value in the config can be overridden on the command line using
-Hydra's dotted-path syntax:
+dotted-path ``key=value`` syntax (common settings also have flags — see
+``torchgeo-bench run --help``):
 
 .. code-block:: console
 
@@ -76,11 +78,16 @@ selection semantics.
 .. code-block:: yaml
 
    eval:
-     bootstrap: 200                # bootstrap resamples for KNN/linear CIs
+     bootstrap: 200                # bootstrap resamples for KNN/linear/segmentation CIs
      c_range: [-6, 4, 40]          # log10 sweep start, stop, num samples for linear probe
      merge_val: true               # merge train+val before training the final logistic head
      skip_linear: false            # skip the (slower) linear probe entirely
      knn_device: null              # inherit device; fall back to CPU if FAISS lacks GPU support
+
+     calibration:
+       n_bins_knn: null             # null = knn_k + 1
+       n_bins_linear: 15
+       temp_scale: false            # requires merge_val=false (held-out validation logits)
 
      intrinsic_dim:                # optional ID metrics on extracted embeddings
        enabled: false
