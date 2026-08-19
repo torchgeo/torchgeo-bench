@@ -279,13 +279,37 @@ def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
 
 
 def test_dofa_wavelengths_still_raises_for_non_sar_missing_wavelength() -> None:
-    """A non-SAR band with no wavelength is a real data-declaration gap, not
-    something DOFA has a documented default for -- must still raise."""
+    """A non-SAR band with no wavelength and no known S2 canonical name is a
+    real data-declaration gap, not something DOFA has a default for."""
     bad_band = BandSpec(
         sensor="dem", name="elevation", source_name="DEM", mean=0.0, std=1.0, min=0.0, max=1.0
     )
     with pytest.raises(ValueError, match="DOFA wavelengths missing"):
         _resolve_dofa_wavelengths([bad_band], None)
+
+
+def test_dofa_wavelengths_fall_back_to_s2_table_for_landsat_bands() -> None:
+    """m_forestnet.py's Landsat nir/swir_1/swir_2 bands don't set
+    wavelength_um -- must fall back to the true Sentinel-2 centre
+    wavelength by canonical name rather than raising."""
+    from torchgeo_bench.models._band_mapping import S2_WAVELENGTHS_UM
+
+    landsat_bands = [
+        BandSpec(
+            sensor="landsat", name="nir", source_name="NIR", mean=0.0, std=1.0, min=0.0, max=1.0
+        ),
+        BandSpec(
+            sensor="landsat",
+            name="swir_1",
+            source_name="SWIR1",
+            mean=0.0,
+            std=1.0,
+            min=0.0,
+            max=1.0,
+        ),
+    ]
+    wavelengths = _resolve_dofa_wavelengths(landsat_bands, None)
+    assert wavelengths == [S2_WAVELENGTHS_UM["nir"], S2_WAVELENGTHS_UM["swir1"]]
 
 
 def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
