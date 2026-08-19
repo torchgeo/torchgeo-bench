@@ -144,6 +144,16 @@ def evaluate_knn(
     return metric, lo, hi, calibration, n_bins
 
 
+class LinearProbeDivergedError(RuntimeError):
+    """Raised when every candidate C in the sweep produced a non-finite score.
+
+    Distinct from a single bad candidate (handled inline by scoring it -inf so
+    the sweep just moves on) -- this means the features themselves are
+    unusable for this backbone/dataset pairing at every regularization
+    strength tried, so there is no "best_c" to report.
+    """
+
+
 def evaluate_logistic(
     x_train: np.ndarray,
     y_train: np.ndarray,
@@ -206,7 +216,16 @@ def evaluate_logistic(
 
         if multi_label:
             val_scores = model.predict_proba(x_val_tensor)
-            val_metric = float(average_precision_score(y_val, val_scores, average="micro"))
+            if not np.all(np.isfinite(val_scores)):
+                # Extreme C values can make LogisticRegression's weights diverge,
+                # producing non-finite logits/probabilities. average_precision_score
+                # raises on that rather than scoring it low, which would otherwise
+                # crash the whole C sweep over one bad candidate; treat it as the
+                # worst possible score instead so the sweep just moves on to the
+                # next C (best_val_score's -1.0 floor already skips it below).
+                val_metric = float("-inf")
+            else:
+                val_metric = float(average_precision_score(y_val, val_scores, average="micro"))
         else:
             val_pred = model.predict(x_val_tensor)
             val_metric = accuracy_score(y_val, val_pred)
@@ -217,7 +236,11 @@ def evaluate_logistic(
             best_val_score = val_metric
             best_c = c
 
-    assert best_c is not None, "C sweep failed to select a value"
+    if best_c is None:
+        raise LinearProbeDivergedError(
+            f"Every candidate C in {list(c_values)} produced a non-finite val score; "
+            "features are unusable for a linear probe at any regularization strength tried."
+        )
     if verbose:
         logger.info(f"[{label_tag}] Best C={best_c:.4g} val_score={best_val_score:.4f}")
 
@@ -903,43 +926,57 @@ def main(cfg: DictConfig) -> None:
                 )
 
             if not plan.skip_linear:
-                lin_score, lin_lo, lin_hi, best_c, lin_cal, lin_cal_ts = evaluate_logistic(
-                    x_train,
-                    y_train,
-                    x_val,
-                    y_val,
-                    x_test,
-                    y_test,
-                    c_values_list,
-                    cfg.seed,
-                    cfg.eval.bootstrap,
-                    cfg.eval.merge_val,
-                    cfg.device,
-                    cfg.verbose,
-                    calibration_n_bins=cal_n_bins_linear,
-                    temp_scale=cal_temp_scale,
-                )
-                all_rows.append(
-                    metric_row(
-                        common_meta,
-                        method="linear",
-                        metric_name=metric_name,
-                        metric_value=lin_score,
-                        ci_lower=lin_lo,
-                        ci_upper=lin_hi,
-                        feature_dim=feature_dim,
-                        n_counts=n_counts,
-                        best_c=best_c,
-                        ece=lin_cal["ece"],
-                        rms_ce=lin_cal["rms_ce"],
-                        mce=lin_cal["mce"],
-                        ece_ts=lin_cal_ts["ece_ts"],
-                        rms_ce_ts=lin_cal_ts["rms_ce_ts"],
-                        mce_ts=lin_cal_ts["mce_ts"],
-                        temperature=lin_cal_ts["temperature"],
+                try:
+                    lin_score, lin_lo, lin_hi, best_c, lin_cal, lin_cal_ts = evaluate_logistic(
+                        x_train,
+                        y_train,
+                        x_val,
+                        y_val,
+                        x_test,
+                        y_test,
+                        c_values_list,
+                        cfg.seed,
+                        cfg.eval.bootstrap,
+                        cfg.eval.merge_val,
+                        cfg.device,
+                        cfg.verbose,
                         calibration_n_bins=cal_n_bins_linear,
+                        temp_scale=cal_temp_scale,
                     )
-                )
+                except LinearProbeDivergedError as exc:
+                    # A handful of (backbone, dataset) pairings produce feature
+                    # magnitudes the probe can't fit at any C in the sweep. That's
+                    # a property of this one combination, not the rest of the
+                    # benchmark run, so skip just this row rather than losing
+                    # every other already-computed metric to an uncaught crash.
+                    logger.warning(
+                        f"[linear] model={common_meta.get('model')} "
+                        f"dataset={common_meta.get('dataset')} bands={common_meta.get('bands')} "
+                        f"norm={common_meta.get('normalization')}: skipping, no usable C found. "
+                        f"Diagnostic: {exc}"
+                    )
+                else:
+                    all_rows.append(
+                        metric_row(
+                            common_meta,
+                            method="linear",
+                            metric_name=metric_name,
+                            metric_value=lin_score,
+                            ci_lower=lin_lo,
+                            ci_upper=lin_hi,
+                            feature_dim=feature_dim,
+                            n_counts=n_counts,
+                            best_c=best_c,
+                            ece=lin_cal["ece"],
+                            rms_ce=lin_cal["rms_ce"],
+                            mce=lin_cal["mce"],
+                            ece_ts=lin_cal_ts["ece_ts"],
+                            rms_ce_ts=lin_cal_ts["rms_ce_ts"],
+                            mce_ts=lin_cal_ts["mce_ts"],
+                            temperature=lin_cal_ts["temperature"],
+                            calibration_n_bins=cal_n_bins_linear,
+                        )
+                    )
             if not plan.skip_id:
                 id_cfg = cfg.eval.intrinsic_dim
                 id_rows = evaluate_intrinsic_dim(

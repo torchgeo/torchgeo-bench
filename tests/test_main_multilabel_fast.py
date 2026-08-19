@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from torchgeo_bench.main import main
+from torchgeo_bench.main import LinearProbeDivergedError, main
 from torchgeo_bench.resume import _resume_config_hash
 
 from .test_main_fast import _compose_cfg, _DictTensorDataset
@@ -138,6 +138,39 @@ def test_multilabel_linear_emits_micro_map(tmp_path: Path):
     df = pd.read_csv(out)
     row = df[df["method"] == "linear"].iloc[0]
     assert row["metric_name"] == "micro_mAP"
+
+
+def test_diverged_linear_probe_skips_row_not_whole_run(tmp_path: Path):
+    """A LinearProbeDivergedError for one dataset must not crash the benchmark run.
+
+    knn5 for the same dataset -- and any other already-computed rows -- must
+    still land in the output, matching the "skip only this cell, log why"
+    convention used elsewhere (e.g. flops_pipeline's segmentation head skip).
+    """
+    out = tmp_path / "out.csv"
+    cfg = _cfg_for_multilabel(out)
+
+    with (
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()
+        ),
+        mock.patch(
+            "torchgeo_bench.main.embed_split", side_effect=_synthetic_multilabel_embeddings()
+        ),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_logistic",
+            side_effect=LinearProbeDivergedError("every candidate C diverged"),
+        ),
+    ):
+        main(cfg)
+
+    df = pd.read_csv(out)
+    assert (df["method"] == "knn5").any()
+    assert not (df["method"] == "linear").any()
 
 
 def test_multilabel_resume_key_stable(tmp_path: Path):
