@@ -4,6 +4,9 @@ Thin wrapper around ``torchid`` (https://github.com/isaaccorley/torchid).
 Provides a single entry point to compute one or more global ID estimates on a
 feature matrix and return scalar values per estimator.
 
+The module also provides dependency-free effective-rank, participation-ratio,
+variance-explained, and anisotropy diagnostics from centered embeddings.
+
 ID is computed on raw embeddings (no L2-normalization) to match the distance
 geometry used by KNN/linear probes elsewhere in this package.
 """
@@ -31,6 +34,18 @@ SUPPORTED_ESTIMATORS: tuple[str, ...] = (
     "DANCo",
     "FisherS",
 )
+
+FEATURE_SPECTRUM_METRICS: tuple[str, ...] = (
+    "effective_rank",
+    "participation_ratio",
+    "pc1_variance_ratio",
+    "pc10_variance_ratio",
+    "spectral_anisotropy",
+)
+
+
+class DegenerateSpectrumError(ValueError):
+    """Feature spectrum is undefined because the centered matrix has no variance."""
 
 
 def _load_estimator(name: str) -> type:
@@ -69,6 +84,97 @@ def _subsample(X: np.ndarray, max_samples: int | None, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     idx = rng.choice(X.shape[0], size=max_samples, replace=False)
     return X[idx]
+
+
+def _validate_max_samples(max_samples: int | None) -> None:
+    """Reject a ``max_samples`` that would make ``_subsample`` misbehave."""
+    if max_samples is not None and (
+        isinstance(max_samples, bool) or not isinstance(max_samples, int) or max_samples < 2
+    ):
+        raise ValueError(
+            f"max_samples must be an integer of at least 2 or None, got {max_samples!r}"
+        )
+
+
+def compute_feature_spectrum(
+    X: np.ndarray,
+    max_samples: int | None = 10_000,
+    seed: int = 0,
+) -> dict[str, float]:
+    """Compute scale-invariant spectral diagnostics on centered embeddings.
+
+    The squared singular values of the centered feature matrix are normalized
+    into variance proportions ``p``. Effective rank is ``exp(H(p))``;
+    participation ratio is ``1 / sum(p**2)``. Spectral anisotropy normalizes
+    leading-component dominance against the isotropic ``1 / d_eff`` baseline,
+    where ``d_eff = min(d, n - 1)`` is the number of singular values centering
+    can leave nonzero: ``(d_eff * p[0] - 1) / (d_eff - 1)``. Using the raw
+    feature dimension ``d`` here would give small splits (``n <= d``, common
+    for val/test) an anisotropy floor above zero even for isotropic data,
+    making the score incomparable across datasets with different split sizes.
+
+    Args:
+        X: Feature matrix of shape ``(n_samples, n_features)``.
+        max_samples: Cap row count via deterministic random subsampling.
+            ``None`` disables subsampling.
+        seed: RNG seed for subsampling determinism.
+
+    Returns:
+        Mapping containing effective rank, participation ratio, variance
+        explained by PC1 and the first 10 PCs, and spectral anisotropy.
+
+    Raises:
+        ValueError: If the input is not a finite 2-D matrix with at least two
+            samples and one feature.
+        DegenerateSpectrumError: If centering leaves no feature variance.
+    """
+    if X.ndim != 2:
+        raise ValueError(f"X must be 2D, got shape {X.shape}")
+    if X.shape[0] < 2:
+        raise ValueError(f"X must contain at least two samples, got shape {X.shape}")
+    if X.shape[1] < 1:
+        raise ValueError(f"X must contain at least one feature, got shape {X.shape}")
+    if not np.isfinite(X).all():
+        raise ValueError("X must contain only finite values")
+    _validate_max_samples(max_samples)
+
+    Xs = np.asarray(_subsample(X, max_samples, seed), dtype=np.float64)
+    centered = Xs - Xs.mean(axis=0, keepdims=True)
+    singular_values = np.linalg.svd(centered, compute_uv=False, full_matrices=False)
+    variances = singular_values**2
+    total_variance = float(variances.sum())
+    if not np.isfinite(total_variance) or total_variance <= 0:
+        raise DegenerateSpectrumError(
+            "Feature spectrum is undefined: centering left zero total variance "
+            f"for X{tuple(Xs.shape)}."
+        )
+
+    proportions = variances / total_variance
+    positive = proportions[proportions > 0]
+    effective_rank = float(np.exp(-np.sum(positive * np.log(positive))))
+    participation_ratio = float(1.0 / np.sum(proportions**2))
+    pc1_variance_ratio = float(proportions[0])
+    pc10_variance_ratio = float(proportions[:10].sum())
+
+    effective_dim = min(Xs.shape[1], Xs.shape[0] - 1)
+    if effective_dim <= 1:
+        spectral_anisotropy = 0.0
+    else:
+        spectral_anisotropy = float(
+            np.clip(
+                (effective_dim * pc1_variance_ratio - 1.0) / (effective_dim - 1.0),
+                0.0,
+                1.0,
+            )
+        )
+
+    return {
+        "effective_rank": effective_rank,
+        "participation_ratio": participation_ratio,
+        "pc1_variance_ratio": pc1_variance_ratio,
+        "pc10_variance_ratio": pc10_variance_ratio,
+        "spectral_anisotropy": spectral_anisotropy,
+    }
 
 
 def _two_nearest_distances(X: torch.Tensor) -> torch.Tensor:
@@ -142,6 +248,7 @@ def compute_intrinsic_dim(
     """
     if X.ndim != 2:
         raise ValueError(f"X must be 2D, got shape {X.shape}")
+    _validate_max_samples(max_samples)
     if not estimators:
         return {}
 

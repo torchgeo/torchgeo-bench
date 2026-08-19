@@ -64,9 +64,11 @@ eval:
     n_bins_linear: 15
     temp_scale: false      # requires merge_val=false so validation remains held out
 
-  # Optional intrinsic dimension (ID) metrics on extracted embeddings.
-  # Computed alongside KNN/linear probing when enabled. Adds rows with
-  # method="intrinsic_dim" and metric_name="id_<estimator>_<split>".
+  # Optional intrinsic dimension (ID) metrics and centered feature-spectrum
+  # diagnostics on extracted embeddings. Computed alongside KNN/linear probing
+  # when enabled. Adds method="intrinsic_dim" rows named
+  # "id_<estimator>_<split>" plus effective rank, participation ratio, PC1/PC10
+  # variance ratios, and spectral anisotropy for each selected split.
   intrinsic_dim:
     enabled: false
     estimators: [TwoNN, MLE, lPCA]   # subset of torchid global estimators
@@ -115,4 +117,3 @@ eval:
     save_viz: false            # set true to save prediction grids and confusion matrices
     viz_dir: "viz"             # root output directory for visualizations
     n_viz_samples: 8           # number of test samples shown in the sample grid
-
