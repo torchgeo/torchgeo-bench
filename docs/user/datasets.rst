@@ -2,8 +2,8 @@ Datasets
 ========
 
 ``torchgeo-bench`` supports two generations of GeoBench datasets — V1 and
-V2 — plus a small wrapper around torchgeo's standalone EuroSAT dataset
-for sanity checks.  All datasets share the
+V2 — plus wrappers around torchgeo's standalone EuroSAT and NWPU-RESISC45
+datasets.  All datasets share the
 :class:`~torchgeo_bench.datasets.BenchDataset` interface and are
 auto-registered on import so they can be selected by their CLI name.
 
@@ -31,6 +31,9 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
    * - ``eurosat``
      - ``data/eurosat/``
      - torchgeo's ``EuroSAT`` downloader
+   * - ``resisc45``
+     - ``data/resisc45/``
+     - torchgeo's ``RESISC45`` downloader
 
 Downloading
 -----------
@@ -44,6 +47,7 @@ The bundled :doc:`/api/cli` provides one subcommand per family:
    $ torchgeo-bench download geobench_v2                              # default V2 set
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # V2 subset
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT
+   $ torchgeo-bench download resisc45                                 # torchgeo RESISC45
    $ torchgeo-bench download geobench_v2 --output-dir /scratch/data   # custom root
 
 The default V2 download set is: ``benv2``, ``burn_scars``, ``caffe``,
@@ -178,7 +182,16 @@ CLI name             Class
 ==================== ============================================================================
 ``eurosat``          :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper, random split)
 ``eurosat-spatial``  :class:`~torchgeo_bench.datasets.EuroSATSpatial`  (longitude-based split)
+``resisc45``         :class:`~torchgeo_bench.datasets.RESISC45`  (45-class aerial scenes, RGB)
 ==================== ============================================================================
+
+``resisc45`` is 31,500 RGB scenes at 256x256 across 45 classes, on torchgeo's
+published 60/20/20 split.  It is the most-divergent benchmark in the GFM
+literature — the same Scale-MAE checkpoint is reported at 33.0 and 89.6
+linear-probe accuracy by different papers under the same nominal protocol —
+which is why it is worth running under a fixed harness.  The imagery carries
+no geolocation, so it appears on the coverage map as an explicit gap rather
+than being silently omitted.
 
 Selecting datasets
 ------------------

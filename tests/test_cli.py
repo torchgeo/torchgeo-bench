@@ -96,6 +96,20 @@ def test_download_rejects_empty_dataset_list() -> None:
         cli_main(["download", "geobench_v1", "--datasets", ","])
 
 
+def test_download_resisc45(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "torchgeo_bench.download.download_resisc45", lambda path: calls.append(str(path))
+    )
+    cli_main(["download", "resisc45"])
+    assert calls == ["data"]
+
+
+def test_download_rejects_datasets_for_resisc45() -> None:
+    with pytest.raises(SystemExit):
+        cli_main(["download", "resisc45", "--datasets", "resisc45"])
+
+
 def test_download_rejects_datasets_for_eurosat() -> None:
     with pytest.raises(SystemExit, match="only supported for GeoBench"):
         cli_main(["download", "eurosat", "--datasets", "m-eurosat"])

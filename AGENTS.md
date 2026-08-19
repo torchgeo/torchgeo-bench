@@ -151,6 +151,7 @@ torchgeo-bench download geobench_v1                       # GeoBench V1 -> data/
 torchgeo-bench download geobench_v2                       # all benchmark V2 datasets -> data/geobenchv2/<name>
 torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # subset
 torchgeo-bench download eurosat                           # torchgeo EuroSAT -> data/eurosat
+torchgeo-bench download resisc45                          # torchgeo RESISC45 -> data/resisc45
 ```
 
 ### Running the Benchmark

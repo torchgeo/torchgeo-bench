@@ -59,6 +59,7 @@ _REGISTRY_SPEC: dict[str, tuple[str, str]] = {
     # torchgeo template
     "eurosat": ("eurosat", "EuroSAT"),
     "eurosat-spatial": ("eurosat", "EuroSATSpatial"),
+    "resisc45": ("resisc45", "RESISC45"),
 }
 
 
