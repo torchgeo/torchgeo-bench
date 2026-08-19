@@ -196,6 +196,69 @@ def test_minmax_zscore_uses_actual_bandspec_stats():
     assert abs(out_max.item() - 3.5) < 1e-4, f"expected 3.5 at band max, got {out_max.item()}"
 
 
+def _band(name: str, wavelength_um: float | None) -> "BandSpec":
+    from torchgeo_bench.datasets.base import BandSpec
+
+    return BandSpec(
+        sensor="s2",
+        name=name,
+        source_name=name.upper(),
+        mean=0.0,
+        std=1.0,
+        min=0.0,
+        max=1.0,
+        wavelength_um=wavelength_um,
+    )
+
+
+def test_rgb_first_permutation_reorders_bgr_native_bands():
+    """Sentinel-2's native declaration order (blue, green, red, ...) must be
+    reordered so the pretrained RGB kernel's R/G/B weights line up with the
+    physically-matching bands, identified by wavelength (name-agnostic)."""
+    from torchgeo_bench.models.timm import _rgb_first_permutation
+
+    # Native S2 order: b02=blue, b03=green, b04=red, b08=nir
+    bands = [_band("b02", 0.49), _band("b03", 0.56), _band("b04", 0.665), _band("b08", 0.842)]
+    perm = _rgb_first_permutation(bands)
+    assert perm == [2, 1, 0, 3]  # red, green, blue, nir
+
+
+def test_rgb_first_permutation_none_without_full_triplet():
+    """SAR-only or otherwise non-optical band sets have nothing to reorder."""
+    from torchgeo_bench.models.timm import _rgb_first_permutation
+
+    bands = [_band("vv", None), _band("vh", None)]
+    assert _rgb_first_permutation(bands) is None
+
+    # Missing the red band entirely.
+    bands = [_band("b02", 0.49), _band("b03", 0.56), _band("nir", 0.842)]
+    assert _rgb_first_permutation(bands) is None
+
+
+def test_multichannel_pretrained_permutes_channels_before_backbone():
+    """Pretrained + multi-channel must feed the backbone R/G/B-first, even
+    when the dataset declares bands in native blue/green/red/... order."""
+    from torchgeo_bench.models.timm import TimmPatchBenchModel
+
+    bands = [_band("b02", 0.49), _band("b03", 0.56), _band("b04", 0.665), _band("b08", 0.842)]
+    model = TimmPatchBenchModel(bands=bands, model_name="resnet18", pretrained=True)
+    assert model._channel_perm == [2, 1, 0, 3]
+
+    seen = {}
+
+    class _Capture(torch.nn.Module):
+        def forward(self, images):
+            seen["images"] = images
+            return torch.zeros(images.shape[0], 8)
+
+    model.backbone = _Capture()
+    raw = torch.arange(4).float().view(1, 4, 1, 1).expand(1, 4, 2, 2).clone()
+    model._forward_patch_features(raw)
+    # channel 0 (native blue=1.0) must now carry channel-index-2's original
+    # value (0.0, native red) after the R/G/B-first permutation, etc.
+    assert torch.equal(seen["images"][0, :, 0, 0], torch.tensor([2.0, 1.0, 0.0, 3.0]))
+
+
 def test_unknown_timm_model_name_raises_clearly():
     """A typo in ``model_name`` must fail loudly at construction (we don't
     silently swallow the missing pretrained_cfg)."""
