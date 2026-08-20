@@ -12,15 +12,11 @@ import torch
 from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench.config.presets import ModelPreset
 from torchgeo_bench.coordbench import (
-    ClassFrequencyPrior,
     CoordBenchmark,
-    GridPrior,
-    KDEPrior,
-    NearestNeighborPrior,
+    LocationEncoder,
     NeRFLocationEncoder,
     SinCosLocationEncoder,
     SphericalHarmonicLocationEncoder,
-    UniformPrior,
     XYZLocationEncoder,
     knn_probe_score,
     linear_probe_score,
@@ -29,8 +25,10 @@ from torchgeo_bench.coordbench import (
     spatial_fold_ids,
 )
 from torchgeo_bench.coordbench import datasets as cb_datasets
+from torchgeo_bench.coordbench import probe as cb_probe
 from torchgeo_bench.coordbench.config import CoordConfig
 from torchgeo_bench.coordbench.run import _instantiate_encoder
+from torchgeo_bench.coordbench.run import test_sample_count as sample_count
 
 pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 
@@ -154,35 +152,83 @@ def test_coordinate_auto_probe_selects_device_and_preserves_solution(
     ],
 )
 def test_coordinate_encoders_shape_and_batching(
-    points: tuple[np.ndarray, np.ndarray], encoder, width: int
+    points: tuple[np.ndarray, np.ndarray], encoder: LocationEncoder, width: int
 ) -> None:
     lon, lat = points
+    expected = encoder.encode(lon, lat)
     encoder.batch_size = 37
     feats = encoder.encode(lon, lat)
     assert feats.shape == (len(lon), width)
     assert feats.dtype == np.float32
     assert np.isfinite(feats).all()
+    np.testing.assert_array_equal(feats, expected)
 
 
-@pytest.mark.parametrize(
-    "prior",
-    [
-        UniformPrior(),
-        ClassFrequencyPrior(),
-        GridPrior(),
-        NearestNeighborPrior(),
-        NearestNeighborPrior(weights="distance"),
-        KDEPrior(),
-    ],
-)
-def test_spatial_priors_return_probabilities(prior) -> None:
-    lon = np.array([-100.0, -99.0, 10.0, 11.0])
-    lat = np.array([40.0, 41.0, 10.0, 11.0])
-    labels = np.array(["a", "a", "b", "b"])
-    probabilities = prior.fit(lon, lat, labels).predict_proba(lon, lat)
-    assert probabilities.shape == (4, 2)
-    assert np.isfinite(probabilities).all()
-    assert np.allclose(probabilities.sum(axis=1), 1.0)
+def test_xyz_known_spherical_coordinates() -> None:
+    features = XYZLocationEncoder().encode(
+        np.array([0.0, 90.0, 180.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0, 90.0, -90.0])
+    )
+    expected = [[1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
+    np.testing.assert_allclose(features, expected, atol=1e-7)
+
+
+@pytest.mark.parametrize("include_xyz", [False, True])
+def test_nerf_frequency_and_feature_order(
+    points: tuple[np.ndarray, np.ndarray], *, include_xyz: bool
+) -> None:
+    xyz = XYZLocationEncoder().encode(*points)
+    angles = xyz[:, :, None] * np.array([1.0, 2.0, 4.0], dtype=np.float32) * np.pi
+    parts = [np.sin(angles).reshape(len(xyz), -1), np.cos(angles).reshape(len(xyz), -1)]
+    if include_xyz:
+        parts.insert(0, xyz)
+    features = NeRFLocationEncoder(num_frequencies=3, include_xyz=include_xyz).encode(*points)
+    np.testing.assert_allclose(features, np.concatenate(parts, axis=1), atol=1e-6)
+
+
+@pytest.mark.parametrize("degree", range(4))
+def test_spherical_harmonic_normalization(
+    points: tuple[np.ndarray, np.ndarray], degree: int
+) -> None:
+    features = SphericalHarmonicLocationEncoder(degree=degree).encode(*points)
+    assert features.shape == (len(points[0]), (degree + 1) ** 2)
+    np.testing.assert_allclose(features[:, 0], 1 / np.sqrt(4 * np.pi))
+    for order in range(degree + 1):
+        power = np.square(features[:, order**2 : (order + 1) ** 2]).sum(axis=1)
+        np.testing.assert_allclose(power, (2 * order + 1) / (4 * np.pi), atol=5e-7)
+
+
+@pytest.mark.parametrize("seed", [0, 42, 2**64 - 1])
+def test_random_folds_use_local_torch_seed(seed: int) -> None:
+    state = torch.random.get_rng_state()
+    actual = cb_probe._fold_indices(31, 5, seed, None)
+    permutation = torch.randperm(31, generator=torch.Generator().manual_seed(seed)).numpy()
+    for fold, indices in enumerate(actual):
+        np.testing.assert_array_equal(indices, permutation[fold::5])
+    torch.testing.assert_close(torch.random.get_rng_state(), state)
+
+
+def test_official_split_randomizes_only_valid_training_pool() -> None:
+    features = np.arange(80, dtype=np.float32).reshape(40, 2)
+    labels = features[:, 0].copy()
+    labels[1] = np.nan
+    test_mask = np.arange(40) % 4 == 0
+    train_pool = np.flatnonzero(~test_mask[np.isfinite(labels)])
+    expected = cb_probe._fold_indices(len(train_pool), 3, 42, None)
+    with mock.patch.object(cb_probe, "_cv_alpha_scores", wraps=cb_probe._cv_alpha_scores) as cv:
+        linear_probe_score(
+            features, labels, "regression", folds=3, seed=42, test_mask=test_mask, alphas=(0.1,)
+        )
+    for actual, indices in zip(cv.call_args.args[1], expected, strict=True):
+        np.testing.assert_array_equal(actual.numpy(), train_pool[indices])
+
+
+@pytest.mark.parametrize("task_type", ["regression", "classification"])
+@pytest.mark.parametrize("split", ["random", "official"])
+def test_sample_count_excludes_invalid_features_and_labels(task_type: str, split: str) -> None:
+    features = np.array([[0.0], [np.nan], [1.0], [2.0]])
+    labels = np.array([0.0, 1.0, np.nan, 1.0])
+    mask = np.array([True, True, True, False]) if split == "official" else None
+    assert sample_count(features, labels, task_type, mask) == (1 if split == "official" else 2)
 
 
 def test_documented_fourier_encoder_example(points: tuple[np.ndarray, np.ndarray]) -> None:

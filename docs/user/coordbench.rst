@@ -74,6 +74,32 @@ Included encoders
      - base
      - Compact real spherical-harmonic encoding.
 
+The ``xyz`` encoder returns three unit-sphere coordinates. The ``nerf`` preset applies 16 frequency bands (``2**k * pi``) to each XYZ coordinate, returning 96 sine/cosine features; ``include_xyz: true`` adds the three raw coordinates. The ``spherical-harmonics`` preset returns 16 normalized real harmonics through degree 3, with configurable degrees from 0 to 3.
+
+Run a position encoder with the same explicit coordinate command:
+
+.. code-block:: console
+
+   $ torchgeo-bench coord --model xyz --dataset california_housing \
+       --methods linear --device cpu
+
+To customize an encoder, pass constructor options under ``model.kwargs`` in a coordinate YAML file:
+
+.. code-block:: yaml
+
+   model:
+     name: nerf
+     kwargs:
+       num_frequencies: 8
+       include_xyz: true
+   datasets: [california_housing]
+   evaluation:
+     methods: [linear]
+   runtime:
+     device: cpu
+   output:
+     file: results/nerf_coordbench.csv
+
 Install the optional reference encoders from PyPI with:
 
 .. code-block:: console
@@ -168,24 +194,6 @@ locations. They are not silently reinterpreted as universal CoordBench models.
 The coordinate-only pretrained encoders remain available through the
 ``coordbench`` extra. Retrieval-augmented models that require an external
 database are intentionally outside this apples-to-apples encoder track.
-
-Task-conditioned classification baselines
-------------------------------------------
-
-The task-conditioned prior baselines are exposed separately from
-``LocationEncoder`` because they need training coordinates and labels and
-return class probabilities rather than reusable features:
-
-.. code-block:: python
-
-   from torchgeo_bench.coordbench import GridPrior
-
-   prior = GridPrior(cell_size=10.0, smoothing=1.0).fit(lon, lat, labels)
-   probabilities = prior.predict_proba(test_lon, test_lat)
-
-Available priors are ``UniformPrior``, ``ClassFrequencyPrior``, ``GridPrior``,
-``NearestNeighborPrior``, and ``KDEPrior``. They are classification-only and
-use Euclidean longitude/latitude degrees as simple baselines.
 
 Add a location encoder
 ----------------------
