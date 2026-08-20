@@ -7,15 +7,10 @@ import torch
 from omegaconf import OmegaConf
 
 from torchgeo_bench.coordbench import (
-    ClassFrequencyPrior,
     CoordBenchmark,
-    GridPrior,
-    KDEPrior,
-    NearestNeighborPrior,
     NeRFLocationEncoder,
     SinCosLocationEncoder,
     SphericalHarmonicLocationEncoder,
-    UniformPrior,
     XYZLocationEncoder,
     knn_probe_score,
     linear_probe_score,
@@ -63,27 +58,6 @@ def test_coordinate_encoders_shape_and_batching(
     assert feats.shape == (len(lon), width)
     assert feats.dtype == np.float32
     assert np.isfinite(feats).all()
-
-
-@pytest.mark.parametrize(
-    "prior",
-    [
-        UniformPrior(),
-        ClassFrequencyPrior(),
-        GridPrior(),
-        NearestNeighborPrior(),
-        NearestNeighborPrior(weights="distance"),
-        KDEPrior(),
-    ],
-)
-def test_spatial_priors_return_probabilities(prior) -> None:
-    lon = np.array([-100.0, -99.0, 10.0, 11.0])
-    lat = np.array([40.0, 41.0, 10.0, 11.0])
-    labels = np.array(["a", "a", "b", "b"])
-    probabilities = prior.fit(lon, lat, labels).predict_proba(lon, lat)
-    assert probabilities.shape == (4, 2)
-    assert np.isfinite(probabilities).all()
-    assert np.allclose(probabilities.sum(axis=1), 1.0)
 
 
 def test_documented_fourier_encoder_example(points: tuple[np.ndarray, np.ndarray]) -> None:

@@ -133,24 +133,6 @@ The coordinate-only pretrained encoders remain available through the
 ``coordbench`` extra. Retrieval-augmented models that require an external
 database are intentionally outside this apples-to-apples encoder track.
 
-Task-conditioned classification baselines
-------------------------------------------
-
-The task-conditioned prior baselines are exposed separately from
-``LocationEncoder`` because they need training coordinates and labels and
-return class probabilities rather than reusable features:
-
-.. code-block:: python
-
-   from torchgeo_bench.coordbench import GridPrior
-
-   prior = GridPrior(cell_size=10.0, smoothing=1.0).fit(lon, lat, labels)
-   probabilities = prior.predict_proba(test_lon, test_lat)
-
-Available priors are ``UniformPrior``, ``ClassFrequencyPrior``, ``GridPrior``,
-``NearestNeighborPrior``, and ``KDEPrior``. They are classification-only and
-use Euclidean longitude/latitude degrees as simple baselines.
-
 Add a location encoder
 ----------------------
 
