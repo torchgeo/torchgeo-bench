@@ -30,6 +30,12 @@ from torchgeo_bench.datasets import get_bench_dataset_class
 logger = logging.getLogger(__name__)
 
 
+def _format_stat(value: float) -> str:
+    """Format a statistic without discarding meaningful fractional values."""
+    result = f"{value:.4f}".rstrip("0").rstrip(".")
+    return "0" if result == "-0" else result
+
+
 def compute_statistics(
     dataset_name: str,
     *,
@@ -93,7 +99,7 @@ def format_bandspec_block(dataset_name: str, stats: list[dict[str, float]]) -> s
         lines.append(
             f'        BandSpec("{spec.sensor}", "{spec.name}", "{spec.source_name}", '
             f"mean={values['mean']:.4f}, std={values['std']:.4f}, "
-            f"min={values['min']:.0f}, max={values['max']:.0f}{wavelength}),"
+            f"min={_format_stat(values['min'])}, max={_format_stat(values['max'])}{wavelength}),"
         )
     lines += ["    ]", "    # fmt: on"]
     return "\n".join(lines)
