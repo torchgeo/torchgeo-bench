@@ -57,6 +57,10 @@ class TestMetadata:
 
         assert detect_input_unit(RESISC45().bands) is InputUnit.UINT8
 
+    def test_variable_gsd_does_not_use_fixed_aerial_sensor(self):
+        """Resolution-aware models must not silently assume one aerial GSD."""
+        assert {band.sensor for band in RESISC45.bands} == {"google_earth"}
+
     def test_data_root_is_fixed(self):
         # Compare Paths, not strings: str() is backslash-separated on Windows.
         assert RESISC45.data_root() == Path("data/resisc45")
