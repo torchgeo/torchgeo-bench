@@ -13,6 +13,17 @@ Public API
 .. autofunction:: run_coordbench
 """
 
+from torchgeo_bench.coordbench.baselines import (
+    ClassFrequencyPrior,
+    GridPrior,
+    KDEPrior,
+    NearestNeighborPrior,
+    NeRFLocationEncoder,
+    SpatialPrior,
+    SphericalHarmonicLocationEncoder,
+    UniformPrior,
+    XYZLocationEncoder,
+)
 from torchgeo_bench.coordbench.datasets import (
     CoordBenchmark,
     list_benchmarks,
@@ -45,6 +56,15 @@ __all__ = [
     "SINRLocationEncoder",
     "GeoCLIPLocationEncoder",
     "SatCLIPLocationEncoder",
+    "XYZLocationEncoder",
+    "NeRFLocationEncoder",
+    "SphericalHarmonicLocationEncoder",
+    "SpatialPrior",
+    "UniformPrior",
+    "ClassFrequencyPrior",
+    "GridPrior",
+    "NearestNeighborPrior",
+    "KDEPrior",
     "list_benchmarks",
     "list_families",
     "load_benchmarks",

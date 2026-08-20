@@ -19,7 +19,7 @@ mode: image    # image (default GeoBench pipeline) | coord (CoordBench location-
 
 # CoordBench location-encoder track (used only when mode=coord).
 # Point (lon, lat) -> label benchmarks from taylor-geospatial/coordbench, probed
-# with a frozen coordinate encoder (model=sincos|climplicit|sinr|geoclip|satclip).
+# with a frozen coordinate encoder (model=sincos|mind|climplicit|sinr|geoclip|satclip|xyz|nerf|spherical-harmonics).
 coord:
   output: results/coordbench_results.csv
   names: all               # all | comma-separated families (pdfm,satclip,...) or benchmark names

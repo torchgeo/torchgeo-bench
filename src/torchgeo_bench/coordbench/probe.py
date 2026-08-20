@@ -68,7 +68,8 @@ def _fold_indices(
     if fold_assign is not None:
         groups = [np.where(fold_assign == f)[0] for f in np.unique(fold_assign)]
         return [g for g in groups if g.size > 0]
-    perm = np.random.default_rng(seed).permutation(n)
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    perm = torch.randperm(n, generator=generator).numpy()
     return [perm[i::folds] for i in range(folds)]
 
 
@@ -189,8 +190,8 @@ def linear_probe_score(
     if test_mask is not None:
         is_test = torch.as_tensor(np.asarray(test_mask)[valid], device=dev, dtype=torch.bool)
         train_pool, test_idx = all_idx[~is_test], all_idx[is_test]
-        tp = train_pool.cpu().numpy()
-        inner = [torch.as_tensor(tp[i::folds], device=dev) for i in range(folds)]
+        inner_indices = _fold_indices(len(train_pool), folds, seed, None)
+        inner = [train_pool[torch.as_tensor(idx, device=dev)] for idx in inner_indices]
         best_alpha, _ = _cv_alpha_scores(
             feats, targets, class_idx, inner, alphas, task_type, dev, standardize
         )

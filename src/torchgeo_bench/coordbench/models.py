@@ -9,7 +9,9 @@ The trivial :class:`SinCosLocationEncoder` and the pretrained
 :class:`MINDLocationEncoder` ship in the base install. The other pretrained
 reference encoders (SatCLIP / GeoCLIP / Climplicit / SINR) are thin wrappers
 over the ``rshf`` package and require the ``coordbench`` extra
-(``pip install -e ".[coordbench]"``).
+(``pip install -e ".[coordbench]"``). The dependency-free coordinate position
+encoders live in :mod:`torchgeo_bench.coordbench.baselines`; external released
+weights are dataset-specific and are not loaded by these generic presets.
 """
 
 import logging
