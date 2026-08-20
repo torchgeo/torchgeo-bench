@@ -63,6 +63,10 @@ Status = Literal["extracted", "no_geo", "not_downloaded"]
 NO_GEO: dict[str, str] = {
     "so2sat": "tortilla metadata has no lon/lat columns",
     "m-so2sat": "every sample has transform=None and crs=None",
+    "resisc45": (
+        "scene-classification JPEGs with no georeferencing: no sampled image "
+        "carries any EXIF block, and the upstream release ships no coordinate table"
+    ),
 }
 
 # Datasets that carry no geometry of their own because they are a re-split of

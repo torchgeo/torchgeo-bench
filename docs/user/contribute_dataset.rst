@@ -17,11 +17,17 @@ Clone the repository and install the development dependencies:
    $ uv sync --extra dev
 
 This is the same setup used in :doc:`eval_own_model`.  Download the dataset
-files so you can test loading locally:
+files so you can test loading locally.  ``download`` takes a *family*, not an
+individual dataset name; GeoBench families accept ``--datasets`` to narrow the
+fetch:
 
 .. code-block:: console
 
-   $ torchgeo-bench download <dataset_name>
+   $ torchgeo-bench download geobench_v2 --datasets burn_scars
+   $ torchgeo-bench download resisc45
+
+If you are adding a dataset that no existing family covers, you will wire up
+its own download target below.
 
 Implement BenchDataset
 ----------------------
@@ -64,9 +70,16 @@ Required class-level attributes:
 * ``task`` — ``"classification"`` or ``"segmentation"``
 * ``num_classes`` — integer label count
 * ``bands`` — list of :class:`~torchgeo_bench.datasets.BandSpec` objects
-  supplying per-channel sensor / wavelength / normalisation stats
+  supplying per-channel sensor / wavelength / normalisation stats.  See
+  `Compute the band statistics`_ — these must be measured, not copied.
 * ``rgb_bands`` — short names of the bands used in RGB-only mode
 * ``split_sizes`` — dict with ``train``, ``val``, and ``test`` keys
+* ``multilabel`` — ``True`` for multi-hot labels (BigEarthNet, TreeSatAI).
+  Selects micro-mAP over accuracy as the reported metric, so getting it wrong
+  silently reports the wrong number.
+* ``supports_partitions`` — ``True`` only for V1 GeoBench datasets, which ship
+  partition JSON files.  When ``False``, ``get_datasets`` warns and ignores a
+  non-default ``dataset.partition``.
 
 The ``get_dataset`` method takes ``split`` (``"train"``, ``"val"``, or
 ``"test"``) plus the keyword-only arguments ``partition``, ``bands`` (the
@@ -89,6 +102,58 @@ If you inherit from ``_V1Dataset`` or ``_V2Dataset``, both ``data_root`` and
    :class:`~torchgeo_bench.datasets.geobench_v2._V2Dataset`.  When adding a
    genuinely new dataset, prefer the V2 torchgeo pattern so the loader can
    participate in torchgeo's transform pipeline.
+
+Band selection when the loader has no ``bands`` argument
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The runner passes ``get_dataset`` the band subset a model asked for, and then
+checks that the loaded tensor's channel count matches the ``BandSpec`` list it
+built.  How you honour that subset depends on the upstream loader:
+
+* **The loader accepts bands.** Forward them and you are done —
+  :class:`~torchgeo_bench.datasets.EuroSAT` passes ``source_name`` codes
+  straight to :class:`torchgeo.datasets.EuroSAT`.
+* **The loader does not.** Most torchgeo classification datasets are
+  fixed-channel ``ImageFolder`` wrappers with no band argument at all, so the
+  subset has to be applied in *your* wrapper, as a transform that indexes the
+  channel axis.  :class:`~torchgeo_bench.datasets.RESISC45` is the worked
+  example: see ``_make_band_select`` and ``_compose`` in
+  :file:`src/torchgeo_bench/datasets/resisc45.py`.
+
+Two details matter in the second case.  Compose your selection **before** the
+``transform`` the caller handed you — that argument is the resize built by
+:func:`~torchgeo_bench.datasets.get_datasets`, and it should only see channels
+that survive selection.  And return ``None`` rather than an identity transform
+when the selection is a no-op, so the common ``bands=rgb`` / ``bands=all``
+paths add no per-sample work.
+
+Compute the band statistics
+---------------------------
+
+Each :class:`~torchgeo_bench.datasets.BandSpec` carries ``mean``, ``std``,
+``min``, and ``max``.  These are not decoration: they back ``bandspec_zscore``,
+the benchmark's default normalisation strategy, and in raw units they are what
+``detect_input_unit`` reads to decide whether a dataset is Sentinel-2 DN,
+uint8, or reflectance under ``model_native``.  Wrong statistics mis-normalize
+every model evaluated on your dataset, and nothing will fail loudly.
+
+So measure them.  Two rules:
+
+* **Train split only.**  Statistics that include val or test leak evaluation
+  data into the normalisation every model sees.
+* **Raw sensor units.**  Do not pre-scale to ``[0, 1]``; unit detection depends
+  on the raw magnitudes.
+
+Once your class is registered with placeholder statistics and loads, run:
+
+.. code-block:: console
+
+   $ python scripts/compute_band_statistics.py --dataset my_dataset
+
+It accumulates in float64 over the train split and prints a paste-ready
+``bands = [...]`` block.  Record in a comment that the numbers came from this
+script, so the next person knows they are measured rather than copied from a
+paper.
 
 Register and configure
 ----------------------
@@ -131,12 +196,38 @@ Individual dataset classes load lazily through module ``__getattr__`` so that
 an eager ``from .my_dataset import MyDataset`` import; register the name in
 ``_LAZY_CLASSES`` instead.
 
-**3. For a GeoBench V2 dataset**, also add the name → upstream class mapping to
-``_V2_REGISTRY`` in :file:`src/torchgeo_bench/datasets/geobench_v2.py` and to
-``DEFAULT_V2_DATASETS`` in :file:`src/torchgeo_bench/download.py`.
+Keep both lists alphabetically sorted; they are read by humans far more often
+than by the loader.
+
+**3. Wire up the download.** Which files you touch depends on the family:
+
+* **GeoBench V2** — add the name → upstream class mapping to ``_V2_REGISTRY``
+  in :file:`src/torchgeo_bench/datasets/geobench_v2.py`.
+  ``DEFAULT_V2_DATASETS`` is derived from that registry automatically.
+* **A torchgeo wrapper or anything else** — add a ``download_<name>`` function
+  to :file:`src/torchgeo_bench/download.py`, then add your target to the
+  ``choices=`` list of the ``download`` subparser and dispatch to it in
+  ``_cmd_download``, both in :file:`src/torchgeo_bench/cli.py`.  Without the
+  ``choices`` entry the CLI rejects your target name.  ``download_resisc45``
+  is the reference implementation.
 
 **4. Add the expected split sizes** to ``EXPECTED_SIZES`` in
-:file:`tests/test_split_sizes.py`.
+:file:`tests/test_split_sizes.py`.  Those cases are marked
+``@pytest.mark.slow`` and the default ``addopts`` deselect them, so verify
+yours against the data on disk explicitly:
+
+.. code-block:: console
+
+   $ uv run pytest tests/test_split_sizes.py -m slow -k my_dataset
+
+**5. Document it.** Three files, none optional:
+
+* :file:`docs/user/datasets.rst` — a row in the relevant family table, plus
+  the filesystem-layout table and the ``download`` command block if you added
+  a new target.
+* :file:`docs/api/datasets.rst` — an ``.. autoclass::`` entry, or your class
+  gets no API page.
+* :file:`docs/user/changelog.rst` — an entry under ``Unreleased``.
 
 Run the smoke test
 ------------------
@@ -147,6 +238,17 @@ and produces sensible results:
 .. code-block:: console
 
    $ torchgeo-bench run -m timm/resnet50 -d my_dataset --skip-linear --bootstrap 10
+
+The config default is ``device: cuda:0``.  On a machine without a GPU, pass
+``--device cpu`` or the run fails inside feature extraction with a bare CUDA
+driver error rather than anything that names the real problem.  ``-m
+imagestats`` is a useful first pass either way: it is a 12-dimensional colour
+baseline that runs in seconds, so a score comfortably above chance tells you
+the plumbing is right before you spend time on a real backbone.
+
+Write down the chance level for your dataset and compare against it.  A
+45-class dataset where ``imagestats`` scores 0.34 against a 0.022 chance level
+is loading correctly; one that scores 0.02 is not.
 
 Add the geographic metadata
 ---------------------------
@@ -174,3 +276,13 @@ in ``extract_geography``.
 
 Once results look sensible, follow the PR workflow described in
 :doc:`contribute_model` to open a pull request.
+
+A worked example
+----------------
+
+`#234 <https://github.com/torchgeo/torchgeo-bench/pull/234>`__ adds NWPU-RESISC45
+and touches every step on this page: a torchgeo wrapper whose loader takes no
+``bands`` argument, measured band statistics, its own download target, a
+``no_geo`` record with the check that justified it, and unit tests that run
+without the data on disk.  Read
+:file:`src/torchgeo_bench/datasets/resisc45.py` alongside this guide.
