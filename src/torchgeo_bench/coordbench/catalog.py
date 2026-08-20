@@ -80,3 +80,17 @@ FAMILY_BENCHMARKS: dict[str, tuple[str, ...]] = {
     "soilgrids": ("soilgrids-soc", "soilgrids-phh2o"),
     "deepmind": tuple(f"dm-{stem}" for stem in DEEPMIND_EVAL_CONFIGS),
 }
+
+
+def validate_datasets(value: list[str]) -> list[str]:
+    """Validate names and families without loading coordinate tables."""
+    if any(not name.strip() for name in value) or len(set(value)) != len(value):
+        raise ValueError("datasets must contain distinct non-empty names")
+    if "all" in value and len(value) != 1:
+        raise ValueError("'all' cannot be combined with other datasets")
+    known = {"all", *FAMILY_BENCHMARKS}
+    known.update(name for names in FAMILY_BENCHMARKS.values() for name in names)
+    unknown = sorted(set(value) - known)
+    if unknown:
+        raise ValueError(f"Unknown coordinate datasets: {unknown}")
+    return value

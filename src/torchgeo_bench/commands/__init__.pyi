@@ -3,6 +3,7 @@
 from . import _profile_runtime as _profile_runtime
 from . import _run_runtime as _run_runtime
 from ._coord import coord as coord
+from ._coord_prior import coord_prior as coord_prior
 from ._download import download as download
 from ._download_runtime import download_module as download_module
 from ._flops import flops as flops

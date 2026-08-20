@@ -46,6 +46,33 @@ Encoders
 .. autoclass:: NeRFLocationEncoder
 .. autoclass:: SphericalHarmonicLocationEncoder
 
+Spatial priors
+--------------
+
+These CPU estimators fit task labels and belong to the separate ``coord-prior`` track, not the frozen-encoder catalog. Coordinates and distance bandwidths are in longitude/latitude degrees.
+
+.. code-block:: python
+
+   from torchgeo_bench.coordbench import load_coord_prior_config, run_coordbench_priors
+
+   config = load_coord_prior_config("docs/examples/coord-prior.yaml")
+   run_coordbench_priors(config)
+
+.. autoclass:: CoordPriorConfig
+   :members: model_dump_yaml
+   :no-show-inheritance:
+
+.. autofunction:: load_coord_prior_config
+
+.. autoclass:: SpatialPrior
+.. autoclass:: UniformPrior
+.. autoclass:: ClassFrequencyPrior
+.. autoclass:: GridPrior
+.. autoclass:: NearestNeighborPrior
+.. autoclass:: KDEPrior
+
+``EmpiricalPrior`` and ``FrequencyBaseline`` alias ``ClassFrequencyPrior``; ``DistancePrior`` and ``NearestNeighborBaseline`` alias ``NearestNeighborPrior``. ``UniformBaseline``, ``GridBaseline``, and ``KDEBaseline`` are also available.
+
 Benchmarks
 ----------
 
@@ -62,3 +89,5 @@ Probes and runner
 .. autofunction:: spatial_fold_ids
 .. autoclass:: CoordResult
 .. autofunction:: run_coordbench
+.. autoclass:: CoordPriorResult
+.. autofunction:: run_coordbench_priors

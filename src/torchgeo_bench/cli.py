@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 
 from . import __version__, commands
 from .commands.coord_arguments import add_coord_arguments
+from .commands.coord_prior_arguments import add_coord_prior_arguments
 from .commands.flops_arguments import add_flops_arguments
 from .commands.profile_arguments import add_profile_arguments
 from .commands.run_arguments import add_run_arguments
@@ -62,6 +63,8 @@ def _setup_parser() -> argparse.ArgumentParser:
     # Coordinate benchmarks
     coord = subcommands.add_parser("coord", help="Run coordinate encoder benchmarks")
     add_coord_arguments(coord)
+    coord_prior = subcommands.add_parser("coord-prior", help="Run supervised spatial priors (CPU)")
+    add_coord_prior_arguments(coord_prior)
     return parser
 
 
@@ -108,6 +111,8 @@ def main(argv: list[str] | None = None) -> None:
         commands.flops(args)
     elif args.command == "coord":
         commands.coord(args)
+    elif args.command == "coord-prior":
+        commands.coord_prior(args)
     else:
         raise SystemExit(f"{args.command} is not implemented by the image CLI yet")
 

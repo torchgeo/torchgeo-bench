@@ -195,6 +195,32 @@ The coordinate-only pretrained encoders remain available through the
 ``coordbench`` extra. Retrieval-augmented models that require an external
 database are intentionally outside this apples-to-apples encoder track.
 
+Spatial-prior baselines
+-----------------------
+
+The coordinate encoders are evaluated as frozen representations. The separate ``coord-prior`` command evaluates supervised spatial priors: each estimator fits only the training coordinates and labels, predicts held-out coordinates, and writes to a separate CSV.
+
+.. code-block:: console
+
+   $ torchgeo-bench coord-prior --dataset satclip \
+       --methods uniform frequency grid nearest kde --split both \
+       --output results/coordbench_priors.csv
+
+The five methods are ``uniform`` (equal probability over training classes), ``frequency`` (training class frequencies), ``grid`` (local cell frequencies, falling back to global frequencies), ``nearest`` (nearest training labels), and ``kde`` (class-conditional Gaussian densities). They run on CPU only; this command has no model preset or device flag. Distances and bandwidths use Euclidean longitude/latitude degrees, not great-circle distances. Regression tasks are explicitly skipped.
+
+Dataset names, families, and ``all`` work as in ``coord``. Defaults are all five methods, random cross-validation, five folds, 10-degree spatial cells, and seed 0. ``--split spatial`` and ``--split both`` select spatial folds or both protocols; an official test mask always takes precedence and is evaluated once. Invalid labels or coordinates are excluded, and splits with no valid training or test samples are skipped with a warning rather than writing NaN results.
+
+``--grid-cell-size`` (default 10 degrees), ``--nearest-k`` (5), ``--nearest-weights`` (``uniform`` or ``distance``), ``--kde-bandwidth`` (10 degrees), and ``--smoothing`` (0, a non-negative pseudocount for grid/KDE priors) configure estimators. ``--cell-deg`` controls spatial holdouts independently of the prior's grid.
+
+The runnable YAML example uses ``datasets``, ``evaluation``, ``runtime.seed``, and ``output`` sections; flags override YAML, including explicit ``--no-resume``:
+
+.. code-block:: console
+
+   $ torchgeo-bench coord-prior --config docs/examples/coord-prior.yaml --dry-run
+   $ python -m torchgeo_bench coord-prior --config docs/examples/coord-prior.yaml
+
+Results default to ``results/coordbench_priors.csv`` with ``method=prior`` and the estimator name in ``model_name``. ``--resume`` uses ``(dataset, task, method, model_name, split)`` rather than a configuration hash, so choose a new output file when changing prior parameters or seeds. Intervals are mean plus/minus fold standard deviation, just as for coordinate encoders. Analyze these supervised results separately from frozen-encoder results.
+
 Add a location encoder
 ----------------------
 

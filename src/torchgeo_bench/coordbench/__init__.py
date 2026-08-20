@@ -1,8 +1,9 @@
-"""CoordBench: coordinate-only location-encoder evaluation for torchgeo-bench.
+"""CoordBench: coordinate-only evaluation for torchgeo-bench.
 
 Loads the unified ``taylor-geospatial/coordbench`` benchmark suite (point
 ``(lon, lat)`` -> label) and probes a frozen coordinate encoder with KNN and a
-ridge linear head under random or spatial-block cross-validation.
+ridge linear head under random or spatial-block cross-validation. Label-informed
+spatial priors are available through a separate runner.
 
 Public API
 ----------
@@ -11,6 +12,7 @@ Public API
 .. autoclass:: CoordBenchmark
 .. autofunction:: load_benchmarks
 .. autofunction:: run_coordbench
+.. autofunction:: run_coordbench_priors
 """
 
 import lazy_loader as lazy

@@ -17,7 +17,7 @@ from torchgeo_bench.config.schema import (
     default_methods,
     load_yaml,
 )
-from torchgeo_bench.coordbench.catalog import FAMILY_BENCHMARKS
+from torchgeo_bench.coordbench.catalog import validate_datasets
 
 
 class CoordRuntimeConfig(StrictModel):
@@ -59,16 +59,7 @@ class CoordConfig(StrictModel):
     @classmethod
     def validate_datasets(cls, value: list[str]) -> list[str]:
         """Require distinct, non-blank names and an exclusive all selection."""
-        if any(not name.strip() for name in value) or len(set(value)) != len(value):
-            raise ValueError("datasets must contain distinct non-empty names")
-        if "all" in value and len(value) != 1:
-            raise ValueError("'all' cannot be combined with other datasets")
-        known = {"all", *FAMILY_BENCHMARKS}
-        known.update(name for names in FAMILY_BENCHMARKS.values() for name in names)
-        unknown = sorted(set(value) - known)
-        if unknown:
-            raise ValueError(f"Unknown coordinate datasets: {unknown}")
-        return value
+        return validate_datasets(value)
 
     def model_dump_yaml(self) -> dict[str, Any]:
         """Return a reusable YAML mapping with explicit effective defaults."""

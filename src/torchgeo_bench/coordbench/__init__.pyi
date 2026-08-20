@@ -1,3 +1,16 @@
+from .baselines import ClassFrequencyPrior as ClassFrequencyPrior
+from .baselines import DistancePrior as DistancePrior
+from .baselines import EmpiricalPrior as EmpiricalPrior
+from .baselines import FrequencyBaseline as FrequencyBaseline
+from .baselines import GridBaseline as GridBaseline
+from .baselines import GridPrior as GridPrior
+from .baselines import KDEBaseline as KDEBaseline
+from .baselines import KDEPrior as KDEPrior
+from .baselines import NearestNeighborBaseline as NearestNeighborBaseline
+from .baselines import NearestNeighborPrior as NearestNeighborPrior
+from .baselines import SpatialPrior as SpatialPrior
+from .baselines import UniformBaseline as UniformBaseline
+from .baselines import UniformPrior as UniformPrior
 from .config import CoordConfig as CoordConfig
 from .datasets import (
     CoordBenchmark as CoordBenchmark,
@@ -41,6 +54,10 @@ from .models import (
 from .models import (
     XYZLocationEncoder as XYZLocationEncoder,
 )
+from .prior_config import CoordPriorConfig as CoordPriorConfig
+from .prior_config import load_coord_prior_config as load_coord_prior_config
+from .prior_run import CoordPriorResult as CoordPriorResult
+from .prior_run import run_coordbench_priors as run_coordbench_priors
 from .probe import (
     knn_probe_score as knn_probe_score,
 )

@@ -1,0 +1,17 @@
+schema_version: 1
+datasets: [satclip-country]
+evaluation:
+  methods: [uniform, frequency, grid, nearest, kde]
+  split: both
+  folds: 5
+  cell_deg: 10.0
+  grid_cell_size: 10.0
+  smoothing: 0.0
+  nearest_k: 5
+  nearest_weights: uniform
+  kde_bandwidth: 10.0
+runtime:
+  seed: 0
+output:
+  file: results/coordbench_priors.csv
+  resume: false
