@@ -1,0 +1,6 @@
+# NeRF position encoding; dependency-free.
+name: nerf
+target: torchgeo_bench.coordbench.baselines.NeRFLocationEncoder
+track: coord
+kwargs:
+  num_frequencies: 16

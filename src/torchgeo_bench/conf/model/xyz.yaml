@@ -1,0 +1,4 @@
+# XYZ position encoding; dependency-free.
+name: xyz
+target: torchgeo_bench.coordbench.baselines.XYZLocationEncoder
+track: coord

@@ -1,3 +1,30 @@
+from .baselines import (
+    ClassFrequencyPrior as ClassFrequencyPrior,
+)
+from .baselines import (
+    GridPrior as GridPrior,
+)
+from .baselines import (
+    KDEPrior as KDEPrior,
+)
+from .baselines import (
+    NearestNeighborPrior as NearestNeighborPrior,
+)
+from .baselines import (
+    NeRFLocationEncoder as NeRFLocationEncoder,
+)
+from .baselines import (
+    SpatialPrior as SpatialPrior,
+)
+from .baselines import (
+    SphericalHarmonicLocationEncoder as SphericalHarmonicLocationEncoder,
+)
+from .baselines import (
+    UniformPrior as UniformPrior,
+)
+from .baselines import (
+    XYZLocationEncoder as XYZLocationEncoder,
+)
 from .config import CoordConfig as CoordConfig
 from .datasets import (
     CoordBenchmark as CoordBenchmark,

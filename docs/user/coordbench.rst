@@ -36,17 +36,43 @@ are equivalent entry points. The former ``run mode=coord`` and dotted
 Included encoders
 -----------------
 
-================  ==============  =============================================
-Model preset      Installation    Description
-================  ==============  =============================================
-``sincos``        base            Four-dimensional periodic coordinate baseline.
-``mind``          base            64-dimensional MIND Matryoshka prefix.
-``mind-small``    base            128-dimensional distilled MIND student.
-``climplicit``    ``coordbench``  Climplicit climate-specialist encoder.
-``geoclip``       ``coordbench``  GeoCLIP Equal-Earth/RFF encoder.
-``satclip``       ``coordbench``  SatCLIP spherical-harmonic encoder.
-``sinr``          ``coordbench``  SINR species-distribution encoder.
-================  ==============  =============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 30 14 60
+
+   * - Model preset
+     - Installation
+     - Description
+   * - ``sincos``
+     - base
+     - Four-dimensional periodic coordinate baseline.
+   * - ``mind``
+     - base
+     - 64-dimensional MIND Matryoshka prefix.
+   * - ``mind-small``
+     - base
+     - 128-dimensional distilled MIND student.
+   * - ``climplicit``
+     - ``coordbench``
+     - Climplicit climate-specialist encoder.
+   * - ``geoclip``
+     - ``coordbench``
+     - GeoCLIP Equal-Earth/RFF encoder.
+   * - ``satclip``
+     - ``coordbench``
+     - SatCLIP spherical-harmonic encoder.
+   * - ``sinr``
+     - ``coordbench``
+     - SINR species-distribution encoder.
+   * - ``xyz``
+     - base
+     - Unit-sphere XYZ position encoding.
+   * - ``nerf``
+     - base
+     - NeRF Fourier position encoding.
+   * - ``spherical-harmonics``
+     - base
+     - Compact real spherical-harmonic encoding.
 
 Install the optional reference encoders from PyPI with:
 
@@ -135,6 +161,31 @@ remote tables:
 The coordinate schema deliberately has no image ``input``, ``segmentation``,
 or ``classification`` sections. See :doc:`/api/coordbench` for
 ``CoordConfig`` and the Python loader.
+
+External released weights are often dataset-specific classifiers whose
+checkpoints also encode the original task head and, for some families, anchor
+locations. They are not silently reinterpreted as universal CoordBench models.
+The coordinate-only pretrained encoders remain available through the
+``coordbench`` extra. Retrieval-augmented models that require an external
+database are intentionally outside this apples-to-apples encoder track.
+
+Task-conditioned classification baselines
+------------------------------------------
+
+The task-conditioned prior baselines are exposed separately from
+``LocationEncoder`` because they need training coordinates and labels and
+return class probabilities rather than reusable features:
+
+.. code-block:: python
+
+   from torchgeo_bench.coordbench import GridPrior
+
+   prior = GridPrior(cell_size=10.0, smoothing=1.0).fit(lon, lat, labels)
+   probabilities = prior.predict_proba(test_lon, test_lat)
+
+Available priors are ``UniformPrior``, ``ClassFrequencyPrior``, ``GridPrior``,
+``NearestNeighborPrior``, and ``KDEPrior``. They are classification-only and
+use Euclidean longitude/latitude degrees as simple baselines.
 
 Add a location encoder
 ----------------------

@@ -7,6 +7,8 @@ Add models by implementing :meth:`LocationEncoder._encode` and selecting their c
 SinCos and MIND ship with the base install.
 
 SatCLIP, GeoCLIP, Climplicit, and SINR need ``pip install -e '.[coordbench]'``.
+
+Dependency-free position encoders live in :mod:`torchgeo_bench.coordbench.baselines`.
 """
 
 import logging

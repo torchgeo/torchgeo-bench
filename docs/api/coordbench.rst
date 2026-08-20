@@ -42,6 +42,19 @@ Encoders
 .. autoclass:: GeoCLIPLocationEncoder
 .. autoclass:: SatCLIPLocationEncoder
 .. autoclass:: SINRLocationEncoder
+.. autoclass:: XYZLocationEncoder
+.. autoclass:: NeRFLocationEncoder
+.. autoclass:: SphericalHarmonicLocationEncoder
+
+Classification priors
+---------------------
+
+.. autoclass:: SpatialPrior
+.. autoclass:: UniformPrior
+.. autoclass:: ClassFrequencyPrior
+.. autoclass:: GridPrior
+.. autoclass:: NearestNeighborPrior
+.. autoclass:: KDEPrior
 
 Benchmarks
 ----------
