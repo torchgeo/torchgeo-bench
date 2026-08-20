@@ -19,20 +19,14 @@ look incompatible.  See GitHub issue
 follow-up on stronger guards.
 """
 
-import hashlib
 import logging
 import warnings
-from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchgeo.models as tgm
-from torchgeo.models import DEO_Weights
-from torchvision import models as torchvision_models
-from torchvision.ops.misc import Permute
 from torchvision.transforms import Normalize as NormalizeV1
 from torchvision.transforms.v2 import Normalize as NormalizeV2
 
@@ -126,103 +120,7 @@ def _auto_resize(images: torch.Tensor, target_size: int) -> torch.Tensor:
     return images
 
 
-_DEO_CHECKPOINT_URL = (
-    "https://huggingface.co/SolaireTheSun/DEO/resolve/"
-    "43bcb822955b8ceb3ca44ee2c4c0e059002bc0f8/DEO_swin_b.pth"
-)
-_DEO_CHECKPOINT_SHA256 = "2be7271623e3ea74d41f574f3fa8281cb8143220a336595459f086c1c9f93905"
-_DEO_WINDOW_SIZE = [12, 12]
 _DEO_TARGET_SIZE = 224
-
-
-def _verify_deo_checkpoint_digest(path: Path) -> None:
-    """Validate the downloaded DEO checkpoint against its published SHA-256."""
-    digest = hashlib.sha256()
-    with path.open("rb") as checkpoint:
-        for chunk in iter(lambda: checkpoint.read(1024 * 1024), b""):
-            digest.update(chunk)
-    if digest.hexdigest() != _DEO_CHECKPOINT_SHA256:
-        raise RuntimeError(
-            f"DEO checkpoint digest mismatch for {path}: expected {_DEO_CHECKPOINT_SHA256}, "
-            f"got {digest.hexdigest()}."
-        )
-
-
-class _DEOSwinBackbone(nn.Module):
-    """Released DEO Swin-B feature extractor with its native window geometry."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.feat_extr = torchvision_models.SwinTransformer(
-            patch_size=[4, 4],
-            embed_dim=128,
-            depths=[2, 2, 18, 2],
-            num_heads=[4, 8, 16, 32],
-            window_size=_DEO_WINDOW_SIZE,
-            stochastic_depth_prob=0.5,
-        )
-        del self.feat_extr.features[0]
-        embed_dim = self.feat_extr.features[0][0].norm1.normalized_shape[0]
-        self.feat_extr.conv_ms = nn.Sequential(
-            nn.Conv2d(10, embed_dim, kernel_size=(4, 4), stride=(4, 4)),
-            Permute([0, 2, 3, 1]),
-            nn.LayerNorm(embed_dim, eps=1e-5),
-        )
-        self.feat_extr.conv_rgb = nn.Sequential(
-            nn.Conv2d(3, embed_dim, kernel_size=(4, 4), stride=(4, 4)),
-            Permute([0, 2, 3, 1]),
-            nn.LayerNorm(embed_dim, eps=1e-5),
-        )
-        del self.feat_extr.norm
-        del self.feat_extr.head
-
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
-        """Return the final NHWC Swin feature map."""
-        if images.shape[1] == 10:
-            features = self.feat_extr.conv_ms(images)
-        else:
-            features = self.feat_extr.conv_rgb(images)
-        for layer in self.feat_extr.features:
-            features = layer(features)
-        return features
-
-
-def _map_deo_checkpoint_keys(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-    """Map the public DEO feature-extractor checkpoint into this model namespace."""
-    return {
-        f"feat_extr.{key}": value
-        for key, value in state_dict.items()
-        if key.startswith(("features.", "conv_ms.", "conv_rgb."))
-    }
-
-
-def _load_deo_backbone() -> nn.Module:
-    """Load the public DEO feature extractor with all backbone keys validated."""
-    weights = DEO_Weights.DEO_SWIN
-    if weights.url != _DEO_CHECKPOINT_URL:
-        raise RuntimeError(
-            "TorchGeo's DEO_SWIN checkpoint URL differs from the validated DEO revision: "
-            f"{weights.url!r}."
-        )
-
-    backbone = _DEOSwinBackbone()
-    state_dict = weights.get_state_dict(progress=True, weights_only=True)
-    checkpoint_path = (
-        Path(torch.hub.get_dir()) / "checkpoints" / Path(urlparse(weights.url).path).name
-    )
-    if checkpoint_path.is_file():
-        _verify_deo_checkpoint_digest(checkpoint_path)
-
-    backbone_state = _map_deo_checkpoint_keys(state_dict)
-    missing_keys = sorted(set(backbone.state_dict()) - set(backbone_state))
-    unexpected_keys = sorted(set(backbone_state) - set(backbone.state_dict()))
-    if missing_keys or unexpected_keys:
-        raise RuntimeError(
-            "DEO checkpoint is incompatible with the released DEO Swin-B feature extractor: "
-            f"missing={missing_keys}, unexpected={unexpected_keys}."
-        )
-    backbone.load_state_dict(backbone_state, strict=True)
-    return backbone
 
 
 def _extract_normalize_transforms(weights) -> nn.Sequential | None:
@@ -940,7 +838,8 @@ class TorchGeoDEOBench(BenchModel):
 
         self.register_buffer("_deo_mean", torch.tensor(mean, dtype=torch.float32).view(1, -1, 1, 1))
         self.register_buffer("_deo_std", torch.tensor(std, dtype=torch.float32).view(1, -1, 1, 1))
-        self.backbone = _load_deo_backbone()
+        weights = _resolve_torchgeo_weights("DEO_Weights", "DEO_SWIN")
+        self.backbone = _resolve_torchgeo_factory("deo_base")(weights=weights)
         self.backbone.requires_grad_(False)
         self.eval()
 

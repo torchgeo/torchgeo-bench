@@ -17,22 +17,9 @@ def _band(sensor: str, name: str, maximum: float) -> BandSpec:
 
 
 class _FakeDEO(nn.Module):
-    def __init__(self, *, incompatible: bool = False) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.incompatible = incompatible
         self.last_input: torch.Tensor | None = None
-
-    def state_dict(self, *args, **kwargs):
-        del args, kwargs
-        if self.incompatible:
-            return {"feat_extr.features.0.weight": torch.tensor(1)}
-        return {}
-
-    def load_state_dict(self, state_dict, strict: bool = True):
-        del state_dict, strict
-        if self.incompatible:
-            return SimpleNamespace(missing_keys=["feat_extr.conv_rgb.0.weight"], unexpected_keys=[])
-        return SimpleNamespace(missing_keys=[], unexpected_keys=[])
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         self.last_input = images
@@ -40,21 +27,17 @@ class _FakeDEO(nn.Module):
         return values.view(1, 1, 1, 1024).expand(images.shape[0], 2, 3, -1)
 
 
-def _mock_loader(monkeypatch, *, incompatible: bool = False) -> _FakeDEO:
-    backbone = _FakeDEO(incompatible=incompatible)
+def _mock_loader(monkeypatch) -> _FakeDEO:
+    """Stub torchgeo's ``deo_base`` factory so tests never fetch the checkpoint."""
+    backbone = _FakeDEO()
+    sentinel = object()
 
-    class _Weights:
-        url = tg_models._DEO_CHECKPOINT_URL
+    def _deo_base(*, weights):
+        assert weights is sentinel
+        return backbone
 
-        @staticmethod
-        def get_state_dict(*, progress: bool, weights_only: bool):
-            assert progress is True
-            assert weights_only is True
-            return {"checkpoint": torch.tensor(1)}
-
-    monkeypatch.setattr(tg_models, "DEO_Weights", SimpleNamespace(DEO_SWIN=_Weights()))
-    monkeypatch.setattr(tg_models, "_DEOSwinBackbone", lambda: backbone)
-    monkeypatch.setattr(torch.hub, "get_dir", lambda: "/tmp/nonexistent-deo-cache")
+    monkeypatch.setattr(tg_models.tgm, "DEO_Weights", SimpleNamespace(DEO_SWIN=sentinel))
+    monkeypatch.setattr(tg_models.tgm, "deo_base", _deo_base)
     return backbone
 
 
@@ -133,12 +116,6 @@ def test_deo_pools_final_nhwc_map_and_keeps_backbone_frozen(monkeypatch) -> None
     assert backbone.last_input is not None and backbone.last_input.shape[-2:] == (224, 224)
     assert model.training is False and backbone.training is False
     assert all(not parameter.requires_grad for parameter in backbone.parameters())
-
-
-def test_deo_rejects_incompatible_checkpoint(monkeypatch) -> None:
-    _mock_loader(monkeypatch, incompatible=True)
-    with pytest.raises(RuntimeError, match="incompatible"):
-        tg_models._load_deo_backbone()
 
 
 @pytest.mark.parametrize("config_name", ["torchgeo/deo_rgb", "torchgeo/deo_s2"])
