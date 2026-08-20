@@ -51,7 +51,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--device", default=None, help="Torch device, e.g. cuda:1 or cpu")
     run.add_argument(
-        "-o", "--output", default=None, help="Results CSV path (default: results/all_results.csv)"
+        "-o",
+        "--output",
+        default=None,
+        help="Results CSV path (default: results/models/<model name>.csv)",
     )
     run.add_argument(
         "--resume",
