@@ -202,8 +202,8 @@ than by the loader.
 **3. Wire up the download.** Which files you touch depends on the family:
 
 * **GeoBench V2** — add the name → upstream class mapping to ``_V2_REGISTRY``
-  in :file:`src/torchgeo_bench/datasets/geobench_v2.py`, and the name to
-  ``DEFAULT_V2_DATASETS`` in :file:`src/torchgeo_bench/download.py`.
+  in :file:`src/torchgeo_bench/datasets/geobench_v2.py`.
+  ``DEFAULT_V2_DATASETS`` is derived from that registry automatically.
 * **A torchgeo wrapper or anything else** — add a ``download_<name>`` function
   to :file:`src/torchgeo_bench/download.py`, then add your target to the
   ``choices=`` list of the ``download`` subparser and dispatch to it in
