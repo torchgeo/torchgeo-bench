@@ -684,13 +684,19 @@ def main(cfg: DictConfig) -> None:
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
 
-    # Coordinate location-encoder track: a distinct data/probe path (point
-    # (lon, lat) -> label, ridge/KNN, k-fold CV) that does not touch the image
-    # pipeline below. Dispatched by `mode=coord`.
-    if str(cfg.get("mode", "image")) == "coord":
+    # Coordinate tracks use a distinct data/probe path that does not touch the
+    # image pipeline below. `coord-prior` evaluates label-informed baselines;
+    # `coord` evaluates frozen location encoders.
+    mode = str(cfg.get("mode", "image"))
+    if mode == "coord":
         from torchgeo_bench.coordbench.run import run_coordbench
 
         run_coordbench(cfg)
+        return
+    if mode == "coord-prior":
+        from torchgeo_bench.coordbench.prior_run import run_coordbench_priors
+
+        run_coordbench_priors(cfg)
         return
 
     from torchgeo.datasets import DatasetNotFoundError

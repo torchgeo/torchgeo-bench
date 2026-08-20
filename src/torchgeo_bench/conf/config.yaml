@@ -15,7 +15,7 @@ profile_results_dir: results/profiles
 intrinsic_dim_results_dir: results/intrinsic_dim
 verbose: false
 resume: false  # if true, skip dataset+method combinations already in output CSV
-mode: image    # image (default GeoBench pipeline) | coord (CoordBench location-encoder track)
+mode: image    # image | coord (location encoders) | coord-prior (label-informed baselines)
 
 # CoordBench location-encoder track (used only when mode=coord).
 # Point (lon, lat) -> label benchmarks from taylor-geospatial/coordbench, probed
@@ -29,6 +29,22 @@ coord:
   cell_deg: 10.0           # spatial-block grid-cell size in degrees
   knn_k: 5
   knn_device: cpu          # faiss device for KNN; cpu avoids needing GPU faiss (encoder+linear still use `device`)
+
+# CoordBench label-informed spatial baselines (used only when mode=coord-prior).
+# These fit on the training coordinates and labels, then predict the held-out
+# coordinates. Their results are kept in a separate CSV from encoder results.
+coord_prior:
+  output: results/coordbench_priors.csv
+  names: all
+  methods: [uniform, frequency, grid, nearest, kde]
+  split: random
+  folds: 5
+  cell_deg: 10.0
+  grid_cell_size: 10.0
+  smoothing: 0.0
+  nearest_k: 5
+  nearest_weights: uniform
+  kde_bandwidth: 10.0
 
 # Dataset settings
 # Set names: all  OR a list of dataset identifiers

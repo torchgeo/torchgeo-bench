@@ -21,6 +21,16 @@ Encoders
 .. autoclass:: NeRFLocationEncoder
 .. autoclass:: SphericalHarmonicLocationEncoder
 
+Spatial priors
+--------------
+
+.. autoclass:: SpatialPrior
+.. autoclass:: UniformPrior
+.. autoclass:: ClassFrequencyPrior
+.. autoclass:: GridPrior
+.. autoclass:: NearestNeighborPrior
+.. autoclass:: KDEPrior
+
 Benchmarks
 ----------
 
@@ -37,3 +47,5 @@ Probes and runner
 .. autofunction:: spatial_fold_ids
 .. autoclass:: CoordResult
 .. autofunction:: run_coordbench
+.. autoclass:: CoordPriorResult
+.. autofunction:: run_coordbench_priors
