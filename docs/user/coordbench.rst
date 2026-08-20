@@ -126,6 +126,28 @@ The full block is:
      knn_k: 5
      knn_device: cpu
 
+Spatial-prior baselines
+-----------------------
+
+The coordinate encoders are evaluated as frozen representations. CoordBench
+also has a separate ``coord-prior`` mode for label-informed baselines. These
+methods fit on the training coordinates and labels, predict the held-out
+coordinates, and write to a separate file:
+
+.. code-block:: console
+
+   $ torchgeo-bench run \
+       mode=coord-prior \
+       coord_prior.names=satclip \
+       coord_prior.methods=[uniform,frequency,grid,nearest,kde] \
+       coord_prior.split=both \
+       coord_prior.output=results/coordbench_priors.csv
+
+Available methods are ``uniform``, ``frequency``, ``grid``, ``nearest``, and
+``kde``. They currently apply to classification tasks only; regression tasks
+are skipped. The prior output should be analyzed separately from frozen
+location-encoder results because these methods use task labels during fitting.
+
 External released weights are often dataset-specific classifiers whose
 checkpoints also encode the original task head and, for some families, anchor
 locations. They are not silently reinterpreted as universal CoordBench models.
