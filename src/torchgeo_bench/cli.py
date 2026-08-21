@@ -1,9 +1,10 @@
 """Command-line interface for ``torchgeo-bench``.
 
 Subcommands: ``run`` (benchmark), ``flops`` (compute-cost measurement), and
-``download`` (datasets).  This module imports only the standard library so
-``torchgeo-bench --help`` is instant; torch and friends load only once a
-command actually starts doing work.
+``download`` (datasets).  ``--skill`` prints agent-facing usage instructions.
+This module imports only the standard library so ``torchgeo-bench --help`` is
+instant; torch and friends load only once a command actually starts doing
+work.
 """
 
 import argparse
@@ -35,7 +36,17 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="torchgeo-bench",
         description="Benchmark geospatial foundation models on GeoBench datasets.",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--skill",
+        action="store_true",
+        help=(
+            "Print agent-facing instructions for using torchgeo-bench "
+            "(save with: torchgeo-bench --skill > SKILL.md)"
+        ),
+    )
+    # Not required: `--skill` is a complete invocation on its own.  A bare
+    # `torchgeo-bench` still errors out below, same as before.
+    sub = parser.add_subparsers(dest="command")
 
     run = sub.add_parser(
         "run",
@@ -245,6 +256,12 @@ def _cmd_download(args: argparse.Namespace) -> None:
             download_resisc45(output_dir)
 
 
+def _cmd_skill() -> None:
+    from torchgeo_bench.skill import read_skill
+
+    print(read_skill(), end="")
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``torchgeo-bench`` console script."""
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -261,6 +278,11 @@ def main(argv: list[str] | None = None) -> None:
         argv = rest
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.skill:
+        _cmd_skill()
+        return
+    if args.command is None:
+        parser.error("a command is required (run, flops, download) or use --skill")
     if hasattr(args, "overrides"):
         args.overrides = [*args.overrides, *overrides]
     args.func(args)

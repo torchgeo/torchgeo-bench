@@ -165,3 +165,37 @@ def test_model_names_are_posix_on_every_platform():
     names = list_model_configs()
     assert "torchgeo/scalemae_large_fmow" in names
     assert not any("\\" in n for n in names)
+
+
+def test_skill_prints_instructions(capsys) -> None:
+    cli_main(["--skill"])
+    out = capsys.readouterr().out
+    assert out.startswith("---\nname: torchgeo-bench\n")
+    assert "torchgeo-bench run" in out
+    assert "torchgeo-bench download" in out
+
+
+def test_skill_does_not_import_torch() -> None:
+    """`--skill` must stay instant; it may not drag in the heavy runtime."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from torchgeo_bench.cli import main; main(['--skill']); "
+            "sys.stderr.write(str('torch' in sys.modules))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "name: torchgeo-bench" in proc.stdout
+    assert proc.stderr == "False"
+
+
+def test_no_command_still_errors(capsys) -> None:
+    with pytest.raises(SystemExit):
+        cli_main([])
+    assert "a command is required" in capsys.readouterr().err

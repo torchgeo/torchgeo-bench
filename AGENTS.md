@@ -6,6 +6,10 @@ Guidelines for AI coding agents working in the torchgeo-bench repository.
 
 **torchgeo-bench** is a Python benchmarking framework for evaluating geospatial foundation models on GeoBench datasets (V1 and V2). Uses PyTorch and an OmegaConf-based config system (see `config.py` — replaces Hydra, same `model=…`/`key=value` override syntax), and provides KNN-5, Linear Probing, and Segmentation (mIoU) evaluation with bootstrapped confidence intervals.
 
+`torchgeo-bench --skill` prints a condensed, self-contained version of this
+guide (`src/torchgeo_bench/skill/SKILL.md`) for agents working *outside* this
+repository — keep it in sync when commands or conventions change.
+
 ### Key Features
 - **Resume Mode**: Skip already-computed experiments when interrupted/restarted
 - **Atomic CSV Writes**: Results appended with file locking for parallel job safety
@@ -27,6 +31,7 @@ src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
   ├── segmentation_task.py # Segmentation task solver
   ├── segmentation_probe.py# Hook-based segmentation probe
   ├── conf/                # Config YAMLs (packaged inside the source tree)
+  ├── skill/               # SKILL.md printed by `torchgeo-bench --skill`
   └── models/              # Model implementations (interface.py, timm.py, torchgeo_models.py, etc.)
 data/                      # Datasets always live here (relative to CWD)
   ├── classification_v1.0/ # GeoBench V1
@@ -174,6 +179,9 @@ torchgeo-bench run device=cuda:1
 
 # Measure per-sample compute cost (GFLOPs, params, throughput) -> results/compute_cost.csv
 torchgeo-bench flops model=timm/resnet50
+
+# Print the packaged agent brief (src/torchgeo_bench/skill/SKILL.md)
+torchgeo-bench --skill
 ```
 
 ## Results Layout & Resume

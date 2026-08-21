@@ -3,7 +3,8 @@ Command-line interface
 
 .. module:: torchgeo_bench.cli
 
-The ``torchgeo-bench`` console script exposes three subcommands:
+The ``torchgeo-bench`` console script exposes three subcommands and a
+``--skill`` flag:
 
 ``torchgeo-bench run [flags] [key=value ...]``
     Runs the benchmark pipeline. Common settings have flags (``--model``,
@@ -20,6 +21,13 @@ The ``torchgeo-bench`` console script exposes three subcommands:
 ``torchgeo-bench flops [flags] [key=value ...]``
     Measures per-sample backbone, head, and probe compute. Overrides are
     composed from :file:`src/torchgeo_bench/conf/flops_config.yaml`.
+
+``torchgeo-bench --skill``
+    Prints :file:`src/torchgeo_bench/skill/SKILL.md`, a self-contained brief
+    that teaches an AI coding agent how to drive the CLI, where results land,
+    and how to add a model or dataset. Redirect it into your agent's skills
+    directory, e.g.
+    ``torchgeo-bench --skill > .claude/skills/torchgeo-bench/SKILL.md``.
 
 Config composition
 ------------------
