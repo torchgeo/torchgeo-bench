@@ -8,3 +8,7 @@ weights_member: SENTINEL2_SI_RGB_SATLAS
 auto_resize: true
 target_size: 256
 name: tgeo_swinv2t_s2rgb_satlas_si
+eval:
+  segmentation:
+    # SwinV2-T: 4 stages, measured 64x64 -> 8x8. Coarse-to-fine.
+    layers: ["features.7", "features.5", "features.3", "features.1"]

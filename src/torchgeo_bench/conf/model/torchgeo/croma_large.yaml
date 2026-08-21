@@ -7,3 +7,15 @@ target_size: 120
 name: tgeo_croma_large
 eval:
   c_range: [-6, 5, 60]
+  segmentation:
+    # Isotropic S2 transformer (24 layers, 225=15x15 tokens, no CLS token). The
+    # introspection tool's tap-name regex can't match CROMA's nested
+    # transformer.layers.N.{0,1} pair structure (extra trailing index breaks
+    # the pattern), so these were found by hand: feedforward (".1") output of
+    # 4 blocks spread across depth, deepest first, all verified to reshape to
+    # the same 15x15 grid.
+    layers:
+      - "s2_encoder.transformer.layers.23.1"
+      - "s2_encoder.transformer.layers.17.1"
+      - "s2_encoder.transformer.layers.11.1"
+      - "s2_encoder.transformer.layers.5.1"
