@@ -422,7 +422,9 @@ def test_torchgeo_panopticon_model_native_raises(monkeypatch: pytest.MonkeyPatch
     )
 
     bands = _s2_multispectral_bands()
-    native = TorchGeoPanopticonBench(bands=bands, normalization="model_native", input_unit_check="ignore")
+    native = TorchGeoPanopticonBench(
+        bands=bands, normalization="model_native", input_unit_check="ignore"
+    )
 
     with pytest.raises(ValueError, match="model_native normalisation is undefined"):
         native.normalize_inputs(torch.rand(2, len(bands), 32, 32) * 5000)
