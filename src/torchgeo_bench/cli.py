@@ -51,7 +51,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--device", default=None, help="Torch device, e.g. cuda:1 or cpu")
     run.add_argument(
-        "-o", "--output", default=None, help="Results CSV path (default: results/all_results.csv)"
+        "-o",
+        "--output",
+        default=None,
+        help="Results CSV path (default: results/models/<model name>.csv)",
     )
     run.add_argument(
         "--resume",
@@ -99,7 +102,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     download = sub.add_parser("download", help="Download benchmark datasets")
     download.add_argument(
-        "target", choices=["geobench_v1", "geobench_v2", "eurosat"], help="What to download"
+        "target",
+        choices=["geobench_v1", "geobench_v2", "eurosat", "resisc45"],
+        help="What to download",
     )
     download.add_argument(
         "-o", "--output-dir", default="data", help="Benchmark data root (default: data)"
@@ -217,6 +222,7 @@ def _cmd_download(args: argparse.Namespace) -> None:
         download_eurosat,
         download_geobench_v1,
         download_geobench_v2,
+        download_resisc45,
     )
 
     names = None
@@ -233,7 +239,10 @@ def _cmd_download(args: argparse.Namespace) -> None:
     else:
         if names is not None:
             raise SystemExit("error: --datasets is only supported for GeoBench downloads")
-        download_eurosat(output_dir)
+        if args.target == "eurosat":
+            download_eurosat(output_dir)
+        else:
+            download_resisc45(output_dir)
 
 
 def main(argv: list[str] | None = None) -> None:

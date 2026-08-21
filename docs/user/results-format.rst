@@ -73,7 +73,10 @@ Method values
 ``knn5``           KNN-5 classification (multilabel KNN for ``m-bigearthnet``). -> ``results/models/``
 ``linear``         L-BFGS logistic regression with C-sweep on the validation set. -> ``results/models/``
 ``intrinsic_dim``  Optional intrinsic-dimension metrics on extracted embeddings (requires
-                   the ``[id]`` extra and ``eval.intrinsic_dim.enabled=true``). -> ``results/intrinsic_dim/``
+                   the ``[id]`` extra) plus dependency-free centered feature-spectrum
+                   diagnostics. Both are emitted when
+                   ``eval.intrinsic_dim.enabled=true``; set ``estimators=[]`` for
+                   spectrum-only output without ``torchid``. -> ``results/intrinsic_dim/``
 ``profile``        Optional throughput/latency/param-count measurement (requires
                    ``eval.profile.enabled=true``). -> ``results/profiles/``
 ``seg-<head>``     Segmentation probe with the configured head (``linear`` / ``conv_block`` /
@@ -89,7 +92,8 @@ Column               Description
 ``dataset``          Dataset CLI name (e.g. ``m-eurosat``).
 ``method``           ``knn5``, ``linear``, ``intrinsic_dim``, or ``seg-<head_type>``.
 ``metric_name``      Primary metric (``accuracy``, ``micro_mAP``, ``mIoU``,
-                     or ``id_<estimator>_<split>`` for intrinsic dim rows).
+                     ``id_<estimator>_<split>`` for intrinsic-dimension rows,
+                     or ``spectrum_<metric>_<split>`` for feature-spectrum rows).
 ``metric_value``     Point estimate.
 ``ci_lower``         Bootstrap CI lower bound (0.0 when not applicable).
 ``ci_upper``         Bootstrap CI upper bound (0.0 when not applicable).

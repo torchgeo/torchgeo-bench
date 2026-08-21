@@ -32,6 +32,8 @@ from torchgeo_bench.datasets import (
 #     reading ``len(...)`` for each split
 #   * eurosat: ``torchgeo.datasets.EuroSAT.split_filenames`` line counts
 #     (16200 / 5400 / 5400, totalling the canonical 27000-image set)
+#   * resisc45: ``torchgeo.datasets.RESISC45`` split files
+#     (18900 / 6300 / 6300, the canonical 60/20/20 over 31500 images)
 EXPECTED_SIZES: dict[str, dict[str, int]] = {
     # GeoBench V1 (default partition)
     "m-eurosat": {"train": 2000, "val": 1000, "test": 1000},
@@ -58,6 +60,7 @@ EXPECTED_SIZES: dict[str, dict[str, int]] = {
     "spacenet7": {"train": 3500, "val": 652, "test": 1152},
     # torchgeo template
     "eurosat": {"train": 16200, "val": 5400, "test": 5400},
+    "resisc45": {"train": 18900, "val": 6300, "test": 6300},
     "eurosat-spatial": {"train": 16200, "val": 5400, "test": 5400},
 }
 

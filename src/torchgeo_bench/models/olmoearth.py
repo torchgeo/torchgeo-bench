@@ -178,6 +178,10 @@ _MODALITY_INFO: dict[str, dict] = {
             "vh_lee": 1,
             "vh_lee_real": 1,
             "vh_lee_imag": 1,
+            # treesatai's derived VV/VH ratio band -- not a real physical
+            # channel, so it wins whichever slot it lands on (vh, matching
+            # the existing "later variant overwrites" convention above).
+            "vv_vh": 1,
         },
     },
     # NAIP / aerial: no dedicated OlmoEarth modality, route RGB through
@@ -200,6 +204,10 @@ _MODALITY_INFO: dict[str, dict] = {
     },
 }
 _MODALITY_INFO["naip"] = _MODALITY_INFO["aerial"]
+# Datasets declare Sentinel-1 SAR bands under either sensor tag ("s1" in
+# so2sat/benv2/treesatai, "sar" in m_so2sat/kuro_siwo) -- both route to the
+# same OlmoEarth Sentinel-1 modality.
+_MODALITY_INFO["s1"] = _MODALITY_INFO["sar"]
 
 
 # Canonical GSD (meters) per sensor for OlmoEarth's positional encodings.
@@ -207,6 +215,7 @@ _MODALITY_INFO["naip"] = _MODALITY_INFO["aerial"]
 _SENSOR_INPUT_RES: dict[str, int] = {
     "s2": 10,
     "sar": 10,  # S1 coregistered to S2 10 m grid in OlmoEarth pretraining
+    "s1": 10,  # same modality, dataset-declared under the "s1" sensor tag
     "landsat": 30,
     "aerial": 1,
     "naip": 1,
@@ -217,7 +226,7 @@ _SENSOR_INPUT_RES: dict[str, int] = {
 # (Lee-filtered max ~10 000) and the S1 Normalizer expects the original scale.
 # detect_input_unit returns S2_DN for them, making to_s2_dn a no-op anyway,
 # but being explicit avoids surprises if the heuristic ever changes.
-_PASSTHROUGH_SENSORS: frozenset[str] = frozenset({"sar"})
+_PASSTHROUGH_SENSORS: frozenset[str] = frozenset({"sar", "s1"})
 
 # Sensors normalized with dataset (BandSpec) stats rather than OlmoEarth's
 # pretrained normalizer when ``norm_from_pretrained="auto"`` (the default).
@@ -338,7 +347,7 @@ class OlmoEarthBenchModel(BenchModel):
 
     * ``"s2"`` -> ``Modality.SENTINEL2_L2A`` (12 channels, 3 band-sets)
     * ``"landsat"`` -> ``Modality.LANDSAT`` (11 channels, 2 band-sets)
-    * ``"sar"`` -> ``Modality.SENTINEL1`` (2 channels, 1 band-set)
+    * ``"sar"`` / ``"s1"`` -> ``Modality.SENTINEL1`` (2 channels, 1 band-set)
     * ``"aerial"`` / ``"naip"`` -> S2 path with RGB zero-fill
 
     Mixed-sensor inputs (e.g. ``["s2", "sar"]``) are handled by
@@ -621,7 +630,7 @@ class OlmoEarthBenchModel(BenchModel):
                     g_images = to_s2_dn(g_images, input_unit)
                     if group["sensor"] == "landsat" and self.landsat_scale_factor is not None:
                         g_images = g_images * self.landsat_scale_factor
-                if group["sensor"] == "sar" and self.sar_log_scale:
+                if group["sensor"] in ("sar", "s1") and self.sar_log_scale:
                     g_images = 10.0 * torch.log10(g_images.clamp(min=1e-6))
 
                 g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])

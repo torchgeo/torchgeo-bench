@@ -14,6 +14,8 @@ from dataclasses import dataclass
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf
 
+from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
+
 logger = logging.getLogger(__name__)
 
 KEY_COLS = (
@@ -190,6 +192,7 @@ class DatasetRunPlan:
     skip_linear: bool
     skip_id: bool
     skip_profile: bool
+    id_missing_metrics: frozenset[str] = frozenset()
 
 
 def _plan_dataset_run(
@@ -226,16 +229,22 @@ def _plan_dataset_run(
 
     id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
     id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
-    id_metric_names = (
-        [f"id_{est}_{split}" for split in id_cfg.splits for est in id_cfg.estimators]
-        if id_enabled
-        else []
+    id_metric_names = []
+    if id_enabled:
+        for split in id_cfg.splits:
+            id_metric_names.extend(f"id_{est}_{split}" for est in id_cfg.estimators)
+            id_metric_names.extend(
+                f"spectrum_{metric}_{split}" for metric in FEATURE_SPECTRUM_METRICS
+            )
+    # Per-metric, not just per-dataset: a run that already has its (expensive)
+    # torchid estimator rows but is missing only the (cheap) newer spectrum
+    # rows shouldn't have to redo the estimators just to backfill the rest.
+    id_missing_metrics = frozenset(
+        metric
+        for metric in id_metric_names
+        if not (cfg.resume and id_key in completed_metrics.get(metric, set()))
     )
-    skip_id = (not id_enabled) or bool(
-        cfg.resume
-        and id_metric_names
-        and all(id_key in completed_metrics.get(metric, set()) for metric in id_metric_names)
-    )
+    skip_id = (not id_enabled) or bool(id_metric_names and not id_missing_metrics)
 
     profile_cfg = getattr(cfg.eval, "profile", None)
     profile_enabled = bool(profile_cfg and profile_cfg.get("enabled", False))
@@ -255,4 +264,5 @@ def _plan_dataset_run(
         skip_linear=skip_linear,
         skip_id=skip_id,
         skip_profile=skip_profile,
+        id_missing_metrics=id_missing_metrics,
     )
