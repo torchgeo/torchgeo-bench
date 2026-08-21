@@ -35,10 +35,13 @@ class RESISC45(BenchDataset):
 
     The imagery is 8-bit RGB with no radiometric calibration and no per-image
     geolocation -- it is a curated scene-recognition set, not a sensor
-    product.  Band metadata below reflects that: the ``google_earth`` sensor
-    tag and nominal visible-light wavelengths are descriptive, not measured.
-    The distinct sensor tag also prevents resolution-aware models from silently
-    treating every scene as fixed-GSD aerial imagery.
+    product.  Band metadata below reflects that: the ``aerial`` sensor tag
+    and nominal visible-light wavelengths are descriptive, not measured.
+    RESISC45 spans 0.2--30 m/px with no per-image scale metadata, so the
+    ``aerial`` tag's fixed GSD is a deliberate approximation, not a claim of
+    true fixed resolution -- chosen so resolution-aware / sensor-routed
+    models (OlmoEarth, UniverSat, ...) treat it as ordinary RGB aerial
+    imagery instead of rejecting or silently mis-routing it.
     """
 
     # Name of the wrapped torchgeo class, resolved from this module's globals
@@ -58,14 +61,16 @@ class RESISC45(BenchDataset):
     # position in the RGB JPEG -- unlike a multispectral product there is no
     # band key in the file to name.  Wavelengths are nominal visible-light
     # centres: Google Earth composites many sensors, so no single response
-    # curve applies.  Do not use the generic ``aerial`` sensor tag here:
-    # resolution-aware wrappers map it to a fixed GSD, but RESISC45 spans
-    # 0.2--30 m/px and provides no per-image scale metadata.
+    # curve applies.  Sensor tag is ``aerial`` (1 m nominal GSD, same
+    # modality table entry as NAIP) -- an approximation, since RESISC45
+    # actually spans 0.2--30 m/px with no per-image scale metadata, but this
+    # keeps sensor-routed models (OlmoEarth, UniverSat) working instead of
+    # rejecting the dataset outright.
     # fmt: off
     bands = [
-        BandSpec("google_earth", "red", "R", mean=93.8939, std=51.8492, min=0, max=255, wavelength_um=0.65),
-        BandSpec("google_earth", "green", "G", mean=97.1123, std=47.2366, min=0, max=255, wavelength_um=0.55),
-        BandSpec("google_earth", "blue", "B", mean=87.5678, std=47.0631, min=0, max=255, wavelength_um=0.45),
+        BandSpec("aerial", "red", "R", mean=93.8939, std=51.8492, min=0, max=255, wavelength_um=0.65),
+        BandSpec("aerial", "green", "G", mean=97.1123, std=47.2366, min=0, max=255, wavelength_um=0.55),
+        BandSpec("aerial", "blue", "B", mean=87.5678, std=47.0631, min=0, max=255, wavelength_um=0.45),
     ]
     # fmt: on
 
