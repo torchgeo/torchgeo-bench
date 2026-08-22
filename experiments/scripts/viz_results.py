@@ -274,13 +274,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <div class="body">
     <p class="lede">
-      Across <b id="lede-models">—</b> frozen-backbone variants evaluated on
-      <b id="lede-datasets">—</b> GeoBench classification datasets, the
-      strongest configuration in this snapshot reaches an accuracy of
-      <b id="lede-best">—</b> on <b id="lede-best-dataset">—</b>, while the
-      median model variant clusters around <b id="lede-median">—</b>.
-      Use the controls below to filter the underlying observations; every
-      figure on this page updates accordingly.
+      The current selection covers <b id="lede-models">—</b> frozen-backbone
+      variants on <b id="lede-datasets">—</b> datasets. Use the controls below
+      to filter the underlying observations; every figure on this page updates
+      accordingly.
     </p>
 
     <div class="findings" id="findings"></div>
@@ -288,11 +285,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <p>
       Each row of the underlying table records a single
       (dataset, method, model, normalization) experiment with bootstrapped
-      95% confidence intervals on accuracy. The four figures below explore
-      the data from different angles — first a per-dataset leaderboard,
-      then a flexible scatter view, a head-to-head comparison of KNN-5 and
-      linear-probe accuracy, and finally a cross-dataset ranking that
-      surfaces variants which generalise.
+      95% confidence intervals on accuracy. The figures below plot
+      per-dataset scores, any numeric column against any other, KNN-5
+      against linear-probe accuracy, and mean accuracy across the selected
+      datasets.
     </p>
   </div>
 
@@ -320,7 +316,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="label sans">Figure 1</div>
       <div class="title">Per-dataset leaderboard</div>
       <div class="subtitle">
-        The strongest model variants on each GeoBench dataset, ranked by
+        The highest-scoring model variants on each dataset, ranked by
         accuracy. Whiskers show the bootstrapped 95% confidence interval.
       </div>
       <div class="fig-controls">
@@ -376,9 +372,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="title">KNN-5 versus linear probe</div>
       <div class="subtitle">
         For each (dataset, model) pair, the linear-probe accuracy plotted
-        against the parametric-free KNN-5 baseline. Points above the
-        diagonal are configurations where the linear probe extracts more
-        signal than nearest-neighbour retrieval.
+        against the KNN-5 accuracy. The diagonal marks equal accuracy for
+        the two probes.
       </div>
     </figcaption>
     <div class="chart-frame" id="chart-compare"></div>
@@ -390,8 +385,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="label sans">Figure 4</div>
       <div class="title">Mean accuracy across datasets</div>
       <div class="subtitle">
-        Variants are ranked by their mean accuracy across the currently
-        selected datasets — the best generalisers within the filter.
+        Variants ranked by their mean accuracy across the currently
+        selected datasets.
       </div>
       <div class="fig-controls">
         <label>Method
@@ -790,9 +785,6 @@ function updateLede(data) {
 
   document.getElementById("lede-models").textContent = variants.length;
   document.getElementById("lede-datasets").textContent = datasets.length;
-  document.getElementById("lede-best").textContent = best ? formatPct(best.metric_value) : "—";
-  document.getElementById("lede-best-dataset").textContent = best ? best.dataset : "—";
-  document.getElementById("lede-median").textContent = data.length ? formatPct(median(data.map(r => r.metric_value))) : "—";
 
   const findings = document.getElementById("findings");
   const linMean = lin.length ? lin.reduce((s, r) => s + r.metric_value, 0) / lin.length : NaN;
@@ -878,12 +870,12 @@ def main() -> int:
     parser.add_argument(
         "--headline",
         default=None,
-        help="Article headline (defaults to a generated summary).",
+        help="Page headline (defaults to the page name).",
     )
     parser.add_argument(
         "--standfirst",
         default=None,
-        help="Article standfirst / subhead (defaults to a generated summary).",
+        help="Standfirst / subhead (defaults to a description of the snapshot).",
     )
     args = parser.parse_args()
 
@@ -905,25 +897,16 @@ def main() -> int:
         if {"name", "normalization", "model"}.issubset(df.columns)
         else df.shape[0]
     )
-    if "metric_value" in df and len(df):
-        best_idx = df["metric_value"].idxmax()
-        best = df.loc[best_idx]
-        best_dataset = str(best.get("dataset", "—"))
-        best_acc = float(best["metric_value"])
-    else:
-        best_dataset = "—"
-        best_acc = float("nan")
-
-    headline = args.headline or (f"How {n_models} frozen backbones perform on GeoBench")
+    headline = args.headline or "Torchgeo-Bench results explorer"
     if args.standfirst:
         standfirst = args.standfirst
     else:
         standfirst = (
             f"A snapshot of {len(df):,} accuracy measurements across "
             f"{n_datasets} classification datasets and {n_models} model "
-            f"variants. The best configuration in this run reaches "
-            f"{best_acc * 100:.1f}% on <em>{best_dataset}</em> — "
-            f"explore the data below."
+            f"variants, each row recording its probe, band set and "
+            f"normalization policy. Use the controls to filter; the figures "
+            f"and the table follow the selection."
         )
 
     pubdate = pd.Timestamp(args.csv.stat().st_mtime, unit="s").strftime("%-d %B %Y")

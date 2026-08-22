@@ -13,13 +13,16 @@ Usage::
 """
 
 import argparse
-import csv
 import json
 import re
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+import pandas as pd
+
+from torchgeo_bench.results import load_results
+
+ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = ROOT / "results" / "models"
 # Profile/intrinsic_dim rows live in their own per-model files, separate
 # from the knn5/linear/seg metrics files under RESULTS_DIR.
@@ -87,41 +90,33 @@ NUMERIC = {
 BOOL = {"merge_val"}
 
 
-def _iter_result_rows():
-    """Yield rows from every per-model results CSV across all three dirs."""
-    paths = sorted(RESULTS_DIR.glob("*.csv"))
-    paths += sorted(PROFILE_RESULTS_DIR.glob("*.csv"))
-    paths += sorted(INTRINSIC_DIM_RESULTS_DIR.glob("*.csv"))
-    for path in paths:
-        with path.open() as fh:
-            yield from csv.DictReader(fh)
-
-
 def _load_csv_rows(label: str) -> list[dict]:
-    rows = []
-    for r in _iter_result_rows():
-        if r["method"] not in ALLOWED_METHODS:
-            continue
-        if not r.get("metric_value"):
-            continue
-        row = {}
-        for k in COLUMNS:
-            if k == "snapshot":
-                continue
-            v = r.get(k, "")
-            if v is None or v == "":
-                row[k] = None
-            elif k in NUMERIC:
-                try:
-                    row[k] = float(v)
-                except ValueError:
-                    row[k] = None
-            elif k in BOOL:
-                row[k] = v.lower() in ("true", "1")
-            else:
-                row[k] = v
+    """Return snapshot rows from every per-model results CSV across all three dirs.
+
+    Loading goes through :func:`load_results` so this page sees the same
+    deduplicated, normalization-corrected rows as the leaderboard generator.
+    """
+    frames = [
+        load_results(directory)
+        for directory in (RESULTS_DIR, PROFILE_RESULTS_DIR, INTRINSIC_DIM_RESULTS_DIR)
+    ]
+    df = pd.concat([frame for frame in frames if not frame.empty], ignore_index=True, sort=False)
+    df = df[df["method"].isin(ALLOWED_METHODS) & df["metric_value"].notna()]
+
+    data_columns = [column for column in COLUMNS if column != "snapshot"]
+    for column in data_columns:
+        if column not in df.columns:
+            df[column] = None
+    df = df[data_columns].copy()
+    for column in NUMERIC:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+    for column in BOOL:
+        df[column] = df[column].astype(str).str.lower().isin(("true", "1"))
+
+    # JSON has no NaN literal the browser will parse, so every gap becomes null.
+    rows = df.astype(object).where(df.notna(), None).to_dict("records")
+    for row in rows:
         row["snapshot"] = label
-        rows.append(row)
     return rows
 
 
@@ -185,30 +180,28 @@ def main() -> None:
         raise SystemExit("Could not locate COLUMNS/NUMERIC_COLS/DATA block in HTML.")
     text = pattern.sub(new_block, text, count=1)
 
+    # The masthead states what the snapshot contains.  It never names a
+    # leader or reads a result: any such claim goes stale on the next sweep,
+    # and interpreting the numbers is the reader's job, not the page's.
     text = re.sub(
         r'<h1 class="headline" id="headline-text">[^<]*</h1>',
-        (
-            '<h1 class="headline" id="headline-text">'
-            "Four winners on GeoBench: Panopticon on KNN, DINOv3-SAT and "
-            "OlmoEarth on linear, Terramind on multispectral"
-            "</h1>"
-        ),
+        ('<h1 class="headline" id="headline-text">Torchgeo-Bench results explorer</h1>'),
         text,
     )
     text = re.sub(
-        r'<p class="standfirst" id="standfirst-text">[^<]*<em>[^<]*</em>[^<]*</p>',
+        # The standfirst may carry <em> spans, so match to the closing tag.
+        r'<p class="standfirst" id="standfirst-text">.*?</p>',
         (
             f'<p class="standfirst" id="standfirst-text">'
-            f"Across {len(latest_rows):,} measurements on {n_datasets} GeoBench "
-            f"classification datasets and {n_models} frozen-backbone variants, four "
-            f"distinct leaders emerge: <em>Panopticon</em> tops KNN-5 on most datasets, "
-            f"<em>DINOv3-SAT</em> remains the strongest RGB-only linear probe, "
-            f"<em>OlmoEarth</em> reaches 97.8% on <em>eurosat-spatial</em> and "
-            f"97.6% on <em>m-eurosat</em>, and <em>Terramind</em> wins the "
-            f"multispectral datasets when all MSI bands are available."
+            f"Every measurement in this snapshot: {len(latest_rows):,} rows covering "
+            f"{n_datasets} datasets and {n_models} frozen-backbone variants, each row "
+            f"recording its probe, band set, normalization policy and bootstrapped 95% "
+            f"confidence interval. Use the controls to filter; the figures and the "
+            f"table follow the selection."
             "</p>"
         ),
         text,
+        flags=re.DOTALL,
     )
     text = re.sub(
         r'<b id="row-shown">\d+</b> of <b id="row-total">\d+</b>',

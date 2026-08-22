@@ -127,6 +127,7 @@ DATASET_DISPLAY = {
     "so2sat": "So2Sat · V2",
     "forestnet": "ForestNet · V2",
     "eurosat-spatial": "EuroSAT spatial",
+    "resisc45": "RESISC45",
     "burn_scars": "Burn Scars · V2",
     "caffe": "CAFFE · V2",
     "cloudsen12": "CloudSEN12 · V2",

@@ -835,7 +835,7 @@ def main(cfg: DictConfig) -> None:
         # dataclasses reach the constructor intact.
         instantiate_kwargs: dict = {
             "bands": bands_list,
-            "normalization": normalization,
+            "normalization": requested_normalization,
         }
         if model_cfg.get("mode", None) == "empirical":
             # Empirical RCF whitens against real patches, so it needs the dataset.
