@@ -406,6 +406,30 @@ def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> N
     assert torch.isfinite(out).all()
 
 
+def test_torchgeo_panopticon_model_native_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Panopticon ships no Normalize transform and no fixed pretrain
+    mean/std -- it genuinely has no model_native normalization, so asking
+    for it must raise rather than silently substituting something else."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: nn.Identity()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+    )
+
+    bands = _s2_multispectral_bands()
+    native = TorchGeoPanopticonBench(
+        bands=bands, normalization="model_native", input_unit_check="ignore"
+    )
+
+    with pytest.raises(ValueError, match="model_native normalisation is undefined"):
+        native.normalize_inputs(torch.rand(2, len(bands), 32, 32) * 5000)
+
+
 def test_channel_mismatch_preserves_tiled_normalize_chain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

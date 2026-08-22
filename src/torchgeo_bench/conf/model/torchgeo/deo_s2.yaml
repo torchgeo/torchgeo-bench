@@ -1,0 +1,9 @@
+# TorchGeo DEO Swin-B, native ten-band Sentinel-2 pathway (1024-dim output).
+_target_: torchgeo_bench.models.TorchGeoDEOBench
+mode: s2
+normalization: model_native
+auto_resize: true
+target_size: 224
+name: tgeo_deo_swin_s2
+
+# Classification only: DEO's final Swin map is spatially pooled by the wrapper.
