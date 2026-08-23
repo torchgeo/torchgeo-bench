@@ -8,3 +8,7 @@ weights_member: SENTINEL2_SI_RGB_SATLAS
 auto_resize: false
 target_size: 224
 name: tgeo_resnet50_s2rgb_satlas_si
+eval:
+  segmentation:
+    # ResNet-50: 4 stages, measured 56x56 -> 7x7. Coarse-to-fine.
+    layers: ["layer4", "layer3", "layer2", "layer1"]

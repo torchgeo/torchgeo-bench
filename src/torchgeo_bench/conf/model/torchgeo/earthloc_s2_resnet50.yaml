@@ -8,3 +8,12 @@ weights_member: SENTINEL2_RESNET50
 auto_resize: true
 target_size: 320
 name: tgeo_earthloc_s2_resnet50
+eval:
+  segmentation:
+    # EarthLoc wraps its resnet50 under a second `backbone` attribute
+    # (`backbone.backbone.layer*`); SegmentationProbe only strips one
+    # `backbone.` prefix, so the remaining one must stay in the layer name.
+    # This backbone also removes layer4's stride (place-recognition models
+    # keep more spatial detail for retrieval), so layer3/layer4 measure at
+    # the same 20x20 resolution rather than the usual 14x14 -> 7x7 halving.
+    layers: ["backbone.layer4", "backbone.layer3", "backbone.layer2", "backbone.layer1"]

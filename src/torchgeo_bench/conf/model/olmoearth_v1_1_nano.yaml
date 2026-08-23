@@ -13,3 +13,12 @@ normalize: false
 image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
 min_image_size: 64
 name: olmoearth_v1_1_nano
+eval:
+  segmentation:
+    # Isotropic transformer (4 blocks total, 28x28 grid): no spatial pyramid,
+    # so tap every block, deepest first.
+    layers:
+      - "encoder_model.encoder.blocks.3"
+      - "encoder_model.encoder.blocks.2"
+      - "encoder_model.encoder.blocks.1"
+      - "encoder_model.encoder.blocks.0"

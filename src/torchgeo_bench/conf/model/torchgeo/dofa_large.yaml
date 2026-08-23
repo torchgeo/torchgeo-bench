@@ -8,3 +8,12 @@ weights_member: DOFA_MAE
 auto_resize: true
 target_size: 224
 name: tgeo_dofa_large
+eval:
+  segmentation:
+    # Isotropic ViT-L (24 blocks, 197=1+14x14 tokens). No spatial pyramid: 4
+    # blocks spread across depth, deepest first. The introspection tool's
+    # auto-pick grabbed patch_embed.weight_generator's internal transformer
+    # (a 1x1 non-spatial tap from DOFA's dynamic weight-generation MLP, not a
+    # real feature map) as a false positive; verified by hand that
+    # blocks.23/17/11/5 all reshape to the same 14x14 grid instead.
+    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
