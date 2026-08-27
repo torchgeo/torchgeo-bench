@@ -25,7 +25,7 @@ matching extra:
 
 .. code-block:: console
 
-   $ uv sync --extra newextra
+   $ uv sync --extra <newextra>
 
 You can check how to download one or more dataset for evaluation in the :doc:`datasets` guide.
 

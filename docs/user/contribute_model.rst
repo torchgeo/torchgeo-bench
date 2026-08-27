@@ -79,7 +79,7 @@ Install the extra locally to confirm it resolves:
 
 .. code-block:: console
 
-   $ uv sync --extra newmodel
+   $ uv sync --extra <newmodel>
 
 .. note::
 
@@ -96,7 +96,7 @@ Weights
 
 * Pretrained weights must be **publicly accessible without authentication**.
   `HuggingFace Hub <https://huggingface.co/models>`_ is the preferred host.
-* The model must load after a fresh ``pip install 'torchgeo-bench[newextra]'``
+* The model must load after a fresh ``pip install 'torchgeo-bench[<newextra>]'``
   with no manual file placement.  Use
   `huggingface_hub.hf_hub_download <https://huggingface.co/docs/huggingface_hub/>`_
   or an equivalent auto-download call inside your ``__init__``.
