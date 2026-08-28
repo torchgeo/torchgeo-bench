@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.datasets.caffe import CaFFe
-from torchgeo_bench.datasets.loading import _make_resize_transform
+from torchgeo_bench.datasets.loading import _ResizeTransform
 from torchgeo_bench.models import InputUnit
 from torchgeo_bench.models._input_units import detect_input_unit
 from torchgeo_bench.utils import extract_features
@@ -34,11 +34,11 @@ def test_extract_features_preserves_batch_dimension_for_head_global_pool() -> No
 
 def test_invalid_interpolation_raises_instead_of_falling_back() -> None:
     with pytest.raises(ValueError, match="interpolation must be one of"):
-        _make_resize_transform(224, "bilnear")
+        _ResizeTransform(224, "bilnear")
 
 
 def test_area_interpolation_resizes_to_requested_grid() -> None:
-    transform = _make_resize_transform(2, "area")
+    transform = _ResizeTransform(2, "area")
     assert transform is not None
 
     image = torch.arange(16, dtype=torch.float32).reshape(1, 4, 4)
@@ -50,7 +50,7 @@ def test_area_interpolation_resizes_to_requested_grid() -> None:
 
 
 def test_resize_handles_temporal_images_and_singleton_channel_masks() -> None:
-    transform = _make_resize_transform(4, "bilinear")
+    transform = _ResizeTransform(4, "bilinear")
     assert transform is not None
 
     sample = {

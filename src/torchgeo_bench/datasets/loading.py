@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from .base import BenchDataset
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
     import torch
     from torch.utils.data import DataLoader, Dataset
@@ -93,23 +93,24 @@ def list_datasets() -> list[str]:
     return sorted(_REGISTRY_SPEC)
 
 
-def _make_resize_transform(
-    image_size: int | None,
-    interpolation: str,
-) -> Callable[[dict], dict] | None:
-    """Build a sample-level transform that resizes ``image`` (and ``mask``)."""
-    if image_size is None:
-        return None
+class _ResizeTransform:
+    """Sample-level transform that resizes ``image`` (and ``mask``)."""
 
     valid_modes = ("area", "bicubic", "bilinear", "nearest")
-    if interpolation not in valid_modes:
-        raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
-    interp_mode = interpolation
-    align_corners = False if interp_mode in ("bicubic", "bilinear") else None
 
-    import torch.nn.functional as F
+    def __init__(self, image_size: int, interp_mode: str) -> None:
+        if interp_mode not in self.valid_modes:
+            raise ValueError(
+                f"interpolation must be one of {self.valid_modes}, got {interp_mode!r}."
+            )
+        self.image_size = image_size
+        self.interp_mode = interp_mode
+        self.align_corners = False if interp_mode in ("bicubic", "bilinear") else None
 
-    def _resize(sample: dict) -> dict:
+    def __call__(self, sample: dict) -> dict:
+        import torch.nn.functional as F
+
+        image_size = self.image_size
         img: torch.Tensor = sample["image"]
         h, w = img.shape[-2], img.shape[-1]
         if h != image_size or w != image_size:
@@ -118,8 +119,8 @@ def _make_resize_transform(
             img = F.interpolate(
                 resize_input,
                 size=(image_size, image_size),
-                mode=interp_mode,
-                align_corners=align_corners,
+                mode=self.interp_mode,
+                align_corners=self.align_corners,
             )
             if squeeze_batch:
                 img = img.squeeze(0)
@@ -147,8 +148,6 @@ def _make_resize_transform(
                 mask = mask.long()
                 sample["mask"] = mask
         return sample
-
-    return _resize
 
 
 def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
@@ -227,7 +226,7 @@ def get_datasets(
     else:
         bands_tuple = tuple(bands)
 
-    transform = _make_resize_transform(image_size, interpolation)
+    transform = _ResizeTransform(image_size, interpolation) if image_size is not None else None
     train_partition = partition_name if bench.supports_partitions else "default"
 
     common: dict = {"bands": bands_tuple, "transform": transform}

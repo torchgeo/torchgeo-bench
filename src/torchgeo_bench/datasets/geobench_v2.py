@@ -49,6 +49,31 @@ def list_v2_datasets() -> list[str]:
     return sorted(_V2_REGISTRY)
 
 
+class _ChainedTransform:
+    """Canonicalize an upstream V2 sample, then apply the framework transform."""
+
+    def __init__(self, canonicalize: Callable[[dict], dict], transform: Callable | None) -> None:
+        self.canonicalize = canonicalize
+        self.transform = transform
+
+    def __call__(self, sample: dict) -> dict:
+        sample = self.canonicalize(sample)
+        if self.transform is None:
+            return sample
+        if "image" in sample:
+            return self.transform(sample)
+        image_keys = [k for k in sample if k.startswith("image_")]
+        for index, key in enumerate(image_keys):
+            wrapped = {"image": sample[key]}
+            if index == 0 and "mask" in sample:
+                wrapped["mask"] = sample["mask"]
+            wrapped = self.transform(wrapped)
+            sample[key] = wrapped["image"]
+            if "mask" in wrapped:
+                sample["mask"] = wrapped["mask"]
+        return sample
+
+
 class GeoBenchv2(Dataset):
     """Thin :class:`Dataset` adapter around any GeoBench V2 upstream class.
 
@@ -172,28 +197,6 @@ class _V2Dataset(BenchDataset):
         """
         del partition
         band_order = self.build_band_order(bands)
-        canonicalize = self.canonicalize_sample
-
-        def chained(sample: dict) -> dict:
-            sample = canonicalize(sample)  # rename image_b → "image" first
-            if transform is not None:
-                if "image" in sample:
-                    sample = transform(sample)  # _resize now finds "image" safely
-                else:
-                    # treesatai applies its transforms on the per-modality dict
-                    # (image_aerial / image_s2 / image_s1) *before* stacking, so
-                    # the framework's resize transform must operate on each
-                    # modality independently here.
-                    image_keys = [k for k in sample if k.startswith("image_")]
-                    for index, key in enumerate(image_keys):
-                        wrapped = {"image": sample[key]}
-                        if index == 0 and "mask" in sample:
-                            wrapped["mask"] = sample["mask"]
-                        wrapped = transform(wrapped)
-                        sample[key] = wrapped["image"]
-                        if "mask" in wrapped:
-                            sample["mask"] = wrapped["mask"]
-            return sample
 
         kwargs: dict[str, object] = {
             "data_normalizer": nn.Identity,
@@ -211,7 +214,7 @@ class _V2Dataset(BenchDataset):
             dataset_name=self.name,
             split=split,
             band_order=band_order,
-            transforms=chained,
+            transforms=_ChainedTransform(self.canonicalize_sample, transform),
             **kwargs,
         )
 
