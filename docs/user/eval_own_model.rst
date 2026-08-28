@@ -3,7 +3,7 @@ Evaluate your own model (Stage 1)
 
 This guide demonstrates how you can benchmark any frozen pretrained geospatial model against
 the included benchmark datasets. If you want to contribute a new open-source model with available weights such that the broader community can easily access your model, see
-:doc:`contribute_model` (Stage 2).
+:doc:`contribute_model`.
 
 .. _eval-prerequisites:
 
