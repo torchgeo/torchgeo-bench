@@ -1,9 +1,22 @@
 """Feature extraction utilities for model benchmarking."""
 
+import logging
+
 import numpy as np
 import torch
 from rich.progress import track
 from torch.utils.data import DataLoader
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_device(requested_device: str | torch.device) -> torch.device:
+    """Resolve a requested device, falling back to CPU if CUDA is unavailable."""
+    device = torch.device(requested_device)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        logger.warning("CUDA requested but not available; falling back to CPU.")
+        return torch.device("cpu")
+    return device
 
 
 def extract_features(
