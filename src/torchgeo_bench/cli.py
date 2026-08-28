@@ -117,13 +117,13 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _setup_logging() -> None:
+def _setup_logging(verbose: bool = False) -> None:
     import logging
 
     from rich.logging import RichHandler
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.INFO if verbose else logging.WARNING,
         format="%(message)s",
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True, markup=True)],
@@ -195,7 +195,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
         print(OmegaConf.to_yaml(cfg), end="")
         return
-    _setup_logging()
+    _setup_logging(getattr(args, "verbose", False))
     from torchgeo_bench.main import main
 
     main(cfg)
