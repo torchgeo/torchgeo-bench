@@ -152,6 +152,7 @@ def _make_resize_transform(
 
 
 def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
+    import torch
     from torch.utils.data import DataLoader
 
     return DataLoader(
@@ -159,7 +160,7 @@ def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: in
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
     )
 
 
