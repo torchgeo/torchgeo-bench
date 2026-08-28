@@ -1,4 +1,5 @@
-# Portions of this file are adapted from torchgeo (MIT); see LICENSE-THIRDPARTY.
+# Portions of this file are adapted from torchgeo.
+# Copyright (c) TorchGeo Contributors. All rights reserved.
 
 # Configuration file for the Sphinx documentation builder.
 #
