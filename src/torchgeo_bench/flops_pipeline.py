@@ -33,6 +33,7 @@ from torchgeo_bench.model_profile import (
 )
 from torchgeo_bench.results import append_rows_atomic
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
+from torchgeo_bench.utils import resolve_device
 
 warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
@@ -347,7 +348,7 @@ def main(cfg: DictConfig) -> None:
     output_path = str(cfg.output)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    device = torch.device(str(cfg.device))
+    device = resolve_device(str(cfg.device))
     image_size = int(cfg.image_size)
     normalization = str(cfg.normalization)
     model_target = str(cfg.model._target_)

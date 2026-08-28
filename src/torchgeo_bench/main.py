@@ -58,7 +58,7 @@ from torchgeo_bench.resume import (  # noqa: F401  (re-exported for back-compat)
     _row_key,
     load_completed,
 )
-from torchgeo_bench.utils import extract_features
+from torchgeo_bench.utils import extract_features, resolve_device
 
 if TYPE_CHECKING:
     import torchgeo_bench.segmentation_task
@@ -696,7 +696,8 @@ def main(cfg: DictConfig) -> None:
     from torchgeo.datasets import DatasetNotFoundError
 
     dataset_names = _expand_dataset_list(cfg.dataset.names)
-    device = torch.device(cfg.device)
+    device = resolve_device(cfg.device)
+    cfg.device = str(device)
 
     output_path = _resolve_output_path(cfg)
     profile_output_path = _resolve_side_output_path(
@@ -1050,7 +1051,7 @@ def main(cfg: DictConfig) -> None:
                 profile_rows = evaluate_profile(
                     model=model,
                     sample_loader=train_loader,
-                    device=torch.device(cfg.device),
+                    device=device,
                     n_warmup=int(profile_cfg.get("n_warmup", 3)),
                     n_measure=int(profile_cfg.get("n_measure", 20)),
                     common_meta=common_meta,
