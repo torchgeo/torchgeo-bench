@@ -90,10 +90,17 @@ def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
 
 
 def embed_split(
-    model: BenchModel, dataloader: DataLoader, device: torch.device, verbose: bool
+    model: BenchModel,
+    dataloader: DataLoader,
+    device: torch.device,
+    verbose: bool,
+    split: str = "",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract feature embeddings and labels from a data split."""
-    return extract_features(model, dataloader, device, transforms=None, verbose=verbose)
+    description = f"Extracting ({split})" if split else "Extracting"
+    return extract_features(
+        model, dataloader, device, transforms=None, verbose=verbose, description=description
+    )
 
 
 def evaluate_knn(
@@ -937,9 +944,11 @@ def main(cfg: DictConfig) -> None:
             else:
                 # Classification (single-label or multi-label)
                 metric_name = plan.metric_name
-                x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
-                x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
-                x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
+                x_train, y_train = embed_split(
+                    model, train_loader, device, verbose=True, split="train"
+                )
+                x_val, y_val = embed_split(model, val_loader, device, verbose=True, split="val")
+                x_test, y_test = embed_split(model, test_loader, device, verbose=True, split="test")
                 feature_dim = x_train.shape[1]
                 n_counts = {"train": len(x_train), "val": len(x_val), "test": len(x_test)}
 
