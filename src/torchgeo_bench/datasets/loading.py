@@ -93,23 +93,22 @@ def list_datasets() -> list[str]:
     return sorted(_REGISTRY_SPEC)
 
 
-def _make_resize_transform(
-    image_size: int | None,
-    interpolation: str,
-) -> Callable[[dict], dict] | None:
-    """Build a sample-level transform that resizes ``image`` (and ``mask``)."""
-    if image_size is None:
-        return None
+class _ResizeTransform:
+    """Sample-level transform that resizes ``image`` (and ``mask``).
 
-    valid_modes = ("area", "bicubic", "bilinear", "nearest")
-    if interpolation not in valid_modes:
-        raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
-    interp_mode = interpolation
-    align_corners = False if interp_mode in ("bicubic", "bilinear") else None
+    A plain class (rather than a closure) so instances stay picklable for
+    DataLoader workers under the ``spawn``/``forkserver`` start methods.
+    """
 
-    import torch.nn.functional as F
+    def __init__(self, image_size: int, interp_mode: str) -> None:
+        self.image_size = image_size
+        self.interp_mode = interp_mode
+        self.align_corners = False if interp_mode in ("bicubic", "bilinear") else None
 
-    def _resize(sample: dict) -> dict:
+    def __call__(self, sample: dict) -> dict:
+        import torch.nn.functional as F
+
+        image_size = self.image_size
         img: torch.Tensor = sample["image"]
         h, w = img.shape[-2], img.shape[-1]
         if h != image_size or w != image_size:
@@ -118,8 +117,8 @@ def _make_resize_transform(
             img = F.interpolate(
                 resize_input,
                 size=(image_size, image_size),
-                mode=interp_mode,
-                align_corners=align_corners,
+                mode=self.interp_mode,
+                align_corners=self.align_corners,
             )
             if squeeze_batch:
                 img = img.squeeze(0)
@@ -148,10 +147,24 @@ def _make_resize_transform(
                 sample["mask"] = mask
         return sample
 
-    return _resize
+
+def _make_resize_transform(
+    image_size: int | None,
+    interpolation: str,
+) -> Callable[[dict], dict] | None:
+    """Build a sample-level transform that resizes ``image`` (and ``mask``)."""
+    if image_size is None:
+        return None
+
+    valid_modes = ("area", "bicubic", "bilinear", "nearest")
+    if interpolation not in valid_modes:
+        raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
+
+    return _ResizeTransform(image_size, interpolation)
 
 
 def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
+    import torch
     from torch.utils.data import DataLoader
 
     return DataLoader(
@@ -159,7 +172,7 @@ def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: in
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
     )
 
 
