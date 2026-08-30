@@ -1,11 +1,13 @@
 """Regenerate ``docs/_static/results-explorer.html`` from result snapshots.
 
-Reads ``results/models/*.csv``, ``results/profiles/*.csv``, and
-``results/intrinsic_dim/*.csv``, writes today's snapshot to
-``docs/_static/_results_snapshots/<label>.json``, then re-inlines every
-committed snapshot (newest first) into the explorer HTML and bumps the
-masthead.  Keeps ``knn5`` / ``linear`` / ``profile`` rows; the explorer's
-Compute & efficiency figure joins the latter against the former.
+Reads ``results/models/*.csv``, ``results/profiles/*.csv``,
+``results/intrinsic_dim/*.csv`` and ``results/compute_cost.csv``, writes
+today's snapshot to ``docs/_static/_results_snapshots/<label>.json``, then
+re-inlines every committed snapshot (newest first) into the explorer HTML and
+bumps the masthead.  Keeps classification (``knn5`` / ``linear``),
+segmentation (``seg-*``), ``profile`` and ``intrinsic_dim`` rows; the
+explorer's Compute & efficiency figure joins the profile rows against the
+classification ones.
 
 Usage::
 
@@ -25,9 +27,36 @@ RESULTS_DIR = ROOT / "results" / "models"
 # from the knn5/linear/seg metrics files under RESULTS_DIR.
 PROFILE_RESULTS_DIR = ROOT / "results" / "profiles"
 INTRINSIC_DIM_RESULTS_DIR = ROOT / "results" / "intrinsic_dim"
+# Cost/throughput moved out of results/profiles/ into one wide table; only
+# imagestats was ever migrated, which is why the efficiency figure emptied out.
+COMPUTE_COST_CSV = ROOT / "results" / "compute_cost.csv"
 HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
 SNAPSHOT_DIR = ROOT / "docs" / "_static" / "_results_snapshots"
-ALLOWED_METHODS = ("knn5", "linear", "profile", "intrinsic_dim")
+SEG_METHODS = ("seg-linear", "seg-conv_block", "seg-fpn", "seg-dpt")
+ACCURACY_METHODS = ("knn5", "linear")
+ALLOWED_METHODS = (*ACCURACY_METHODS, *SEG_METHODS, "profile", "intrinsic_dim")
+
+# compute_cost.csv is wide -- one row per measured config, one column per
+# quantity.  The explorer wants the long ``method="profile"`` rows that
+# results/profiles/*.csv used to supply, so melt these columns into rows.
+COMPUTE_COST_METRICS = (
+    "gflops_backbone",
+    "gflops_head",
+    "gflops_probe",
+    "gflops_total",
+    "params_backbone_m",
+    "params_head_m",
+    "params_probe_m",
+    "throughput_samples_per_sec",
+    "latency_ms_per_batch_p50",
+    "peak_gpu_mem_gb",
+    "reserved_gpu_mem_gb",
+    "n_tokens",
+)
+# The results CSVs call the multispectral run "all"; compute_cost measures it as
+# the 12-band S2 stack.  Pair them so the efficiency join lands -- n_channels
+# rides along on the row so a dataset whose "all" is not 12 bands stays visible.
+BAND_CONFIG_ALIASES = {"s2": "all"}
 
 COLUMNS = [
     "dataset",
@@ -60,6 +89,9 @@ COLUMNS = [
     "precision",
     "recall",
     "f1",
+    "task",
+    "head_type",
+    "n_channels",
     "snapshot",
 ]
 NUMERIC = {
@@ -83,18 +115,52 @@ NUMERIC = {
     "precision",
     "recall",
     "f1",
+    "n_channels",
 }
 BOOL = {"merge_val"}
 
 
+def _iter_compute_cost_rows():
+    """Melt ``results/compute_cost.csv`` into long ``method="profile"`` rows.
+
+    Cost is measured per (model, band config, task, head) at a fixed 224px
+    input -- it carries no ``dataset``, because a frozen backbone costs the
+    same whichever dataset is probed.  The explorer joins these to accuracy on
+    (name, bands) for that reason.
+    """
+    if not COMPUTE_COST_CSV.exists():
+        return
+    with COMPUTE_COST_CSV.open() as fh:
+        for r in csv.DictReader(fh):
+            bands = BAND_CONFIG_ALIASES.get(r["band_config"], r["band_config"])
+            for metric in COMPUTE_COST_METRICS:
+                if not r.get(metric):
+                    continue
+                yield {
+                    "dataset": "",
+                    "method": "profile",
+                    "metric_name": metric,
+                    "metric_value": r[metric],
+                    "model": r["model"],
+                    "name": r["name"],
+                    "bands": bands,
+                    "n_channels": r["n_channels"],
+                    "image_size": r["image_size"],
+                    "feature_dim": r["feature_dim"],
+                    "task": r["task"],
+                    "head_type": r["head_type"],
+                }
+
+
 def _iter_result_rows():
-    """Yield rows from every per-model results CSV across all three dirs."""
+    """Yield rows from every per-model results CSV, plus melted compute costs."""
     paths = sorted(RESULTS_DIR.glob("*.csv"))
     paths += sorted(PROFILE_RESULTS_DIR.glob("*.csv"))
     paths += sorted(INTRINSIC_DIM_RESULTS_DIR.glob("*.csv"))
     for path in paths:
         with path.open() as fh:
             yield from csv.DictReader(fh)
+    yield from _iter_compute_cost_rows()
 
 
 def _load_csv_rows(label: str) -> list[dict]:
@@ -194,11 +260,16 @@ def main() -> None:
     flat_rows = [r for label in ordered_labels for r in snapshots[label]]
     snapshot_meta = [{"label": label, "rows": len(snapshots[label])} for label in ordered_labels]
 
-    accuracy_rows = [r for r in latest_rows if r["method"] in ("knn5", "linear")]
+    accuracy_rows = [r for r in latest_rows if r["method"] in ACCURACY_METHODS]
+    seg_rows = [r for r in latest_rows if r["method"] in SEG_METHODS]
     n_models = len({r["name"] for r in accuracy_rows if r["name"]}) or len(
         {r["name"] for r in latest_rows if r["name"]}
     )
-    n_datasets = len({r["dataset"] for r in latest_rows})
+    # Profile rows carry no dataset, so count datasets per task rather than
+    # over every row.
+    n_datasets = len({r["dataset"] for r in accuracy_rows if r["dataset"]})
+    n_seg_datasets = len({r["dataset"] for r in seg_rows if r["dataset"]})
+    n_seg_models = len({r["name"] for r in seg_rows if r["name"]})
     best = max(accuracy_rows or latest_rows, key=lambda r: r["metric_value"] or 0)
 
     js_columns = "const COLUMNS = " + json.dumps(COLUMNS) + ";"
@@ -232,14 +303,22 @@ def main() -> None:
             f"<em>{linear_leader}</em> under linear probing"
         )
     else:
-        lede = f"{n_models} frozen backbones on {n_datasets} GeoBench datasets"
+        lede = f"{n_models} frozen backbones on {n_datasets} datasets"
         detail = "no model is evaluated on every dataset, so no overall rank is reported"
+
+    seg_sentence = (
+        f" A further {len(seg_rows):,} segmentation measurements cover "
+        f"{n_seg_models} backbones on {n_seg_datasets} datasets (mIoU, four "
+        f"decoder heads)."
+        if seg_rows
+        else ""
+    )
 
     text = _sub_once(
         r'<h1 class="headline" id="headline-text">.*?</h1>',
         (
             f'<h1 class="headline" id="headline-text">'
-            f"{lede} across {n_datasets} GeoBench classification datasets"
+            f"{lede} across {n_datasets} classification datasets"
             f"</h1>"
         ),
         text,
@@ -248,11 +327,12 @@ def main() -> None:
         r'<p class="standfirst" id="standfirst-text">.*?</p>',
         (
             f'<p class="standfirst" id="standfirst-text">'
-            f"Across {len(latest_rows):,} measurements on {n_datasets} GeoBench "
+            f"Across {len(latest_rows):,} measurements on {n_datasets} "
             f"classification datasets and {n_models} frozen-backbone variants, "
             f"{detail}. The highest single score is "
             f"{best['metric_value']:.3f} ({best['metric_name']}) for "
             f"<em>{best['name']}</em> on <em>{best['dataset']}</em>."
+            f"{seg_sentence}"
             f"</p>"
         ),
         text,
@@ -264,7 +344,7 @@ def main() -> None:
     )
     text = _sub_once(
         r"Source: <b>[^<]*</b>",
-        "Source: <b>results/{models,profiles,intrinsic_dim}/*.csv</b>",
+        "Source: <b>results/{models,profiles,intrinsic_dim}/*.csv, results/compute_cost.csv</b>",
         text,
     )
     text = _sub_once(
