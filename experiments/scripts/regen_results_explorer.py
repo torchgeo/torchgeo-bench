@@ -220,6 +220,15 @@ def _mean_rank_leader(rows: list[dict], method: str) -> str | None:
     return min(full, key=lambda n: full[n]) if full else None
 
 
+def _backbone_name(name: str) -> str:
+    """Strip the ``tgeo_`` loader prefix for display.
+
+    The prefix records where a backbone is loaded from, not what it is; the
+    explorer's JS strips it the same way at its own render sites.
+    """
+    return name.removeprefix("tgeo_") if name else name
+
+
 def _sub_once(pattern: str, repl: str, text: str) -> str:
     """Substitute exactly once, failing loudly if the anchor has drifted.
 
@@ -294,6 +303,8 @@ def main() -> None:
     knn_leader = _mean_rank_leader(accuracy_rows, "knn5")
     linear_leader = _mean_rank_leader(accuracy_rows, "linear")
     if knn_leader and linear_leader:
+        knn_leader = _backbone_name(knn_leader)
+        linear_leader = _backbone_name(linear_leader)
         if knn_leader == linear_leader:
             lede = f"{knn_leader} leads both KNN-5 and linear probing"
         else:
@@ -331,7 +342,8 @@ def main() -> None:
             f"classification datasets and {n_models} frozen-backbone variants, "
             f"{detail}. The highest single score is "
             f"{best['metric_value']:.3f} ({best['metric_name']}) for "
-            f"<em>{best['name']}</em> on <em>{best['dataset']}</em>."
+            f"<em>{_backbone_name(best['name'])}</em> on "
+            f"<em>{best['dataset']}</em>."
             f"{seg_sentence}"
             f"</p>"
         ),
