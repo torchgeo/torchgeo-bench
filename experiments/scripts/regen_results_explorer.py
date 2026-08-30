@@ -58,6 +58,10 @@ COMPUTE_COST_METRICS = (
 # rides along on the row so a dataset whose "all" is not 12 bands stays visible.
 BAND_CONFIG_ALIASES = {"s2": "all"}
 
+# Cloud pricing and grid carbon intensity: page-owned reference data that lives
+# inside the replaced <script> span and must survive regeneration.
+REFERENCE_DATA_RE = r"const GPU_PRICES = \[.*?\];\s*const CARBON_INTENSITY = \[.*?\];"
+
 COLUMNS = [
     "dataset",
     "method",
@@ -295,7 +299,19 @@ def main() -> None:
         r"(?:\s*const GPU_PRICES = \[.*?\];)?(?:\s*const CARBON_INTENSITY = \[.*?\];)?",
         re.DOTALL,
     )
-    new_block = "\n".join([js_columns, js_numeric, js_snaps, js_default, js_data])
+    # GPU_PRICES / CARBON_INTENSITY are static reference data owned by the page
+    # rather than derived from results/, but they sit inside the span this
+    # substitution replaces.  Carry them across verbatim: dropping them leaves
+    # the Compute & efficiency figure with no region to price against, and it
+    # bails out and renders nothing.
+    carried = re.search(REFERENCE_DATA_RE, text, re.DOTALL)
+    if not carried:
+        raise SystemExit(
+            "Could not locate GPU_PRICES/CARBON_INTENSITY in "
+            f"{HTML_PATH.name}; the efficiency figure needs both."
+        )
+
+    new_block = "\n".join([js_columns, js_numeric, js_snaps, js_default, js_data, carried.group()])
     if not pattern.search(text):
         raise SystemExit("Could not locate COLUMNS/NUMERIC_COLS/DATA block in HTML.")
     text = pattern.sub(new_block, text, count=1)
