@@ -17,3 +17,9 @@ benchmark results. The committed page is regenerated from
 ``results/models/*.csv``, ``results/profiles/*.csv``,
 ``results/intrinsic_dim/*.csv``, and the archived JSON snapshots with
 :file:`experiments/scripts/regen_results_explorer.py`.
+
+The page is regenerated automatically: the ``Results explorer`` GitHub Actions
+workflow reruns the script and commits the refreshed page whenever a results
+CSV lands on ``main``, so the explorer never lags behind ``results/``.  On a
+pull request the same workflow regenerates the page and uploads it as a
+build artifact for preview instead of requiring it to be committed.

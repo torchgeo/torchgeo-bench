@@ -19,7 +19,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = ROOT / "results" / "models"
 # Profile/intrinsic_dim rows live in their own per-model files, separate
 # from the knn5/linear/seg metrics files under RESULTS_DIR.
@@ -131,6 +131,41 @@ def _snapshot_label_sort_key(label: str) -> tuple:
     return (m.group(1) if m else "", label)
 
 
+def _mean_rank_leader(rows: list[dict], method: str) -> str | None:
+    """Model with the best mean rank for ``method``, over models covering every dataset.
+
+    Ranking (rather than mean metric) keeps datasets on different metric scales
+    comparable; restricting to full coverage stops a model that ran on one easy
+    dataset from outranking one evaluated everywhere.
+    """
+    best: dict[str, dict[str, float]] = {}
+    for r in rows:
+        if r["method"] != method or r["metric_value"] is None or not r["name"]:
+            continue
+        scores = best.setdefault(r["dataset"], {})
+        scores[r["name"]] = max(r["metric_value"], scores.get(r["name"], r["metric_value"]))
+    if not best:
+        return None
+    ranks: dict[str, list[int]] = {}
+    for scores in best.values():
+        for rank, (name, _) in enumerate(sorted(scores.items(), key=lambda kv: -kv[1]), 1):
+            ranks.setdefault(name, []).append(rank)
+    full = {n: sum(v) / len(v) for n, v in ranks.items() if len(v) == len(best)}
+    return min(full, key=lambda n: full[n]) if full else None
+
+
+def _sub_once(pattern: str, repl: str, text: str) -> str:
+    """Substitute exactly once, failing loudly if the anchor has drifted.
+
+    A silent no-match here leaves stale copy on a page whose data has been
+    refreshed -- the failure mode that left the masthead quoting May's numbers.
+    """
+    out, n = re.subn(pattern, lambda _: repl, text, count=1, flags=re.DOTALL)
+    if n != 1:
+        raise SystemExit(f"Could not locate {pattern!r} in {HTML_PATH.name}")
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -185,48 +220,61 @@ def main() -> None:
         raise SystemExit("Could not locate COLUMNS/NUMERIC_COLS/DATA block in HTML.")
     text = pattern.sub(new_block, text, count=1)
 
-    text = re.sub(
-        r'<h1 class="headline" id="headline-text">[^<]*</h1>',
+    knn_leader = _mean_rank_leader(accuracy_rows, "knn5")
+    linear_leader = _mean_rank_leader(accuracy_rows, "linear")
+    if knn_leader and linear_leader:
+        if knn_leader == linear_leader:
+            lede = f"{knn_leader} leads both KNN-5 and linear probing"
+        else:
+            lede = f"{knn_leader} leads KNN-5, {linear_leader} leads linear probing"
+        detail = (
+            f"<em>{knn_leader}</em> has the best mean rank under KNN-5 and "
+            f"<em>{linear_leader}</em> under linear probing"
+        )
+    else:
+        lede = f"{n_models} frozen backbones on {n_datasets} GeoBench datasets"
+        detail = "no model is evaluated on every dataset, so no overall rank is reported"
+
+    text = _sub_once(
+        r'<h1 class="headline" id="headline-text">.*?</h1>',
         (
-            '<h1 class="headline" id="headline-text">'
-            "Four winners on GeoBench: Panopticon on KNN, DINOv3-SAT and "
-            "OlmoEarth on linear, Terramind on multispectral"
-            "</h1>"
+            f'<h1 class="headline" id="headline-text">'
+            f"{lede} across {n_datasets} GeoBench classification datasets"
+            f"</h1>"
         ),
         text,
     )
-    text = re.sub(
-        r'<p class="standfirst" id="standfirst-text">[^<]*<em>[^<]*</em>[^<]*</p>',
+    text = _sub_once(
+        r'<p class="standfirst" id="standfirst-text">.*?</p>',
         (
             f'<p class="standfirst" id="standfirst-text">'
             f"Across {len(latest_rows):,} measurements on {n_datasets} GeoBench "
-            f"classification datasets and {n_models} frozen-backbone variants, four "
-            f"distinct leaders emerge: <em>Panopticon</em> tops KNN-5 on most datasets, "
-            f"<em>DINOv3-SAT</em> remains the strongest RGB-only linear probe, "
-            f"<em>OlmoEarth</em> reaches 97.8% on <em>eurosat-spatial</em> and "
-            f"97.6% on <em>m-eurosat</em>, and <em>Terramind</em> wins the "
-            f"multispectral datasets when all MSI bands are available."
-            "</p>"
+            f"classification datasets and {n_models} frozen-backbone variants, "
+            f"{detail}. The highest single score is "
+            f"{best['metric_value']:.3f} ({best['metric_name']}) for "
+            f"<em>{best['name']}</em> on <em>{best['dataset']}</em>."
+            f"</p>"
         ),
         text,
     )
-    text = re.sub(
+    text = _sub_once(
         r'<b id="row-shown">\d+</b> of <b id="row-total">\d+</b>',
         f'<b id="row-shown">{len(latest_rows)}</b> of <b id="row-total">{len(latest_rows)}</b>',
         text,
     )
-    text = re.sub(
+    text = _sub_once(
         r"Source: <b>[^<]*</b>",
         "Source: <b>results/{models,profiles,intrinsic_dim}/*.csv</b>",
         text,
     )
-    text = re.sub(
+    text = _sub_once(
         r"Published <b>[^<]*</b>",
         f"Published <b>{date.today().strftime('%-d %B %Y')}</b>",
         text,
     )
-    text = re.sub(
-        r"documented in <code>[^<]*</code>\. Confidence intervals are 95%\s+bootstrap on test predictions \(default \d+ resamples\)\.",
+    text = _sub_once(
+        r"documented in <code>[^<]*</code>\.\s+Confidence intervals\s+are 95%\s+bootstrap"
+        r"\s+on test predictions\s+\(default \d+ resamples\)\.",
         (
             "documented in <code>docs/user/methodology.rst</code>. "
             "Confidence intervals are 95% bootstrap on test predictions "
