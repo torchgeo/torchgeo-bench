@@ -9,6 +9,7 @@ from .olmoearth import OlmoEarthBenchModel
 from .rcf import RCFBench, RCFModelSettings
 from .sam3 import SAM3Encoder
 from .segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead, PatchLinearHead
+from .terrafm import TerraFMBench
 from .terratorch_models import (
     TerraTorchClayBench,
     TerraTorchPrithviBench,
@@ -42,6 +43,7 @@ __all__: list[str] = [
     "RCFBench",
     "RCFModelSettings",
     "SAM3Encoder",
+    "TerraFMBench",
     "TerraTorchClayBench",
     "TerraTorchPrithviBench",
     "TerraTorchTerraMindBench",

@@ -1,0 +1,13 @@
+# TerraFM ViT-Base, Sentinel-1 VV/VH stem. Supply a local checkpoint path.
+_target_: torchgeo_bench.models.TerraFMBench
+variant: base
+modality: s1
+pretrained: true
+checkpoint_path: null
+checkpoint_md5: null
+target_size: 224
+pool: cls
+name: terrafm_base_s1
+eval:
+  segmentation:
+    layers: ["blocks.11", "blocks.8", "blocks.5", "blocks.2"]
