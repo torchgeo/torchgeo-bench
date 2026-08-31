@@ -1,0 +1,14 @@
+# TerraFM ViT-Base, Sentinel-2 L1C 12-band stem. Supply a local checkpoint path.
+_target_: torchgeo_bench.models.TerraFMBench
+variant: base
+modality: s2
+is_l2a: false
+pretrained: true
+checkpoint_path: null
+checkpoint_md5: null
+target_size: 224
+pool: cls
+name: terrafm_base_s2_l1c
+eval:
+  segmentation:
+    layers: ["blocks.11", "blocks.8", "blocks.5", "blocks.2"]
