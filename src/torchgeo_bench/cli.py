@@ -85,6 +85,15 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--list-models", action="store_true", help="List available model configs and exit"
     )
+    run.add_argument(
+        "--list-datasets", action="store_true", help="List available dataset names and exit"
+    )
+    run.add_argument(
+        "--model-help",
+        metavar="MODEL",
+        default=None,
+        help="Print a model config's YAML (available key=value overrides) and exit",
+    )
     _add_override_arg(run)
     run.set_defaults(func=_cmd_run)
 
@@ -188,6 +197,19 @@ def _cmd_run(args: argparse.Namespace) -> None:
         from torchgeo_bench.config import list_model_configs
 
         print("\n".join(list_model_configs()))
+        return
+    if args.list_datasets:
+        from torchgeo_bench.datasets import list_datasets
+
+        print("\n".join(list_datasets()))
+        return
+    if args.model_help is not None:
+        from torchgeo_bench.config import model_config_path
+
+        try:
+            print(model_config_path(args.model_help).read_text(), end="")
+        except ValueError as err:
+            raise SystemExit(f"error: {err}") from err
         return
     cfg = _compose(args, config_name="config", default_model="rcf")
     if args.print_config:

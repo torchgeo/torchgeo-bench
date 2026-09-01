@@ -37,6 +37,13 @@ def list_model_configs() -> list[str]:
     )
 
 
+def model_config_path(name: str) -> Path:
+    """Return the YAML file backing ``model=<name>`` / ``--model <name>``."""
+    if name not in list_model_configs():
+        raise ValueError(f"Unknown model config '{name}'. {_closest_models(name)}")
+    return CONF_DIR / "model" / f"{name}.yaml"
+
+
 def _closest_models(name: str, n: int = 5) -> str:
     """Suggestion fragment naming the closest config names, or '' if none are close."""
     import difflib
