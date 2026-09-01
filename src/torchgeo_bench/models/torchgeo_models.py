@@ -279,12 +279,6 @@ class _TorchGeoBackboneBench(BenchModel):
             raise ValueError(
                 f"input_unit_check must be one of warn|ignore|error, got {input_unit_check!r}."
             )
-        # weights_input_unit describes the pretrained Normalize bundled with
-        # the torchgeo weights, which only runs under model_native -- so a
-        # mismatch against it is only meaningful (and detect_input_unit's
-        # single-scale assumption only holds) there. Multi-sensor band sets
-        # (e.g. benv2/so2sat's S1+S2 "all") have no single input unit, which
-        # must not block bandspec_zscore/identity, which never consult it.
         native = self.normalization is NormalizationStrategy.MODEL_NATIVE
         if native and normalization_input_unit is None:
             _warn_unit_mismatch(

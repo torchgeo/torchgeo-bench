@@ -282,10 +282,7 @@ def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
 def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mixed-sensor band sets (e.g. benv2/so2sat's S1+S2 "all") have no single
-    input unit. detect_input_unit() only feeds a model_native unit conversion,
-    so construction under bandspec_zscore/identity must not eagerly call it --
-    it would raise on the very datasets those strategies are meant to run on."""
+    """Mixed-sensor band sets have no single input unit; must not eagerly call detect_input_unit() outside model_native."""
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     monkeypatch.setattr(
@@ -308,12 +305,7 @@ def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
 def test_torchgeo_backbone_skips_unit_mismatch_warning_outside_model_native(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Same mixed-sensor gap via the other call site: _warn_unit_mismatch's
-    own detect_input_unit() call is only meaningful under model_native (it
-    checks against weights_input_unit, which only governs the pretrained
-    Normalize that model_native applies), so it must not run -- and must not
-    raise on a mixed-sensor band set -- under bandspec_zscore/identity, even
-    with the default (non-"ignore") input_unit_check."""
+    """Same gap in _warn_unit_mismatch's own detect_input_unit() call: must not run outside model_native."""
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _TinyResNet(nn.Module):
@@ -470,11 +462,7 @@ def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_resolve_panopticon_chn_ids_sar_and_optical() -> None:
-    """Panopticon supports SAR channels via a negative chn_id convention
-    (github.com/Panopticon-FM/panopticon .../satellites/sentinel1.yaml), not
-    a real wavelength -- the generic wavelengths_um() helper doesn't know
-    this and raises on SAR bands, which used to break every "all"-bands
-    dataset with a Sentinel-1 component (benv2, so2sat, treesatai)."""
+    """SAR channels resolve to Panopticon's negative chn_id codes, not a wavelength."""
     bands = _s2_multispectral_bands()[:1] + [_sar_band("vv"), _sar_band("vh")]
     ids = _resolve_panopticon_chn_ids(bands)
     assert ids[0] == pytest.approx(bands[0].wavelength_um * 1000.0)
