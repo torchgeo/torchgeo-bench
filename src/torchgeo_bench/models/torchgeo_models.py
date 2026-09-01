@@ -978,6 +978,44 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
         return self.backbone.s2_GAP_FFN(encodings.mean(dim=1))
 
 
+# Polarization -> Panopticon's negative SAR channel-id convention (orbit-
+# agnostic group; torchgeo-bench's BandSpecs carry no per-sample orbit
+# direction). See github.com/Panopticon-FM/panopticon/blob/main/dinov2/
+# configs/data/satellites/sentinel1.yaml.
+_PANOPTICON_SAR_MU: dict[str, float] = {"vv": -1.0, "vh": -2.0, "hh": -3.0, "hv": -4.0}
+
+
+def _resolve_panopticon_chn_ids(bands: list[BandSpec]) -> list[float]:
+    """Return one Panopticon ``chn_id`` (nm wavelength, or negative SAR code) per band.
+
+    Panopticon's ``chn_ids`` encode optical wavelength in nm for optical
+    channels and a negative integer polarization code for SAR channels (see
+    :data:`_PANOPTICON_SAR_MU`), per its own forward-pass docstring. Optical
+    bands with no declared ``wavelength_um`` fall back to the true Sentinel-2
+    centre wavelength for that canonical band name, mirroring DOFA's fallback
+    (:func:`_resolve_dofa_wavelengths`).
+    """
+    from ._band_mapping import S2_WAVELENGTHS_UM, canonical_band_name
+
+    def _resolved(b: BandSpec) -> float | None:
+        if b.sensor in _SAR_SENSORS:
+            return _PANOPTICON_SAR_MU.get(canonical_band_name(b.name))
+        if b.wavelength_um is not None:
+            return float(b.wavelength_um) * 1000.0
+        wl = S2_WAVELENGTHS_UM.get(canonical_band_name(b.name))
+        return wl * 1000.0 if wl is not None else None
+
+    resolved = [_resolved(b) for b in bands]
+    missing = [b.name for b, w in zip(bands, resolved, strict=True) if w is None]
+    if missing:
+        raise ValueError(
+            f"Panopticon chn_ids missing for {missing}: SAR bands must be one of "
+            f"{sorted(_PANOPTICON_SAR_MU)}, and optical bands need a `wavelength_um` "
+            f"or a known Sentinel-2 canonical name."
+        )
+    return [w for w in resolved if w is not None]
+
+
 class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
     """Panopticon ViT-B/14 — per-channel wavelength tokens (nm) from BandSpec."""
 
@@ -1006,10 +1044,8 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
             input_unit_check=input_unit_check,
             **_kwargs,
         )
-        from ._band_mapping import wavelengths_um
-
-        wls_nm = [w * 1000.0 for w in wavelengths_um(bands)]
-        self.register_buffer("_chn_ids", torch.tensor(wls_nm, dtype=torch.float32))
+        chn_ids = _resolve_panopticon_chn_ids(bands)
+        self.register_buffer("_chn_ids", torch.tensor(chn_ids, dtype=torch.float32))
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:

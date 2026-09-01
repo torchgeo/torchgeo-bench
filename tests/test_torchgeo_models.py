@@ -22,6 +22,7 @@ from torchgeo_bench.models.torchgeo_models import (
     _adapt_first_conv,
     _extract_normalize_transforms,
     _resolve_dofa_wavelengths,
+    _resolve_panopticon_chn_ids,
     _resolve_torchgeo_factory,
     _resolve_torchgeo_weights,
     _warn_unit_mismatch,
@@ -466,6 +467,24 @@ def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> N
     assert out.ndim == 2
     assert out.shape == (2, 12)
     assert torch.isfinite(out).all()
+
+
+def test_resolve_panopticon_chn_ids_sar_and_optical() -> None:
+    """Panopticon supports SAR channels via a negative chn_id convention
+    (github.com/Panopticon-FM/panopticon .../satellites/sentinel1.yaml), not
+    a real wavelength -- the generic wavelengths_um() helper doesn't know
+    this and raises on SAR bands, which used to break every "all"-bands
+    dataset with a Sentinel-1 component (benv2, so2sat, treesatai)."""
+    bands = _s2_multispectral_bands()[:1] + [_sar_band("vv"), _sar_band("vh")]
+    ids = _resolve_panopticon_chn_ids(bands)
+    assert ids[0] == pytest.approx(bands[0].wavelength_um * 1000.0)
+    assert ids[1:] == [-1.0, -2.0]
+
+
+def test_resolve_panopticon_chn_ids_raises_for_unknown_polarization() -> None:
+    bad = BandSpec(sensor="s1", name="xx", source_name="XX", mean=0.0, std=1.0, min=-1.0, max=1.0)
+    with pytest.raises(ValueError, match="chn_ids missing"):
+        _resolve_panopticon_chn_ids([bad])
 
 
 def test_torchgeo_panopticon_model_native_raises(monkeypatch: pytest.MonkeyPatch) -> None:
