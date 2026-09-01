@@ -117,12 +117,16 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
     assert set(rows["pool"]) == {"cls", "mean"}
 
 
-def test_knn_row_preserves_metrics_and_metadata(tmp_path: Path) -> None:
+@pytest.mark.parametrize("normalization", ["bandspec_zscore", "model_native"])
+def test_knn_row_preserves_metrics_and_metadata(tmp_path: Path, normalization: str) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out, overrides={"classification": {"methods": ["knn"]}})
+    model = _chainable_model_mock()
+    model.effective_normalization = normalization
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.build_model", return_value=model),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -144,6 +148,7 @@ def test_knn_row_preserves_metrics_and_metadata(tmp_path: Path) -> None:
     assert row["num_classes"] == 10
     assert row["partition"] == resolved.input.partition
     assert row["bands"] == resolved.input.bands
+    assert row["normalization"] == normalization
     assert row["config_hash"] == _hash_for(cfg)
 
 

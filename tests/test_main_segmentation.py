@@ -108,7 +108,7 @@ def test_dataset_eval_resolution_preserves_explicit_values_and_original_config(
     loaders = _synthetic_segmentation_loaders()
     monkeypatch.setattr("torchgeo_bench.main.get_datasets", lambda **_kwargs: loaders)
     monkeypatch.setattr(
-        "torchgeo_bench.main.instantiate_dataset_model", lambda *_args: torch.nn.Identity()
+        "torchgeo_bench.main.instantiate_dataset_model", lambda *_args: _chainable_model_mock()
     )
     monkeypatch.setattr("torchgeo_bench.main.run_segmentation", capture_eval)
 

@@ -923,6 +923,7 @@ def run_dataset(
     model = instantiate_dataset_model(
         cfg, model_cfg, bench, train_dataset, torch.device(cfg.runtime.device)
     )
+    common_meta["normalization"] = model.effective_normalization
     loaders = LoaderSplits(train_loader, val_loader, test_loader)
     if ds_cls.task == "segmentation":
         for rows in run_segmentation(cfg, model, loaders, common_meta):
