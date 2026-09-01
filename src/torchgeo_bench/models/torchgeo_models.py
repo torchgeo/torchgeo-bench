@@ -290,10 +290,19 @@ class _TorchGeoBackboneBench(BenchModel):
         # delivers the expected scale.  Without this, e.g.,
         # resnet50_s2rgb_moco × so2sat collapses to chance because the
         # Normalize ``/10000`` is applied to already-reflectance ([0, 2.8])
-        # values, producing near-zero inputs.
-        self._dataset_input_unit = detect_input_unit(self.bands)
+        # values, producing near-zero inputs.  Only used under model_native
+        # (see normalize_inputs below), so only detected there -- multi-sensor
+        # band sets (e.g. benv2/so2sat's S1+S2 "all") can have no single
+        # input unit, which must not block bandspec_zscore/identity, which
+        # never consult it.
         self._weights_target_unit: InputUnit | None = _UNIT_EXPECTED_SOURCE.get(
             self.normalization_input_unit or ""
+        )
+        native = self.normalization is NormalizationStrategy.MODEL_NATIVE
+        self._dataset_input_unit = (
+            detect_input_unit(self.bands)
+            if native and self._weights_target_unit is not None
+            else None
         )
 
     def _tiled_normalize(self, in_chans: int) -> nn.Sequential | None:

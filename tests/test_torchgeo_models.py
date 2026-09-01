@@ -278,6 +278,32 @@ def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
     assert wavelengths[:3] == [b.wavelength_um for b in bands[:3]]
 
 
+def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed-sensor band sets (e.g. benv2/so2sat's S1+S2 "all") have no single
+    input unit. detect_input_unit() only feeds a model_native unit conversion,
+    so construction under bandspec_zscore/identity must not eagerly call it --
+    it would raise on the very datasets those strategies are meant to run on."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: nn.Identity()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+    )
+
+    bands = _s2_multispectral_bands() + [_sar_band("vh"), _sar_band("vv")]
+    for normalization in ("bandspec_zscore", "identity"):
+        model = TorchGeoDOFABench(
+            bands=bands, normalization=normalization, input_unit_check="ignore"
+        )
+        assert model._dataset_input_unit is None
+
+
 def test_dofa_wavelengths_still_raises_for_non_sar_missing_wavelength() -> None:
     """A non-SAR band with no wavelength and no known S2 canonical name is a
     real data-declaration gap, not something DOFA has a default for."""
