@@ -19,6 +19,8 @@ experiments/scripts/*
 !experiments/scripts/repack_geobench_v1.py
 !experiments/scripts/tune_dataloader.py
 !experiments/scripts/regen_results_explorer.py
+!experiments/scripts/regen_leaderboard.py
+!experiments/scripts/ranking_explorer.template.html
 !experiments/scripts/extract_dataset_geography.py
 !experiments/scripts/test_knn_gpu_smoke.py
 !experiments/scripts/cleanlab_extract_probs.py
@@ -129,7 +131,6 @@ data/
 !results/intrinsic_dim/*.csv
 !results/legacy/
 !results/legacy/*.csv
-!results/coordbench_results.csv
 !conf/**/*.json
 !**/band_stats.json
 !**/normalizer.json
@@ -164,3 +165,6 @@ site/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# tracked benchmark results
+!coordbench-results.csv
