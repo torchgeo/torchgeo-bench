@@ -279,26 +279,27 @@ class _TorchGeoBackboneBench(BenchModel):
             raise ValueError(
                 f"input_unit_check must be one of warn|ignore|error, got {input_unit_check!r}."
             )
-        if normalization_input_unit is None:
+        # weights_input_unit describes the pretrained Normalize bundled with
+        # the torchgeo weights, which only runs under model_native -- so a
+        # mismatch against it is only meaningful (and detect_input_unit's
+        # single-scale assumption only holds) there. Multi-sensor band sets
+        # (e.g. benv2/so2sat's S1+S2 "all") have no single input unit, which
+        # must not block bandspec_zscore/identity, which never consult it.
+        native = self.normalization is NormalizationStrategy.MODEL_NATIVE
+        if native and normalization_input_unit is None:
             _warn_unit_mismatch(
                 type(self).__name__, self.weights_input_unit, bands, input_unit_check
             )
 
-        # Pre-compute the unit conversion needed to bring dataset inputs
-        # into the scale the weights' Normalize was calibrated for.  No-op
-        # when the wrapper doesn't declare a unit, or the dataset already
-        # delivers the expected scale.  Without this, e.g.,
-        # resnet50_s2rgb_moco × so2sat collapses to chance because the
-        # Normalize ``/10000`` is applied to already-reflectance ([0, 2.8])
-        # values, producing near-zero inputs.  Only used under model_native
-        # (see normalize_inputs below), so only detected there -- multi-sensor
-        # band sets (e.g. benv2/so2sat's S1+S2 "all") can have no single
-        # input unit, which must not block bandspec_zscore/identity, which
-        # never consult it.
+        # Pre-compute the unit conversion needed to bring dataset inputs into
+        # the scale the weights' Normalize was calibrated for.  No-op when the
+        # wrapper doesn't declare a unit, or the dataset already delivers the
+        # expected scale.  Without this, e.g., resnet50_s2rgb_moco × so2sat
+        # collapses to chance because the Normalize ``/10000`` is applied to
+        # already-reflectance ([0, 2.8]) values, producing near-zero inputs.
         self._weights_target_unit: InputUnit | None = _UNIT_EXPECTED_SOURCE.get(
             self.normalization_input_unit or ""
         )
-        native = self.normalization is NormalizationStrategy.MODEL_NATIVE
         self._dataset_input_unit = (
             detect_input_unit(self.bands)
             if native and self._weights_target_unit is not None

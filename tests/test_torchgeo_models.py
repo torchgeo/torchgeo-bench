@@ -304,6 +304,42 @@ def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
         assert model._dataset_input_unit is None
 
 
+def test_torchgeo_backbone_skips_unit_mismatch_warning_outside_model_native(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same mixed-sensor gap via the other call site: _warn_unit_mismatch's
+    own detect_input_unit() call is only meaningful under model_native (it
+    checks against weights_input_unit, which only governs the pretrained
+    Normalize that model_native applies), so it must not run -- and must not
+    raise on a mixed-sensor band set -- under bandspec_zscore/identity, even
+    with the default (non-"ignore") input_unit_check."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(14, 8, 3, padding=1)
+            self.pool = nn.AdaptiveAvgPool2d(1)
+            self.fc = nn.Identity()
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return self.pool(self.conv1(images)).flatten(1)
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+    )
+
+    bands = _s2_multispectral_bands() + [_sar_band("vh"), _sar_band("vv")]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore")
+
+
 def test_dofa_wavelengths_still_raises_for_non_sar_missing_wavelength() -> None:
     """A non-SAR band with no wavelength and no known S2 canonical name is a
     real data-declaration gap, not something DOFA has a default for."""
