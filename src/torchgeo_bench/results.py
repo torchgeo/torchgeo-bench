@@ -24,6 +24,8 @@ import numpy as np
 import pandas as pd
 import torch
 
+from torchgeo_bench.resume import KEY_COLS, _canonical_key_cell
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_RESULTS_DIR = "results/models"
@@ -33,6 +35,14 @@ DEFAULT_RESULTS_DIR = "results/models"
 # sweeps rewrite.
 DEFAULT_PROFILE_RESULTS_DIR = "results/profiles"
 DEFAULT_INTRINSIC_DIM_RESULTS_DIR = "results/intrinsic_dim"
+
+# The resume key minus ``config_hash`` (that column is exactly what fragments
+# legacy rows, written before it existed, from later hashed reruns of the same
+# measurement), plus ``metric_name`` (one run emits several metric rows under
+# the same resume key) and ``seed`` (absent from the resume key, but different
+# seeds are different measurements -- without it a multi-seed sweep would
+# collapse to a single arbitrary seed).
+DEDUP_KEY_COLS = tuple(c for c in KEY_COLS if c != "config_hash") + ("metric_name", "seed")
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -78,7 +88,48 @@ def load_results(
     if not frames:
         logger.warning("No results found under %s", directory)
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True, sort=False)
+    df = pd.concat(frames, ignore_index=True, sort=False)
+    df = _relabel_olmoearth_normalization(df)
+    return _dedup_results(df)
+
+
+def _relabel_olmoearth_normalization(df: pd.DataFrame) -> pd.DataFrame:
+    """Relabel OlmoEarth rows whose ``normalization`` does not describe the run.
+
+    OlmoEarth sets ``handles_own_normalization = True`` and overrides
+    ``normalize_inputs`` to identity, so ``dataset.normalization`` never reaches
+    its inputs. Rows are nonetheless stamped with whatever the config asked for,
+    which makes ``bandspec_zscore`` and ``model_native`` runs of the same
+    evaluation look like two measurements when they are bit-identical.
+    """
+    if "name" not in df.columns or "normalization" not in df.columns:
+        return df
+    is_olmoearth = df["name"].astype(str).str.startswith("olmoearth")
+    is_zscore = df["normalization"].astype(str) == "bandspec_zscore"
+    df.loc[is_olmoearth & is_zscore, "normalization"] = "model_native"
+    return df
+
+
+def _dedup_results(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop duplicate measurement rows left by the resume-hash gap.
+
+    ``config_hash`` was added after many rows were already written, and it also
+    covers settings that cannot change a metric (``num_workers``,
+    ``batch_size``, ``device``), so a rerun under a different one of those
+    misses the resume key and appends instead of skipping. Within each "same
+    measurement" group (:data:`DEDUP_KEY_COLS`), a hashed row wins over a
+    legacy unhashed one; among hashed rows the last appended wins.
+    """
+    missing = [c for c in DEDUP_KEY_COLS if c not in df.columns]
+    if missing or "config_hash" not in df.columns:
+        return df
+    has_hash = df["config_hash"].fillna("").astype(str).str.len() > 0
+    key = df[list(DEDUP_KEY_COLS)].apply(
+        lambda row: tuple(_canonical_key_cell(v) for v in row), axis=1
+    )
+    order = pd.DataFrame({"key": key, "has_hash": has_hash, "pos": range(len(df))})
+    keep = order.sort_values(["has_hash", "pos"]).groupby("key", sort=False).tail(1)["pos"]
+    return df.loc[sorted(keep)].reset_index(drop=True)
 
 
 def bootstrap_accuracy(
