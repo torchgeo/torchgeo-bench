@@ -25,6 +25,7 @@ def extract_features(
     device: str | torch.device,
     transforms: object | None = None,
     verbose: bool = True,
+    description: str = "Extracting",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract feature embeddings and labels from a dataloader.
 
@@ -34,6 +35,7 @@ def extract_features(
         device: Device to run inference on.
         transforms: Optional transform applied to images before the model.
         verbose: Whether to display a progress bar.
+        description: Progress bar label.
 
     Returns:
         Tuple of (features, labels) as NumPy arrays.
@@ -42,9 +44,7 @@ def extract_features(
     y_all = []
 
     iterator = (
-        track(dataloader, total=len(dataloader), description="Extracting")
-        if verbose
-        else dataloader
+        track(dataloader, total=len(dataloader), description=description) if verbose else dataloader
     )
 
     for batch in iterator:
