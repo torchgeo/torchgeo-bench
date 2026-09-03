@@ -1,11 +1,13 @@
-"""Tests for ``torchgeo_bench.main.append_rows_atomic`` (CSV writer)."""
+"""Tests for atomic result CSV writes."""
 
 import csv
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import pytest
 
-from torchgeo_bench.main import _completed_run_keys, _profile_metric_names, append_rows_atomic
+from torchgeo_bench.main import _completed_run_keys, _profile_metric_names
+from torchgeo_bench.results import ResultSchemaError, append_rows_atomic, load_results
 
 
 def _read_csv(path: str) -> list[list[str]]:
@@ -35,36 +37,24 @@ def test_append_same_schema_does_not_duplicate_header(tmp_path):
     ]
 
 
-def test_schema_drift_added_column_rewrites_with_unioned_header(tmp_path):
-    """Regression: appending a row with an extra column must not stuff the
-    new value into an unnamed position. The file should be rewritten with
-    the unioned header and the legacy row should get an empty value for the
-    new column."""
+def test_schema_drift_fails_without_rewriting_existing_file(tmp_path):
     path = str(tmp_path / "out.csv")
     append_rows_atomic(path, [{"a": 1, "b": 2}])
-    # New column 'c' appears — mirrors EvaluationResult gaining `bands`.
-    append_rows_atomic(path, [{"a": 3, "b": 4, "c": "rgb"}])
+    original = (tmp_path / "out.csv").read_bytes()
 
-    rows = _read_csv(path)
-    assert rows[0] == ["a", "b", "c"], "header must include the new column"
-    assert rows[1] == ["1", "2", ""], "legacy row gets empty value for new column"
-    assert rows[2] == ["3", "4", "rgb"], "new row is fully populated"
-    # Every data row has the same number of fields as the header.
-    assert all(len(r) == len(rows[0]) for r in rows)
+    with pytest.raises(ResultSchemaError, match="schema mismatch"):
+        append_rows_atomic(path, [{"a": 3, "b": 4, "c": "rgb"}])
+
+    assert (tmp_path / "out.csv").read_bytes() == original
 
 
-def test_schema_drift_removed_column_keeps_old_values(tmp_path):
-    """If a new write omits a previously-present column, the old column is
-    preserved and new rows get an empty value there."""
+def test_rows_with_different_columns_are_rejected(tmp_path):
     path = str(tmp_path / "out.csv")
-    append_rows_atomic(path, [{"a": 1, "b": 2, "c": "rgb"}])
-    append_rows_atomic(path, [{"a": 3, "b": 4}])
 
-    rows = _read_csv(path)
-    # New row's columns come first, dropped column appended at the end.
-    assert rows[0] == ["a", "b", "c"]
-    assert rows[1] == ["1", "2", "rgb"]
-    assert rows[2] == ["3", "4", ""]
+    with pytest.raises(ResultSchemaError, match="Row 1 columns"):
+        append_rows_atomic(path, [{"a": 1}, {"a": 2, "b": 3}])
+
+    assert not (tmp_path / "out.csv").exists()
 
 
 def test_empty_rows_is_noop(tmp_path):
@@ -72,6 +62,49 @@ def test_empty_rows_is_noop(tmp_path):
     append_rows_atomic(path, [])
     with pytest.raises(FileNotFoundError):
         open(path).close()
+
+
+def test_write_failure_preserves_existing_file(tmp_path, monkeypatch):
+    path = str(tmp_path / "out.csv")
+    append_rows_atomic(path, [{"a": 1, "b": 2}])
+    original = (tmp_path / "out.csv").read_bytes()
+
+    def fail_to_csv(self, file, *args, **kwargs):
+        del self, args, kwargs
+        file.write("partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pd.DataFrame, "to_csv", fail_to_csv)
+    with pytest.raises(OSError, match="disk full"):
+        append_rows_atomic(path, [{"a": 3, "b": 4}])
+
+    assert (tmp_path / "out.csv").read_bytes() == original
+
+
+def test_concurrent_writers_preserve_every_row(tmp_path):
+    path = str(tmp_path / "out.csv")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda value: append_rows_atomic(path, [{"value": value}]), range(20)))
+
+    frame = pd.read_csv(path)
+    assert sorted(frame["value"]) == list(range(20))
+
+
+def test_load_results_reports_malformed_file_path(tmp_path):
+    path = tmp_path / "broken.csv"
+    path.write_bytes(b"\xff")
+
+    with pytest.raises(ResultSchemaError, match=str(path)):
+        load_results(tmp_path)
+
+
+def test_load_results_rejects_mixed_schemas(tmp_path):
+    pd.DataFrame([{"a": 1}]).to_csv(tmp_path / "a.csv", index=False)
+    pd.DataFrame([{"a": 2, "b": 3}]).to_csv(tmp_path / "b.csv", index=False)
+
+    with pytest.raises(ResultSchemaError, match="schema mismatch"):
+        load_results(tmp_path)
 
 
 def test_resume_keys_can_require_metric_name():
