@@ -15,60 +15,27 @@ dataloader overhead. Reports:
 All metrics work without extras.
 """
 
-import contextlib
 import logging
 import time
-from collections.abc import Iterator
 from statistics import median
 
 import torch
-import torch.autograd.graph as autograd_graph
-import torch.utils.module_tracker as module_tracker
 from torch import nn
 
 logger = logging.getLogger(__name__)
 
 
-@contextlib.contextmanager
-def lenient_grad_hooks() -> Iterator[None]:
-    """Let ``module_tracker`` skip its bookkeeping for grad-less tensors.
-
-    ``FlopCounterMode`` counts at the ``TorchDispatchMode`` layer, which
-    never needs ``grad_fn``; only ``module_tracker``'s *per-module
-    attribution* does.  Its forward-pre-hook calls
-    ``register_multi_grad_hook`` on the module inputs, which asserts that
-    every input tensor has a ``grad_fn``.  Models that break the autograd
-    chain inside their forward — ``torchgeo.models.Panopticon`` does, via
-    ``self.conv3d(x.unsqueeze(1))`` in its patch-embed — trip that
-    assertion *before any counting happens*, so all three execution
-    contexts in :func:`_count_gflops` fail identically.
-
-    Swallowing the assertion loses module-level breakdown for those
-    modules, not FLOPs: the dispatch-layer totals are unaffected.
-
-    ``module_tracker`` binds the symbol at import time
-    (``from torch.autograd.graph import register_multi_grad_hook``), so
-    both the source module and that binding have to be patched.
-    """
-    original = autograd_graph.register_multi_grad_hook
-
-    class _NoopHandle:
-        def remove(self) -> None:
-            pass
-
-    def safe(tensors, fn, *args, **kwargs):  # type: ignore[no-untyped-def]
-        try:
-            return original(tensors, fn, *args, **kwargs)
-        except AssertionError:
-            return _NoopHandle()
-
-    autograd_graph.register_multi_grad_hook = safe
-    module_tracker.register_multi_grad_hook = safe
-    try:
-        yield
-    finally:
-        autograd_graph.register_multi_grad_hook = original
-        module_tracker.register_multi_grad_hook = original
+def _is_module_tracker_assertion(error: AssertionError) -> bool:
+    """Return whether an assertion originated in PyTorch's module tracker."""
+    traceback = error.__traceback__
+    while traceback is not None:
+        filename = traceback.tb_frame.f_code.co_filename.replace("\\", "/")
+        if filename.endswith("/torch/utils/module_tracker.py") or filename.endswith(
+            "/torch/autograd/graph.py"
+        ):
+            return True
+        traceback = traceback.tb_next
+    return False
 
 
 def _count_params(model: nn.Module) -> float:
@@ -94,34 +61,25 @@ def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
        ``inference_tensor`` returning a regular tensor.
     3. ``torch.enable_grad`` with ``requires_grad=True`` on the input:
        only path that gives every activation a grad_fn.  Required by
-       ``torchgeo.models.Panopticon``, which inside ``MultiheadAttention``
-       triggers ``register_multi_grad_hook`` on a non-leaf tensor and
-       raises ``AssertionError: Expected gradient function to be set``
-       otherwise.  More expensive (autograd graph is built and then
-       discarded) but still a single forward pass.
+       some models whose internal operations retain an autograd chain.
+       More expensive (autograd graph is built and then discarded) but still
+       a single forward pass.
 
-    Each fallback only triggers on the *specific* exception that earlier
-    fallback can't handle, so genuine bugs in the counter surface
-    instead of being papered over.
-
-    The whole ladder runs inside :func:`lenient_grad_hooks`, which makes
-    ``module_tracker``'s grad_fn assertion non-fatal.  Models that used to
-    exhaust all three tiers (Panopticon) now resolve early; models that
-    already worked are unaffected bit-for-bit, since the patch only
-    intercepts an error path they never take.
+    Each fallback only triggers on the specific exception that the earlier
+    context cannot handle. Unexpected counter or model failures propagate.
     """
     from torch.utils.flop_counter import FlopCounterMode
 
     base = sample[:1]
 
     def _measure_no_autograd(ctx_factory) -> float:
-        with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, ctx_factory():
+        with FlopCounterMode(display=False) as counter, ctx_factory():
             model(base)
         return float(counter.get_total_flops()) / 1e9
 
     def _measure_with_autograd() -> float:
         inp = base.detach().clone().requires_grad_(True)
-        with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, torch.enable_grad():
+        with FlopCounterMode(display=False) as counter, torch.enable_grad():
             model(inp)
         return float(counter.get_total_flops()) / 1e9
 
@@ -139,9 +97,7 @@ def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
     try:
         return _measure_no_autograd(torch.no_grad)
     except AssertionError as exc:
-        # 'Expected gradient function to be set' — the module_tracker
-        # needs activations to have grad_fn; only enable_grad provides that.
-        if "Expected gradient function" not in str(exc):
+        if not _is_module_tracker_assertion(exc):
             raise
         logger.info(
             f"FlopCounterMode no_grad rejected by {type(model).__name__}: "
@@ -150,20 +106,14 @@ def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
     try:
         return _measure_with_autograd()
     except AssertionError as exc:
-        # The lenient patch neutralises every module_tracker assertion we
-        # know of, so reaching here means the assertion no longer comes from
-        # module_tracker; raise a typed signal the caller can record as
-        # gflops=None.
-        if "Expected gradient function" not in str(exc):
+        if not _is_module_tracker_assertion(exc):
             raise
         raise NotImplementedError(
             f"{type(model).__name__} is incompatible with "
             f"torch.utils.flop_counter.FlopCounterMode: all three execution "
-            f"contexts (inference_mode, no_grad, enable_grad+requires_grad) "
-            f"fail with an AssertionError that lenient_grad_hooks() does not "
-            f"intercept, so it does not originate from module_tracker's "
-            f"grad_fn bookkeeping.  GFLOPs cannot be measured for this model "
-            f"with the current tooling."
+            "contexts (inference_mode, no_grad, enable_grad+requires_grad) "
+            "failed because an input lacks a gradient function. GFLOPs cannot "
+            "be measured for this model with the current public API."
         ) from exc
 
 

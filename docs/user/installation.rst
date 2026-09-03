@@ -78,7 +78,6 @@ Extra             Pulls in
 ``id``            ``torchid`` for intrinsic-dimension metrics (Python ≥ 3.13 only)
 ``olmoearth``     ``olmoearth-pretrain-minimal`` for the OlmoEarth backbone
 ``sam3``          ``transformers`` for the SAM 3 encoder
-``terratorch``    ``terratorch`` for TerraTorch backbones
 ``viz``           ``matplotlib``, ``pillow`` for segmentation visualisations
 ``all``           every extra above **except** ``cuda`` (FAISS conflict)
 ================  ==============================================================

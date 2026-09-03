@@ -28,7 +28,6 @@ from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.model_profile import (
     _count_gflops,
     _count_params,
-    lenient_grad_hooks,
     measure_profile,
 )
 from torchgeo_bench.results import append_rows_atomic
@@ -38,21 +37,6 @@ from torchgeo_bench.utils import resolve_device
 warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
 logger = logging.getLogger(__name__)
-
-# TerraMind carries the band configuration in the *model config*, not just in
-# the tensor shape: TerraTorchTerraMindBench takes both `bands` and `modality`,
-# and the modality selects which pretrained tokenizer (and which band table and
-# normalization statistics) the input is mapped through.  The `_rgb` and
-# S2L2A configs are therefore one model at two points on the band axis, not two
-# models — they are emitted under the merged name with `band_config` telling
-# them apart.  Each config is only ever measured at its matching band config.
-_MODALITY_FOR_BAND_CONFIG = {"rgb": "RGB", "s2": "S2L2A"}
-_TERRAMIND_MERGED_NAME = {
-    "tt_terramind_v1_base": "tt_terramind_v1_base",
-    "tt_terramind_v1_base_rgb": "tt_terramind_v1_base",
-    "tt_terramind_v1_large": "tt_terramind_v1_large",
-    "tt_terramind_v1_large_rgb": "tt_terramind_v1_large",
-}
 
 
 def _load_completed(path: str) -> frozenset[tuple]:
@@ -79,10 +63,6 @@ def _load_completed(path: str) -> frozenset[tuple]:
         return frozenset()
 
 
-def _is_terramind(cfg_model: DictConfig) -> bool:
-    return "TerraMind" in str(cfg_model._target_)
-
-
 # A band incompatibility is identified by message, not by exception type alone.
 # `isinstance(exc, ValueError)` is far too wide: omegaconf's
 # InterpolationKeyError, ValidationError, UnsupportedValueType and
@@ -93,8 +73,6 @@ _BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
     # torchgeo_bench.models._band_mapping
     "missing required model band",
     "none of the target bands",
-    # TerraMind's modality/band-config disagreement, raised in _build_model
-    "does not match band config",
     # third-party stems that validate channel count themselves (torchgeo's
     # fixed-channel checkpoints, timm patch-embed).  Deliberately *not*
     # included: "images has N channels but src_bands has M entries" from
@@ -145,21 +123,6 @@ def _build_model(
     Those raise ``ValueError`` and are skipped with a warning, mirroring
     ``seg_corruption_pipeline``.
     """
-    if _is_terramind(cfg_model):
-        # Each TerraMind config declares its own modality and is only ever
-        # measured at the matching band config (enforced by the caller), so
-        # the declared modality is used as-is rather than overridden.  Assert
-        # the agreement here too: pairing S2RGB with 12 channels is the one
-        # failure mode that yields a plausible-looking wrong number instead of
-        # an exception.
-        declared = str(cfg_model.get("modality", "S2L2A"))
-        expected = _MODALITY_FOR_BAND_CONFIG[band_config]
-        if declared != expected:
-            raise ValueError(
-                f"TerraMind modality {declared!r} does not match band config "
-                f"{band_config!r} ({len(band_specs)} channels, expects {expected!r}). "
-                f"Measuring this pair would map through the wrong band table."
-            )
     try:
         return instantiate(cfg_model, bands=band_specs, normalization=normalization)
     except Exception as exc:
@@ -193,10 +156,9 @@ def _measure_backbone(
     while True:
         try:
             x = torch.randn(batch_size, n_channels, image_size, image_size, device=device)
-            with lenient_grad_hooks():
-                return measure_profile(
-                    model, x, device, n_warmup=n_warmup, n_measure=n_measure
-                ), batch_size
+            return measure_profile(
+                model, x, device, n_warmup=n_warmup, n_measure=n_measure
+            ), batch_size
         except torch.cuda.OutOfMemoryError:
             if batch_size <= 1:
                 raise
@@ -302,7 +264,7 @@ def _seg_head_gflops(
     # batch-1 here, so hand it straight through.
     from torch.utils.flop_counter import FlopCounterMode
 
-    with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, torch.inference_mode():
+    with FlopCounterMode(display=False) as counter, torch.inference_mode():
         wrapper(features)
     return float(counter.get_total_flops()) / 1e9
 
@@ -336,7 +298,6 @@ def _flops_row(
         "peak_gpu_mem_gb": None,
         "reserved_gpu_mem_gb": None,
         "timing_batch_size": None,
-        "lenient_grad_hooks": True,
         "measured_at": _now(),
     }
     row.update(values)
@@ -353,9 +314,7 @@ def main(cfg: DictConfig) -> None:
     normalization = str(cfg.normalization)
     model_target = str(cfg.model._target_)
     config_name = str(cfg.model.get("name", model_target.split(".")[-1]))
-    # TerraMind's _rgb / non-_rgb configs are the same model at two points on
-    # the band axis, so they report under one merged name.
-    model_name = _TERRAMIND_MERGED_NAME.get(config_name, config_name)
+    model_name = config_name
 
     ds_cls = get_bench_dataset_class(str(cfg.band_source))
     bench = ds_cls()
@@ -380,13 +339,6 @@ def main(cfg: DictConfig) -> None:
     n_skipped = 0
 
     for band_config in list(cfg.band_configs):
-        # A TerraMind config only ever measures the band config its declared
-        # modality matches; the sibling `_rgb` / S2L2A config covers the other.
-        if _is_terramind(cfg.model):
-            declared = str(cfg.model.get("modality", "S2L2A"))
-            if declared != _MODALITY_FOR_BAND_CONFIG[band_config]:
-                continue
-
         band_specs = band_specs_for[band_config]
         n_channels = len(band_specs)
 

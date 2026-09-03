@@ -14,6 +14,7 @@ from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.config import compose_config
 from torchgeo_bench.main import main, resolve_model_config
+from torchgeo_bench.results import ResultSchemaError, metric_row
 from torchgeo_bench.resume import _resume_config_hash
 
 
@@ -92,11 +93,14 @@ def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
     return [(x_train, y_train), (x_val, y_val), (x_test, y_test)]
 
 
-def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, object]:
-    """Build a resume-key-matching CSV row for pre-seeding output files."""
-    return {
+def _resume_row(
+    cfg: DictConfig, *, method: str, metric_name: str, num_classes: int = 10
+) -> dict[str, object]:
+    """Build a complete result row for pre-seeding output files."""
+    c_start, c_stop, c_num = cfg.eval.c_range
+    common_meta = {
         "dataset": "m-eurosat",
-        "method": method,
+        "seed": cfg.seed,
         "model": cfg.model._target_,
         "name": cfg.model.name,
         "normalization": cfg.dataset.normalization,
@@ -104,11 +108,24 @@ def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, 
         "interpolation": cfg.dataset.interpolation,
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
-        "num_classes": 10,
+        "num_classes": num_classes,
         "config_hash": _resume_config_hash(cfg),
-        "metric_name": metric_name,
-        "metric_value": 0.1,
+        "c_range_start": c_start,
+        "c_range_stop": c_stop,
+        "c_range_num": c_num,
+        "merge_val": cfg.eval.merge_val,
+        "bootstrap": cfg.eval.bootstrap,
+        "res": None,
+        "pool": None,
     }
+    return metric_row(
+        common_meta,
+        method=method,
+        metric_name=metric_name,
+        metric_value=0.1,
+        feature_dim=8,
+        n_counts={"train": 16, "val": 8, "test": 8},
+    )
 
 
 def _chainable_model_mock() -> mock.Mock:
@@ -499,8 +516,8 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 1
 
 
-def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
-    """Rows from an older label schema must not satisfy the current resume key."""
+def test_resume_legacy_row_without_num_classes_requires_migration(tmp_path: Path):
+    """A legacy results schema must fail clearly instead of being rewritten."""
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
     legacy_row = _resume_row(cfg, method="knn5", metric_name="accuracy")
@@ -516,14 +533,11 @@ def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
             "torchgeo_bench.main.evaluate_knn",
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ) as knn_mock,
+        pytest.raises(ResultSchemaError, match="schema mismatch"),
     ):
         main(cfg)
 
     knn_mock.assert_called_once()
-    df = pd.read_csv(out)
-    assert len(df) == 2
-    assert pd.isna(df.iloc[0]["num_classes"])
-    assert int(df.iloc[1]["num_classes"]) == 10
 
 
 def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
