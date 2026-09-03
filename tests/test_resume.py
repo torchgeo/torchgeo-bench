@@ -1,5 +1,7 @@
 """Regression tests for resume-mode config fingerprinting."""
 
+import pytest
+
 from torchgeo_bench.config import compose_config
 from torchgeo_bench.resume import _resume_config_hash
 
@@ -39,3 +41,17 @@ def test_config_hash_changes_with_normalization():
     minmax = _cfg(["dataset.normalization=minmax"])
 
     assert _resume_config_hash(zscore) != _resume_config_hash(minmax)
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("timm/convnext_base", "bdef71b44fb8fb29"),
+        ("timm/convnext_large", "d8ec53e70484ac7d"),
+        ("timm/convnext_small", "c73ed0c79cadee82"),
+    ],
+)
+def test_model_schema_validation_preserves_current_hashes(model: str, expected: str) -> None:
+    cfg = compose_config([f"model={model}", "dataset.names=[m-eurosat]"])
+
+    assert _resume_config_hash(cfg) == expected

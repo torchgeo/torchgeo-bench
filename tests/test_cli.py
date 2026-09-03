@@ -187,3 +187,50 @@ def test_model_names_are_posix_on_every_platform():
     names = list_model_configs()
     assert "torchgeo/scalemae_large_fmow" in names
     assert not any("\\" in n for n in names)
+
+
+def test_all_model_configs_match_schema_and_import_targets() -> None:
+    import importlib
+
+    from torchgeo_bench.config import compose_config, list_model_configs
+
+    for name in list_model_configs():
+        cfg = compose_config([f"model={name}"])
+        module_name, _, class_name = str(cfg.model._target_).rpartition(".")
+        assert hasattr(importlib.import_module(module_name), class_name)
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({"name": "missing-target"}, "_target_"),
+        ({"_target_": "example.Model", "name": ""}, "name"),
+        (
+            {"_target_": "example.Model", "name": "bad-eval", "eval": []},
+            "eval",
+        ),
+        (
+            {
+                "_target_": "example.Model",
+                "name": "bad-layers",
+                "eval": {"segmentation": {"layers": [1]}},
+            },
+            "layers",
+        ),
+        (
+            {
+                "_target_": "example.Model",
+                "name": "bad-overrides",
+                "dataset_overrides": {"m-eurosat": 1},
+            },
+            "dataset_overrides",
+        ),
+    ],
+)
+def test_model_config_schema_rejects_invalid_structure(
+    config: dict[str, object], message: str
+) -> None:
+    from torchgeo_bench.config import ModelConfigError, validate_model_config
+
+    with pytest.raises(ModelConfigError, match=message):
+        validate_model_config(config, source="test.yaml")
