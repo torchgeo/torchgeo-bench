@@ -157,10 +157,7 @@ def main() -> None:
 
     for dataset, split, csv_path in pairs:
         out = args.out_dir / f"{dataset}_{split}.png"
-        try:
-            render_gallery(dataset, split, csv_path, out, args.top_k, args.cols)
-        except Exception:
-            logger.exception("[%s/%s] failed", dataset, split)
+        render_gallery(dataset, split, csv_path, out, args.top_k, args.cols)
 
 
 if __name__ == "__main__":

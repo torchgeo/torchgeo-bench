@@ -21,6 +21,7 @@ logging.getLogger("faiss.loader").setLevel(logging.WARNING)
 import faiss  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
+from faissknn import FaissKNNClassifier, FaissKNNMultilabelClassifier  # noqa: E402
 
 if sys.platform == "darwin":
     faiss.omp_set_num_threads(1)
@@ -177,15 +178,6 @@ class KNNClassifier:
     # ---- GPU path (faissknn delegate) -------------------------------------
 
     def _fit_gpu(self, X: np.ndarray, y: np.ndarray) -> None:
-        try:
-            from faissknn import FaissKNNClassifier, FaissKNNMultilabelClassifier
-        except ImportError as exc:  # pragma: no cover — covered by env, not unit tests
-            raise ImportError(
-                f"KNNClassifier(device={self.device!r}): faissknn is not installed. "
-                "GPU KNN requires Linux x86_64, where it installs automatically; "
-                'otherwise request device="cpu".'
-            ) from exc
-
         if not gpu_faiss_available():
             raise RuntimeError(
                 f"KNNClassifier(device={self.device!r}): GPU-enabled FAISS is unavailable. "

@@ -1,9 +1,6 @@
 """Tests for multi-label support and KNNClassifier."""
 
-import builtins
 import logging
-import sys
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -107,14 +104,8 @@ class TestKNNClassifierSingleLabel:
                 del X, y
 
         monkeypatch.setattr(knn, "gpu_faiss_available", lambda: True)
-        monkeypatch.setitem(
-            sys.modules,
-            "faissknn",
-            SimpleNamespace(
-                FaissKNNClassifier=FakeFaissKNNClassifier,
-                FaissKNNMultilabelClassifier=FakeFaissKNNClassifier,
-            ),
-        )
+        monkeypatch.setattr(knn, "FaissKNNClassifier", FakeFaissKNNClassifier)
+        monkeypatch.setattr(knn, "FaissKNNMultilabelClassifier", FakeFaissKNNClassifier)
         X = np.zeros((3, 2), dtype=np.float32)
         y = np.array([0, 1, 2], dtype=np.int64)
 
@@ -295,22 +286,6 @@ class TestKNNGPUPath:
         clf.fit(d["x_train"], d["y_train"])
         assert isinstance(clf.predict(d["x_test"]), np.ndarray)
         assert isinstance(clf.predict_proba(d["x_test"]), np.ndarray)
-
-    def test_gpu_missing_faissknn_raises_instead_of_cpu_fallback(
-        self, singlelabel_data, monkeypatch
-    ):
-        real_import = builtins.__import__
-
-        def fake_import(name, *args, **kwargs):
-            if name == "faissknn":
-                raise ImportError("blocked for test")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-        d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=5, device="cuda")
-        with pytest.raises(ImportError, match='request device="cpu"'):
-            clf.fit(d["x_train"], d["y_train"])
 
     def test_explicit_gpu_with_cpu_faiss_raises_actionable_error(
         self, singlelabel_data, monkeypatch

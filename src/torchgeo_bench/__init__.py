@@ -4,12 +4,9 @@ Heavy submodules (torch, torchgeo, sklearn) load lazily so importing the
 package — and therefore CLI startup — stays fast.
 """
 
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import version
 
-try:
-    __version__ = version("torchgeo-bench")
-except PackageNotFoundError:  # editable / pre-install fallback
-    __version__ = "0.5.0"
+__version__ = version("torchgeo-bench")
 
 __author__ = "torchgeo-bench contributors"
 
