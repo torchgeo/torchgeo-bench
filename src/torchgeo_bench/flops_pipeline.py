@@ -20,19 +20,20 @@ import warnings
 from datetime import UTC
 
 import torch
-from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
 from torchgeo_bench.config import instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.main import resolve_configured_device
 from torchgeo_bench.model_profile import (
     _count_gflops,
     _count_params,
     measure_profile,
 )
+from torchgeo_bench.models._band_mapping import BandIncompatibilityError
 from torchgeo_bench.results import append_rows_atomic
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
-from torchgeo_bench.utils import resolve_device
+from torchgeo_bench.settings import FlopsSettings, merge
 
 warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
@@ -40,12 +41,22 @@ logger = logging.getLogger(__name__)
 
 
 def _load_completed(path: str) -> frozenset[tuple]:
-    """Return the ``(name, band_config, task, head_type)`` keys already in *path*."""
+    """Return the ``(name, band_config, task, head_type)`` keys already in *path*.
+
+    Only the specific, well-understood ways a result file can be legitimately
+    "nothing measured yet" are tolerated: empty (``EmptyDataError``),
+    unparseable CSV syntax (``ParserError``), or missing one of the expected
+    resume-key columns (``KeyError``, e.g. an older schema). Anything else --
+    a permissions error, a truncated/binary file, an unrelated bug -- is a
+    real failure and must propagate rather than be silently treated as an
+    empty, freshly-resumable file.
+    """
     if not os.path.exists(path):
         return frozenset()
-    try:
-        import pandas as pd
 
+    import pandas as pd
+
+    try:
         df = pd.read_csv(path)
         return frozenset(
             zip(
@@ -56,23 +67,29 @@ def _load_completed(path: str) -> frozenset[tuple]:
                 strict=False,
             )
         )
-    except Exception:
-        # A malformed/partial CSV must not abort the sweep; re-measuring is
-        # cheap and append_rows_atomic heals schema drift.
-        logger.warning("Could not read %s for resume; measuring everything.", path)
+    except pd.errors.EmptyDataError:
+        logger.warning("%s is empty; measuring everything.", path)
+        return frozenset()
+    except pd.errors.ParserError as exc:
+        logger.warning("Could not parse %s (%s); measuring everything.", path, exc)
+        return frozenset()
+    except KeyError as exc:
+        logger.warning("%s is missing expected resume column %s; measuring everything.", path, exc)
         return frozenset()
 
 
-# A band incompatibility is identified by message, not by exception type alone.
-# `isinstance(exc, ValueError)` is far too wide: omegaconf's
-# InterpolationKeyError, ValidationError, UnsupportedValueType and
-# ConfigValueError are *all* ValueError subclasses, so a broken model config —
-# a `${seed}` interpolation with no `seed` key, say — would be logged as
-# "incompatible with this band config" and silently dropped from the CSV.
-_BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
-    # torchgeo_bench.models._band_mapping
-    "missing required model band",
-    "none of the target bands",
+# First-party band mismatches (this repo's own `_band_mapping` helpers) raise
+# the typed `BandIncompatibilityError` and are matched by type in
+# `_is_band_incompatibility`. Only a narrow, documented set of third-party
+# stems that validate channel count themselves -- and raise a plain
+# `ValueError` this repo doesn't control -- fall back to a message match.
+# `isinstance(exc, ValueError)` alone is far too wide for that fallback: our
+# own `compose_config` and various third-party constructors raise plain
+# `ValueError` for reasons that have nothing to do with band compatibility
+# (a malformed --config YAML, an unrelated validation failure, ...), so
+# matching on type alone would log those as "incompatible with this band
+# config" and silently drop them from the CSV instead of failing loudly.
+_THIRD_PARTY_CHANNEL_MISMATCH_MARKERS: tuple[str, ...] = (
     # third-party stems that validate channel count themselves (torchgeo's
     # fixed-channel checkpoints, timm patch-embed).  Deliberately *not*
     # included: "images has N channels but src_bands has M entries" from
@@ -88,11 +105,12 @@ _BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
 def _is_band_incompatibility(exc: BaseException) -> BaseException | None:
     """Return the band-incompatibility cause in *exc*'s chain, or None.
 
-    Model constructors may wrap the band-mismatch ``ValueError``, so the
-    exception chain is walked.  Only genuine band/shape mismatches match;
-    anything else (a missing checkpoint, an exhausted disk quota, a malformed
-    config) is a real failure and must propagate rather than be recorded as a
-    skip.
+    Model constructors may wrap the band-mismatch error, so the exception
+    chain is walked. First-party mismatches are matched by the typed
+    ``BandIncompatibilityError``; a narrow, documented set of third-party
+    channel-count messages is matched as a fallback. Anything else (a
+    missing checkpoint, an exhausted disk quota, a malformed config) is a
+    real failure and must propagate rather than be recorded as a skip.
     """
     seen: set[int] = set()
     cause: BaseException | None = exc
@@ -101,16 +119,18 @@ def _is_band_incompatibility(exc: BaseException) -> BaseException | None:
     # terminate.
     while cause is not None and id(cause) not in seen:
         seen.add(id(cause))
+        if isinstance(cause, BandIncompatibilityError):
+            return cause
         if isinstance(cause, ValueError):
             message = str(cause).lower()
-            if any(marker in message for marker in _BAND_INCOMPAT_MARKERS):
+            if any(marker in message for marker in _THIRD_PARTY_CHANNEL_MISMATCH_MARKERS):
                 return cause
         cause = cause.__cause__ or cause.__context__
     return None
 
 
 def _build_model(
-    cfg_model: DictConfig,
+    cfg_model: dict,
     band_specs: list,
     normalization: str,
     band_config: str,
@@ -120,8 +140,9 @@ def _build_model(
     Model/band incompatibilities are expected and numerous: several configs
     are RGB-only (a 3-channel pretrained stem) and several are
     multispectral-only (``tgeo_resnet50_s2all_moco`` has a 13-channel stem).
-    Those raise ``ValueError`` and are skipped with a warning, mirroring
-    ``seg_corruption_pipeline``.
+    Those raise the typed ``BandIncompatibilityError`` (first-party) or a
+    narrow, documented third-party channel-count ``ValueError`` and are
+    skipped with a warning, mirroring ``seg_corruption_pipeline``.
     """
     try:
         return instantiate(cfg_model, bands=band_specs, normalization=normalization)
@@ -131,7 +152,7 @@ def _build_model(
             raise
         logger.warning(
             "Skipping %s/%s: model is incompatible with this band config: %s",
-            cfg_model.get("name", cfg_model._target_),
+            cfg_model.get("name", cfg_model["_target_"]),
             band_config,
             cause,
         )
@@ -174,12 +195,16 @@ def _probe_gflops(
     device: torch.device,
     head: str,
     n_classes: int,
-) -> tuple[float, float, int]:
+) -> tuple[float | None, float, int]:
     """Build the linear/mlp probe the way ``linear.py`` does and count it.
 
     ``feature_dim`` is *not* configured anywhere — ``linear.py`` infers it
     from ``X.shape[1]`` of the extracted features.  So the width has to come
     from a real forward pass, and the probe can only be constructed after it.
+
+    Returns ``None`` gflops (with a warning) if ``_count_gflops`` raises its
+    typed ``NotImplementedError`` -- i.e. the probe cannot be traced under
+    ``torch.utils.flop_counter.FlopCounterMode`` through the public API.
     """
     with torch.inference_mode():
         feats = model(torch.randn(1, n_channels, image_size, image_size, device=device))
@@ -196,7 +221,11 @@ def _probe_gflops(
         probe = nn.Linear(feature_dim, n_classes, bias=True)
     probe.to(device).eval()
 
-    gflops = _count_gflops(probe, torch.randn(2, feature_dim, device=device))
+    try:
+        gflops: float | None = _count_gflops(probe, torch.randn(2, feature_dim, device=device))
+    except NotImplementedError as exc:
+        logger.warning("[flops] %s", exc)
+        gflops = None
     return gflops, _count_params(probe), feature_dim
 
 
@@ -236,13 +265,20 @@ def _seg_head_gflops(
     n_channels: int,
     image_size: int,
     device: torch.device,
-) -> float:
+) -> float | None:
     """Count the segmentation head alone, mirroring ``SegmentationProbe.forward``.
 
     Counting the probe end-to-end would be wrong: ``forward`` wraps the frozen
     backbone in ``no_grad`` + ``autocast``, which perturbs counts.  So the
     backbone is run once to populate ``_features``, then only
     ``head(features, H, W)`` is counted.
+
+    Returns ``None`` (with a warning) if the head cannot be traced under
+    ``FlopCounterMode`` through the public API alone: the feature maps handed
+    to the head come from a backbone forward pass run under
+    ``inference_mode``, so they carry no ``grad_fn``, and a head whose own
+    module structure needs one (rare, but possible for exotic decoders) trips
+    the same ``module_tracker`` assertion ``_count_gflops`` guards against.
     """
     x = torch.randn(1, n_channels, image_size, image_size, device=device)
     probe._features.clear()
@@ -264,8 +300,21 @@ def _seg_head_gflops(
     # batch-1 here, so hand it straight through.
     from torch.utils.flop_counter import FlopCounterMode
 
-    with FlopCounterMode(display=False) as counter, torch.inference_mode():
-        wrapper(features)
+    try:
+        with FlopCounterMode(display=False) as counter, torch.inference_mode():
+            wrapper(features)
+    except AssertionError as exc:
+        # 'Expected gradient function to be set' — module_tracker wants a
+        # grad_fn on every head input; anything else is a genuine bug.
+        if "Expected gradient function" not in str(exc):
+            raise
+        logger.warning(
+            "[flops] %s is incompatible with torch.utils.flop_counter.FlopCounterMode "
+            "(module_tracker requires a gradient function on its inputs); "
+            "gflops_head will be None.",
+            type(probe.head).__name__,
+        )
+        return None
     return float(counter.get_total_flops()) / 1e9
 
 
@@ -304,17 +353,16 @@ def _flops_row(
     return row
 
 
-def main(cfg: DictConfig) -> None:
+def main(cfg: FlopsSettings) -> None:
     """Measure per-sample compute cost for one model config."""
     output_path = str(cfg.output)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    device = resolve_device(str(cfg.device))
+    device = resolve_configured_device(str(cfg.device))
     image_size = int(cfg.image_size)
     normalization = str(cfg.normalization)
-    model_target = str(cfg.model._target_)
-    config_name = str(cfg.model.get("name", model_target.split(".")[-1]))
-    model_name = config_name
+    model_target = str(cfg.model["_target_"])
+    model_name = str(cfg.model.get("name", model_target.split(".")[-1]))
 
     ds_cls = get_bench_dataset_class(str(cfg.band_source))
     bench = ds_cls()
@@ -325,15 +373,13 @@ def main(cfg: DictConfig) -> None:
 
     completed = _load_completed(output_path) if bool(cfg.resume) else frozenset()
 
-    # Merge the model's eval block over the base eval config (models only
-    # override `layers` / `head_type`). Struct mode comes off first: model
-    # configs carry eval keys this pipeline ignores (e.g. `c_range`), which
-    # would otherwise raise ConfigKeyError on merge.
-    seg_eval_cfg = OmegaConf.create(OmegaConf.to_container(cfg.eval, resolve=True))
-    OmegaConf.set_struct(seg_eval_cfg, False)
-    if "eval" in cfg.model and cfg.model.eval is not None:
-        seg_eval_cfg = OmegaConf.merge(seg_eval_cfg, cfg.model.eval)
-    seg_layers = list(seg_eval_cfg.segmentation.get("layers", []))
+    # Merge the model's eval block over the base eval settings (models only
+    # override `layers` / `head_type`).
+    seg_eval_cfg = cfg.eval
+    model_eval = cfg.model.get("eval")
+    if model_eval is not None:
+        seg_eval_cfg = merge(seg_eval_cfg, model_eval)
+    seg_layers = list(seg_eval_cfg.segmentation.layers)
 
     rows: list[dict] = []
     n_skipped = 0
@@ -409,7 +455,9 @@ def main(cfg: DictConfig) -> None:
                     gflops_backbone=gflops_backbone,
                     gflops_probe=gflops_probe,
                     gflops_total=(
-                        None if gflops_backbone is None else gflops_backbone + gflops_probe
+                        None
+                        if gflops_backbone is None or gflops_probe is None
+                        else gflops_backbone + gflops_probe
                     ),
                     params_backbone_m=metrics["params_m"],
                     params_probe_m=params_probe_m,
@@ -422,11 +470,11 @@ def main(cfg: DictConfig) -> None:
                 )
             )
             logger.info(
-                "%s/%s classification: backbone=%s GF probe=%.6f GF (D=%d)",
+                "%s/%s classification: backbone=%s GF probe=%s GF (D=%d)",
                 model_name,
                 band_config,
                 f"{gflops_backbone:.4f}" if gflops_backbone is not None else "None",
-                gflops_probe,
+                f"{gflops_probe:.6f}" if gflops_probe is not None else "None",
                 feature_dim,
             )
 
@@ -446,15 +494,12 @@ def main(cfg: DictConfig) -> None:
             if seg_key in completed:
                 logger.info("Skip (%s, %s, %s) — already done", model_name, band_config, head_type)
                 continue
-            head_cfg = OmegaConf.merge(
-                seg_eval_cfg,
-                OmegaConf.create({"segmentation": {"head_type": head_type}}),
-            )
+            head_cfg = merge(seg_eval_cfg, {"segmentation": {"head_type": head_type}})
             try:
                 # build_seg_probe_and_solver runs _dry_run_channels(), a real
                 # forward pass, so the model must already be on-device.
                 probe, _solver = build_seg_probe_and_solver(
-                    model, int(cfg.seg_num_classes), head_cfg, device, 1e-3
+                    model, int(cfg.seg_num_classes), head_cfg.segmentation, device, 1e-3
                 )
             except (ValueError, RuntimeError) as exc:
                 logger.warning(
@@ -480,11 +525,11 @@ def main(cfg: DictConfig) -> None:
                 )
             )
             logger.info(
-                "%s/%s segmentation head=%s: head=%.4f GF (taps=%s)",
+                "%s/%s segmentation head=%s: head=%s GF (taps=%s)",
                 model_name,
                 band_config,
                 head_type,
-                gflops_head,
+                f"{gflops_head:.4f}" if gflops_head is not None else "None",
                 probe.channels_list,
             )
             del probe

@@ -20,6 +20,7 @@ from torchgeo_bench.flops_pipeline import (
     _seg_head_gflops,
 )
 from torchgeo_bench.model_profile import _count_gflops
+from torchgeo_bench.models._band_mapping import BandIncompatibilityError
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 CPU = torch.device("cpu")
@@ -170,20 +171,16 @@ _TAP_LAYERS = ["layer4", "layer3", "layer2", "layer1"]
 
 
 def _seg_cfg(layers: list[str], head_type: str):
-    from omegaconf import OmegaConf
+    from torchgeo_bench.settings import SegmentationSettings
 
-    return OmegaConf.create(
-        {
-            "segmentation": {
-                "layers": layers,
-                "head_type": head_type,
-                "lr_scheduler": "cosine",
-                "criterion": {
-                    "_target_": "torch.nn.CrossEntropyLoss",
-                    "ignore_index": 255,
-                },
-            }
-        }
+    return SegmentationSettings(
+        layers=layers,
+        head_type=head_type,
+        lr_scheduler="cosine",
+        criterion={
+            "_target_": "torch.nn.CrossEntropyLoss",
+            "ignore_index": 255,
+        },
     )
 
 
@@ -245,6 +242,22 @@ def test_band_configs_come_from_cloudsen12_class_attributes():
 
 
 # ---------------------------------------------------------------------------
+# Device resolution
+# ---------------------------------------------------------------------------
+
+
+def test_flops_auto_device_fails_fast_when_explicit_and_unavailable(monkeypatch):
+    """flops shares main's fail-fast device resolution: only the omitted/
+    "auto" default may silently prefer CPU."""
+    from torchgeo_bench.flops_pipeline import resolve_configured_device
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert resolve_configured_device("auto") == torch.device("cpu")
+    with pytest.raises(RuntimeError, match="CUDA is unavailable"):
+        resolve_configured_device("cuda")
+
+
+# ---------------------------------------------------------------------------
 # Resume
 # ---------------------------------------------------------------------------
 
@@ -271,10 +284,41 @@ def test_load_completed_reads_cell_keys(tmp_path):
 
 
 def test_load_completed_tolerates_malformed_csv(tmp_path):
-    """A partial/garbled CSV must not abort the sweep."""
+    """Rows parse fine but lack the expected resume columns -- a schema
+    ``KeyError``, tolerated the same as an empty or unparseable file."""
     path = tmp_path / "broken.csv"
     path.write_text("this,is not\na valid;;csv\n")
     assert _load_completed(str(path)) == frozenset()
+
+
+def test_load_completed_tolerates_empty_csv(tmp_path):
+    path = tmp_path / "empty.csv"
+    path.write_text("")
+    assert _load_completed(str(path)) == frozenset()
+
+
+def test_load_completed_tolerates_unparseable_csv(tmp_path):
+    """A genuine CSV-syntax error (unterminated quote) must not abort the sweep."""
+    path = tmp_path / "unparseable.csv"
+    path.write_text('name,band_config,task,head_type\n"resnet50,rgb,classification,\n')
+    assert _load_completed(str(path)) == frozenset()
+
+
+def test_load_completed_does_not_swallow_unrelated_errors(tmp_path, monkeypatch):
+    """Only the documented parse/empty/schema exceptions are tolerated; anything
+    else (a permissions error, a genuine bug) must propagate loudly rather than
+    be treated as an empty, freshly-resumable file."""
+    import pandas as pd
+
+    path = tmp_path / "compute_cost.csv"
+    path.write_text("name,band_config,task,head_type\nresnet50,rgb,classification,\n")
+
+    def _boom(*args, **kwargs):
+        raise MemoryError("simulated unrelated failure")
+
+    monkeypatch.setattr(pd, "read_csv", _boom)
+    with pytest.raises(MemoryError, match="simulated unrelated failure"):
+        _load_completed(str(path))
 
 
 # ---------------------------------------------------------------------------
@@ -294,23 +338,27 @@ def _wrap(exc: BaseException, depth: int = 2) -> BaseException:
 
 
 def test_band_incompatibility_detected_through_wrapping():
-    """A wrapped band ValueError is still found by walking the chain."""
-    inner = ValueError("Missing required model band 'nir'. Available canonical bands: ...")
+    """A wrapped BandIncompatibilityError is still found by walking the chain."""
+    inner = BandIncompatibilityError(
+        "Missing required model band 'nir'. Available canonical bands: ..."
+    )
     assert _is_band_incompatibility(_wrap(inner)) is inner
 
 
 def test_band_incompatibility_matches_empty_intersection():
-    inner = ValueError("select_src_bands: none of the target bands ['blue'] are present.")
+    inner = BandIncompatibilityError(
+        "select_src_bands: none of the target bands ['blue'] are present."
+    )
     assert _is_band_incompatibility(_wrap(inner)) is inner
 
 
-def test_interpolation_key_error_is_not_a_band_incompatibility():
-    """omegaconf's InterpolationKeyError subclasses ValueError, so an
-    unresolved ``${seed}`` must not be classified as a band incompatibility."""
-    from omegaconf.errors import InterpolationKeyError
-
-    assert issubclass(InterpolationKeyError, ValueError)  # why the narrowing is needed
-    exc = InterpolationKeyError("Interpolation key 'seed' not found")
+def test_unrelated_config_value_error_is_not_a_band_incompatibility():
+    """A plain ``ValueError`` from our own config plumbing (e.g. a malformed
+    ``--config`` YAML) is a ``ValueError`` too, but not a ``BandIncompatibilityError``
+    and doesn't match the narrow third-party channel-mismatch markers, so it
+    must not be classified as a band incompatibility."""
+    exc = ValueError("--config settings.yaml must contain a YAML mapping at the top level")
+    assert not isinstance(exc, BandIncompatibilityError)  # why type alone isn't enough
     assert _is_band_incompatibility(_wrap(exc)) is None
 
 
@@ -331,7 +379,7 @@ def test_real_failures_are_not_swallowed(exc):
 def test_band_incompatibility_survives_a_cyclic_cause_chain():
     """``__cause__ or __context__`` can cycle when an exception is raised while
     handling itself; the walk must terminate rather than spin."""
-    a = ValueError("Missing required model band 'swir1'")
+    a = BandIncompatibilityError("Missing required model band 'swir1'")
     b = RuntimeError("wrapper")
     a.__context__ = b
     b.__context__ = a
@@ -347,8 +395,9 @@ def test_band_incompatibility_terminates_on_unmatched_cycle():
 
 
 def test_band_markers_match_what_band_mapping_actually_raises():
-    """The markers are matched by message, so they are pinned against the real
-    raise sites.  A reword there without a matching update here would silently
+    """First-party band mismatches are matched by type, so this is pinned
+    against the real raise sites actually using the typed exception. A
+    regression there (reverting to a plain ``ValueError``) would silently
     widen the sweep's blind spot back out."""
     from torchgeo_bench.datasets.base import BandSpec
     from torchgeo_bench.models._band_mapping import map_to_model_bands, select_src_bands
@@ -358,11 +407,11 @@ def test_band_markers_match_what_band_mapping_actually_raises():
         for n in ("red", "green", "blue")
     ]
 
-    with pytest.raises(ValueError) as missing:
+    with pytest.raises(BandIncompatibilityError) as missing:
         map_to_model_bands(torch.zeros(1, 3, 4, 4), rgb, ["blue", "green", "red", "nir"])
     assert _is_band_incompatibility(missing.value) is missing.value
 
-    with pytest.raises(ValueError) as empty:
+    with pytest.raises(BandIncompatibilityError) as empty:
         select_src_bands(rgb, ["swir1", "swir2"])
     assert _is_band_incompatibility(empty.value) is empty.value
 
@@ -370,7 +419,10 @@ def test_band_markers_match_what_band_mapping_actually_raises():
 def test_channel_count_disagreement_is_a_bug_not_a_band_skip():
     """map_to_model_bands' own caller assertion — a tensor whose channel count
     disagrees with its BandSpecs — means the *pipeline* is wrong, not the model.
-    It must propagate rather than be logged as a routine band skip."""
+    It must propagate rather than be logged as a routine band skip. This stays
+    a plain ``ValueError`` (not ``BandIncompatibilityError``): it cannot occur
+    through this pipeline anyway, since n_channels is len(band_specs) by
+    construction, but must still be recognized as a real bug if it ever did."""
     from torchgeo_bench.datasets.base import BandSpec
     from torchgeo_bench.models._band_mapping import map_to_model_bands
 
@@ -381,20 +433,18 @@ def test_channel_count_disagreement_is_a_bug_not_a_band_skip():
     with pytest.raises(ValueError) as mismatch:
         map_to_model_bands(torch.zeros(1, 7, 4, 4), rgb, ["red", "green", "blue"])
     assert "channels but" in str(mismatch.value)
+    assert not isinstance(mismatch.value, BandIncompatibilityError)
     assert _is_band_incompatibility(mismatch.value) is None
 
 
 def test_flops_config_resolves_every_shipped_model_config():
-    """conf/model/rcf.yaml carries ``seed: ${seed}``, which raises
-    InterpolationKeyError unless flops_config defines a top-level ``seed``,
-    so the sweep's own config is checked here instead of in the job."""
-    from omegaconf import OmegaConf
-
+    """conf/model/rcf.yaml carries ``seed: ${seed}``, explicitly resolved
+    against flops_config's top-level ``seed`` by ``compose_config`` -- so
+    the sweep's own config is checked here instead of in the job."""
     from torchgeo_bench.config import compose_config
 
-    cfg = compose_config(["model=rcf"], config_name="flops_config", default_model=None)
-    resolved = OmegaConf.to_container(cfg, resolve=True)  # raises if unresolvable
-    assert resolved["model"]["seed"] == resolved["seed"] == 0
+    cfg = compose_config(model="rcf", config_name="flops_config", default_model=None)
+    assert cfg.model["seed"] == cfg.seed == 0
 
 
 # ---------------------------------------------------------------------------
@@ -403,12 +453,14 @@ def test_flops_config_resolves_every_shipped_model_config():
 
 
 @pytest.mark.slow
-def test_panopticon_yields_finite_gflops_without_patching_torch():
-    """Panopticon is measurable through the public FLOP counter."""
+def test_panopticon_yields_finite_gflops():
+    """Panopticon's chn-fusion breaks the autograd chain mid-forward; GFLOPs
+    counting must still resolve to a finite value via ``_count_gflops``'s
+    fallback tier ladder."""
     from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()
-    cfg = compose_config(["model=torchgeo/panopticon"])
+    cfg = compose_config(model="torchgeo/panopticon")
     model = instantiate(
         cfg.model,
         bands=bench.select_band_specs(None),
@@ -416,7 +468,6 @@ def test_panopticon_yields_finite_gflops_without_patching_torch():
     ).eval()
 
     gflops = _count_gflops(model, torch.randn(1, 12, 224, 224))
-
     assert math.isfinite(gflops)
     assert gflops > 0
 
@@ -430,7 +481,7 @@ def test_vit_gflops_ordering_and_tokens():
     rgb = bench.select_band_specs(bench.rgb_bands)
 
     def build(name):
-        cfg = compose_config([f"model={name}"])
+        cfg = compose_config(model=name)
         return instantiate(cfg.model, bands=rgb, normalization="bandspec_zscore").eval()
 
     base = build("timm/vit/vit_base_patch16_224")

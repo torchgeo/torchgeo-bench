@@ -6,11 +6,10 @@ from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
-from rich.progress import track
 from torch.utils.data import DataLoader
 
 if TYPE_CHECKING:
-    from omegaconf import DictConfig
+    from torchgeo_bench.settings import SegmentationSettings
 from torchmetrics.classification import (
     MulticlassF1Score,
     MulticlassJaccardIndex,
@@ -151,8 +150,9 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             desc = f"Epoch {epoch + 1}/{epochs}"
-            batches = track(train_loader, description=desc) if verbose else train_loader
-            for batch in batches:
+            if verbose:
+                logger.info(desc)
+            for batch in train_loader:
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
                     masks = batch["mask"].to(self.device).long()
@@ -296,8 +296,9 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             desc = f"Epoch {epoch + 1}/{epochs}"
+            if verbose:
+                logger.info("%s (%d batches)", desc, num_batches)
             batches = gpu_train.shuffled_batches(batch_size)
-            batches = track(batches, total=num_batches, description=desc) if verbose else batches
             for features, masks in batches:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
@@ -426,14 +427,14 @@ class SegmentationSolver:
 def build_seg_probe_and_solver(
     model: nn.Module,
     num_classes: int,
-    eval_cfg: "DictConfig",
+    segmentation: "SegmentationSettings",
     device: torch.device,
     lr: float,
 ) -> tuple[SegmentationProbe, SegmentationSolver]:
-    """Build the frozen-backbone probe and its solver from the merged eval config."""
+    """Build the frozen-backbone probe and its solver from the merged segmentation settings."""
     from torchgeo_bench.config import instantiate
 
-    layer_names = list(eval_cfg.segmentation.layers)
+    layer_names = list(segmentation.layers)
     if not layer_names:
         raise ValueError(
             "Segmentation evaluation requires eval.segmentation.layers to name "
@@ -443,11 +444,11 @@ def build_seg_probe_and_solver(
         backbone=model,
         layer_names=layer_names,
         num_classes=num_classes,
-        head_type=eval_cfg.segmentation.head_type,
+        head_type=segmentation.head_type,
         freeze_backbone=True,
-        temporal_pool=str(eval_cfg.segmentation.get("temporal_pool", "mean")),
+        temporal_pool=str(segmentation.temporal_pool),
     )
-    criterion = instantiate(eval_cfg.segmentation.criterion)
+    criterion = instantiate(segmentation.criterion)
     criterion_ignore = getattr(criterion, "ignore_index", None)
     solver = SegmentationSolver(
         model=probe,
@@ -455,7 +456,7 @@ def build_seg_probe_and_solver(
         lr=lr,
         device=str(device),
         criterion=criterion,
-        lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
+        lr_scheduler=segmentation.lr_scheduler,
         ignore_index=int(criterion_ignore) if criterion_ignore is not None else 255,
     )
     return probe, solver

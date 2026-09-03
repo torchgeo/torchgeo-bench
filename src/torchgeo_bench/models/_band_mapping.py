@@ -9,6 +9,17 @@ from torchgeo_bench.datasets.base import BandSpec
 logger = logging.getLogger(__name__)
 
 
+class BandIncompatibilityError(ValueError):
+    """Raised when a dataset's BandSpecs cannot satisfy a model's band requirements.
+
+    A ``ValueError`` subclass so existing ``except ValueError`` call sites
+    keep working unchanged; callers that need to distinguish a genuine
+    band/channel mismatch from any other ``ValueError`` (a malformed config,
+    an unrelated validation failure) should catch this type directly instead
+    of matching on the exception message.
+    """
+
+
 _RGB_ALIASES = {
     "red": "red",
     "r": "red",
@@ -163,7 +174,7 @@ def select_src_bands(
             selected.append(name)
     if not indices:
         available = sorted(src_index)
-        raise ValueError(
+        raise BandIncompatibilityError(
             f"select_src_bands: none of the target bands {target_band_names} are present. "
             f"Available canonical bands: {available}."
         )
@@ -227,7 +238,7 @@ def map_to_model_bands(
         if idx is None:
             if not allow_missing:
                 available = [canonical_band_name(b.name) for b in src_bands]
-                raise ValueError(
+                raise BandIncompatibilityError(
                     f"Missing required model band {name!r}. Available canonical bands: "
                     f"{available}. Pass allow_missing=True only for an explicit zero-fill ablation."
                 )
