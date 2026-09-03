@@ -84,11 +84,9 @@ def _is_terramind(cfg_model: dict) -> bool:
 
 
 # A band incompatibility is identified by message, not by exception type alone.
-# `isinstance(exc, ValueError)` is far too wide: omegaconf's
-# InterpolationKeyError, ValidationError, UnsupportedValueType and
-# ConfigValueError are *all* ValueError subclasses, so a broken model config —
-# a `${seed}` interpolation with no `seed` key, say — would be logged as
-# "incompatible with this band config" and silently dropped from the CSV.
+# `isinstance(exc, ValueError)` is too wide: configuration and model
+# constructors use ValueError for unrelated validation failures that must stay
+# visible instead of being silently classified as band incompatibilities.
 _BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
     # torchgeo_bench.models._band_mapping
     "missing required model band",

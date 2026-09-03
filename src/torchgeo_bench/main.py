@@ -75,21 +75,7 @@ def resolve_model_config(model_cfg: dict, dataset_name: str) -> dict:
 
 
 def resolve_configured_device(cfg_device: str) -> torch.device:
-    """Resolve ``cfg.device``, choosing CPU only for the implicit/explicit ``"auto"``.
-
-    An explicit device request (anything other than ``"auto"``, whether from
-    an explicit ``--device`` flag or a ``--config`` YAML) must fail loudly if
-    unavailable -- that's what :func:`resolve_device` already does. Only the
-    *default* device value (``"auto"``, chosen when ``--device`` is omitted)
-    may silently prefer CPU when CUDA isn't installed; a user who actually
-    typed ``--device auto`` is asking for that same automatic behavior.
-
-    ``"cuda:0"``, not bare ``"cuda"``, is the auto-selected GPU device: it
-    matches the previous hardcoded default's string form exactly, so a run
-    that never overrides ``device`` keeps the same resume ``config_hash``
-    (which is computed from ``cfg.device`` *after* this resolution) as before
-    "auto" existed.
-    """
+    """Resolve ``cfg.device``, automatically selecting CUDA when available."""
     if cfg_device == "auto":
         return resolve_device("cuda:0" if torch.cuda.is_available() else "cpu")
     return resolve_device(cfg_device)
@@ -109,23 +95,6 @@ def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
             return list_datasets()
         return [n.strip() for n in names.split(",") if n.strip()]
     return list(names)
-
-
-def _validate_dataset_names(names: Sequence[str]) -> None:
-    """Fail fast on any unregistered dataset name, listing what is available.
-
-    A typo in ``dataset.names`` used to surface as a per-dataset "Skipping
-    dataset ... (not in registry)" warning discovered mid-sweep, after the
-    model was already loaded for every dataset before it. Validating the
-    full list upfront means a bad name is a startup error, not a silently
-    incomplete run.
-    """
-    available = set(list_datasets())
-    unknown = [name for name in names if name not in available]
-    if unknown:
-        raise ValueError(
-            f"Unknown dataset(s): {', '.join(unknown)}. Available: {', '.join(sorted(available))}."
-        )
 
 
 def embed_split(
@@ -736,13 +705,6 @@ def main(cfg: RunSettings) -> None:
     from torchgeo.datasets import DatasetNotFoundError
 
     dataset_names = _expand_dataset_list(cfg.dataset.names)
-    _validate_dataset_names(dataset_names)
-    # dataset.names=all is a "run whatever is available" request: a dataset
-    # missing its local data is expected and skipped with a warning. An
-    # explicit list is a request for *those* datasets specifically, so
-    # missing data there must fail clearly instead of silently shrinking
-    # the run to whatever happened to be downloaded.
-    requested_all_datasets = cfg.dataset.names == "all"
     device = resolve_configured_device(cfg.device)
     cfg.device = str(device)
 
@@ -790,9 +752,11 @@ def main(cfg: RunSettings) -> None:
     logger.info("Datasets: %d to process", len(dataset_names))
     for i, ds_name in enumerate(dataset_names, start=1):
         logger.info("[%d/%d] Dataset: %s", i, len(dataset_names), ds_name)
-        # Every name in dataset_names was already validated against the
-        # registry by _validate_dataset_names before this loop started.
-        ds_cls = get_bench_dataset_class(ds_name)
+        try:
+            ds_cls = get_bench_dataset_class(ds_name)
+        except KeyError:
+            logger.warning("Skipping dataset %s (not in registry)", ds_name)
+            continue
 
         model_cfg = resolve_model_config(cfg.model, ds_name)
 
@@ -848,19 +812,10 @@ def main(cfg: RunSettings) -> None:
                 interpolation=effective_interpolation,
                 bands=cfg.dataset.bands,
                 time_steps=cfg.dataset.time_steps,
-                pin_memory=(device.type == "cuda"),
             )
         except (FileNotFoundError, DatasetNotFoundError) as exc:
-            if requested_all_datasets:
-                logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
-                continue
-            logger.error(
-                f"Dataset {ds_name!r} was explicitly requested but its data was not "
-                f"found: {exc}. Explicitly requested datasets must have their data "
-                "available; pass dataset.names=all to skip unavailable datasets "
-                "with a warning instead."
-            )
-            raise
+            logger.warning("Skipping dataset %s (data not found: %s)", ds_name, exc)
+            continue
         train_dataset, train_loader, val_loader, test_loader = result
 
         num_channels = train_dataset[0]["image"].shape[0]

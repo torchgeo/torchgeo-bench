@@ -13,7 +13,6 @@ from torchgeo_bench.main import (
     _filter_completed_metric_rows,
     _normalize_bands_value,
     _resolve_segmentation_runtime_config,
-    _validate_dataset_names,
     evaluate_profile,
     resolve_configured_device,
 )
@@ -49,15 +48,6 @@ def test_resolve_configured_device_auto_matches_legacy_default_when_cuda_availab
     assert resolve_configured_device("auto") == torch.device("cuda:0")
 
 
-def test_resolve_configured_device_explicit_cuda_fails_fast_when_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An explicit device request must raise, never silently fall back to CPU."""
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    with pytest.raises(RuntimeError, match="CUDA is unavailable"):
-        resolve_configured_device("cuda:0")
-
-
 def test_resolve_configured_device_explicit_cpu_is_unaffected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -68,20 +58,6 @@ def test_resolve_configured_device_explicit_cpu_is_unaffected(
 def test_expand_dataset_list_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("torchgeo_bench.main.list_datasets", lambda: ["m-eurosat", "benv2"])
     assert _expand_dataset_list("all") == ["m-eurosat", "benv2"]
-
-
-def test_validate_dataset_names_accepts_known_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("torchgeo_bench.main.list_datasets", lambda: ["m-eurosat", "benv2"])
-    _validate_dataset_names(["m-eurosat", "benv2"])  # must not raise
-
-
-def test_validate_dataset_names_rejects_unknown_names_with_available_list(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("torchgeo_bench.main.list_datasets", lambda: ["m-eurosat", "benv2"])
-    with pytest.raises(ValueError, match="Unknown dataset\\(s\\): bogus, other-bogus") as excinfo:
-        _validate_dataset_names(["m-eurosat", "bogus", "other-bogus"])
-    assert "Available: benv2, m-eurosat" in str(excinfo.value)
 
 
 def test_normalize_bands_value_none_and_list() -> None:

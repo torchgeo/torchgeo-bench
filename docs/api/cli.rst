@@ -51,6 +51,15 @@ Config composition
 .. autofunction:: compose_config
 .. autofunction:: list_model_configs
 
+Configuration settings
+----------------------
+
+.. currentmodule:: torchgeo_bench.settings
+
+.. autoclass:: RunSettings
+.. autoclass:: FlopsSettings
+.. autoclass:: EvalSettings
+
 Benchmark entry point
 ---------------------
 

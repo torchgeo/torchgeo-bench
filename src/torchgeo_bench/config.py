@@ -46,8 +46,7 @@ def validate_model_config(config: Mapping[str, Any], *, source: str | Path) -> N
             not isinstance(c_range, list)
             or len(c_range) != 3
             or not all(
-                not isinstance(value, bool) and isinstance(value, int | float)
-                for value in c_range
+                not isinstance(value, bool) and isinstance(value, int | float) for value in c_range
             )
         ):
             raise ModelConfigError(f"{source}: 'eval.c_range' must be a three-number list.")
@@ -73,9 +72,8 @@ def validate_model_config(config: Mapping[str, Any], *, source: str | Path) -> N
             for dataset, values in dataset_overrides.items()
         )
     ):
-        raise ModelConfigError(
-            f"{source}: 'dataset_overrides' must map dataset names to mappings."
-        )
+        raise ModelConfigError(f"{source}: 'dataset_overrides' must map dataset names to mappings.")
+
 
 _SETTINGS_CLASSES: dict[str, type] = {
     "config": RunSettings,
@@ -128,7 +126,7 @@ def compose_config(
             ``{"dataset": {"batch_size": 8}}``), applied last so flags win.
         config_name: Which settings dataclass to start from (``"config"`` for
             :class:`~torchgeo_bench.settings.RunSettings`, ``"flops_config"``
-            for ``FlopsSettings``).
+            for :class:`~torchgeo_bench.settings.FlopsSettings`).
         default_model: Model selected when no ``model`` name is given;
             ``None`` makes the model selection mandatory.
         model: Model name selected explicitly (e.g. from ``--model``).

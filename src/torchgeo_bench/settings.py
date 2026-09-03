@@ -257,10 +257,7 @@ class RunSettings:
     """Top-level settings for ``torchgeo-bench run`` (and its ``coord`` mode)."""
 
     seed: int = 0
-    # "auto" picks cuda if available, else cpu, and never fails for a
-    # CPU-only machine; an explicit device (e.g. "cuda:1", including one set
-    # via --config) must fail loudly if unavailable instead of silently
-    # falling back -- see resolve_configured_device in main.py.
+    # "auto" picks cuda if available, else cpu.
     device: str = "auto"
     # Explicit CSV path; null writes knn/linear/seg rows to
     # <results_dir>/<model name>.csv (and profile/intrinsic_dim rows to their
@@ -300,8 +297,7 @@ class RunSettings:
 class FlopsSettings:
     """Top-level settings for ``torchgeo-bench flops``."""
 
-    # "auto" picks cuda if available, else cpu; an explicit device must fail
-    # loudly if unavailable -- see resolve_configured_device in main.py.
+    # "auto" picks cuda if available, else cpu.
     device: str = "auto"
     resume: bool = True
     # Nothing here is trained and GFLOPs is deterministic, so this seeds no

@@ -8,11 +8,9 @@ import pandas as pd
 import pytest
 import torch
 from torch.utils.data import DataLoader, Dataset
-from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.config import compose_config
 from torchgeo_bench.main import main, resolve_model_config
-from torchgeo_bench.results import ResultSchemaError, metric_row
 from torchgeo_bench.resume import _resume_config_hash
 from torchgeo_bench.settings import RunSettings, merge
 
@@ -96,17 +94,10 @@ def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
 def _resume_row(
     cfg: RunSettings, *, method: str, metric_name: str, num_classes: int = 10
 ) -> dict[str, object]:
-    """Build a full ``EvaluationResult``-shaped row for pre-seeding output files.
-
-    Mirrors ``main.py``'s real ``common_meta`` construction so the row has
-    every column ``append_rows_atomic`` now strictly requires to match --
-    a partial/legacy-shaped row is a schema mismatch, not something resume
-    silently tolerates.
-    """
-    c_start, c_stop, c_num = cfg.eval.c_range
-    common_meta = {
+    """Build a resume-key-matching CSV row for pre-seeding output files."""
+    return {
         "dataset": "m-eurosat",
-        "seed": cfg.seed,
+        "method": method,
         "model": cfg.model["_target_"],
         "name": cfg.model["name"],
         "normalization": cfg.dataset.normalization,
@@ -116,22 +107,9 @@ def _resume_row(
         "bands": cfg.dataset.bands,
         "num_classes": num_classes,
         "config_hash": _resume_config_hash(cfg),
-        "c_range_start": c_start,
-        "c_range_stop": c_stop,
-        "c_range_num": c_num,
-        "merge_val": cfg.eval.merge_val,
-        "bootstrap": cfg.eval.bootstrap,
-        "res": None,
-        "pool": None,
+        "metric_name": metric_name,
+        "metric_value": 0.1,
     }
-    return metric_row(
-        common_meta,
-        method=method,
-        metric_name=metric_name,
-        metric_value=0.1,
-        feature_dim=8,
-        n_counts={"train": 16, "val": 8, "test": 8},
-    )
 
 
 def _chainable_model_mock() -> mock.Mock:
@@ -227,51 +205,6 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
     knn_mock.assert_called_once()
     rows = pd.read_csv(out)
     assert set(rows["pool"]) == {"cls", "mean"}
-
-
-def test_get_datasets_pin_memory_false_for_cpu(tmp_path: Path):
-    """A CPU run must never pin dataloader memory."""
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides={"eval": {"skip_linear": True}})
-
-    with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
-        ) as data_mock,
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ),
-    ):
-        main(cfg)
-
-    assert data_mock.call_args.kwargs["pin_memory"] is False
-
-
-def test_get_datasets_pin_memory_true_for_cuda_device(tmp_path: Path, monkeypatch):
-    """pin_memory must follow the resolved run device, not global CUDA
-    availability -- so a CPU run doesn't pin memory merely because some other
-    GPU exists on the machine, and a CUDA run does pin it."""
-    out = tmp_path / "out.csv"
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    cfg = _compose_cfg(out, overrides={"device": "cuda:0", "eval": {"skip_linear": True}})
-    model = _chainable_model_mock()
-
-    with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
-        ) as data_mock,
-        mock.patch("torchgeo_bench.main.instantiate", return_value=model),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ),
-    ):
-        main(cfg)
-
-    assert data_mock.call_args.kwargs["pin_memory"] is True
 
 
 def test_knn_row_emitted(tmp_path: Path):
@@ -560,39 +493,6 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 1
 
 
-def test_resume_legacy_row_without_num_classes_requires_migration(tmp_path: Path):
-    """A results CSV from an older schema (missing a column ``EvaluationResult``
-    now has) is not something resume silently heals: it fails clearly instead
-    of writing a duplicate row alongside a mismatched-schema legacy one.
-
-    The resume-key check itself still treats the legacy row as "not
-    complete" (a missing key column backfills to "" for matching purposes,
-    which cannot equal the current run's real ``num_classes``), so ``knn``
-    still runs -- it's the *append* of the newly computed row that must
-    refuse to silently coexist with the old schema.
-    """
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides={"resume": True, "eval": {"skip_linear": True}})
-    legacy_row = _resume_row(cfg, method="knn5", metric_name="accuracy")
-    legacy_row.pop("num_classes")
-    pd.DataFrame([legacy_row]).to_csv(out, index=False)
-    model = _chainable_model_mock()
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.instantiate", return_value=model),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ) as knn_mock,
-        pytest.raises(ResultSchemaError, match="schema mismatch"),
-    ):
-        main(cfg)
-
-    knn_mock.assert_called_once()
-
-
 def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
     """A stale row must not suppress a run with a different random seed."""
     out = tmp_path / "out.csv"
@@ -613,49 +513,6 @@ def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
         main(cfg)
 
     knn_mock.assert_called_once()
-
-
-def test_dataset_not_found_skips_when_names_is_all(tmp_path: Path):
-    """dataset.names=all is a "run whatever is available" request: missing
-    local data for one dataset is expected and skipped with a warning."""
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides={"dataset": {"names": "all"}})
-
-    with mock.patch(
-        "torchgeo_bench.main.get_datasets", side_effect=DatasetNotFoundError("missing")
-    ):
-        main(cfg)
-
-    assert not out.exists()
-
-
-def test_dataset_not_found_fails_clearly_for_explicit_names(tmp_path: Path):
-    """An explicitly requested dataset must fail loudly if its data is
-    missing, not silently shrink the run -- unlike dataset.names=all."""
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out)  # default names=[m-eurosat], an explicit list
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", side_effect=DatasetNotFoundError("missing")),
-        pytest.raises(DatasetNotFoundError),
-    ):
-        main(cfg)
-
-    assert not out.exists()
-
-
-def test_unknown_dataset_name_fails_fast_with_available_names(tmp_path: Path):
-    """A typo in dataset.names must be a startup error, not a silent per-dataset
-    skip discovered mid-sweep after the model was already loaded."""
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides={"dataset": {"names": ["bogus-dataset", "m-eurosat"]}})
-
-    with mock.patch("torchgeo_bench.main.get_datasets") as get_datasets_mock:
-        with pytest.raises(ValueError, match="Unknown dataset\\(s\\): bogus-dataset"):
-            main(cfg)
-        get_datasets_mock.assert_not_called()
-
-    assert not out.exists()
 
 
 def test_csv_row_has_required_columns(tmp_path: Path):

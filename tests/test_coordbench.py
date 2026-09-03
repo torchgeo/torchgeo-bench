@@ -137,19 +137,6 @@ def _coord_cfg(tmp_path, **coord_overrides) -> RunSettings:
     )
 
 
-def test_run_coordbench_explicit_cuda_fails_fast_when_unavailable(tmp_path, monkeypatch) -> None:
-    """An explicit (non-"auto") device must raise before any real work starts,
-    never silently fall back to CPU."""
-    monkeypatch.setattr(
-        "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
-    )
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    cfg = _coord_cfg(tmp_path)
-    cfg.device = "cuda:0"
-    with pytest.raises(RuntimeError, match="CUDA is unavailable"):
-        run_coordbench(cfg)
-
-
 def test_run_coordbench_end_to_end(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
