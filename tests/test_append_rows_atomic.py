@@ -1,6 +1,7 @@
 """Tests for atomic result CSV writes."""
 
 import csv
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
@@ -95,7 +96,7 @@ def test_load_results_reports_malformed_file_path(tmp_path):
     path = tmp_path / "broken.csv"
     path.write_bytes(b"\xff")
 
-    with pytest.raises(ResultSchemaError, match=str(path)):
+    with pytest.raises(ResultSchemaError, match=re.escape(str(path))):
         load_results(tmp_path)
 
 
