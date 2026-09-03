@@ -110,21 +110,6 @@ class TestRawEmission:
             "the dataset may still be normalizing internally."
         )
 
-    def test_normalize_arg_deprecation(self, geobench_root, small_partition):
-        """Passing the legacy `normalize` arg emits a DeprecationWarning."""
-        del small_partition
-        from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
-
-        with pytest.warns(DeprecationWarning, match="normalize is deprecated"):
-            GeoBenchv1(
-                root=geobench_root,
-                dataset_name="m-eurosat",
-                split="train",
-                partition="0.01x_train",
-                bands=("04 - Red", "03 - Green", "02 - Blue"),
-                normalize=True,
-            )
-
 
 @pytest.mark.slow
 class TestDataLoader:

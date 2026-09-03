@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from torchgeo_bench.datasets import get_bench_dataset_class, list_datasets
 from torchgeo_bench.datasets._metadata import unpickle_metadata
 from torchgeo_bench.datasets.eurosat import EuroSAT, EuroSATSpatial
 from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
@@ -29,6 +30,13 @@ def test_unpickle_metadata_rejects_python_expressions() -> None:
 
 def test_v2_data_root_is_fixed() -> None:
     assert _V2Dataset.data_root() == Path("data/geobenchv2")
+
+
+def test_registered_datasets_declare_complete_split_metadata() -> None:
+    for name in list_datasets():
+        split_sizes = get_bench_dataset_class(name).split_sizes
+        assert set(split_sizes) == {"train", "val", "test"}
+        assert all(size > 0 for size in split_sizes.values())
 
 
 # ---------------------------------------------------------------------------

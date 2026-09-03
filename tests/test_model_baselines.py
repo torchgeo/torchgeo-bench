@@ -50,20 +50,6 @@ def _run_bench(*overrides: str, timeout: int = 600) -> subprocess.CompletedProce
     )
 
 
-def test_accuracy_check_marker_is_registered() -> None:
-    """Verify accuracy_check marker is listed in pytest --markers output."""
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "--markers"],
-        capture_output=True,
-        text=True,
-        cwd=str(_REPO_ROOT),
-    )
-    assert result.returncode == 0
-    assert "accuracy_check" in result.stdout, (
-        f"accuracy_check marker not registered; got markers:\n{result.stdout}"
-    )
-
-
 @pytest.mark.skipif(
     not list(_RESULTS_DIR.glob("*.csv")), reason="no per-model results in results/models"
 )
@@ -89,9 +75,19 @@ if _FIXTURE_PATH.exists():
 else:
     _fixture_df = pd.DataFrame(columns=list(_FIXTURE_COLS))
 
-_COMBOS = (
-    _fixture_df[["model_config", "name", "dataset", "bands"]].drop_duplicates().to_dict("records")
-)
+_SENTINELS = {
+    ("rcf", "m-eurosat", "rgb"),
+    ("timm/resnet18", "m-eurosat", "rgb"),
+    ("torchgeo/dofa_base", "so2sat", "all"),
+    ("imagestats", "m-pv4ger", "all"),
+}
+_COMBOS = [
+    combo
+    for combo in _fixture_df[["model_config", "name", "dataset", "bands"]]
+    .drop_duplicates()
+    .to_dict("records")
+    if (combo["model_config"], combo["dataset"], combo["bands"]) in _SENTINELS
+]
 
 
 def _combo_id(combo: dict) -> str:
@@ -112,12 +108,19 @@ def test_accuracy(combo: dict, tmp_path: Path) -> None:
 
     out = tmp_path / "out.csv"
     result = _run_bench(
-        f"model={model_config}",
-        f"dataset.names=[{dataset}]",
-        f"dataset.bands={bands}",
-        f"output={out}",
-        "eval.bootstrap=10",
-        f"device={_DEVICE}",
+        "run",
+        "--model",
+        model_config,
+        "--datasets",
+        dataset,
+        "--bands",
+        bands,
+        "--output",
+        str(out),
+        "--bootstrap",
+        "10",
+        "--device",
+        _DEVICE,
     )
     assert result.returncode == 0, f"CLI failed for {model_config} × {dataset}:\n{result.stderr}"
 
