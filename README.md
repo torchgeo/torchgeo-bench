@@ -8,7 +8,7 @@
 A lightweight benchmarking framework for evaluating **frozen** geospatial
 foundation models on GeoBench V1/V2 and location encoders on CoordBench. Plug
 in a backbone or coordinate encoder and run consistent downstream probes through
-OmegaConf configs.
+a plain CLI (flags win over an optional YAML file of uncommon settings).
 
 - **Frozen-backbone evaluation** — KNN-5, L-BFGS logistic regression, and
   linear / conv / FPN / DPT segmentation probes.
@@ -16,9 +16,9 @@ OmegaConf configs.
   full multispectral / multi-modal stacks.
 - **CoordBench built in** — coordinate-only regression and classification with
   random, spatial-block, and official holdouts.
-- **Config-driven** — sweep models, datasets, partitions, image sizes, and
-  bands without code changes.
-- **Resumable** — `resume=true` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
+- **CLI-driven** — sweep models, datasets, partitions, image sizes, and
+  bands with flags, no code changes.
+- **Resumable** — `--resume` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
 - **Bring your own model** — copy
   [`contrib_template.py`](src/torchgeo_bench/models/contrib_template.py),
   implement `_forward_patch_features`, and add a one-file model config.
@@ -71,7 +71,7 @@ for all options.
 torchgeo-bench run
 
 # A single dataset with a pretrained ImageNet ResNet-50
-torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
+torchgeo-bench run --model timm/resnet50 --datasets m-eurosat
 ```
 
 The default device is `cuda:0`. On a machine without a working CUDA GPU (or if
@@ -79,21 +79,22 @@ a GPU run crashes — see [troubleshooting](https://torchgeo.org/torchgeo-bench/
 fall back to CPU:
 
 ```bash
-torchgeo-bench run dataset.names=[m-eurosat] device=cpu
+torchgeo-bench run --datasets m-eurosat --device cpu
 ```
 
 Results are appended to `results/models/<model name>.csv`, which **ship pre-populated
 with reference results** — to start from a clean slate, write to your own file
-with `output=results/my_run.csv`. Re-run with `resume=true` to skip
+with `--output results/my_run.csv`. Re-run with `--resume` to skip
 already-completed rows. One-time profile/intrinsic-dim measurements go to their
-own `results/profiles/` and `results/intrinsic_dim/` files instead, so routine
-metrics reruns don't touch them.
+own `results/profiles/` and `results/intrinsic_dim/` files instead (via the
+dedicated `torchgeo-bench profile` / `torchgeo-bench intrinsic-dim`
+subcommands), so routine metrics reruns don't touch them.
 
 ## CoordBench — location encoders
 
-`mode=coord` swaps the image pipeline for a **coordinate-only** track: point
-`(lon, lat)` in, a downstream label out. Benchmarks are streamed directly from
-the unified [`taylor-geospatial/coordbench`](https://huggingface.co/datasets/taylor-geospatial/coordbench)
+`torchgeo-bench coord` swaps the image pipeline for a **coordinate-only**
+track: point `(lon, lat)` in, a downstream label out. Benchmarks are streamed
+directly from the unified [`taylor-geospatial/coordbench`](https://huggingface.co/datasets/taylor-geospatial/coordbench)
 HuggingFace dataset (PDFM, SatCLIP, SustainBench, CDC PLACES, MOSAIKS/USAVars,
 the DeepMind/AlphaEarth suite, and more — no local download). A frozen encoder
 is probed with **KNN** and a **ridge linear** head under **random** or
@@ -101,18 +102,18 @@ is probed with **KNN** and a **ridge linear** head under **random** or
 
 ```bash
 # MIND location encoder on the whole suite, random + spatial CV
-torchgeo-bench run mode=coord model=mind coord.split=both
+torchgeo-bench coord --model mind --split both
 
 # One family, linear probe only, trivial sin/cos baseline
-torchgeo-bench run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
+torchgeo-bench coord --model sincos --names pdfm --methods linear
 ```
 
-`model=mind` and `model=mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),
-distilled from AlphaEarth/Climplicit/GeoCLIP/SINR) and `model=sincos` work with
-the base install. The other pretrained encoders (SatCLIP / GeoCLIP / Climplicit /
-SINR, via `rshf`) need the `coordbench` extra:
+`--model mind` and `--model mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),
+distilled from AlphaEarth/Climplicit/GeoCLIP/SINR) and `--model sincos` work
+with the base install. The other pretrained encoders (SatCLIP / GeoCLIP /
+Climplicit / SINR, via `rshf`) need the `coordbench` extra:
 `pip install "torchgeo-bench[coordbench]"`,
-then `model=climplicit` (etc.). Results land in
+then `--model climplicit` (etc.). Results land in
 `results/coordbench_results.csv`. Add your own encoder by subclassing
 `LocationEncoder` (implement `_encode`) and pointing a `model` config's
 `_target_` at it. See the

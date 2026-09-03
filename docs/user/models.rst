@@ -12,8 +12,9 @@ Available presets
 -----------------
 
 Every preset under :file:`src/torchgeo_bench/conf/model/` becomes a
-``model=…`` selector for the ``run`` subcommand.  A preset's ``_target_``
-field resolves to a class re-exported from :mod:`torchgeo_bench.models`.
+``--model``/``-m`` selector for the ``run`` subcommand.  A preset's
+``_target_`` field resolves to a class re-exported from
+:mod:`torchgeo_bench.models`.
 
 Random Convolutional Features (RCF)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -23,8 +24,11 @@ features in the spirit of MOSAIKS.
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=rcf
-   $ torchgeo-bench run model=rcf model.mode=empirical model.features=1024
+   $ torchgeo-bench run --model rcf
+
+Fields with no dedicated CLI flag (like RCF's ``mode``/``features``) are
+set by copying :file:`conf/model/rcf.yaml` to a new preset name and editing
+it -- there is no ``key=value`` override for arbitrary model kwargs.
 
 Image statistics baseline
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -34,7 +38,7 @@ returns per-channel mean / std as the feature vector.
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=imagestats
+   $ torchgeo-bench run --model imagestats
 
 timm — ImageNet-pretrained CNNs and ViTs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -46,18 +50,18 @@ ViT / DeiT / Swin variants live under :file:`timm/vit/`.
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=timm/resnet50
-   $ torchgeo-bench run model=timm/convnext_base dataset.names=[m-eurosat]
-   $ torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224
-   $ torchgeo-bench run model=timm/vit/swin_base_patch4_window7_224 eval.skip_linear=true
+   $ torchgeo-bench run --model timm/resnet50
+   $ torchgeo-bench run --model timm/convnext_base --datasets m-eurosat
+   $ torchgeo-bench run --model timm/vit/vit_base_patch16_224 --image-size 224
+   $ torchgeo-bench run --model timm/vit/swin_base_patch4_window7_224 --skip-linear
 
 ViT-style backbones expect a fixed spatial resolution.  Set
-``dataset.image_size=224`` (``bilinear`` by default; switch to
-``bicubic`` / ``nearest`` via ``dataset.interpolation``) to resize the
+``--image-size 224`` (``bilinear`` by default; switch to
+``bicubic`` / ``nearest`` via ``--interpolation``) to resize the
 dataset tiles for any model.
 
 timm models rebuild their input convolution for any number of channels —
-they work with ``dataset.bands=all`` out of the box (pretrained
+they work with ``--bands all`` out of the box (pretrained
 3-channel weights are averaged / replicated as needed).
 
 .. warning::
@@ -82,22 +86,22 @@ RGB-only self-supervised checkpoints from torchgeo's model hub.
 .. code-block:: console
 
    $ # Sentinel-2 RGB SSL
-   $ torchgeo-bench run model=torchgeo/resnet50_s2rgb_moco
-   $ torchgeo-bench run model=torchgeo/resnet18_s2rgb_seco
-   $ torchgeo-bench run model=torchgeo/resnet50_fmow_gassl
+   $ torchgeo-bench run --model torchgeo/resnet50_s2rgb_moco
+   $ torchgeo-bench run --model torchgeo/resnet18_s2rgb_seco
+   $ torchgeo-bench run --model torchgeo/resnet50_fmow_gassl
 
    $ # ScaleMAE on fMoW RGB
-   $ torchgeo-bench run model=torchgeo/scalemae_large_fmow
+   $ torchgeo-bench run --model torchgeo/scalemae_large_fmow
 
    $ # DOFA — band-agnostic (currently configured for Sentinel-2 RGB wavelengths)
-   $ torchgeo-bench run model=torchgeo/dofa_base
+   $ torchgeo-bench run --model torchgeo/dofa_base
 
    $ # Satlas Swin-V2 (NAIP / Sentinel-2 RGB)
-   $ torchgeo-bench run model=torchgeo/swinv2b_naip_satlas_mi
-   $ torchgeo-bench run model=torchgeo/swinv2b_s2rgb_satlas_mi
+   $ torchgeo-bench run --model torchgeo/swinv2b_naip_satlas_mi
+   $ torchgeo-bench run --model torchgeo/swinv2b_s2rgb_satlas_mi
 
    $ # EarthLoc place-recognition descriptor
-   $ torchgeo-bench run model=torchgeo/earthloc_s2_resnet50
+   $ torchgeo-bench run --model torchgeo/earthloc_s2_resnet50
 
 OlmoEarth (AI2)
 ^^^^^^^^^^^^^^^
@@ -110,19 +114,19 @@ optional ``olmoearth`` extra:
    $ pip install 'torchgeo-bench[olmoearth]'
 
    $ # OlmoEarth v1 (Nano / Tiny / Base / Large)
-   $ torchgeo-bench run model=olmoearth_nano
-   $ torchgeo-bench run model=olmoearth_base
-   $ torchgeo-bench run model=olmoearth_large dataset.bands=all
+   $ torchgeo-bench run --model olmoearth_nano
+   $ torchgeo-bench run --model olmoearth_base
+   $ torchgeo-bench run --model olmoearth_large --bands all
 
    $ # OlmoEarth v1.1 (Nano / Tiny / Base)
-   $ torchgeo-bench run model=olmoearth_v1_1_nano
-   $ torchgeo-bench run model=olmoearth_v1_1_tiny
-   $ torchgeo-bench run model=olmoearth_v1_1_base
+   $ torchgeo-bench run --model olmoearth_v1_1_nano
+   $ torchgeo-bench run --model olmoearth_v1_1_tiny
+   $ torchgeo-bench run --model olmoearth_v1_1_base
 
    $ # OlmoEarth v1.2 (Nano / Tiny / Small / Base)
-   $ torchgeo-bench run model=olmoearth_v1_2_nano
-   $ torchgeo-bench run model=olmoearth_v1_2_small
-   $ torchgeo-bench run model=olmoearth_v1_2_base
+   $ torchgeo-bench run --model olmoearth_v1_2_nano
+   $ torchgeo-bench run --model olmoearth_v1_2_small
+   $ torchgeo-bench run --model olmoearth_v1_2_base
 
 OlmoEarth v1.1 uses a **linear patch embedding** (vs. convolutional in v1),
 a single bandset per modality, and updated masking/loss functions, yielding a
@@ -185,7 +189,7 @@ The ``version`` parameter selects the weight family:
 
 .. note::
 
-   Input normalization is selected globally with ``dataset.normalization``
+   Input normalization is selected globally with ``--normalization``
    (default ``bandspec_zscore``).  Each model receives that strategy through
    :class:`~torchgeo_bench.models.BenchModel`; use ``model_native`` for
    wrappers that declare pretrained input units / statistics, or ``identity``
@@ -196,20 +200,21 @@ The ``version`` parameter selects the weight family:
    DN) can't match.  OlmoEarth therefore selects normalization per sensor
    (``norm_from_pretrained="auto"``, the default): Landsat is normalized with
    dataset-specific ``BandSpec`` stats while Sentinel-2 / SAR use the
-   pretrained normalizer.  Pass ``model.norm_from_pretrained=true`` (or
-   ``false``) to force one path for all sensors.
+   pretrained normalizer.  ``norm_from_pretrained`` has no dedicated CLI
+   flag; to force one path for all sensors, copy the relevant OlmoEarth
+   preset YAML to a new name and set ``norm_from_pretrained: true`` (or
+   ``false``) in the copy.
 
 .. note::
 
-   **Per-model input resolution.**  A model config may set ``image_size`` to
-   override the global ``dataset.image_size`` (default ``224``).  OlmoEarth is
-   resolution-flexible, so its configs set ``image_size: null`` to evaluate at
+   **Per-model input resolution.**  A model preset may set ``image_size`` to
+   override the global default (``--image-size``, ``224``).  OlmoEarth is
+   resolution-flexible, so its presets set ``image_size: null`` to evaluate at
    each dataset's **native** resolution rather than upsampling to 224×224
    (matching the reference OlmoEarth evals).  Models that omit the field
-   inherit ``dataset.image_size``.  To force a specific size for a run, pass
-   ``model.image_size=<int>`` (or ``~model.image_size`` to fall back to the
-   dataset default).  The effective size is recorded in the results CSV and
-   in the resume cache key.
+   inherit the ``--image-size`` value.  To force a specific size for a run,
+   pass ``--image-size <int>`` on the command line.  The effective size is
+   recorded in the results CSV and in the resume cache key.
 
 SAM 3 vision encoder
 ^^^^^^^^^^^^^^^^^^^^
@@ -220,7 +225,7 @@ SAM 3 vision encoder
 .. code-block:: console
 
    $ pip install 'torchgeo-bench[sam3]'
-   $ torchgeo-bench run model=sam3_encoder dataset.bands=[red,green,blue]
+   $ torchgeo-bench run --model sam3_encoder --bands red,green,blue
 
 Adding a new model
 ------------------

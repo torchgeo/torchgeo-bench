@@ -201,9 +201,9 @@ registered dataset:
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.names=[m-eurosat]
-   $ torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
-   $ torchgeo-bench run dataset.names=all
+   $ torchgeo-bench run --datasets m-eurosat
+   $ torchgeo-bench run --datasets burn_scars,pastis,flair2
+   $ torchgeo-bench run --datasets all
 
 Bands selection
 ---------------
@@ -211,22 +211,22 @@ Bands selection
 Each dataset declares an ordered list of :class:`~torchgeo_bench.datasets.BandSpec`
 objects.  Three modes are supported:
 
-* ``dataset.bands=rgb`` *(default)* — only the bands listed in
+* ``--bands rgb`` *(default)* — only the bands listed in
   :attr:`~torchgeo_bench.datasets.BenchDataset.rgb_bands`.
-* ``dataset.bands=all`` — every band the dataset exposes.
-* ``dataset.bands=[red,green,blue,nir]`` — an explicit subset.
+* ``--bands all`` — every band the dataset exposes.
+* ``--bands red,green,blue,nir`` — an explicit subset.
 
 The runner derives ``num_channels`` from the loaded tensor and constructs
 the matching ``list[BandSpec]`` so the model wrapper can size its input
 layer and per-channel normalization correctly.  The selected ``bands``
 value is recorded in the results CSV so multiple runs writing to the same
-file (and ``resume=true``) keep RGB and multispectral results
+file (and ``--resume``) keep RGB and multispectral results
 distinguishable.
 
 .. code-block:: console
 
    $ # All 13 Sentinel-2 bands on EuroSAT with a pretrained timm ResNet-18
-   $ torchgeo-bench run model=timm/resnet18 dataset.names=[m-eurosat] dataset.bands=all
+   $ torchgeo-bench run --model timm/resnet18 --datasets m-eurosat --bands all
 
 Multi-modality (V2)
 -------------------
@@ -236,7 +236,7 @@ S1, ``pastis`` = S2 + S1, ``kuro_siwo`` = SAR + DEM).  Their wrappers
 set ``band_order_strategy = "by_sensor"`` and the V2 base class groups
 ``BandSpec`` entries by sensor before passing them to the upstream
 ``geobench_v2`` loader.  End users do not need to do anything special —
-set ``dataset.bands=all`` (or an explicit subset) and the right
+set ``--bands all`` (or an explicit subset) and the right
 per-modality tensors are concatenated into a single ``image`` key.
 
 Model compatibility
@@ -257,14 +257,14 @@ Model compatibility
 Data partitions (V1 only)
 -------------------------
 
-V1 datasets honour the ``dataset.partition`` argument (which selects one
+V1 datasets honour the ``--partition`` flag (which selects one
 of the partition JSON files distributed with each dataset).  V2 datasets
 ignore it.
 
 .. code-block:: console
 
    $ # Train on 1% of the V1 training split, write to a separate CSV
-   $ torchgeo-bench run dataset.partition=0.01x_train output=results/1pct.csv
+   $ torchgeo-bench run --partition 0.01x_train --output results/1pct.csv
 
 Common partition values: ``default``, ``0.01x_train``, ``0.02x_train``,
 ``0.05x_train``, ``0.10x_train``, ``0.20x_train``, ``0.50x_train``,
