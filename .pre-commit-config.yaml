@@ -17,6 +17,9 @@ repos:
       - id: debug-statements
       - id: check-added-large-files
         args: ["--maxkb=2000"]
+        # The results explorer and its snapshots are generated artifacts that
+        # inline every result row; they are legitimately tens of MB.
+        exclude: ^docs/_static/(_results_snapshots/.*\.json|results-explorer\.html)$
       - id: check-merge-conflict
       - id: trailing-whitespace
       - id: requirements-txt-fixer

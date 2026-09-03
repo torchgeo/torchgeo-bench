@@ -1,0 +1,93 @@
+name: Results explorer
+
+# The explorer page is a build artifact of results/**.csv that happens to be
+# committed.  Left to humans it drifts: the page on main quoted May's numbers
+# for three months of merged results.  This keeps it in lockstep by opening a
+# PR a maintainer can merge -- main is protected, so CI never pushes to it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "results/models/**"
+      - "results/profiles/**"
+      - "results/intrinsic_dim/**"
+      - "results/compute_cost.csv"
+      - "experiments/scripts/regen_results_explorer.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - "results/models/**"
+      - "results/profiles/**"
+      - "results/intrinsic_dim/**"
+      - "results/compute_cost.csv"
+      - "experiments/scripts/regen_results_explorer.py"
+  workflow_dispatch:
+
+# Serialise: two runs regenerating the same page would race on the branch.
+# Don't cancel an in-flight main run -- a half-opened PR is worse than a slow one.
+concurrency:
+  group: results-explorer-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  regenerate:
+    name: Regenerate results explorer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      # regen_results_explorer.py is stdlib-only, so skip the uv sync entirely.
+      - name: Regenerate
+        run: python experiments/scripts/regen_results_explorer.py
+
+      - name: Show what changed
+        run: git --no-pager diff --stat
+
+      # On a PR, don't demand the contributor commit a 40 MB artifact -- just
+      # prove the regeneration still works against their CSVs and let the
+      # reviewer preview the page.  The refresh PR is opened from main.
+      - name: Upload preview
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-explorer
+          path: docs/_static/results-explorer.html
+          retention-days: 14
+
+      # Requires Settings -> Actions -> General -> "Allow GitHub Actions to
+      # create and approve pull requests".  Note that a PR opened with the
+      # default GITHUB_TOKEN does not itself trigger workflows; swap in a PAT
+      # as `token:` if the refresh PR needs its own CI run before merge.
+      - name: Open refresh PR
+        if: github.event_name != 'pull_request'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # Reuses one branch, so repeated result merges update the open PR
+          # in place instead of piling up near-identical 40 MB PRs.
+          branch: automation/results-explorer
+          base: main
+          add-paths: |
+            docs/_static/results-explorer.html
+            docs/_static/_results_snapshots
+          commit-message: "chore(docs): refresh results explorer from results/*.csv"
+          title: "chore(docs): refresh results explorer"
+          body: |
+            Regenerated `docs/_static/results-explorer.html` from the results
+            CSVs on `main` via `experiments/scripts/regen_results_explorer.py`.
+
+            Opened automatically because a results CSV changed. The diff is the
+            re-inlined data plus the masthead, both derived from the CSVs — the
+            page ships with no hand-written numbers, so this needs a read of the
+            summary line rather than of the 40 MB payload.
+
+            Triggered by ${{ github.sha }}.
+          labels: automation
+          delete-branch: true
