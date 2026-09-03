@@ -12,6 +12,9 @@ The ``torchgeo-bench`` console script exposes three subcommands:
     preset under :file:`conf/model/`) can be overridden with ``key=value``
     pairs, e.g. ``model=timm/resnet50 dataset.names=[m-eurosat]``. Output is
     quiet by default; pass ``-v``/``--verbose`` for INFO-level progress logs.
+    ``--list-models``/``--list-datasets`` list valid ``model=``/``dataset.names=``
+    values, and ``--model-help <name>`` prints that model config's YAML
+    (its available ``model.*`` overrides) without running anything.
 
 ``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}``
     Downloads benchmark datasets into ``./data/`` (or a custom location with

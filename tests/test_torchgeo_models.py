@@ -22,6 +22,7 @@ from torchgeo_bench.models.torchgeo_models import (
     _adapt_first_conv,
     _extract_normalize_transforms,
     _resolve_dofa_wavelengths,
+    _resolve_panopticon_chn_ids,
     _resolve_torchgeo_factory,
     _resolve_torchgeo_weights,
     _warn_unit_mismatch,
@@ -278,6 +279,60 @@ def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
     assert wavelengths[:3] == [b.wavelength_um for b in bands[:3]]
 
 
+def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed-sensor band sets have no single input unit; must not eagerly call detect_input_unit() outside model_native."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: nn.Identity()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+    )
+
+    bands = _s2_multispectral_bands() + [_sar_band("vh"), _sar_band("vv")]
+    for normalization in ("bandspec_zscore", "identity"):
+        model = TorchGeoDOFABench(
+            bands=bands, normalization=normalization, input_unit_check="ignore"
+        )
+        assert model._dataset_input_unit is None
+
+
+def test_torchgeo_backbone_skips_unit_mismatch_warning_outside_model_native(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same gap in _warn_unit_mismatch's own detect_input_unit() call: must not run outside model_native."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(14, 8, 3, padding=1)
+            self.pool = nn.AdaptiveAvgPool2d(1)
+            self.fc = nn.Identity()
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return self.pool(self.conv1(images)).flatten(1)
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+    )
+
+    bands = _s2_multispectral_bands() + [_sar_band("vh"), _sar_band("vv")]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore")
+
+
 def test_dofa_wavelengths_still_raises_for_non_sar_missing_wavelength() -> None:
     """A non-SAR band with no wavelength and no known S2 canonical name is a
     real data-declaration gap, not something DOFA has a default for."""
@@ -404,6 +459,20 @@ def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> N
     assert out.ndim == 2
     assert out.shape == (2, 12)
     assert torch.isfinite(out).all()
+
+
+def test_resolve_panopticon_chn_ids_sar_and_optical() -> None:
+    """SAR channels resolve to Panopticon's negative chn_id codes, not a wavelength."""
+    bands = _s2_multispectral_bands()[:1] + [_sar_band("vv"), _sar_band("vh")]
+    ids = _resolve_panopticon_chn_ids(bands)
+    assert ids[0] == pytest.approx(bands[0].wavelength_um * 1000.0)
+    assert ids[1:] == [-1.0, -2.0]
+
+
+def test_resolve_panopticon_chn_ids_raises_for_unknown_polarization() -> None:
+    bad = BandSpec(sensor="s1", name="xx", source_name="XX", mean=0.0, std=1.0, min=-1.0, max=1.0)
+    with pytest.raises(ValueError, match="chn_ids missing"):
+        _resolve_panopticon_chn_ids([bad])
 
 
 def test_torchgeo_panopticon_model_native_raises(monkeypatch: pytest.MonkeyPatch) -> None:

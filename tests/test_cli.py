@@ -54,6 +54,28 @@ def test_run_list_models(capsys) -> None:
     assert "torchgeo/scalemae_large_fmow" in out
 
 
+def test_run_list_datasets(capsys) -> None:
+    cli_main(["run", "--list-datasets"])
+    out = capsys.readouterr().out
+    assert "m-eurosat" in out
+
+
+def test_run_model_help(capsys) -> None:
+    cli_main(["run", "--model-help", "rcf"])
+    out = capsys.readouterr().out
+    assert "torchgeo_bench.models.RCFBench" in out
+
+
+def test_run_model_help_unknown_model_errors() -> None:
+    with pytest.raises(SystemExit, match="error: Unknown model config"):
+        cli_main(["run", "--model-help", "not-a-real-model"])
+
+
+def test_run_model_help_rejects_path_traversal() -> None:
+    with pytest.raises(SystemExit, match="error: Unknown model config"):
+        cli_main(["run", "--model-help", "../flops_config"])
+
+
 def test_download_invalid_target(capsys) -> None:
     with pytest.raises(SystemExit):
         cli_main(["download", "bogus"])
