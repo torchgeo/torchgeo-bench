@@ -19,7 +19,7 @@ Glossary
 
    bootstrap
        Resampling technique used to estimate a confidence interval
-       around a metric.  ``eval.bootstrap`` controls the number of
+       around a metric.  ``--bootstrap`` controls the number of
        resamples; per-dataset CIs are reported as ``(ci_lower, ci_upper)``
        in the results CSV.
 
@@ -33,16 +33,11 @@ Glossary
        directory per dataset under ``data/geobenchv2/``.  V2 datasets
        use no prefix (``benv2``, ``treesatai``, ``pastis``, ...).
 
-   OmegaConf
-       The YAML configuration library used to compose model and run
-       configs.  See :doc:`configuration` for the override syntax and
-       https://omegaconf.readthedocs.io for the full documentation.
-
    intrinsic dimension
        The geometric / statistical dimension of a manifold of feature
        embeddings, estimated by methods such as TwoNN, MLE, or lPCA.
-       Optional in ``torchgeo-bench`` via ``eval.intrinsic_dim`` and the
-       ``[id]`` extra; see :mod:`torchgeo_bench.intrinsic_dim`.
+       Run via the ``torchgeo-bench intrinsic-dim`` subcommand (the
+       ``[id]`` extra); see :mod:`torchgeo_bench.intrinsic_dim`.
 
    KNN-5
        5-nearest-neighbour classifier evaluated on backbone-extracted
@@ -50,8 +45,9 @@ Glossary
 
    linear probe
        Logistic regression trained on frozen backbone features. We sweep
-       ``C`` over ``eval.c_range`` and report the best test-set
-       performance with ``best_c``. Method label: ``linear``.
+       ``C`` over a log-spaced range (set via ``--config``'s
+       ``eval.c_range``) and report the best test-set performance with
+       ``best_c``. Method label: ``linear``.
 
    mIoU
        Mean Intersection-over-Union, the primary metric for segmentation
@@ -59,6 +55,6 @@ Glossary
        :func:`~torchgeo_bench.main.evaluate_segmentation`.
 
    resume mode
-       When ``resume=true``, the runner skips any
+       When ``--resume`` is passed, the runner skips any
        ``(dataset, method, model, config)`` combination already present
        in the output CSV.  See :doc:`results-format` for the exact key.

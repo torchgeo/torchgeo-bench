@@ -84,5 +84,5 @@ Extra             Pulls in
 
 Datasets are not installed by these extras — see :doc:`datasets` for how to
 download GeoBench V1 / V2 with the bundled ``torchgeo-bench download`` command.
-CoordBench tables stream from Hugging Face when ``mode=coord``; see
+CoordBench tables stream from Hugging Face when using ``torchgeo-bench coord``; see
 :doc:`coordbench`.
