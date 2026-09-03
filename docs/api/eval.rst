@@ -66,4 +66,6 @@ function lives in :mod:`torchgeo_bench.main`:
 Result I/O
 ----------
 
+.. currentmodule:: torchgeo_bench.results
+.. autoclass:: ResultSchemaError
 .. autofunction:: append_rows_atomic
