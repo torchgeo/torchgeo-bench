@@ -335,7 +335,7 @@ def evaluate_logistic(
 
 def _resolve_segmentation_runtime_config(
     seg_cfg: DictConfig,
-) -> tuple[int, int, float, bool, torch.dtype]:
+) -> tuple[int, int, float, bool, torch.dtype, str]:
     """Validate and normalize the segmentation settings used during a run.
 
     Configuration mistakes should fail before feature extraction or training,
@@ -347,6 +347,7 @@ def _resolve_segmentation_runtime_config(
     lr = seg_cfg.get("lr", 1e-3)
     use_cache = seg_cfg.get("cache_features", True)
     cache_dtype_name = seg_cfg.get("cache_dtype", "float16")
+    cache_device = seg_cfg.get("cache_device", "auto")
 
     for name, value in (("epochs", epochs), ("batch_size", batch_size)):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -361,7 +362,39 @@ def _resolve_segmentation_runtime_config(
             "eval.segmentation.cache_dtype must be one of "
             f"{tuple(cache_dtypes)}, got {cache_dtype_name!r}."
         )
-    return epochs, batch_size, float(lr), use_cache, cache_dtypes[cache_dtype_name]
+    if cache_device not in ("auto", "cpu", "device"):
+        raise ValueError(
+            "eval.segmentation.cache_device must be one of "
+            f"('auto', 'cpu', 'device'), got {cache_device!r}."
+        )
+    return epochs, batch_size, float(lr), use_cache, cache_dtypes[cache_dtype_name], cache_device
+
+
+def _cache_fits_device(
+    train_cache: "torchgeo_bench.segmentation_probe.CachedFeaturesDataset",
+    val_cache: "torchgeo_bench.segmentation_probe.CachedFeaturesDataset",
+    device: torch.device,
+    cache_device: str,
+) -> bool:
+    """Return whether complete train and validation caches should move to the device."""
+    if cache_device == "cpu" or device.type != "cuda":
+        return False
+    if cache_device == "device":
+        return True
+
+    from torchgeo_bench.segmentation_probe import _estimate_cache_bytes
+
+    required_bytes = _estimate_cache_bytes(train_cache) + _estimate_cache_bytes(val_cache)
+    free_bytes, _ = torch.cuda.mem_get_info(device)
+    fits = required_bytes <= int(free_bytes * 0.8)
+    logger.info(
+        "Segmentation cache requires %.1f GiB; %.1f GiB is free on %s. Using %s cache.",
+        required_bytes / 2**30,
+        free_bytes / 2**30,
+        device,
+        "device" if fits else "CPU-streamed",
+    )
+    return fits
 
 
 def evaluate_intrinsic_dim(
@@ -574,8 +607,8 @@ def evaluate_segmentation(
         raise ValueError("Segmentation evaluation config missing for the model.")
 
     seg_cfg = eval_cfg.segmentation
-    epochs, probe_batch_size, lr, use_cache, cache_dtype = _resolve_segmentation_runtime_config(
-        seg_cfg
+    epochs, probe_batch_size, lr, use_cache, cache_dtype, cache_device = (
+        _resolve_segmentation_runtime_config(seg_cfg)
     )
 
     probe, solver = build_seg_probe_and_solver(model, num_classes, eval_cfg, device, lr)
@@ -584,19 +617,26 @@ def evaluate_segmentation(
         logger.info("Caching backbone features for train and val splits...")
         train_cache = probe.extract_segmentation_features(train_loader, cache_dtype=cache_dtype)
         val_cache = probe.extract_segmentation_features(val_loader, cache_dtype=cache_dtype)
-        test_cache = probe.extract_segmentation_features(test_loader, cache_dtype=cache_dtype)
+        cache_on_device = _cache_fits_device(train_cache, val_cache, device, cache_device)
         solver.fit_cached(
             train_cache=train_cache,
             val_cache=val_cache,
             batch_size=probe_batch_size,
             epochs=epochs,
             verbose=verbose,
+            cache_on_device=cache_on_device,
         )
+        del train_cache, val_cache
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        logger.info("Caching backbone features for the test split...")
+        test_cache = probe.extract_segmentation_features(test_loader, cache_dtype=cache_dtype)
         eval_result = solver.evaluate_cached(
             test_cache,
             batch_size=probe_batch_size,
             collect_preds=collect_preds,
             collect_confusions=collect_confusions,
+            cache_on_device=cache_on_device,
         )
     else:
         solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=verbose)

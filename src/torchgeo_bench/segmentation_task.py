@@ -22,6 +22,7 @@ from .segmentation_probe import (
     CachedFeaturesDataset,
     GPUTensorCache,
     SegmentationProbe,
+    StreamingTensorCache,
 )
 
 logger = logging.getLogger(__name__)
@@ -247,6 +248,7 @@ class SegmentationSolver:
         verbose: bool = True,
         gpu_train: "GPUTensorCache | None" = None,
         gpu_val: "GPUTensorCache | None" = None,
+        cache_on_device: bool = True,
     ) -> float | None:
         """Train the segmentation head on pre-cached backbone features.
 
@@ -273,22 +275,36 @@ class SegmentationSolver:
                 the GPU transfer is skipped.
             gpu_val: Optional pre-built GPU cache for validation. Used only
                 when ``gpu_train`` is also provided.
+            cache_on_device: Move each complete cache to the training device.
+                If False, retain it on CPU and transfer one batch at a time.
 
         Returns:
             Val mIoU from the final epoch if val_cache is given, else None.
         """
-        if gpu_train is None:
-            gpu_train = GPUTensorCache.from_cached(train_cache, self.device)
-        if gpu_val is None and val_cache is not None:
-            gpu_val = GPUTensorCache.from_cached(val_cache, self.device)
+        train_batches = (
+            gpu_train
+            if gpu_train is not None
+            else GPUTensorCache.from_cached(train_cache, self.device)
+            if cache_on_device
+            else StreamingTensorCache(train_cache, self.device)
+        )
+        val_batches = gpu_val
+        if val_batches is None and val_cache is not None:
+            val_batches = (
+                GPUTensorCache.from_cached(val_cache, self.device)
+                if cache_on_device
+                else StreamingTensorCache(val_cache, self.device)
+            )
 
-        # Fast path: GPU tensor cache — no DataLoader, no host→device transfer per batch
         scheduler = self._make_scheduler(epochs)
 
-        input_hw: tuple[int, int] = (gpu_train.masks.shape[-2], gpu_train.masks.shape[-1])
+        input_hw: tuple[int, int] = (
+            train_batches.masks.shape[-2],
+            train_batches.masks.shape[-1],
+        )
         last_val_miou: float | None = None
         self.val_history = []
-        num_batches = math.ceil(len(gpu_train) / batch_size)
+        num_batches = math.ceil(len(train_batches) / batch_size)
 
         for epoch in range(epochs):
             self.model.train()
@@ -296,7 +312,7 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             desc = f"Epoch {epoch + 1}/{epochs}"
-            batches = gpu_train.shuffled_batches(batch_size)
+            batches = train_batches.shuffled_batches(batch_size)
             batches = track(batches, total=num_batches, description=desc) if verbose else batches
             for features, masks in batches:
                 self.optimizer.zero_grad()
@@ -311,8 +327,8 @@ class SegmentationSolver:
             if scheduler is not None:
                 scheduler.step()
 
-            if gpu_val is not None:
-                val_metrics = self._evaluate_gpu_cache(gpu_val, batch_size)
+            if val_batches is not None:
+                val_metrics = self._evaluate_gpu_cache(val_batches, batch_size)
                 last_val_miou = val_metrics["mIoU"]
                 self.val_history.append(last_val_miou)
                 if verbose:
@@ -326,6 +342,7 @@ class SegmentationSolver:
         batch_size: int = 64,
         collect_preds: bool = False,
         collect_confusions: bool = False,
+        cache_on_device: bool = True,
     ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
         """Evaluate on a CachedFeaturesDataset.
 
@@ -338,11 +355,17 @@ class SegmentationSolver:
             batch_size: Batch size for iterating over the cache.
             collect_preds: If True, also return predicted class maps (N, H, W) int64.
             collect_confusions: If True, also return per-image confusion matrices.
+            cache_on_device: Move the complete cache to the evaluation device.
+                If False, transfer one batch at a time.
 
         Returns:
             Metrics, optionally followed by predictions and/or per-image confusion matrices.
         """
-        gpu_cache = GPUTensorCache.from_cached(cache, self.device)
+        gpu_cache = (
+            GPUTensorCache.from_cached(cache, self.device)
+            if cache_on_device
+            else StreamingTensorCache(cache, self.device)
+        )
         return self._evaluate_gpu_cache(
             gpu_cache,
             batch_size,
@@ -390,7 +413,7 @@ class SegmentationSolver:
     @torch.no_grad()
     def _evaluate_gpu_cache(
         self,
-        gpu_cache: GPUTensorCache,
+        gpu_cache: GPUTensorCache | StreamingTensorCache,
         batch_size: int,
         collect_preds: bool = False,
         collect_confusions: bool = False,

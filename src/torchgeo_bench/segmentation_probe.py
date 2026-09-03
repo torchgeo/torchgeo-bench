@@ -145,6 +145,43 @@ class GPUTensorCache:
             yield [t[s] for t in self.layer_tensors], self.masks[s]
 
 
+class StreamingTensorCache:
+    """Stream CPU-resident cached features to a device one batch at a time."""
+
+    def __init__(
+        self,
+        cache: CachedFeaturesDataset,
+        device: torch.device | str,
+    ) -> None:
+        self.layer_tensors = cache.layer_tensors
+        self.masks = cache.masks
+        self.device = torch.device(device)
+        self.dtype = torch.float16 if self.device.type == "cuda" else torch.float32
+
+    def __len__(self) -> int:
+        return self.masks.shape[0]
+
+    def _batch(self, indices: torch.Tensor | slice) -> tuple[list[torch.Tensor], torch.Tensor]:
+        features = [
+            tensor[indices].to(self.device, dtype=self.dtype) for tensor in self.layer_tensors
+        ]
+        masks = self.masks[indices].to(self.device, dtype=torch.long)
+        return features, masks
+
+    def shuffled_batches(
+        self, batch_size: int
+    ) -> Iterator[tuple[list[torch.Tensor], torch.Tensor]]:
+        """Yield shuffled batches, transferring only the current batch."""
+        indices = torch.randperm(len(self), device=self.device).cpu()
+        for start in range(0, len(self), batch_size):
+            yield self._batch(indices[start : start + batch_size])
+
+    def ordered_batches(self, batch_size: int) -> Iterator[tuple[list[torch.Tensor], torch.Tensor]]:
+        """Yield sequential batches, transferring only the current batch."""
+        for start in range(0, len(self), batch_size):
+            yield self._batch(slice(start, start + batch_size))
+
+
 class SegmentationProbe(nn.Module):
     """Multi-scale segmentation probe that hooks into backbone feature layers.
 

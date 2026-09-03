@@ -9,6 +9,7 @@ from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
     GPUTensorCache,
     SegmentationProbe,
+    StreamingTensorCache,
     _resolve_num_prefix_tokens,
 )
 from torchgeo_bench.segmentation_task import SegmentationSolver, build_seg_probe_and_solver
@@ -779,6 +780,56 @@ def test_gpu_tensor_cache_ordered_batches(mock_backbone, dummy_data):
     for _feats, masks in gpu_cache.ordered_batches(batch_size=1):
         total += masks.shape[0]
     assert total == len(cache)
+
+
+def test_streaming_tensor_cache_transfers_batches(mock_backbone, dummy_data):
+    """StreamingTensorCache keeps the full cache on CPU and transfers batches."""
+    cache = _make_cpu_cache(mock_backbone, dummy_data)
+    streaming_cache = StreamingTensorCache(cache, device="cpu")
+
+    batches = list(streaming_cache.ordered_batches(batch_size=1))
+
+    assert len(batches) == len(cache)
+    assert batches[0][0][0].dtype == torch.float32
+    assert batches[0][1].dtype == torch.long
+
+
+def test_streaming_and_device_caches_share_seeded_order(mock_backbone, dummy_data):
+    """Cache placement must not alter seeded training permutations."""
+    cache = _make_cpu_cache(mock_backbone, dummy_data)
+    device_cache = GPUTensorCache.from_cached(cache, device="cpu")
+    streaming_cache = StreamingTensorCache(cache, device="cpu")
+
+    torch.manual_seed(7)
+    device_masks = torch.cat([masks for _, masks in device_cache.shuffled_batches(batch_size=1)])
+    torch.manual_seed(7)
+    streaming_masks = torch.cat(
+        [masks for _, masks in streaming_cache.shuffled_batches(batch_size=1)]
+    )
+
+    assert torch.equal(device_masks, streaming_masks)
+
+
+def test_solver_fit_cached_streams_cpu_cache(mock_backbone, dummy_data):
+    """fit_cached can train without moving the complete cache to the device."""
+    images, masks = dummy_data["image"], dummy_data["mask"]
+    loader = make_loader(images, masks)
+    probe = make_probe(mock_backbone, ["layer1", "layer2"])
+    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
+    train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+
+    val_miou = solver.fit_cached(
+        train_cache,
+        val_cache=train_cache,
+        batch_size=1,
+        epochs=1,
+        verbose=False,
+        cache_on_device=False,
+    )
+    metrics = solver.evaluate_cached(train_cache, batch_size=1, cache_on_device=False)
+
+    assert isinstance(val_miou, float)
+    assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
 def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
