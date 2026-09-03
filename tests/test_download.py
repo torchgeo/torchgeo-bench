@@ -28,7 +28,7 @@ def test_download_geobench_v1_creates_output_and_decompresses(tmp_path: Path) ->
         mock.patch(
             "torchgeo_bench.download.snapshot_download", side_effect=_fake_snapshot_download
         ),
-        mock.patch("torchgeo_bench.download._decompress_zip_with_progress") as decompress_mock,
+        mock.patch("torchgeo_bench.download._decompress_zip") as decompress_mock,
     ):
         download_geobench_v1(out)
 

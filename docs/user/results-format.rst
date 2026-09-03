@@ -41,7 +41,8 @@ Sample rows
 
 Datasets emit unnormalized tensors; each model wrapper normalises inside
 :meth:`~torchgeo_bench.models.BenchModel.normalize_inputs` according to
-the strategy selected by ``cfg.dataset.normalization``.  Allowed values:
+the strategy selected by ``--normalization`` (``cfg.dataset.normalization``
+internally).  Allowed values:
 
 .. list-table::
    :header-rows: 1
@@ -74,10 +75,12 @@ Method values
 ``linear``         L-BFGS logistic regression with C-sweep on the validation set. -> ``results/models/``
 ``intrinsic_dim``  Optional intrinsic-dimension metrics on extracted embeddings (requires
                    the ``[id]`` extra) plus dependency-free centered feature-spectrum
-                   diagnostics. Both are emitted when
-                   ``eval.intrinsic_dim.enabled=true``; set ``estimators=[]`` for
+                   diagnostics. Both are emitted when running via the
+                   ``torchgeo-bench intrinsic-dim`` subcommand (internally
+                   ``eval.intrinsic_dim.enabled=true``); set ``estimators=[]`` for
                    spectrum-only output without ``torchid``. -> ``results/intrinsic_dim/``
-``profile``        Optional throughput/latency/param-count measurement (requires
+``profile``        Optional throughput/latency/param-count measurement, produced by the
+                   ``torchgeo-bench profile`` subcommand (internally
                    ``eval.profile.enabled=true``). -> ``results/profiles/``
 ``seg-<head>``     Segmentation probe with the configured head (``linear`` / ``conv_block`` /
                    ``fpn`` / ``dpt``). -> ``results/models/``
@@ -137,7 +140,7 @@ per GPU or per dataset) at the same output file without corrupting it.
 Resume mode
 -----------
 
-When ``resume=true``, the runner reads the existing CSV(s) at startup and
+When ``--resume`` is passed, the runner reads the existing CSV(s) at startup and
 skips any combination that already has a matching row.  Since profile and
 intrinsic-dim rows may live in their own files (see above), resume reads
 all three files -- ``results/models/<name>.csv``,
@@ -150,8 +153,8 @@ all three files -- ``results/models/<name>.csv``,
     normalization, image_size, interpolation, partition, bands, num_classes)
 
 Note that ``method`` is per-method (``knn5`` / ``linear`` /
-``intrinsic_dim`` / ``seg-<head_type>``), so re-running with
-``eval.skip_linear=false`` after a ``skip_linear=true`` run will fill in
+``intrinsic_dim`` / ``seg-<head_type>``), so re-running without
+``--skip-linear`` after a ``--skip-linear`` run will fill in
 just the linear-probe rows.
 
 Rows written before version 0.5.0 do not have ``num_classes`` and are treated

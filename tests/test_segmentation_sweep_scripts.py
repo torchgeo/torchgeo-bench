@@ -44,7 +44,8 @@ def test_representative_sweep_passes_seed_and_rejects_unknown_metadata(tmp_path:
     )
     runner = sweep.SweepRunner(config)
 
-    assert "seed=17" in runner._command(runner.jobs[0], gpu=0, attempt=1)
+    command = runner._command(runner.jobs[0], gpu=0, attempt=1)
+    assert command[command.index("--seed") + 1] == "17"
     assert sweep.sweep_metadata(ROOT, image_size=224, seed=17)["seed"] == 17
 
     config.output.write_text("dataset\n")
@@ -68,5 +69,6 @@ def test_protocol_study_passes_configured_seed(tmp_path: Path) -> None:
     )
     runner = study.StudyRunner(config)
 
-    assert "seed=23" in runner._command(runner.jobs[0], gpu=0, attempt=1)
+    command = runner._command(runner.jobs[0], gpu=0, attempt=1)
+    assert command[command.index("--seed") + 1] == "23"
     assert study.study_metadata(ROOT, seed=23)["seed"] == 23

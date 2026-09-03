@@ -5,7 +5,6 @@ from unittest import mock
 import pandas as pd
 import pytest
 import torch
-from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.main import (
@@ -15,9 +14,11 @@ from torchgeo_bench.main import (
     _normalize_bands_value,
     _resolve_segmentation_runtime_config,
     evaluate_profile,
+    resolve_configured_device,
 )
 from torchgeo_bench.model_profile import measure_cpu_throughput
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
+from torchgeo_bench.settings import SegmentationSettings
 
 
 class _ImageOnlyDataset(Dataset):
@@ -29,15 +30,39 @@ class _ImageOnlyDataset(Dataset):
         return {"image": torch.ones(3, 8, 8)}
 
 
+def test_resolve_configured_device_auto_prefers_cpu_only_when_cuda_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The omitted-device default ("auto") may silently choose CPU."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert resolve_configured_device("auto") == torch.device("cpu")
+
+
+def test_resolve_configured_device_auto_matches_legacy_default_when_cuda_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "auto" resolves to "cuda:0", matching the string form of the old
+    hardcoded default -- so a run that never overrides ``device`` keeps the
+    same resume ``config_hash`` it always had."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert resolve_configured_device("auto") == torch.device("cuda:0")
+
+
+def test_resolve_configured_device_explicit_cpu_is_unaffected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert resolve_configured_device("cpu") == torch.device("cpu")
+
+
 def test_expand_dataset_list_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("torchgeo_bench.main.list_datasets", lambda: ["m-eurosat", "benv2"])
     assert _expand_dataset_list("all") == ["m-eurosat", "benv2"]
 
 
-def test_normalize_bands_value_none_and_listconfig() -> None:
+def test_normalize_bands_value_none_and_list() -> None:
     assert _normalize_bands_value(None) == "all"
-    cfg_list = OmegaConf.create(["red", "green"])
-    assert _normalize_bands_value(cfg_list) == "red,green"
+    assert _normalize_bands_value(["red", "green"]) == "red,green"
 
 
 def test_completed_run_keys_metric_name_absent_returns_empty() -> None:
@@ -56,20 +81,16 @@ def test_filter_completed_metric_rows_partial_filtering() -> None:
 
 
 def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
-    eval_cfg = OmegaConf.create(
-        {
-            "segmentation": {
-                "layers": [],
-                "head_type": "fpn",
-                "criterion": {"_target_": "torch.nn.CrossEntropyLoss"},
-            }
-        }
+    segmentation = SegmentationSettings(
+        layers=[],
+        head_type="fpn",
+        criterion={"_target_": "torch.nn.CrossEntropyLoss"},
     )
     with pytest.raises(ValueError, match="requires eval.segmentation.layers"):
         build_seg_probe_and_solver(
             model=torch.nn.Identity(),
             num_classes=2,
-            eval_cfg=eval_cfg,
+            segmentation=segmentation,
             device=torch.device("cpu"),
             lr=1e-3,
         )
@@ -88,16 +109,15 @@ def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
 def test_segmentation_runtime_config_rejects_invalid_values(
     field: str, value: object, message: str
 ) -> None:
-    cfg = OmegaConf.create(
-        {
-            "epochs": 1,
-            "batch_size": 2,
-            "lr": 1e-3,
-            "cache_features": True,
-            "cache_dtype": "float16",
-            field: value,
-        }
-    )
+    kwargs = {
+        "epochs": 1,
+        "batch_size": 2,
+        "lr": 1e-3,
+        "cache_features": True,
+        "cache_dtype": "float16",
+    }
+    kwargs[field] = value
+    cfg = SegmentationSettings(**kwargs)
 
     with pytest.raises(ValueError, match=message):
         _resolve_segmentation_runtime_config(cfg)

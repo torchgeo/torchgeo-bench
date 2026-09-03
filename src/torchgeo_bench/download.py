@@ -18,7 +18,6 @@ import zipfile
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
-from rich.progress import track
 from torchgeo.datasets import RESISC45, EuroSAT
 
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
@@ -32,10 +31,12 @@ GEOBENCH_V2_REPO_PREFIX = "aialliance"
 DEFAULT_V2_DATASETS: tuple[str, ...] = tuple(list_v2_datasets())
 
 
-def _decompress_zip_with_progress(zip_path: Path, extract_to: Path) -> None:
-    """Extract ``zip_path`` into ``extract_to`` with a progress bar; delete the zip."""
+def _decompress_zip(zip_path: Path, extract_to: Path) -> None:
+    """Extract ``zip_path`` into ``extract_to`` and delete the archive."""
     with zipfile.ZipFile(zip_path, "r") as zf:
-        for name in track(zf.namelist(), description=f"Extracting {zip_path.name}"):
+        names = zf.namelist()
+        logger.info("Extracting %d files from %s", len(names), zip_path.name)
+        for name in names:
             zf.extract(name, extract_to)
     zip_path.unlink()
     logger.info("Removed zip file: %s", zip_path)
@@ -85,7 +86,7 @@ def download_geobench_v1(output_dir: Path, datasets: list[str] | None = None) ->
 
     for zip_path in sorted(output_dir.rglob("*.zip")):
         logger.info("Decompressing %s", zip_path)
-        _decompress_zip_with_progress(zip_path, zip_path.parent)
+        _decompress_zip(zip_path, zip_path.parent)
 
     logger.info("GeoBench v1 download complete.")
 

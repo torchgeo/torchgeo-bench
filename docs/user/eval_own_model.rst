@@ -191,38 +191,38 @@ parent directory to ``PYTHONPATH`` before running:
 Run the benchmark
 -----------------
 
-Pass your config name as ``model=new_model`` and any combination of dataset
+Pass your preset name as ``--model new_model`` and any combination of dataset
 names to the ``run`` subcommand (see :doc:`datasets` for the full list of
 available names):
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model dataset.names=[m-eurosat]
-   $ torchgeo-bench run model=new_model \
-       dataset.names=[m-eurosat,m-bigearthnet,benv2,burn_scars]
+   $ torchgeo-bench run --model new_model --datasets m-eurosat
+   $ torchgeo-bench run --model new_model \
+       --datasets m-eurosat,m-bigearthnet,benv2,burn_scars
 
 Skip the (slow) linear probe and reduce bootstrap samples for a quick trial:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model dataset.names=[m-eurosat] \
-       eval.skip_linear=true eval.bootstrap=100
+   $ torchgeo-bench run --model new_model --datasets m-eurosat \
+       --skip-linear --bootstrap 100
 
 To write results to a dedicated file instead of the shared
-the per-model file, pass ``output=``:
+the per-model file, pass ``--output``:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model \
-       dataset.names=[m-eurosat,m-so2sat] \
-       output=results/new_model_results.csv
+   $ torchgeo-bench run --model new_model \
+       --datasets m-eurosat,m-so2sat \
+       --output results/new_model_results.csv
 
-The ``resume=true`` flag respects whatever ``output=`` is set to, so an
+The ``--resume`` flag respects whatever ``--output`` is set to, so an
 interrupted run can be continued against the same file:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model output=results/new_model_results.csv resume=true
+   $ torchgeo-bench run --model new_model --output results/new_model_results.csv --resume
 
 .. _eval-results:
 
@@ -230,11 +230,12 @@ Results
 -------
 
 Results are written to ``results/models/<model name>.csv`` by default (or to
-the path set via ``output=``, see above). Profile and intrinsic-dim rows --
-one-time model+hardware measurements enabled by ``eval.profile.enabled`` /
-``eval.intrinsic_dim.enabled`` -- go to their own
+the path set via ``--output``, see above). Profile and intrinsic-dim rows --
+one-time model+hardware measurements produced by the dedicated
+``torchgeo-bench profile`` / ``torchgeo-bench intrinsic-dim`` subcommands --
+go to their own
 ``results/profiles/<model name>.csv`` and
 ``results/intrinsic_dim/<model name>.csv`` files instead, so a routine
-metrics rerun never touches them. Setting ``output=`` explicitly sends
+metrics rerun never touches them. Passing ``--output`` explicitly sends
 every row type to that one file.
 For the full column reference and how to read the CSV, see :doc:`results-format`.
