@@ -12,8 +12,12 @@ dataset silently disappearing from the map.
 """
 
 import json
+import pickle
 
+import h5py
+import numpy as np
 import pytest
+from affine import Affine
 
 from torchgeo_bench.datasets import list_datasets
 from torchgeo_bench.geography import (
@@ -22,6 +26,7 @@ from torchgeo_bench.geography import (
     NO_GEO,
     STORE_DIR,
     GeoRecord,
+    _v1_origin,
     list_geography,
     missing_datasets,
 )
@@ -152,3 +157,17 @@ def test_stored_files_are_canonical_json() -> None:
         assert raw == json.dumps(json.loads(raw), sort_keys=True, separators=(",", ":")), (
             f"{path.name} is not canonical; regenerate it with the extractor"
         )
+
+
+def test_v1_origin_reads_pickled_metadata_without_eval(tmp_path) -> None:
+    path = tmp_path / "sample.hdf5"
+    metadata = {
+        "04 - Red": {
+            "transform": Affine.translation(12.5, 48.25),
+            "crs": "EPSG:4326",
+        }
+    }
+    with h5py.File(path, "w") as file:
+        file.attrs["pickle"] = np.void(pickle.dumps(metadata))
+
+    assert _v1_origin(str(path)) == (12.5, 48.25, "EPSG:4326")

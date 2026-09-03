@@ -23,9 +23,9 @@ loader can read them without changes.
 """
 
 import argparse
+import ast
 import io
 import logging
-import pickle
 import shutil
 from pathlib import Path
 
@@ -33,24 +33,10 @@ import h5py
 import numpy as np
 import webdataset as wds
 
+from torchgeo_bench.datasets._metadata import unpickle_metadata
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-
-
-class _StubUnpickler(pickle.Unpickler):
-    """Match GeoBenchv1._load_sample_metadata: stub geobench module classes."""
-
-    def find_class(self, module: str, name: str) -> type:  # type: ignore[override]
-        if module == "geobench.dataset":
-            return type(name, (), {})
-        return super().find_class(module, name)
-
-
-def _safe_unpickle(b: bytes) -> dict:
-    try:
-        return pickle.loads(b)
-    except (ModuleNotFoundError, AttributeError):
-        return _StubUnpickler(io.BytesIO(b)).load()
 
 
 def _read_sample(hdf5_path: Path) -> tuple[dict[str, np.ndarray], bytes]:
@@ -62,13 +48,15 @@ def _read_sample(hdf5_path: Path) -> tuple[dict[str, np.ndarray], bytes]:
 
 
 def _resolve_pickle_bytes(raw: object) -> bytes:
-    if isinstance(raw, bytes):
-        return raw
     if isinstance(raw, str):
         # The upstream V1 distribution stored the bytes as a Python repr
-        # of a bytestring (``"b'...'"``), so eval the string back.
-        return eval(raw)  # noqa: S307 — trusted dataset payload
-    raise TypeError(f"Unexpected pickle attr type: {type(raw)}")
+        # of a bytestring (``"b'...'"``).
+        raw = ast.literal_eval(raw)
+    elif not isinstance(raw, bytes) and hasattr(raw, "tobytes"):
+        raw = raw.tobytes()
+    if not isinstance(raw, bytes):
+        raise TypeError(f"Unexpected pickle attr type: {type(raw)}")
+    return raw
 
 
 def repack(dataset_dir: Path, out_dir: Path, shard_size: int = 1000) -> int:
@@ -154,11 +142,11 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
         if not parts:
             continue
         new_bands = dict(np.load(io.BytesIO(_read(parts["bands.npz"]))))
-        new_meta = _safe_unpickle(_read(parts["meta.pkl"]))
+        new_meta = unpickle_metadata(_read(parts["meta.pkl"]))
 
         # Reference HDF5
         ref_bands, ref_pkl = _read_sample(targets[sid])
-        ref_meta = _safe_unpickle(_resolve_pickle_bytes(ref_pkl))
+        ref_meta = unpickle_metadata(_resolve_pickle_bytes(ref_pkl))
 
         assert set(new_bands) == set(ref_bands), f"{sid}: band keys differ"
         for k in ref_bands:

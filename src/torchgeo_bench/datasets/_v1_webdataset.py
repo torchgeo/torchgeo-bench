@@ -29,6 +29,7 @@ from typing import Literal
 
 import numpy as np
 import torch
+from huggingface_hub import snapshot_download
 from torch.utils.data import Dataset
 
 from ._metadata import unpickle_metadata
@@ -54,15 +55,6 @@ def ensure_sharded_root(
     target = Path(sharded_root) / dataset_name
     if target.exists() and any(target.glob("shard_*.tar")):
         return target
-
-    try:
-        from huggingface_hub import snapshot_download
-    except ImportError as e:
-        raise RuntimeError(
-            "huggingface_hub is required to auto-download the GeoBench V1 "
-            "WebDataset mirror.  Install via `pip install huggingface_hub`, "
-            "or set GEOBENCH_V1_NO_HF_DOWNLOAD=1 and provide the data manually."
-        ) from e
 
     sharded_root = Path(sharded_root)
     sharded_root.mkdir(parents=True, exist_ok=True)

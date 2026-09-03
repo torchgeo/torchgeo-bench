@@ -21,7 +21,4 @@ def unpickle_metadata(value: object) -> dict:
     if not isinstance(value, bytes):
         raise TypeError(f"Expected pickled metadata bytes, got {type(value).__name__}.")
 
-    try:
-        return pickle.loads(value)
-    except (ModuleNotFoundError, AttributeError):
-        return _StubUnpickler(io.BytesIO(value)).load()
+    return _StubUnpickler(io.BytesIO(value)).load()

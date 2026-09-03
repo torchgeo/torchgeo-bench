@@ -19,8 +19,6 @@ Usage::
     python experiments/scripts/extract_dataset_geography.py --check
 """
 
-from __future__ import annotations
-
 import argparse
 import logging
 import os
