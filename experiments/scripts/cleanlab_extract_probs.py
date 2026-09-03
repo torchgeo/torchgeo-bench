@@ -32,8 +32,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -41,9 +39,11 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from torchgeo_bench.config import compose_config, instantiate  # noqa: E402
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets  # noqa: E402
 from torchgeo_bench.linear import LogisticRegression  # noqa: E402
 from torchgeo_bench.main import embed_split  # noqa: E402
+from torchgeo_bench.settings import load_yaml  # noqa: E402
 
 logger = logging.getLogger("cleanlab_extract")
 
@@ -51,14 +51,14 @@ logger = logging.getLogger("cleanlab_extract")
 CONF_ROOT = REPO_ROOT / "src" / "torchgeo_bench" / "conf" / "model"
 
 
-def build_name_to_config_map() -> dict[str, Path]:
-    """Map ``name:`` field in each model yaml to its file path."""
-    out: dict[str, Path] = {}
+def build_name_to_config_map() -> dict[str, str]:
+    """Map each model result name to its config identifier."""
+    out: dict[str, str] = {}
     for yaml_path in CONF_ROOT.rglob("*.yaml"):
-        cfg = OmegaConf.load(yaml_path)
-        name = cfg.get("name") if isinstance(cfg, dict) or hasattr(cfg, "get") else None
+        cfg = load_yaml(yaml_path)
+        name = cfg.get("name") if isinstance(cfg, dict) else None
         if name is not None:
-            out[str(name)] = yaml_path
+            out[str(name)] = str(yaml_path.relative_to(CONF_ROOT).with_suffix(""))
     return out
 
 
@@ -167,7 +167,7 @@ def main() -> None:
     name_map = build_name_to_config_map()
     if model_name not in name_map:
         raise SystemExit(f"No yaml found with name={model_name!r}; checked {CONF_ROOT}")
-    model_cfg = OmegaConf.load(name_map[model_name])
+    model_cfg = compose_config(model=name_map[model_name]).model
 
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
@@ -211,7 +211,6 @@ def main() -> None:
         model_cfg,
         bands=bands_list,
         normalization=normalization,
-        _convert_="object",
     )
     model.to(device).eval()
 

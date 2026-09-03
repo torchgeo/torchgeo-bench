@@ -22,12 +22,11 @@ import re
 from pathlib import Path
 
 import torch
-import yaml
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 
+from torchgeo_bench.config import instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.segmentation_probe import SegmentationProbe
+from torchgeo_bench.settings import load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +136,7 @@ def main() -> None:
     only = set(args.only.split(",")) if args.only else None
     results: dict[str, dict] = {}
     for path in sorted(CONF.rglob("*.yaml")):
-        conf = yaml.safe_load(path.read_text()) or {}
+        conf = load_yaml(path) or {}
         name, target = conf.get("name"), conf.get("_target_", "")
         if not name or not target or "coordbench" in target:
             continue
@@ -145,8 +144,8 @@ def main() -> None:
             continue
         if only and name not in only:
             continue
-        cfg = OmegaConf.create({k: v for k, v in conf.items() if k != "eval"})
-        model = instantiate(cfg, bands=band_specs(args.dataset, args.bands), _convert_="object")
+        cfg = {key: value for key, value in conf.items() if key != "eval"}
+        model = instantiate(cfg, bands=band_specs(args.dataset, args.bands))
         model.eval()
         seen = measure(model)
         if not seen:
