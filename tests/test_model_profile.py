@@ -70,7 +70,7 @@ def test_count_gflops_inference_attrerror_falls_back_to_no_grad() -> None:
     assert torch.isfinite(torch.tensor(gflops))
 
 
-def test_count_gflops_assertion_chain_raises_not_implemented() -> None:
+def test_count_gflops_model_assertion_propagates() -> None:
     class AssertionChainModel(nn.Module):
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             del x
@@ -78,5 +78,5 @@ def test_count_gflops_assertion_chain_raises_not_implemented() -> None:
                 raise AttributeError("next_functions")
             raise AssertionError("Expected gradient function to be set")
 
-    with pytest.raises(NotImplementedError, match="incompatible"):
+    with pytest.raises(AssertionError, match="Expected gradient function"):
         _count_gflops(AssertionChainModel(), torch.rand(1, 3, 8, 8))

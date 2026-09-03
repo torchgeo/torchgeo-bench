@@ -28,7 +28,6 @@ from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.model_profile import (
     _count_gflops,
     _count_params,
-    lenient_grad_hooks,
     measure_profile,
 )
 from torchgeo_bench.results import append_rows_atomic
@@ -157,10 +156,9 @@ def _measure_backbone(
     while True:
         try:
             x = torch.randn(batch_size, n_channels, image_size, image_size, device=device)
-            with lenient_grad_hooks():
-                return measure_profile(
-                    model, x, device, n_warmup=n_warmup, n_measure=n_measure
-                ), batch_size
+            return measure_profile(
+                model, x, device, n_warmup=n_warmup, n_measure=n_measure
+            ), batch_size
         except torch.cuda.OutOfMemoryError:
             if batch_size <= 1:
                 raise
@@ -266,7 +264,7 @@ def _seg_head_gflops(
     # batch-1 here, so hand it straight through.
     from torch.utils.flop_counter import FlopCounterMode
 
-    with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, torch.inference_mode():
+    with FlopCounterMode(display=False) as counter, torch.inference_mode():
         wrapper(features)
     return float(counter.get_total_flops()) / 1e9
 
@@ -300,7 +298,6 @@ def _flops_row(
         "peak_gpu_mem_gb": None,
         "reserved_gpu_mem_gb": None,
         "timing_batch_size": None,
-        "lenient_grad_hooks": True,
         "measured_at": _now(),
     }
     row.update(values)

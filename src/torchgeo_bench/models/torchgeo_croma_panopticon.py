@@ -172,6 +172,4 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         chn_ids = self._chn_ids.unsqueeze(0).expand(images.shape[0], -1)
-        if images.requires_grad:
-            chn_ids = chn_ids.clone().requires_grad_(True)
         return self.backbone({"imgs": images, "chn_ids": chn_ids})
