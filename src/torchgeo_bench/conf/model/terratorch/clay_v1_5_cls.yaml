@@ -1,0 +1,13 @@
+_target_: torchgeo_bench.models.TerraTorchClayBench
+backbone_name: timm_clay_v1_base
+pretrained: true
+target_size: 256  # Clay's pretrained pos_embed is fixed to 32x32 patches @ patch_size=8
+modality: sentinel-2-l2a
+name: tt_clay_v1_5_base_cls
+pool: cls
+eval:
+  segmentation:
+    # Isotropic transformer: no spatial pyramid, so tap 4 blocks
+    # spread across depth, deepest first.  Derived by measurement
+    # (experiments/scripts/introspect_seg_layers.py).
+    layers: ["clay_encoder.transformer.layers.11.1", "clay_encoder.transformer.layers.8.1", "clay_encoder.transformer.layers.5.1", "clay_encoder.transformer.layers.2.1"]

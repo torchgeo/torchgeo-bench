@@ -1,0 +1,13 @@
+_target_: torchgeo_bench.models.TerraTorchPrithviBench
+backbone_name: prithvi_eo_v2_300
+pretrained: true
+target_size: 224
+name: tt_prithvi_eo_v2_300_cls
+eval:
+  segmentation:
+    # Isotropic transformer: no spatial pyramid, so tap 4 blocks
+    # spread across depth, deepest first.  Derived by measurement
+    # (experiments/scripts/introspect_seg_layers.py).
+    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+  c_range: [-6, 5, 60]
+pool: cls
