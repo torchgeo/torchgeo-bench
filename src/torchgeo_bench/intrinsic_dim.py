@@ -66,14 +66,12 @@ def _load_estimator(name: str) -> type:
 
 
 def _resolve_device(device: str | torch.device | None) -> torch.device:
-    """Resolve the requested device, falling back to CPU when CUDA unavailable."""
+    """Resolve an automatic device or reject unavailable requested CUDA."""
     if device is None:
-        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    else:
-        dev = torch.device(device)
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dev = torch.device(device)
     if dev.type == "cuda" and not torch.cuda.is_available():
-        logger.warning("CUDA requested for intrinsic-dim but unavailable; using CPU.")
-        dev = torch.device("cpu")
+        raise RuntimeError(f"CUDA device {dev} was requested, but CUDA is unavailable.")
     return dev
 
 

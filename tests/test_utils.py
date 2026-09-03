@@ -1,11 +1,13 @@
 """Tests for extract_features in torchgeo_bench.utils."""
 
+from unittest import mock
+
 import numpy as np
 import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from torchgeo_bench.utils import extract_features
+from torchgeo_bench.utils import extract_features, resolve_device
 
 
 class _IdentityModel(torch.nn.Module):
@@ -102,3 +104,11 @@ def test_3d_output_mean_pooled():
     X, y = extract_features(_SeqModel(), loader, device="cpu", verbose=False)
     assert X.ndim == 2
     assert X.shape[0] == 4
+
+
+def test_resolve_device_rejects_unavailable_cuda() -> None:
+    with (
+        mock.patch.object(torch.cuda, "is_available", return_value=False),
+        pytest.raises(RuntimeError, match="CUDA is unavailable"),
+    ):
+        resolve_device("cuda:0")

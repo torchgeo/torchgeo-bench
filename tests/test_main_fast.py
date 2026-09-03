@@ -249,6 +249,7 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
     )
     model = _chainable_model_mock()
     monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
@@ -273,6 +274,7 @@ def test_explicit_gpu_knn_without_gpu_faiss_fails_before_data_loading(tmp_path: 
         overrides=["device=cuda:0", "eval.knn_device=cuda", "eval.skip_linear=true"],
     )
     monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
