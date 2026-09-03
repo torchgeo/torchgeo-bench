@@ -16,7 +16,7 @@ Override semantics kept from the Hydra days so existing scripts still work:
 """
 
 import importlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,62 @@ from typing import Any
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 CONF_DIR = Path(str(files("torchgeo_bench") / "conf"))
+
+
+class ModelConfigError(ValueError):
+    """Raised when a model YAML does not match the supported structure."""
+
+
+def validate_model_config(config: Mapping[str, Any], *, source: str | Path) -> None:
+    """Validate the shared structure around heterogeneous model kwargs.
+
+    Model-specific constructor arguments remain intentionally unrestricted.
+    This validates only the fields interpreted by torchgeo-bench itself.
+    """
+    target = config.get("_target_")
+    if not isinstance(target, str) or not target or "." not in target:
+        raise ModelConfigError(f"{source}: '_target_' must be a dotted import path.")
+
+    name = config.get("name")
+    if not isinstance(name, str) or not name:
+        raise ModelConfigError(f"{source}: 'name' must be a non-empty string.")
+
+    eval_config = config.get("eval")
+    if eval_config is not None and not isinstance(eval_config, Mapping):
+        raise ModelConfigError(f"{source}: 'eval' must be a mapping.")
+    if isinstance(eval_config, Mapping):
+        c_range = eval_config.get("c_range")
+        if c_range is not None and (
+            not isinstance(c_range, list)
+            or len(c_range) != 3
+            or not all(
+                not isinstance(value, bool) and isinstance(value, int | float) for value in c_range
+            )
+        ):
+            raise ModelConfigError(f"{source}: 'eval.c_range' must be a three-number list.")
+
+        segmentation = eval_config.get("segmentation")
+        if segmentation is not None and not isinstance(segmentation, Mapping):
+            raise ModelConfigError(f"{source}: 'eval.segmentation' must be a mapping.")
+        if isinstance(segmentation, Mapping):
+            layers = segmentation.get("layers")
+            if layers is not None and (
+                not isinstance(layers, list)
+                or not all(isinstance(layer, str) and layer for layer in layers)
+            ):
+                raise ModelConfigError(
+                    f"{source}: 'eval.segmentation.layers' must be a list of strings."
+                )
+
+    dataset_overrides = config.get("dataset_overrides")
+    if dataset_overrides is not None and (
+        not isinstance(dataset_overrides, Mapping)
+        or not all(
+            isinstance(dataset, str) and isinstance(values, Mapping)
+            for dataset, values in dataset_overrides.items()
+        )
+    ):
+        raise ModelConfigError(f"{source}: 'dataset_overrides' must map dataset names to mappings.")
 
 
 def list_model_configs() -> list[str]:
@@ -105,6 +161,10 @@ def compose_config(
             f"{len(list_model_configs())} configs."
         )
     cfg.model = OmegaConf.load(model_path)
+    resolved_model = OmegaConf.to_container(cfg.model, resolve=True)
+    if not isinstance(resolved_model, dict):
+        raise ModelConfigError(f"{model_path}: model config must contain a YAML mapping.")
+    validate_model_config(resolved_model, source=model_path)
 
     OmegaConf.set_struct(cfg, True)
     if additions:
