@@ -35,9 +35,6 @@ PINNED_CONFIGS: dict[str, str] = {
     "tgeo_panopticon": "torchgeo/panopticon",
     "tgeo_scalemae_large_fmow": "torchgeo/scalemae_large_fmow",
     "olmoearth_v1_nano": "olmoearth_nano",
-    "tt_prithvi_eo_v2_300": "terratorch/prithvi_eo_v2_300",
-    "tt_terramind_v1_base": "terratorch/terramind_v1_base",
-    "tt_clay_v1_5_base": "terratorch/clay_v1_5",
     "tgeo_swinv2b_s2rgb_satlas_mi": "torchgeo/swinv2b_s2rgb_satlas_mi",
 }
 
@@ -53,9 +50,6 @@ CANONICAL_BANDS: dict[str, str] = {
     "tgeo_panopticon": "all",
     "tgeo_scalemae_large_fmow": "all",
     "olmoearth_v1_nano": "rgb",
-    "tt_prithvi_eo_v2_300": "all",
-    "tt_terramind_v1_base": "all",
-    "tt_clay_v1_5_base": "all",
     "tgeo_swinv2b_s2rgb_satlas_mi": "rgb",
 }
 

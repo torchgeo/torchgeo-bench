@@ -8,11 +8,6 @@ from .olmoearth import OlmoEarthBenchModel
 from .rcf import RCFBench
 from .sam3 import SAM3Encoder
 from .segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead, PatchLinearHead
-from .terratorch_models import (
-    TerraTorchClayBench,
-    TerraTorchPrithviBench,
-    TerraTorchTerraMindBench,
-)
 from .timm import TimmPatchBenchModel
 from .torchgeo_models import (
     TorchGeoCromaBench,
@@ -44,9 +39,6 @@ __all__: list[str] = [
     "TorchGeoResNetBench",
     "TorchGeoScaleMAEBench",
     "TorchGeoSwinBench",
-    "TerraTorchPrithviBench",
-    "TerraTorchClayBench",
-    "TerraTorchTerraMindBench",
     "LinearHead",
     "PatchLinearHead",
     "ConvBlockHead",

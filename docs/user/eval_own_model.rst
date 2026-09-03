@@ -82,11 +82,10 @@ Pick the strategy that matches how your backbone was trained:
        backbone's expected unit, then applies any declared per-channel
        mean/std.
 
-       *In-repo examples:* Prithvi-EO (``expected_input_unit = S2_DN``),
-       Clay v1.5 and TerraMind (``expected_input_unit = REFLECTANCE_0_1``),
-       CROMA (``expected_input_unit = REFLECTANCE_0_1``).  See
-       ``TerraTorchPrithviBench`` in :file:`src/torchgeo_bench/models/terratorch_models.py`
-       and :class:`~torchgeo_bench.models.TimmPatchBenchModel` for the pattern.
+       *In-repo examples:* DOFA and CROMA use reflectance-scaled inputs, while
+       the TorchGeo ResNet wrappers declare the units expected by their
+       pretrained weights. See :class:`~torchgeo_bench.models.TimmPatchBenchModel`
+       and the modules under :file:`src/torchgeo_bench/models/` for the pattern.
      - Set ``expected_input_unit``, ``pretrain_mean``, and ``pretrain_std``
        as class attributes *before* calling ``super().__init__(bands=bands)``.
 
