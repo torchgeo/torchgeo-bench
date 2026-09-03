@@ -34,14 +34,12 @@ class TestResolveDevice:
         with mock.patch.object(torch.cuda, "is_available", return_value=True):
             assert _resolve_device(None).type == "cuda"
 
-    def test_cuda_unavailable_falls_back_to_cpu(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_cuda_unavailable_raises(self) -> None:
         with (
             mock.patch.object(torch.cuda, "is_available", return_value=False),
-            caplog.at_level(logging.WARNING),
+            pytest.raises(RuntimeError, match="CUDA is unavailable"),
         ):
-            dev = _resolve_device("cuda")
-        assert dev.type == "cpu"
-        assert any("CUDA requested" in r.message for r in caplog.records)
+            _resolve_device("cuda")
 
 
 class TestSubsample:

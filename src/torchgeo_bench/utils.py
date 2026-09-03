@@ -10,11 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_device(requested_device: str | torch.device) -> torch.device:
-    """Resolve a requested device, falling back to CPU if CUDA is unavailable."""
+    """Resolve a requested device and reject unavailable CUDA explicitly."""
     device = torch.device(requested_device)
     if device.type == "cuda" and not torch.cuda.is_available():
-        logger.warning("CUDA requested but not available; falling back to CPU.")
-        return torch.device("cpu")
+        raise RuntimeError(f"CUDA device {device} was requested, but CUDA is unavailable.")
     return device
 
 
