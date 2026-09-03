@@ -503,6 +503,11 @@ class OlmoEarthBenchModel(BenchModel):
         """Identity — OlmoEarth's internal Normalizer handles raw values."""
         return images
 
+    @property
+    def effective_normalization(self) -> str:
+        """Record OlmoEarth's internal preprocessing as model-native."""
+        return "model_native"
+
     def _pad_group(
         self,
         g_images: torch.Tensor,

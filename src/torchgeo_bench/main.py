@@ -743,9 +743,10 @@ def main(cfg: DictConfig) -> None:
                 _, side_metrics = load_completed(side_path)
                 _merge_completed_metrics(completed_metrics, side_metrics)
 
-    # Selectable input-normalisation strategy; recorded in the CSV so
-    # ablations across strategies are distinguishable.
-    normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
+    # Selectable input-normalisation strategy.  The result rows below record
+    # the policy actually applied by each instantiated wrapper; these can
+    # differ when a model owns its preprocessing internally.
+    requested_normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
     config_hash = _resume_config_hash(cfg)
 
@@ -771,7 +772,7 @@ def main(cfg: DictConfig) -> None:
             config_tuple = tuple(
                 _canonical_key_cell(v)
                 for v in (
-                    normalization,
+                    requested_normalization,
                     effective_image_size,
                     effective_interpolation,
                     cfg.dataset.partition,
@@ -847,7 +848,7 @@ def main(cfg: DictConfig) -> None:
             # dataclasses reach the constructor intact.
             instantiate_kwargs: dict = {
                 "bands": bands_list,
-                "normalization": normalization,
+                "normalization": requested_normalization,
             }
             if model_cfg.get("mode", None) == "empirical":
                 # Empirical RCF whitens against real patches, so it needs the dataset.
@@ -856,13 +857,14 @@ def main(cfg: DictConfig) -> None:
             model_cfg.pop("interpolation", None)
             model: BenchModel = instantiate(model_cfg, **instantiate_kwargs)
             model.to(device).eval()
+            effective_normalization = model.effective_normalization
 
             common_meta = {
                 "dataset": ds_name,
                 "seed": cfg.seed,
                 "model": model_cfg._target_,
                 "name": model_cfg.name,
-                "normalization": normalization,
+                "normalization": effective_normalization,
                 "image_size": effective_image_size,
                 "interpolation": effective_interpolation,
                 "partition": cfg.dataset.partition,

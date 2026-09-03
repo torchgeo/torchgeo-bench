@@ -77,6 +77,7 @@ optional-dependencies.coordbench = [
   "rshf>=0.2", # pretrained location encoders: SatCLIP/GeoCLIP/Climplicit/SINR
 ]
 optional-dependencies.dev = [
+  "evaluma>=0.3",        # methodology-aware ranking backend for experiments/scripts/regen_leaderboard.py
   "mdformat>=0.7.22",
   "pre-commit>=4.3",
   "pyproject-fmt>=2.21",
