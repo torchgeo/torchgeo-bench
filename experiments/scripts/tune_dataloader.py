@@ -4,7 +4,7 @@ report samples/sec, peak GPU memory, and the throughput-maximising config.
 Usage::
 
     python experiments/scripts/tune_dataloader.py \\
-        --model torchgeo/dofa_base \\
+        --model terratorch/prithvi_eo_v2_300 \\
         --dataset m-bigearthnet \\
         --bands all \\
         --root data/classification_v1.0_wds \\
@@ -93,7 +93,7 @@ def _bench(
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--model", required=True, help="e.g. torchgeo/dofa_base")
+    p.add_argument("--model", required=True, help="e.g. terratorch/prithvi_eo_v2_300")
     p.add_argument("--dataset", default="m-bigearthnet")
     p.add_argument("--bands", default="all")
     p.add_argument("--root", default="data/classification_v1.0_wds")

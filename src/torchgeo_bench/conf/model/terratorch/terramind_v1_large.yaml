@@ -1,0 +1,13 @@
+_target_: torchgeo_bench.models.TerraTorchTerraMindBench
+backbone_name: terramind_v1_large
+pretrained: true
+target_size: 224
+modality: S2L2A
+name: tt_terramind_v1_large
+eval:
+  segmentation:
+    # Isotropic transformer: no spatial pyramid, so tap 4 blocks
+    # spread across depth, deepest first.  Derived by measurement
+    # (experiments/scripts/introspect_seg_layers.py).
+    layers: ["encoder.23", "encoder.17", "encoder.11", "encoder.5"]
+  c_range: [-6, 5, 60]
