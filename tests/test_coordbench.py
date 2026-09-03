@@ -8,7 +8,10 @@ from omegaconf import OmegaConf
 
 from torchgeo_bench.coordbench import (
     CoordBenchmark,
+    NeRFLocationEncoder,
     SinCosLocationEncoder,
+    SphericalHarmonicLocationEncoder,
+    XYZLocationEncoder,
     knn_probe_score,
     linear_probe_score,
     load_benchmarks,
@@ -34,6 +37,25 @@ def test_sincos_encode_shape(points: tuple[np.ndarray, np.ndarray]) -> None:
     lon, lat = points
     feats = SinCosLocationEncoder(device="cpu").encode(lon, lat)
     assert feats.shape == (len(lon), 4)
+    assert feats.dtype == np.float32
+    assert np.isfinite(feats).all()
+
+
+@pytest.mark.parametrize(
+    ("encoder", "width"),
+    [
+        (XYZLocationEncoder(device="cpu"), 3),
+        (NeRFLocationEncoder(num_frequencies=2, device="cpu"), 12),
+        (SphericalHarmonicLocationEncoder(degree=3, device="cpu"), 16),
+    ],
+)
+def test_coordinate_encoders_shape_and_batching(
+    points: tuple[np.ndarray, np.ndarray], encoder, width: int
+) -> None:
+    lon, lat = points
+    encoder.batch_size = 37
+    feats = encoder.encode(lon, lat)
+    assert feats.shape == (len(lon), width)
     assert feats.dtype == np.float32
     assert np.isfinite(feats).all()
 
@@ -177,6 +199,8 @@ def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> No
     bench = _synthetic_benchmarks()[0]
     test_mask = np.zeros(len(bench.lat), dtype=bool)
     test_mask[::3] = True
+    bench.tasks["target"][test_mask] = np.nan
+    test_mask[1] = True
     bench.test_mask = test_mask
     monkeypatch.setattr("torchgeo_bench.coordbench.run.load_benchmarks", lambda names: [bench])
 
@@ -185,7 +209,7 @@ def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> No
 
     df = pd.read_csv(cfg.coord.output)
     assert set(df.split) == {"official"}
-    assert set(df.n_test) == {int(test_mask.sum())}
+    assert set(df.n_test) == {1}
 
 
 def test_load_benchmarks_selection(monkeypatch) -> None:

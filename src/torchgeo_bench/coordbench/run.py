@@ -21,6 +21,7 @@ from torchgeo_bench.config import instantiate
 from torchgeo_bench.coordbench.datasets import CoordBenchmark, load_benchmarks
 from torchgeo_bench.coordbench.models import LocationEncoder
 from torchgeo_bench.coordbench.probe import (
+    _valid_mask,
     knn_probe_score,
     linear_probe_score,
     spatial_fold_ids,
@@ -87,7 +88,7 @@ def _resolve_splits(split: str) -> list[str]:
 
 
 def _completed_keys(output_path: str) -> set[tuple[str, ...]]:
-    """Existing (dataset, task, method, model_name, split) keys for resume."""
+    """Return existing ``(dataset, task, method, model, split)`` keys."""
     if not os.path.exists(output_path):
         return set()
     df = pd.read_csv(output_path)
@@ -257,12 +258,11 @@ def _evaluate_benchmark(
                     fold_assign=fold_assign,
                 )
                 std = float(np.std(fold_scores)) if len(fold_scores) > 1 else 0.0
+                valid = _valid_mask(features, np.asarray(labels), bench.task_type)
                 if test_mask is not None:
-                    n_test = int(np.asarray(test_mask, dtype=bool).sum())
-                elif bench.task_type == "regression":
-                    n_test = int(np.isfinite(np.asarray(labels, dtype=np.float64)).sum())
+                    n_test = int((valid & np.asarray(test_mask, dtype=bool)).sum())
                 else:
-                    n_test = int(len(labels))
+                    n_test = int(valid.sum())
                 rows.append(
                     CoordResult(
                         dataset=bench.name,

@@ -34,17 +34,43 @@ already match ``(dataset, task, method, model, split)``.
 Included encoders
 -----------------
 
-================  ==============  =============================================
-Model preset      Installation    Description
-================  ==============  =============================================
-``sincos``        base            Four-dimensional periodic coordinate baseline.
-``mind``          base            64-dimensional MIND Matryoshka prefix.
-``mind-small``    base            128-dimensional distilled MIND student.
-``climplicit``    ``coordbench``  Climplicit climate-specialist encoder.
-``geoclip``       ``coordbench``  GeoCLIP Equal-Earth/RFF encoder.
-``satclip``       ``coordbench``  SatCLIP spherical-harmonic encoder.
-``sinr``          ``coordbench``  SINR species-distribution encoder.
-================  ==============  =============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 30 14 60
+
+   * - Model preset
+     - Installation
+     - Description
+   * - ``sincos``
+     - base
+     - Four-dimensional periodic coordinate baseline.
+   * - ``mind``
+     - base
+     - 64-dimensional MIND Matryoshka prefix.
+   * - ``mind-small``
+     - base
+     - 128-dimensional distilled MIND student.
+   * - ``climplicit``
+     - ``coordbench``
+     - Climplicit climate-specialist encoder.
+   * - ``geoclip``
+     - ``coordbench``
+     - GeoCLIP Equal-Earth/RFF encoder.
+   * - ``satclip``
+     - ``coordbench``
+     - SatCLIP spherical-harmonic encoder.
+   * - ``sinr``
+     - ``coordbench``
+     - SINR species-distribution encoder.
+   * - ``xyz``
+     - base
+     - Unit-sphere XYZ position encoding.
+   * - ``nerf``
+     - base
+     - NeRF Fourier position encoding.
+   * - ``spherical-harmonics``
+     - base
+     - Compact real spherical-harmonic encoding.
 
 Install the optional reference encoders from PyPI with:
 
@@ -99,6 +125,13 @@ The full block is:
      cell_deg: 10.0
      knn_k: 5
      knn_device: cpu
+
+External released weights are often dataset-specific classifiers whose
+checkpoints also encode the original task head and, for some families, anchor
+locations. They are not silently reinterpreted as universal CoordBench models.
+The coordinate-only pretrained encoders remain available through the
+``coordbench`` extra. Retrieval-augmented models that require an external
+database are intentionally outside this apples-to-apples encoder track.
 
 Add a location encoder
 ----------------------

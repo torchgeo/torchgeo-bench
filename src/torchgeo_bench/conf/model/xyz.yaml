@@ -1,0 +1,3 @@
+# XYZ position encoding; dependency-free.
+_target_: torchgeo_bench.coordbench.models.XYZLocationEncoder
+name: xyz

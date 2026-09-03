@@ -1,0 +1,4 @@
+# NeRF position encoding; dependency-free.
+_target_: torchgeo_bench.coordbench.models.NeRFLocationEncoder
+name: nerf
+num_frequencies: 16

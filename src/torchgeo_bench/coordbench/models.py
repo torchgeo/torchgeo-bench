@@ -9,7 +9,8 @@ The trivial :class:`SinCosLocationEncoder` and the pretrained
 :class:`MINDLocationEncoder` ship in the base install. The other pretrained
 reference encoders (SatCLIP / GeoCLIP / Climplicit / SINR) are thin wrappers
 over the ``rshf`` package and require the ``coordbench`` extra
-(``pip install -e ".[coordbench]"``).
+(``pip install -e ".[coordbench]"``). The dependency-free coordinate position
+encoders below do not load external released weights.
 """
 
 import logging
@@ -82,6 +83,136 @@ class SinCosLocationEncoder(LocationEncoder):
         return np.stack(
             [np.sin(lat_r), np.cos(lat_r), np.sin(lon_r), np.cos(lon_r)], axis=1
         ).astype(np.float32)
+
+
+def _unit_xyz(lon: np.ndarray, lat: np.ndarray) -> torch.Tensor:
+    """Convert finite geographic coordinates in degrees to unit XYZ tensors."""
+    if lon.ndim != 1 or lat.ndim != 1 or lon.shape != lat.shape:
+        raise ValueError("lon and lat must be one-dimensional arrays with equal length")
+    if not np.isfinite(lon).all() or not np.isfinite(lat).all():
+        raise ValueError("lon and lat must contain only finite values")
+    if ((lat < -90.0) | (lat > 90.0)).any():
+        raise ValueError("lat must be in the inclusive range [-90, 90] degrees")
+
+    lon_radians = torch.as_tensor(np.deg2rad(lon), dtype=torch.float32)
+    lat_radians = torch.as_tensor(np.deg2rad(lat), dtype=torch.float32)
+    cos_lat = torch.cos(lat_radians)
+    return torch.stack(
+        (
+            cos_lat * torch.cos(lon_radians),
+            cos_lat * torch.sin(lon_radians),
+            torch.sin(lat_radians),
+        ),
+        dim=1,
+    )
+
+
+class XYZLocationEncoder(LocationEncoder):
+    """Return the three-dimensional unit-sphere representation of each point."""
+
+    name = "xyz"
+
+    @torch.no_grad()
+    def _encode(self, lon: np.ndarray, lat: np.ndarray, _year: np.ndarray | None) -> np.ndarray:
+        return _unit_xyz(lon, lat).numpy()
+
+
+class NeRFLocationEncoder(LocationEncoder):
+    """Return deterministic NeRF-style Fourier features of spherical XYZ.
+
+    For each XYZ coordinate, frequencies ``2**k * pi`` are applied for
+    ``k = 0 .. num_frequencies - 1``. The encoder emits only the transformed
+    features by default. Set ``include_xyz`` to add raw spherical coordinates
+    as an ablation.
+
+    Args:
+        num_frequencies: Number of geometric frequency bands. Must be positive.
+        include_xyz: Include the three untransformed XYZ coordinates.
+    """
+
+    name = "nerf"
+
+    def __init__(
+        self,
+        num_frequencies: int = 10,
+        include_xyz: bool = False,
+        device: str = "cpu",
+        batch_size: int = 8192,
+    ) -> None:
+        super().__init__(device=device, batch_size=batch_size)
+        if num_frequencies < 1:
+            raise ValueError("num_frequencies must be positive")
+        self.num_frequencies = int(num_frequencies)
+        self.include_xyz = bool(include_xyz)
+
+    @torch.no_grad()
+    def _encode(self, lon: np.ndarray, lat: np.ndarray, _year: np.ndarray | None) -> np.ndarray:
+        xyz = _unit_xyz(lon, lat)
+        frequencies = torch.pow(2.0, torch.arange(self.num_frequencies, dtype=torch.float32))
+        angles = xyz[:, :, None] * frequencies[None, None, :] * torch.pi
+        features = [torch.sin(angles).flatten(1), torch.cos(angles).flatten(1)]
+        if self.include_xyz:
+            features.insert(0, xyz)
+        return torch.cat(features, dim=1).numpy()
+
+
+class SphericalHarmonicLocationEncoder(LocationEncoder):
+    """Return normalized real spherical-harmonic features through degree 3.
+
+    The output has ``(degree + 1)**2`` columns, ordered by increasing degree
+    and then the conventional real ``m`` order from ``-l`` to ``l``. Degree
+    three is a deliberate upper bound: it provides a compact continuous
+    spherical basis without pretending to reproduce a learned task head.
+
+    Args:
+        degree: Maximum harmonic degree, from 0 through 3.
+    """
+
+    name = "spherical-harmonics"
+
+    def __init__(
+        self,
+        degree: int = 3,
+        device: str = "cpu",
+        batch_size: int = 8192,
+    ) -> None:
+        super().__init__(device=device, batch_size=batch_size)
+        if degree < 0 or degree > 3:
+            raise ValueError("degree must be between 0 and 3")
+        self.degree = int(degree)
+
+    @torch.no_grad()
+    def _encode(self, lon: np.ndarray, lat: np.ndarray, _year: np.ndarray | None) -> np.ndarray:
+        x, y, z = _unit_xyz(lon, lat).unbind(dim=1)
+        one = torch.ones_like(x)
+        features = [0.28209479177387814 * one]
+        if self.degree >= 1:
+            features.extend(
+                (-0.4886025119029199 * y, 0.4886025119029199 * z, -0.4886025119029199 * x)
+            )
+        if self.degree >= 2:
+            features.extend(
+                (
+                    1.0925484305920792 * x * y,
+                    -1.0925484305920792 * y * z,
+                    0.31539156525252005 * (3.0 * z.square() - 1.0),
+                    -1.0925484305920792 * x * z,
+                    0.5462742152960396 * (x.square() - y.square()),
+                )
+            )
+        if self.degree >= 3:
+            features.extend(
+                (
+                    -0.5900435899266435 * y * (3.0 * x.square() - y.square()),
+                    2.890611442640554 * x * y * z,
+                    -0.4570457994644658 * y * (5.0 * z.square() - 1.0),
+                    0.3731763325901154 * z * (5.0 * z.square() - 3.0),
+                    -0.4570457994644658 * x * (5.0 * z.square() - 1.0),
+                    1.445305721320277 * z * (x.square() - y.square()),
+                    -0.5900435899266435 * x * (x.square() - 3.0 * y.square()),
+                )
+            )
+        return torch.stack(features, dim=1).numpy()
 
 
 class MINDLocationEncoder(LocationEncoder):

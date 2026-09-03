@@ -24,9 +24,12 @@ from torchgeo_bench.coordbench.models import (
     GeoCLIPLocationEncoder,
     LocationEncoder,
     MINDLocationEncoder,
+    NeRFLocationEncoder,
     SatCLIPLocationEncoder,
     SinCosLocationEncoder,
     SINRLocationEncoder,
+    SphericalHarmonicLocationEncoder,
+    XYZLocationEncoder,
 )
 from torchgeo_bench.coordbench.probe import (
     knn_probe_score,
@@ -45,6 +48,9 @@ __all__ = [
     "SINRLocationEncoder",
     "GeoCLIPLocationEncoder",
     "SatCLIPLocationEncoder",
+    "XYZLocationEncoder",
+    "NeRFLocationEncoder",
+    "SphericalHarmonicLocationEncoder",
     "list_benchmarks",
     "list_families",
     "load_benchmarks",
