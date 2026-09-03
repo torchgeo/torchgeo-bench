@@ -130,6 +130,10 @@ and the runnable
   workflow, and troubleshooting.
 - **[AGENTS.md](https://github.com/torchgeo/torchgeo-bench/blob/main/AGENTS.md)**
   — contributor guide and house style.
+- **`torchgeo-bench --skill`** — prints agent-facing instructions (commands,
+  override syntax, results layout, how to add a model or dataset). Pipe it
+  into your agent's skills directory:
+  `torchgeo-bench --skill > .claude/skills/torchgeo-bench/SKILL.md`.
 
 <!-- skip-on-docs-landing-end -->
 

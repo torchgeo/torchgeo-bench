@@ -117,3 +117,22 @@ pandas:
    from torchgeo_bench.results import load_results
    df = load_results()
    print(df.groupby(["dataset", "method"])["metric_value"].mean())
+
+Point a coding agent at the benchmark
+-------------------------------------
+
+``--skill`` prints a self-contained brief -- commands, config-override syntax,
+dataset names, results layout, and the conventions for adding a model or
+dataset -- written for AI coding agents:
+
+.. code-block:: console
+
+   $ torchgeo-bench --skill
+
+Redirect it into whichever skills directory your agent reads, for example
+``.claude/skills/torchgeo-bench/SKILL.md`` or ``.github/skills/torchgeo-bench/SKILL.md``:
+
+.. code-block:: console
+
+   $ mkdir -p .claude/skills/torchgeo-bench
+   $ torchgeo-bench --skill > .claude/skills/torchgeo-bench/SKILL.md
