@@ -118,7 +118,7 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
     df = pd.DataFrame(rows)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = npz_path.stem  # e.g. benv2__tt_terramind_v1_large_test
+    stem = npz_path.stem  # e.g. benv2__tgeo_croma_large_test
     dataset, rest = stem.split("__", 1)
     split = rest.rsplit("_", 1)[1]  # train|test
     out_path = out_dir / f"perclass_{dataset}_{split}.csv"

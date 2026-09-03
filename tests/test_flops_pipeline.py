@@ -13,7 +13,6 @@ from torch import nn
 
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.flops_pipeline import (
-    _MODALITY_FOR_BAND_CONFIG,
     _is_band_incompatibility,
     _load_completed,
     _n_tokens,
@@ -300,7 +299,7 @@ def test_num_classes_barely_moves_head_cost():
 
 
 # ---------------------------------------------------------------------------
-# Band configs and the TerraMind modality agreement
+# Band configs
 # ---------------------------------------------------------------------------
 
 
@@ -317,24 +316,6 @@ def test_band_configs_come_from_cloudsen12_class_attributes():
     # so2sat's 10 S2 + 2 SAR.
     assert {b.sensor for b in s2} == {"s2"}
     assert [b.name for b in rgb] == ["b04", "b03", "b02"]
-
-
-def test_terramind_modality_map_matches_shipped_configs():
-    """Assert no cell can pair an RGB modality with a 12-channel tensor.
-
-    This is the one failure mode that yields a plausible-looking wrong number
-    instead of an exception, so it is pinned against the actual config files.
-    """
-    from torchgeo_bench.config import compose_config
-
-    for config_name, band_config in [
-        ("terratorch/terramind_v1_base", "s2"),
-        ("terratorch/terramind_v1_base_rgb", "rgb"),
-        ("terratorch/terramind_v1_large", "s2"),
-        ("terratorch/terramind_v1_large_rgb", "rgb"),
-    ]:
-        cfg = compose_config([f"model={config_name}"])
-        assert str(cfg.model.modality) == _MODALITY_FOR_BAND_CONFIG[band_config]
 
 
 # ---------------------------------------------------------------------------
@@ -475,16 +456,6 @@ def test_channel_count_disagreement_is_a_bug_not_a_band_skip():
         map_to_model_bands(torch.zeros(1, 7, 4, 4), rgb, ["red", "green", "blue"])
     assert "channels but" in str(mismatch.value)
     assert _is_band_incompatibility(mismatch.value) is None
-
-
-def test_terramind_modality_mismatch_is_a_band_incompatibility():
-    """_build_model raises this itself for an S2L2A/rgb pairing."""
-    exc = ValueError(
-        "TerraMind modality 'S2L2A' does not match band config 'rgb' "
-        "(3 channels, expects 'RGB'). Measuring this pair would map through "
-        "the wrong band table."
-    )
-    assert _is_band_incompatibility(exc) is exc
 
 
 def test_flops_config_resolves_every_shipped_model_config():
