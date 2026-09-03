@@ -9,6 +9,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.main import (
+    _cache_fits_device,
     _completed_run_keys,
     _expand_dataset_list,
     _filter_completed_metric_rows,
@@ -17,6 +18,7 @@ from torchgeo_bench.main import (
     evaluate_profile,
 )
 from torchgeo_bench.model_profile import measure_cpu_throughput
+from torchgeo_bench.segmentation_probe import CachedFeaturesDataset
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 
@@ -83,6 +85,7 @@ def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
         ("lr", 0.0, "finite positive number"),
         ("cache_features", "true", "must be a boolean"),
         ("cache_dtype", "bfloat16", "must be one of"),
+        ("cache_device", "gpu", "must be one of"),
     ],
 )
 def test_segmentation_runtime_config_rejects_invalid_values(
@@ -101,6 +104,22 @@ def test_segmentation_runtime_config_rejects_invalid_values(
 
     with pytest.raises(ValueError, match=message):
         _resolve_segmentation_runtime_config(cfg)
+
+
+def test_cache_fits_device_respects_auto_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    cache = CachedFeaturesDataset(
+        [torch.zeros(2, 4, 2, 2, dtype=torch.float16)],
+        torch.zeros(2, 4, 4, dtype=torch.long),
+    )
+    required = sum(t.numel() * t.element_size() for t in cache.layer_tensors)
+    required += cache.masks.numel() * cache.masks.element_size()
+
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda _device: (required * 10, required * 20))
+    assert _cache_fits_device(cache, cache, torch.device("cuda:0"), "auto")
+
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda _device: (required, required * 20))
+    assert not _cache_fits_device(cache, cache, torch.device("cuda:0"), "auto")
+    assert not _cache_fits_device(cache, cache, torch.device("cpu"), "auto")
 
 
 def test_measure_cpu_throughput_budget_exceeded_returns_none_metrics() -> None:

@@ -33,6 +33,21 @@ def test_config_hash_ignores_intrinsic_dim_toggle():
     assert _resume_config_hash(without_id) == _resume_config_hash(with_id)
 
 
+def test_config_hash_ignores_segmentation_cache_device():
+    """Cache placement must not invalidate otherwise identical result rows."""
+    automatic = _cfg(["eval.segmentation.cache_device=auto"])
+    streamed = _cfg(["eval.segmentation.cache_device=cpu"])
+
+    assert _resume_config_hash(automatic) == _resume_config_hash(streamed)
+
+
+def test_default_resnet50_config_hash_remains_stable():
+    """Guard committed result rows against accidental fingerprint invalidation."""
+    cfg = compose_config(["model=timm/resnet50", "dataset.names=[m-eurosat]"])
+
+    assert _resume_config_hash(cfg) == "7d70b8b78ddec4d6"
+
+
 def test_config_hash_changes_with_normalization():
     """Sanity check: the fingerprint must still change for settings that affect the row."""
     zscore = _cfg(["dataset.normalization=bandspec_zscore"])

@@ -53,6 +53,95 @@ def test_representative_sweep_passes_seed_and_rejects_unknown_metadata(tmp_path:
         runner._validate_metadata()
 
 
+def test_representative_sweep_filters_and_deduplicates_band_modes() -> None:
+    sweep = _load_script("run_segmentation_representative_sweep.py")
+    model = sweep.MODELS[0]
+
+    jobs = sweep.build_jobs(
+        models=[model],
+        datasets=["caffe", "spacenet2", "spacenet7"],
+        heads=["fpn"],
+        bands=["rgb", "all"],
+    )
+
+    assert [(job.dataset, job.bands) for job in jobs] == [
+        ("caffe", "rgb"),
+        ("spacenet2", "rgb"),
+        ("spacenet2", "all"),
+        ("spacenet7", "rgb"),
+    ]
+
+
+def test_representative_sweep_enforces_model_input_contracts() -> None:
+    sweep = _load_script("run_segmentation_representative_sweep.py")
+    for config in [
+        "torchgeo/scalemae_large_fmow",
+        "torchgeo/scalemae_large_fmow_cls",
+    ]:
+        scalemae = sweep._select_models(config)[0]
+        jobs = sweep.build_jobs(
+            models=[scalemae],
+            datasets=["dynamic_earthnet", "spacenet2", "spacenet7"],
+            heads=["fpn"],
+            bands=["rgb", "all"],
+        )
+
+        assert [(job.dataset, job.bands) for job in jobs] == [
+            ("spacenet2", "rgb"),
+            ("spacenet7", "rgb"),
+        ]
+
+
+def test_representative_sweep_selects_models_by_config_or_name() -> None:
+    sweep = _load_script("run_segmentation_representative_sweep.py")
+
+    selected = sweep._select_models("timm/resnet50,convnext_tiny")
+
+    assert [model.name for model in selected] == ["resnet50", "convnext_tiny"]
+
+
+def test_representative_sweep_selects_arbitrary_segmentation_config() -> None:
+    sweep = _load_script("run_segmentation_representative_sweep.py")
+
+    selected = sweep._select_models("resnet18")
+
+    assert selected == [sweep.Model("timm/resnet18", "resnet18", 8, 8)]
+
+
+def test_representative_sweep_rejects_model_without_segmentation_layers() -> None:
+    sweep = _load_script("run_segmentation_representative_sweep.py")
+
+    with pytest.raises(ValueError, match="segmentation-incompatible"):
+        sweep._select_models("rcf")
+
+
+def test_representative_sweep_selects_all_configured_segmentation_models() -> None:
+    sweep = _load_script("run_segmentation_representative_sweep.py")
+
+    selected = sweep._select_models("configured")
+
+    assert len(selected) >= 80
+    assert len({model.name for model in selected}) == len(selected)
+    assert "resnet18" in {model.name for model in selected}
+    assert "rcf" not in {model.name for model in selected}
+
+
+def test_representative_sweep_selects_all_band_mode_literally() -> None:
+    sweep = _load_script("run_segmentation_representative_sweep.py")
+
+    selected = sweep._parse_choices("all", sweep.BANDS, "band modes", expand_all=False)
+
+    assert selected == ["all"]
+
+
+def test_representative_sweep_deduplicates_repeated_choices() -> None:
+    sweep = _load_script("run_segmentation_representative_sweep.py")
+
+    selected = sweep._parse_choices("fpn,linear,fpn", sweep.HEADS, "heads")
+
+    assert selected == ["fpn", "linear"]
+
+
 def test_protocol_study_passes_configured_seed(tmp_path: Path) -> None:
     study = _load_script("run_segmentation_protocol_study.py")
     config = study.StudyConfig(

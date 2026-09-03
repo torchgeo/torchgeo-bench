@@ -9,6 +9,7 @@ import logging
 import random
 import signal
 import subprocess
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from _seg_sweep_common import (
     torchgeo_bench_cli,
     write_json_atomic,
 )
+
+from torchgeo_bench.config import compose_config, list_model_configs
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ DATASETS = [
 HEADS = ["linear", "conv_block", "fpn", "dpt"]
 BANDS = ["rgb", "all"]
 EPOCHS = 10
+EQUIVALENT_BAND_DATASETS = {"caffe", "spacenet7"}
 
 
 @dataclass(frozen=True)
@@ -79,25 +83,61 @@ MODELS = [
     ),
 ]
 
-# These inputs violate the pretrained wrapper's normalization contract,
-# independent of probe head or batch size.
+# Scale-MAE FMOW_RGB accepts exactly three ordered RGB bands. Some datasets'
+# ``rgb`` aliases are grayscale, SAR, or use unsupported short names.
+SCALEMAE_CONFIGS = {
+    "torchgeo/scalemae_large_fmow",
+    "torchgeo/scalemae_large_fmow_cls",
+}
+SCALEMAE_UNSUPPORTED_INPUTS = {
+    ("burn_scars", "all"),
+    ("caffe", "rgb"),
+    ("caffe", "all"),
+    ("cloudsen12", "all"),
+    ("dynamic_earthnet", "rgb"),
+    ("dynamic_earthnet", "all"),
+    ("flair2", "all"),
+    ("fotw", "all"),
+    ("kuro_siwo", "rgb"),
+    ("kuro_siwo", "all"),
+    ("pastis", "all"),
+    ("spacenet2", "all"),
+}
+
+# These inputs violate pretrained wrapper contracts, independent of probe head
+# or batch size.
 UNSUPPORTED_INPUTS = {
-    ("torchgeo/scalemae_large_fmow", "caffe", "rgb"),
-    ("torchgeo/scalemae_large_fmow", "caffe", "all"),
-    ("torchgeo/scalemae_large_fmow", "pastis", "all"),
     ("torchgeo/swinv2b_s2rgb_satlas_mi", "pastis", "all"),
+    *{
+        (model, dataset, bands)
+        for model in SCALEMAE_CONFIGS
+        for dataset, bands in SCALEMAE_UNSUPPORTED_INPUTS
+    },
 }
 
 
-def build_jobs() -> list[Job]:
-    """Return every supported combination in the representative matrix."""
+def _effective_bands(dataset: str, bands: Sequence[str]) -> list[str]:
+    """Return selected band modes without equivalent duplicate inputs."""
+    selected = list(bands)
+    if dataset in EQUIVALENT_BAND_DATASETS and set(selected) == set(BANDS):
+        return ["rgb"]
+    return selected
+
+
+def build_jobs(
+    models: Sequence[Model] = MODELS,
+    datasets: Sequence[str] = DATASETS,
+    heads: Sequence[str] = HEADS,
+    bands: Sequence[str] = BANDS,
+) -> list[Job]:
+    """Return supported combinations in the selected representative matrix."""
     jobs: list[Job] = []
-    for model in MODELS:
-        for dataset in DATASETS:
-            for head in HEADS:
-                for bands in BANDS:
-                    job = Job(model, dataset, head, bands)
-                    if (model.config, dataset, bands) not in UNSUPPORTED_INPUTS:
+    for model in models:
+        for dataset in datasets:
+            for head in heads:
+                for band_mode in _effective_bands(dataset, bands):
+                    job = Job(model, dataset, head, band_mode)
+                    if (model.config, dataset, band_mode) not in UNSUPPORTED_INPUTS:
                         jobs.append(job)
     return jobs
 
@@ -113,10 +153,18 @@ def _source_hash(root: Path) -> str:
     return hasher.hexdigest()
 
 
-def sweep_metadata(root: Path, image_size: int, seed: int) -> dict[str, object]:
+def sweep_metadata(
+    root: Path,
+    image_size: int,
+    seed: int,
+    models: Sequence[Model] = MODELS,
+    datasets: Sequence[str] = DATASETS,
+    heads: Sequence[str] = HEADS,
+    bands: Sequence[str] = BANDS,
+) -> dict[str, object]:
     """Return the result-affecting configuration fingerprint."""
     return {
-        "schema_version": 2,
+        "schema_version": 5,
         "source_hash": _source_hash(root),
         "epochs": EPOCHS,
         "image_size": image_size,
@@ -126,10 +174,11 @@ def sweep_metadata(root: Path, image_size: int, seed: int) -> dict[str, object]:
         "partition": "default",
         "cache_features": True,
         "cache_dtype": "float16",
-        "models": [asdict(model) for model in MODELS],
-        "datasets": DATASETS,
-        "heads": HEADS,
-        "bands": BANDS,
+        "models": [asdict(model) for model in models],
+        "datasets": list(datasets),
+        "heads": list(heads),
+        "bands": list(bands),
+        "equivalent_band_datasets": sorted(EQUIVALENT_BAND_DATASETS),
         "unsupported_inputs": [list(item) for item in sorted(UNSUPPORTED_INPUTS)],
     }
 
@@ -149,11 +198,20 @@ class SweepRunner(BaseGpuRunner):
     config: SweepConfig
     subprocess_env = BaseGpuRunner.subprocess_env | {"TOKENIZERS_PARALLELISM": "false"}
 
-    def __init__(self, config: SweepConfig) -> None:
-        super().__init__(config, build_jobs())
+    def __init__(
+        self,
+        config: SweepConfig,
+        jobs: Sequence[Job] | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        selected_jobs = list(jobs) if jobs is not None else build_jobs()
+        super().__init__(config, selected_jobs)
+        self.expected_metadata = (
+            metadata
+            if metadata is not None
+            else sweep_metadata(config.root, config.image_size, config.seed)
+        )
         self.metadata_path = Path(f"{config.output}.sweep.json")
-        self.counts["candidate_total"] = len(MODELS) * len(DATASETS) * len(HEADS) * len(BANDS)
-        self.counts["unsupported"] = len(UNSUPPORTED_INPUTS) * len(HEADS)
 
     @staticmethod
     def _normalized_size(value: str) -> str:
@@ -188,7 +246,6 @@ class SweepRunner(BaseGpuRunner):
         )
 
     def _validate_metadata(self) -> None:
-        expected = sweep_metadata(self.config.root, self.config.image_size, self.config.seed)
         if self.config.output.exists() and self.config.output.stat().st_size > 0:
             if not self.metadata_path.exists():
                 raise RuntimeError(
@@ -196,12 +253,12 @@ class SweepRunner(BaseGpuRunner):
                     "refusing to resume results with an unknown configuration."
                 )
             actual = json.loads(self.metadata_path.read_text())
-            if actual != expected:
+            if actual != self.expected_metadata:
                 raise RuntimeError(
                     f"{self.config.output} was created by an incompatible sweep configuration."
                 )
             return
-        write_json_atomic(self.metadata_path, expected)
+        write_json_atomic(self.metadata_path, self.expected_metadata)
 
     def _summary_extra(self) -> dict[str, object]:
         return {
@@ -269,10 +326,12 @@ class SweepRunner(BaseGpuRunner):
             )
 
 
-def ensure_datasets(config: SweepConfig, *, download_missing: bool) -> None:
+def ensure_datasets(
+    config: SweepConfig, datasets: Sequence[str], *, download_missing: bool
+) -> None:
     """Download GeoBench V2 datasets whose canonical directories are absent."""
     data_root = config.root / "data/geobenchv2"
-    missing = [name for name in DATASETS if not (data_root / name).is_dir()]
+    missing = [name for name in datasets if not (data_root / name).is_dir()]
     if not missing:
         return
     if not download_missing:
@@ -291,10 +350,82 @@ def ensure_datasets(config: SweepConfig, *, download_missing: bool) -> None:
     )
 
 
+def _parse_choices(
+    value: str,
+    choices: Sequence[str],
+    label: str,
+    *,
+    expand_all: bool = True,
+) -> list[str]:
+    """Parse ``all`` or a comma-separated subset of known values."""
+    if expand_all and value == "all":
+        return list(choices)
+    selected = list(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+    unknown = sorted(set(selected) - set(choices))
+    if unknown:
+        raise ValueError(f"Unknown {label}: {', '.join(unknown)}")
+    if not selected:
+        raise ValueError(f"At least one {label} must be selected.")
+    return selected
+
+
+def _select_models(value: str) -> list[Model]:
+    """Select representative or arbitrary segmentation-capable model configs."""
+    if value == "all":
+        return MODELS
+    requested = [item.strip() for item in value.split(",") if item.strip()]
+    if not requested:
+        raise ValueError("At least one model must be selected.")
+
+    representative = {model.config: model for model in MODELS}
+    configured_models: list[Model] = []
+    for config in list_model_configs():
+        cfg = compose_config([f"model={config}"])
+        layers = cfg.model.get("eval", {}).get("segmentation", {}).get("layers", [])
+        if not layers:
+            continue
+        configured_models.append(
+            representative.get(config, Model(config, str(cfg.model.name), 8, 8))
+        )
+
+    if value == "configured":
+        return configured_models
+
+    by_identifier = {
+        identifier: model
+        for model in configured_models
+        for identifier in (model.config, model.name)
+    }
+    unresolved = sorted(set(requested) - set(by_identifier))
+    if unresolved:
+        raise ValueError("Unknown or segmentation-incompatible models: " + ", ".join(unresolved))
+    return list(dict.fromkeys(by_identifier[item] for item in requested))
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line options."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpus", default="all", help="'all' or comma-separated GPU indices")
+    parser.add_argument(
+        "--models",
+        default="all",
+        help="'all', 'configured', or comma-separated model config keys/result names",
+    )
+    parser.add_argument(
+        "--datasets",
+        default="all",
+        help="'all' or comma-separated dataset names",
+    )
+    parser.add_argument(
+        "--heads",
+        default="all",
+        help="'all' or comma-separated probe heads",
+    )
+    parser.add_argument(
+        "--bands",
+        default="rgb,all",
+        help="comma-separated band modes: rgb, all, or rgb,all",
+    )
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-attempts", type=int, default=2)
@@ -312,6 +443,11 @@ def main() -> None:
     args = parse_args()
     root = Path(__file__).resolve().parents[1]
     cli = torchgeo_bench_cli(require=True)
+    models = _select_models(args.models)
+    datasets = _parse_choices(args.datasets, DATASETS, "datasets")
+    heads = _parse_choices(args.heads, HEADS, "heads")
+    bands = _parse_choices(args.bands, BANDS, "band modes", expand_all=False)
+    jobs = build_jobs(models, datasets, heads, bands)
 
     output = resolve_path(
         root,
@@ -334,28 +470,37 @@ def main() -> None:
         max_attempts=args.max_attempts,
         seed=args.seed,
     )
-    candidate_total = len(MODELS) * len(DATASETS) * len(HEADS) * len(BANDS)
-    supported_total = len(build_jobs())
+    candidate_total = len(models) * len(datasets) * len(heads) * len(bands)
+    supported_total = len(jobs)
     logger.info(
-        "Matrix: %d candidates, %d unsupported, %d supported jobs",
+        "Matrix: %d candidates, %d skipped duplicate/unsupported, %d supported jobs",
         candidate_total,
         candidate_total - supported_total,
         supported_total,
     )
     logger.info(
         "Dimensions: %d models x %d datasets x %d heads x %d band modes",
-        len(MODELS),
-        len(DATASETS),
-        len(HEADS),
-        len(BANDS),
+        len(models),
+        len(datasets),
+        len(heads),
+        len(bands),
     )
     logger.info("GPUs: %s", config.gpus)
     logger.info("Results: %s", config.output)
     if args.dry_run:
         return
 
-    ensure_datasets(config, download_missing=not args.no_download)
-    runner = SweepRunner(config)
+    ensure_datasets(config, datasets, download_missing=not args.no_download)
+    metadata = sweep_metadata(
+        root,
+        args.image_size,
+        args.seed,
+        models,
+        datasets,
+        heads,
+        bands,
+    )
+    runner = SweepRunner(config, jobs, metadata)
     signal.signal(signal.SIGINT, runner.request_stop)
     signal.signal(signal.SIGTERM, runner.request_stop)
     config.state_dir.mkdir(parents=True, exist_ok=True)

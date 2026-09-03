@@ -166,6 +166,7 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
             "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
             return_value=(probe, solver),
         ),
+        mock.patch("torchgeo_bench.main._cache_fits_device", return_value=False),
     ):
         main(cfg)
 
@@ -175,6 +176,7 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
         batch_size=3,
         epochs=cfg.eval.segmentation.epochs,
         verbose=cfg.verbose,
+        cache_on_device=False,
     )
     df = pd.read_csv(out)
     assert df.loc[0, "best_batch_size"] == 3
