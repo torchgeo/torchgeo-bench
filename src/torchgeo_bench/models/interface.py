@@ -96,7 +96,7 @@ class BenchModel(nn.Module, ABC):
         ``True`` must call this exactly once, at the point in their own
         ``__init__`` where they've finished loading whatever state
         (pretrained weights, per-modality statistics, ...) the normalizer
-        depends on.  A no-op when :attr:`normalization` is not
+        depends on.  A no-op when ``normalization`` is not
         ``model_native``.
 
         Args:
