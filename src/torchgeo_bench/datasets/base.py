@@ -14,18 +14,15 @@ dependency-free :mod:`torchgeo_bench.bands`, and torch is only imported for
 type checking.
 """
 
-from __future__ import annotations
-
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from torchgeo_bench.bands import BandSpec
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
-
     from torch.utils.data import Dataset
 
 __all__ = ["BandSpec", "BenchDataset"]
@@ -108,7 +105,7 @@ class BenchDataset(ABC):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
-    ) -> Dataset:
+    ) -> "Dataset":
         """Return a PyTorch :class:`~torch.utils.data.Dataset` for a split.
 
         Datasets always emit raw float32 values; normalization is the

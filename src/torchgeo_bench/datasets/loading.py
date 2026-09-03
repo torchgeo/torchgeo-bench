@@ -11,18 +11,14 @@ registry spec below, and ``get_bench_dataset_class`` imports just the one
 module that defines the requested dataset.
 """
 
-from __future__ import annotations
-
 import logging
-import warnings
+from collections.abc import Iterable
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 from .base import BenchDataset
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     import torch
     from torch.utils.data import DataLoader, Dataset
 
@@ -108,50 +104,63 @@ class _ResizeTransform:
         self.align_corners = False if interp_mode in ("bicubic", "bilinear") else None
 
     def __call__(self, sample: dict) -> dict:
-        import torch.nn.functional as F
-
-        image_size = self.image_size
-        img: torch.Tensor = sample["image"]
-        h, w = img.shape[-2], img.shape[-1]
-        if h != image_size or w != image_size:
-            squeeze_batch = img.ndim == 3
-            resize_input = img.unsqueeze(0) if squeeze_batch else img
-            img = F.interpolate(
-                resize_input,
-                size=(image_size, image_size),
-                mode=self.interp_mode,
-                align_corners=self.align_corners,
-            )
-            if squeeze_batch:
-                img = img.squeeze(0)
-            sample["image"] = img
+        sample["image"] = _resize_image(
+            sample["image"],
+            self.image_size,
+            self.interp_mode,
+            self.align_corners,
+        )
         if "mask" in sample:
-            mask: torch.Tensor = sample["mask"].float()
-            h_m, w_m = mask.shape[-2], mask.shape[-1]
-            if h_m != image_size or w_m != image_size:
-                if mask.ndim == 2:
-                    resize_mask = mask.unsqueeze(0).unsqueeze(0)
-                    squeeze_dims = 2
-                elif mask.ndim == 3:
-                    resize_mask = mask.unsqueeze(0)
-                    squeeze_dims = 1
-                else:
-                    resize_mask = mask
-                    squeeze_dims = 0
-                mask = F.interpolate(
-                    resize_mask,
-                    size=(image_size, image_size),
-                    mode="nearest",
-                )
-                for _ in range(squeeze_dims):
-                    mask = mask.squeeze(0)
-                mask = mask.long()
-                sample["mask"] = mask
+            sample["mask"] = _resize_mask(sample["mask"], self.image_size)
         return sample
 
 
-def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
-    import torch
+def _resize_image(
+    image: "torch.Tensor",
+    image_size: int,
+    mode: str,
+    align_corners: bool | None,
+) -> "torch.Tensor":
+    """Resize a single image or temporal image stack."""
+    import torch.nn.functional as F
+
+    if image.shape[-2:] == (image_size, image_size):
+        return image
+    if image.ndim not in (3, 4):
+        raise ValueError(f"Expected image shape (C,H,W) or (T,C,H,W), got {tuple(image.shape)}.")
+    add_batch = image.ndim == 3
+    resized = F.interpolate(
+        image.unsqueeze(0) if add_batch else image,
+        size=(image_size, image_size),
+        mode=mode,
+        align_corners=align_corners,
+    )
+    return resized.squeeze(0) if add_batch else resized
+
+
+def _resize_mask(mask: "torch.Tensor", image_size: int) -> "torch.Tensor":
+    """Resize a two- or three-dimensional segmentation mask."""
+    import torch.nn.functional as F
+
+    if mask.shape[-2:] == (image_size, image_size):
+        return mask
+    if mask.ndim == 2:
+        resize_input = mask[None, None].float()
+        return F.interpolate(resize_input, (image_size, image_size), mode="nearest")[0, 0].long()
+    if mask.ndim == 3:
+        resize_input = mask[None].float()
+        return F.interpolate(resize_input, (image_size, image_size), mode="nearest")[0].long()
+    raise ValueError(f"Expected mask shape (H,W) or (C,H,W), got {tuple(mask.shape)}.")
+
+
+def _make_loader(
+    ds: "Dataset",
+    *,
+    batch_size: int,
+    shuffle: bool,
+    num_workers: int,
+    pin_memory: bool,
+) -> "DataLoader":
     from torch.utils.data import DataLoader
 
     return DataLoader(
@@ -159,7 +168,7 @@ def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: in
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=pin_memory,
     )
 
 
@@ -173,6 +182,7 @@ def get_datasets(
     interpolation: str = "bilinear",
     bands: str | Iterable[str] | None = "rgb",
     time_steps: int | None = None,
+    pin_memory: bool = False,
 ) -> tuple:
     """Load benchmark dataset splits and dataloaders.
 
@@ -195,6 +205,7 @@ def get_datasets(
         time_steps: Number of acquisition dates per sample.  Only accepted by
             multi-temporal wrappers (PASTIS); ``None`` keeps each dataset's
             own default.
+        pin_memory: Pin dataloader batches for CUDA transfer.
 
     Returns:
         Either ``(train_dataset, train_loader, test_loader)`` or, when
@@ -208,11 +219,9 @@ def get_datasets(
     bench = cls()
 
     if partition_name != "default" and not bench.supports_partitions:
-        warnings.warn(
+        raise ValueError(
             f"Dataset '{dataset_name}' does not support custom partitions. "
-            f"Ignoring partition '{partition_name}'.",
-            UserWarning,
-            stacklevel=2,
+            f"Use partition 'default', not '{partition_name}'."
         )
 
     if bands == "rgb":
@@ -240,11 +249,25 @@ def get_datasets(
     test_ds = bench.get_dataset("test", partition="default", **common)
 
     train_loader = _make_loader(
-        train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
     )
-    val_loader = _make_loader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    val_loader = _make_loader(
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
     test_loader = _make_loader(
-        test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers
+        test_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
     )
 
     if return_val:

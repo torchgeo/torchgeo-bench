@@ -94,14 +94,25 @@ class TestV2Loading:
         assert "mask" in batch
         assert batch["image"].shape[0] == 2
 
-    def test_partition_warning(self, mock_v2_env):
+    def test_unsupported_partition_raises(self, mock_v2_env):
         del mock_v2_env
-        with pytest.warns(UserWarning, match="does not support custom partitions"):
+        with pytest.raises(ValueError, match="does not support custom partitions"):
             get_datasets(
                 dataset_name="benv2",
                 partition_name="0.10x_train",
                 num_workers=0,
             )
+
+    def test_pin_memory_is_explicit(self, mock_v2_env):
+        del mock_v2_env
+        _, train_dl, _ = get_datasets(
+            dataset_name="benv2",
+            batch_size=2,
+            num_workers=0,
+            pin_memory=True,
+        )
+
+        assert train_dl.pin_memory
 
     def test_resize_transform(self, mock_v2_env):
         del mock_v2_env
