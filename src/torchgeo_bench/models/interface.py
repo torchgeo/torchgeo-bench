@@ -5,6 +5,7 @@ sealed-forward contract.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
@@ -45,6 +46,17 @@ class BenchModel(nn.Module, ABC):
     #: must not be validated against ``expected_input_unit``.
     handles_own_normalization: bool = False
 
+    #: Set by wrappers whose ``model_native`` normalizer depends on state
+    #: that only exists partway through their own ``__init__`` (e.g. a
+    #: TorchGeo wrapper's loaded pretrained weights, or TerraMind's
+    #: per-modality band selection).  When ``True``, the base ``__init__``
+    #: skips building a ``model_native`` normalizer itself; the subclass
+    #: must instead call :meth:`finalize_model_native_normalizer` (or
+    #: assign ``self._normalizer`` directly) once that state is ready, so
+    #: construction still fails immediately on an unsupported
+    #: configuration instead of deferring the failure to first forward.
+    installs_own_model_native_normalizer: bool = False
+
     def __init__(
         self,
         bands: list[BandSpec],
@@ -59,6 +71,46 @@ class BenchModel(nn.Module, ABC):
         self.normalization = NormalizationStrategy(normalization)
         if self.handles_own_normalization:
             self._normalizer = lambda x: x
+            return
+        if (
+            self.normalization is NormalizationStrategy.MODEL_NATIVE
+            and self.installs_own_model_native_normalizer
+        ):
+            # Deferred to `finalize_model_native_normalizer()`, called once
+            # the subclass has everything its normalizer needs.
+            return
+        self._normalizer = build_normalizer(
+            self.normalization,
+            bands=self.bands,
+            expected_input_unit=self.expected_input_unit,
+            pretrain_mean=self.pretrain_mean,
+            pretrain_std=self.pretrain_std,
+        )
+
+    def finalize_model_native_normalizer(
+        self, normalizer: Callable[[torch.Tensor], torch.Tensor] | None = None
+    ) -> None:
+        """Install this instance's ``model_native`` normalizer, or fail now.
+
+        Subclasses that set :attr:`installs_own_model_native_normalizer` to
+        ``True`` must call this exactly once, at the point in their own
+        ``__init__`` where they've finished loading whatever state
+        (pretrained weights, per-modality statistics, ...) the normalizer
+        depends on.  A no-op when :attr:`normalization` is not
+        ``model_native``.
+
+        Args:
+            normalizer: A ready-to-use callable, if the subclass built its
+                own (e.g. from the pretrained weights' ``Normalize``
+                transform).  ``None`` falls back to the generic
+                ``pretrain_mean``/``pretrain_std`` + ``expected_input_unit``
+                builder, raising immediately if that is not enough to
+                define one.
+        """
+        if self.normalization is not NormalizationStrategy.MODEL_NATIVE:
+            return
+        if normalizer is not None:
+            self._normalizer = normalizer
             return
         self._normalizer = build_normalizer(
             self.normalization,

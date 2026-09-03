@@ -130,15 +130,17 @@ def test_model_native_s2dn_target():
     assert torch.allclose(out, x, atol=1e-5)
 
 
-def test_model_native_without_pretrain_stats_raises_on_use():
+def test_model_native_without_pretrain_stats_raises_immediately():
     """Unit conversion alone is not a normalisation.
 
     Without pretrain stats model_native used to hand the backbone raw DN, which
     collapsed features (Prithvi scored an identical 0.264 on treesatai at 86M,
-    304M and 631M parameters).  Building is allowed so wrappers can install
-    their own normaliser afterwards; using this one must fail.
+    304M and 631M parameters).  build_normalizer now fails immediately rather
+    than returning a normaliser that only raises lazily on first use; callers
+    that install their own normaliser afterwards (e.g. TerraMind, the torchgeo
+    wrappers) go through `BenchModel.installs_own_model_native_normalizer` /
+    `finalize_model_native_normalizer()` instead of calling this directly.
     """
     bands = _bands([10000.0])
-    fn = build_normalizer("model_native", bands, expected_input_unit=InputUnit.S2_DN)
     with pytest.raises(ValueError, match="model_native normalisation is undefined"):
-        fn(torch.tensor([[[[5000.0]]]]))
+        build_normalizer("model_native", bands, expected_input_unit=InputUnit.S2_DN)

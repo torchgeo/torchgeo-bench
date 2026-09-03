@@ -129,22 +129,24 @@ def build_normalizer(
         # the features — Prithvi scored an identical 0.264 on treesatai at
         # 86M, 304M and 631M parameters, below the imagestats baseline.
         #
-        # Raising here would break wrappers that install their own
-        # model_native normaliser *after* super().__init__ (TerraMind) or that
-        # override normalize_inputs entirely (the torchgeo wrappers, which use
-        # the Normalize bound to their weights).  So defer: fail only if this
-        # normaliser is actually the one used.
-        def _undefined(_x: torch.Tensor) -> torch.Tensor:
-            raise ValueError(
-                "model_native normalisation is undefined for this model: it declares "
-                f"expected_input_unit={expected_input_unit.value!r} but no pretrain_mean/"
-                "pretrain_std, and it does not supply its own normaliser.  Converting "
-                "units without standardising leaves raw sensor values.  Set "
-                "pretrain_mean/pretrain_std on the wrapper, or evaluate it with "
-                "dataset.normalization=bandspec_zscore."
-            )
-
-        return _undefined
+        # Wrappers that install their own model_native normaliser (either
+        # after super().__init__, e.g. TerraMind, or by overriding
+        # normalize_inputs entirely, e.g. the torchgeo wrappers) must declare
+        # that explicitly via `BenchModel.installs_own_model_native_normalizer`
+        # and finalize their own normalizer through
+        # `BenchModel.finalize_model_native_normalizer()` -- they never reach
+        # this call in the first place.  Any wrapper that does reach here has
+        # neither a usable pretrain_mean/pretrain_std nor its own normalizer,
+        # so fail immediately instead of returning a normalizer that only
+        # raises lazily on first forward.
+        raise ValueError(
+            "model_native normalisation is undefined for this model: it declares "
+            f"expected_input_unit={expected_input_unit.value!r} but no pretrain_mean/"
+            "pretrain_std, and it does not supply its own normaliser.  Converting "
+            "units without standardising leaves raw sensor values.  Set "
+            "pretrain_mean/pretrain_std on the wrapper, or evaluate it with "
+            "dataset.normalization=bandspec_zscore."
+        )
 
     n = len(pretrain_mean)
     pm = torch.tensor(pretrain_mean, dtype=torch.float32).view(1, n, 1, 1)

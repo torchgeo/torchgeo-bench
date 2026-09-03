@@ -11,7 +11,7 @@ from torchgeo_bench.models._band_mapping import (
     select_src_bands,
     wavelengths_um,
 )
-from torchgeo_bench.models.torchgeo_models import _resolve_dofa_wavelengths
+from torchgeo_bench.models.torchgeo_dofa_earthloc import _resolve_dofa_wavelengths
 
 
 def _band(name: str, wl: float | None = None, sensor: str = "s2") -> BandSpec:

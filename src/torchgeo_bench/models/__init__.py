@@ -9,16 +9,11 @@ from .rcf import RCFBench
 from .sam3 import SAM3Encoder
 from .segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead, PatchLinearHead
 from .timm import TimmPatchBenchModel
-from .torchgeo_models import (
-    TorchGeoCromaBench,
-    TorchGeoDEOBench,
-    TorchGeoDOFABench,
-    TorchGeoEarthLocBench,
-    TorchGeoPanopticonBench,
-    TorchGeoResNetBench,
-    TorchGeoScaleMAEBench,
-    TorchGeoSwinBench,
-)
+from .torchgeo_croma_panopticon import TorchGeoCromaBench, TorchGeoPanopticonBench
+from .torchgeo_deo import TorchGeoDEOBench
+from .torchgeo_dofa_earthloc import TorchGeoDOFABench, TorchGeoEarthLocBench
+from .torchgeo_resnet_swin import TorchGeoResNetBench, TorchGeoSwinBench
+from .torchgeo_scalemae import TorchGeoScaleMAEBench
 from .universat import UniverSatBenchModel
 
 __all__: list[str] = [
