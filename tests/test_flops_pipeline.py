@@ -19,15 +19,10 @@ from torchgeo_bench.flops_pipeline import (
     _probe_gflops,
     _seg_head_gflops,
 )
-from torchgeo_bench.model_profile import _count_gflops, lenient_grad_hooks
+from torchgeo_bench.model_profile import _count_gflops
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 CPU = torch.device("cpu")
-
-
-# ---------------------------------------------------------------------------
-# lenient_grad_hooks: the no-op guarantee
-# ---------------------------------------------------------------------------
 
 
 class _TinyConvNet(nn.Module):
@@ -42,75 +37,6 @@ class _TinyConvNet(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.pool(self.stem(x)).flatten(1)
         return self.fc(x)
-
-
-class _GradBreakingNet(nn.Module):
-    """Reproduces Panopticon's failure shape.
-
-    A ``conv3d`` fed a tensor introduced *inside* the forward has no
-    ``grad_fn``, so ``module_tracker``'s forward-pre-hook raises before any
-    counting happens.  This is the structural pattern, not the model.
-    """
-
-    def __init__(self, in_ch: int = 3) -> None:
-        super().__init__()
-        # (B, 1, 1, H, W) -> (B, 4, 1, H, W), squeezed back to (B, 4, H, W).
-        self.conv3d = nn.Conv3d(1, 4, kernel_size=(1, 3, 3), padding=(0, 1, 1))
-        self.head = nn.Linear(4, 2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Detach severs the autograd chain the way Panopticon's chn-fusion does.
-        broken = x.mean(dim=1, keepdim=True).detach()
-        y = self.conv3d(broken.unsqueeze(1)).squeeze(2)
-        return self.head(y.mean(dim=(-2, -1)))
-
-
-def test_lenient_grad_hooks_is_bit_identical_for_healthy_models():
-    """The load-bearing check: the workaround must change nothing for models
-    that already work.  Bit-identical, not merely close."""
-    model = _TinyConvNet().eval()
-    x = torch.randn(2, 3, 32, 32)
-
-    plain = _count_gflops(model, x)
-    with lenient_grad_hooks():
-        lenient = _count_gflops(model, x)
-
-    assert plain == lenient, f"{plain!r} != {lenient!r}"
-    assert plain > 0
-
-
-def test_lenient_grad_hooks_restores_the_original_hook():
-    """The patch must not leak outside the context manager."""
-    import torch.autograd.graph as autograd_graph
-    import torch.utils.module_tracker as module_tracker
-
-    before = autograd_graph.register_multi_grad_hook
-    before_mt = module_tracker.register_multi_grad_hook
-    with lenient_grad_hooks():
-        assert autograd_graph.register_multi_grad_hook is not before
-    assert autograd_graph.register_multi_grad_hook is before
-    assert module_tracker.register_multi_grad_hook is before_mt
-
-
-def test_lenient_grad_hooks_restores_on_exception():
-    import torch.autograd.graph as autograd_graph
-
-    before = autograd_graph.register_multi_grad_hook
-    with pytest.raises(RuntimeError), lenient_grad_hooks():
-        raise RuntimeError("boom")
-    assert autograd_graph.register_multi_grad_hook is before
-
-
-def test_grad_breaking_model_is_measurable():
-    """A model with Panopticon's grad-breaking shape yields finite GFLOPs.
-
-    ``_count_gflops`` runs the whole tier ladder inside ``lenient_grad_hooks``,
-    so this must not raise ``NotImplementedError``.
-    """
-    model = _GradBreakingNet().eval()
-    gflops = _count_gflops(model, torch.randn(2, 3, 32, 32))
-    assert math.isfinite(gflops)
-    assert gflops > 0
 
 
 # ---------------------------------------------------------------------------
@@ -477,8 +403,8 @@ def test_flops_config_resolves_every_shipped_model_config():
 
 
 @pytest.mark.slow
-def test_panopticon_yields_finite_gflops():
-    """Panopticon yields finite GFLOPs through the lenient_grad_hooks path."""
+def test_panopticon_yields_finite_gflops_without_patching_torch():
+    """Panopticon is measurable through the public FLOP counter."""
     from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()
@@ -490,6 +416,7 @@ def test_panopticon_yields_finite_gflops():
     ).eval()
 
     gflops = _count_gflops(model, torch.randn(1, 12, 224, 224))
+
     assert math.isfinite(gflops)
     assert gflops > 0
 
