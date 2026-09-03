@@ -1,5 +1,6 @@
 """Benchmark script for torchgeo-bench."""
 
+import copy
 import logging
 import math
 import os
@@ -8,8 +9,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
-from rich.progress import Progress, track
 from torch.utils.data import DataLoader
 
 from torchgeo_bench.calibration import (
@@ -58,19 +57,42 @@ from torchgeo_bench.resume import (  # noqa: F401  (re-exported for back-compat)
     _row_key,
     load_completed,
 )
+from torchgeo_bench.settings import RunSettings, merge
 from torchgeo_bench.utils import extract_features, resolve_device
 
 if TYPE_CHECKING:
     import torchgeo_bench.segmentation_task
+    from torchgeo_bench.settings import EvalSettings, SegmentationSettings
 
 logger = logging.getLogger(__name__)
 
 
-def resolve_model_config(model_cfg: DictConfig, dataset_name: str) -> DictConfig:
+def resolve_model_config(model_cfg: dict, dataset_name: str) -> dict:
     """Apply a dataset-specific partial override to a model configuration."""
-    resolved = OmegaConf.create(OmegaConf.to_container(model_cfg, resolve=True))
+    resolved = copy.deepcopy(model_cfg)
     dataset_overrides = resolved.pop("dataset_overrides", {})
-    return OmegaConf.merge(resolved, dataset_overrides.get(dataset_name, {}))
+    return merge(resolved, dataset_overrides.get(dataset_name, {}) or {})
+
+
+def resolve_configured_device(cfg_device: str) -> torch.device:
+    """Resolve ``cfg.device``, choosing CPU only for the implicit/explicit ``"auto"``.
+
+    An explicit device request (anything other than ``"auto"``, whether from
+    an explicit ``--device`` flag or a ``--config`` YAML) must fail loudly if
+    unavailable -- that's what :func:`resolve_device` already does. Only the
+    *default* device value (``"auto"``, chosen when ``--device`` is omitted)
+    may silently prefer CPU when CUDA isn't installed; a user who actually
+    typed ``--device auto`` is asking for that same automatic behavior.
+
+    ``"cuda:0"``, not bare ``"cuda"``, is the auto-selected GPU device: it
+    matches the previous hardcoded default's string form exactly, so a run
+    that never overrides ``device`` keeps the same resume ``config_hash``
+    (which is computed from ``cfg.device`` *after* this resolution) as before
+    "auto" existed.
+    """
+    if cfg_device == "auto":
+        return resolve_device("cuda:0" if torch.cuda.is_available() else "cpu")
+    return resolve_device(cfg_device)
 
 
 def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
@@ -87,6 +109,23 @@ def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
             return list_datasets()
         return [n.strip() for n in names.split(",") if n.strip()]
     return list(names)
+
+
+def _validate_dataset_names(names: Sequence[str]) -> None:
+    """Fail fast on any unregistered dataset name, listing what is available.
+
+    A typo in ``dataset.names`` used to surface as a per-dataset "Skipping
+    dataset ... (not in registry)" warning discovered mid-sweep, after the
+    model was already loaded for every dataset before it. Validating the
+    full list upfront means a bad name is a startup error, not a silently
+    incomplete run.
+    """
+    available = set(list_datasets())
+    unknown = [name for name in names if name not in available]
+    if unknown:
+        raise ValueError(
+            f"Unknown dataset(s): {', '.join(unknown)}. Available: {', '.join(sorted(available))}."
+        )
 
 
 def embed_split(
@@ -212,11 +251,8 @@ def evaluate_logistic(
             f"[{label_tag}] C sweep start over {len(c_values)} values "
             f"(train={len(x_train)}, val={len(x_val)})"
         )
-        c_value_iterator = track(c_values, description="C values")
-    else:
-        c_value_iterator = c_values
 
-    for idx, c in enumerate(c_value_iterator):
+    for idx, c in enumerate(c_values):
         model = LogisticRegression(
             C=c,
             max_iter=2000,
@@ -341,19 +377,21 @@ def evaluate_logistic(
 
 
 def _resolve_segmentation_runtime_config(
-    seg_cfg: DictConfig,
+    seg_cfg: "SegmentationSettings",
 ) -> tuple[int, int, float, bool, torch.dtype]:
     """Validate and normalize the segmentation settings used during a run.
 
     Configuration mistakes should fail before feature extraction or training,
     rather than being silently coerced or failing after an expensive GPU job
-    has started.
+    has started. ``seg_cfg``'s fields always exist (a dataclass), but their
+    *values* are never runtime-type-checked by Python, so a malformed
+    ``--config`` YAML (e.g. ``epochs: "ten"``) still needs this check.
     """
-    epochs = seg_cfg.get("epochs", 10)
-    batch_size = seg_cfg.get("batch_size", 64)
-    lr = seg_cfg.get("lr", 1e-3)
-    use_cache = seg_cfg.get("cache_features", True)
-    cache_dtype_name = seg_cfg.get("cache_dtype", "float16")
+    epochs = seg_cfg.epochs
+    batch_size = seg_cfg.batch_size
+    lr = seg_cfg.lr
+    use_cache = seg_cfg.cache_features
+    cache_dtype_name = seg_cfg.cache_dtype
 
     for name, value in (("epochs", epochs), ("batch_size", batch_size)):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -545,7 +583,7 @@ def evaluate_segmentation(
     train_loader: DataLoader,
     val_loader: DataLoader,
     test_loader: DataLoader,
-    eval_cfg: DictConfig,
+    eval_cfg: "EvalSettings",
     num_classes: int,
     device: torch.device,
     seed: int,
@@ -563,7 +601,7 @@ def evaluate_segmentation(
         train_loader: Training DataLoader.
         val_loader: Validation DataLoader.
         test_loader: Test DataLoader.
-        eval_cfg: The eval config, already merged with any model-specific
+        eval_cfg: The eval settings, already merged with any model-specific
             ``eval`` overrides.
         num_classes: Number of segmentation classes.
         device: Torch device.
@@ -577,15 +615,12 @@ def evaluate_segmentation(
     """
     from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
-    if "segmentation" not in eval_cfg:
-        raise ValueError("Segmentation evaluation config missing for the model.")
-
     seg_cfg = eval_cfg.segmentation
     epochs, probe_batch_size, lr, use_cache, cache_dtype = _resolve_segmentation_runtime_config(
         seg_cfg
     )
 
-    probe, solver = build_seg_probe_and_solver(model, num_classes, eval_cfg, device, lr)
+    probe, solver = build_seg_probe_and_solver(model, num_classes, seg_cfg, device, lr)
     collect_confusions = int(eval_cfg.bootstrap) > 0
     if use_cache and probe.freeze_backbone:
         logger.info("Caching backbone features for train and val splits...")
@@ -638,27 +673,25 @@ def evaluate_segmentation(
     return metrics, sum(probe.channels_list), lr, actual_batch_size, preds
 
 
-def _resolve_output_path(cfg: DictConfig) -> str:
+def _resolve_output_path(cfg: RunSettings) -> str:
     """Return the CSV to write: explicit ``output``, else the model's own file.
 
     Per-model files keep a re-run of one model from rewriting every other
     model's rows.  ``output=`` still wins so one-off experiment scripts can
     send their rows to a scratch CSV.
     """
-    if cfg.get("output"):
+    if cfg.output:
         return str(cfg.output)
-    name = cfg.model.get("name") if "name" in cfg.model else None
+    name = cfg.model.get("name")
     if not name:
         raise ValueError(
             "model config has no 'name', so no per-model results file can be "
             "derived; set output= explicitly or add a name to the model config."
         )
-    return str(model_results_path(cfg.get("results_dir", DEFAULT_RESULTS_DIR), name))
+    return str(model_results_path(cfg.results_dir, name))
 
 
-def _resolve_side_output_path(
-    cfg: DictConfig, output_path: str, dir_key: str, default_dir: str
-) -> str:
+def _resolve_side_output_path(cfg: RunSettings, output_path: str, dir_key: str) -> str:
     """Return the CSV for a one-time measurement kind (profile/intrinsic_dim).
 
     Mirrors :func:`_resolve_output_path`'s "``output=`` wins" rule: when the
@@ -667,15 +700,15 @@ def _resolve_side_output_path(
     from prior behavior. Only the default per-model routing path splits
     profile/intrinsic_dim into their own directory.
     """
-    if cfg.get("output"):
+    if cfg.output:
         return output_path
-    name = cfg.model.get("name") if "name" in cfg.model else None
+    name = cfg.model.get("name")
     if not name:
         raise ValueError(
             "model config has no 'name', so no per-model results file can be "
             "derived; set output= explicitly or add a name to the model config."
         )
-    return str(model_results_path(cfg.get(dir_key, default_dir), name))
+    return str(model_results_path(getattr(cfg, dir_key), name))
 
 
 def _merge_completed_metrics(
@@ -686,7 +719,7 @@ def _merge_completed_metrics(
         base.setdefault(metric_name, set()).update(keys)
 
 
-def main(cfg: DictConfig) -> None:
+def main(cfg: RunSettings) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
@@ -694,7 +727,7 @@ def main(cfg: DictConfig) -> None:
     # Coordinate location-encoder track: a distinct data/probe path (point
     # (lon, lat) -> label, ridge/KNN, k-fold CV) that does not touch the image
     # pipeline below. Dispatched by `mode=coord`.
-    if str(cfg.get("mode", "image")) == "coord":
+    if cfg.mode == "coord":
         from torchgeo_bench.coordbench.run import run_coordbench
 
         run_coordbench(cfg)
@@ -703,15 +736,20 @@ def main(cfg: DictConfig) -> None:
     from torchgeo.datasets import DatasetNotFoundError
 
     dataset_names = _expand_dataset_list(cfg.dataset.names)
-    device = resolve_device(cfg.device)
+    _validate_dataset_names(dataset_names)
+    # dataset.names=all is a "run whatever is available" request: a dataset
+    # missing its local data is expected and skipped with a warning. An
+    # explicit list is a request for *those* datasets specifically, so
+    # missing data there must fail clearly instead of silently shrinking
+    # the run to whatever happened to be downloaded.
+    requested_all_datasets = cfg.dataset.names == "all"
+    device = resolve_configured_device(cfg.device)
     cfg.device = str(device)
 
     output_path = _resolve_output_path(cfg)
-    profile_output_path = _resolve_side_output_path(
-        cfg, output_path, "profile_results_dir", DEFAULT_PROFILE_RESULTS_DIR
-    )
+    profile_output_path = _resolve_side_output_path(cfg, output_path, "profile_results_dir")
     intrinsic_dim_output_path = _resolve_side_output_path(
-        cfg, output_path, "intrinsic_dim_results_dir", DEFAULT_INTRINSIC_DIM_RESULTS_DIR
+        cfg, output_path, "intrinsic_dim_results_dir"
     )
     for path in {output_path, profile_output_path, intrinsic_dim_output_path}:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -719,9 +757,9 @@ def main(cfg: DictConfig) -> None:
     all_rows: list[dict] = []
     id_out_rows: list[dict] = []
     profile_out_rows: list[dict] = []
-    model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
-    if model_eval is not None and model_eval.get("c_range", None) is not None:
-        c_start, c_stop, c_num = model_eval.c_range
+    model_eval = cfg.model.get("eval")
+    if model_eval is not None and model_eval.get("c_range") is not None:
+        c_start, c_stop, c_num = model_eval["c_range"]
     else:
         c_start, c_stop, c_num = cfg.eval.c_range
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
@@ -745,354 +783,354 @@ def main(cfg: DictConfig) -> None:
 
     # Selectable input-normalisation strategy; recorded in the CSV so
     # ablations across strategies are distinguishable.
-    normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
-    bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
+    normalization = str(cfg.dataset.normalization)
+    bands_value = _normalize_bands_value(cfg.dataset.bands)
     config_hash = _resume_config_hash(cfg)
 
-    dataset_progress = Progress(redirect_stdout=False, redirect_stderr=False, auto_refresh=False)
-    dataset_progress.start()
-    try:
-        for ds_name in dataset_progress.track(dataset_names, description="Datasets"):
-            try:
-                ds_cls = get_bench_dataset_class(ds_name)
-            except KeyError:
-                logger.warning(f"Skipping dataset {ds_name} (not in registry)")
-                continue
+    logger.info("Datasets: %d to process", len(dataset_names))
+    for i, ds_name in enumerate(dataset_names, start=1):
+        logger.info("[%d/%d] Dataset: %s", i, len(dataset_names), ds_name)
+        # Every name in dataset_names was already validated against the
+        # registry by _validate_dataset_names before this loop started.
+        ds_cls = get_bench_dataset_class(ds_name)
 
-            model_cfg = resolve_model_config(cfg.model, ds_name)
+        model_cfg = resolve_model_config(cfg.model, ds_name)
 
-            effective_image_size = model_cfg.get("image_size", cfg.dataset.get("image_size"))
-            effective_interpolation = model_cfg.get(
-                "interpolation", cfg.dataset.get("interpolation", "bilinear")
+        effective_image_size = model_cfg.get("image_size", cfg.dataset.image_size)
+        effective_interpolation = model_cfg.get("interpolation", cfg.dataset.interpolation)
+        model_res = model_cfg.get("res")
+        model_pool = model_cfg.get("pool")
+
+        config_tuple = tuple(
+            _canonical_key_cell(v)
+            for v in (
+                normalization,
+                effective_image_size,
+                effective_interpolation,
+                cfg.dataset.partition,
+                bands_value,
+                ds_cls.num_classes,
+                model_res,
+                model_pool,
+                config_hash,
             )
-            model_res = model_cfg.get("res")
-            model_pool = model_cfg.get("pool")
+        )
+        eval_cfg_merged = merge(cfg.eval, model_eval or {})
+        knn_k = int(eval_cfg_merged.knn_k)
+        seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
+        plan = _plan_dataset_run(
+            cfg=cfg,
+            ds_name=ds_name,
+            ds_cls=ds_cls,
+            knn_k=knn_k,
+            seg_method=seg_method,
+            config_tuple=config_tuple,
+            completed_runs=completed_runs,
+            completed_metrics=completed_metrics,
+        )
+        if plan.skip_dataset:
+            if cfg.verbose:
+                logger.info(f"[{ds_name}] Resume preflight: all requested work already complete")
+            continue
 
-            config_tuple = tuple(
-                _canonical_key_cell(v)
-                for v in (
-                    normalization,
-                    effective_image_size,
-                    effective_interpolation,
-                    cfg.dataset.partition,
-                    bands_value,
-                    ds_cls.num_classes,
-                    model_res,
-                    model_pool,
-                    config_hash,
-                )
+        knn_device: str | None = None
+        if ds_cls.task != "segmentation" and not plan.skip_knn:
+            knn_device = resolve_knn_device(cfg.eval.knn_device, cfg.device)
+
+        try:
+            result = get_datasets(
+                dataset_name=ds_name,
+                partition_name=cfg.dataset.partition,
+                batch_size=cfg.dataset.batch_size,
+                num_workers=int(cfg.dataset.num_workers),
+                return_val=True,
+                image_size=effective_image_size,
+                interpolation=effective_interpolation,
+                bands=cfg.dataset.bands,
+                time_steps=cfg.dataset.time_steps,
+                pin_memory=(device.type == "cuda"),
             )
-            eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
-            knn_k = int(getattr(eval_cfg_merged, "knn_k", 5))
-            seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
-            plan = _plan_dataset_run(
-                cfg=cfg,
-                ds_name=ds_name,
-                ds_cls=ds_cls,
-                knn_k=knn_k,
-                seg_method=seg_method,
-                config_tuple=config_tuple,
-                completed_runs=completed_runs,
-                completed_metrics=completed_metrics,
-            )
-            if plan.skip_dataset:
-                if cfg.verbose:
-                    logger.info(
-                        f"[{ds_name}] Resume preflight: all requested work already complete"
-                    )
-                continue
-
-            knn_device: str | None = None
-            if ds_cls.task != "segmentation" and not plan.skip_knn:
-                knn_device = resolve_knn_device(cfg.eval.get("knn_device"), cfg.device)
-
-            try:
-                result = get_datasets(
-                    dataset_name=ds_name,
-                    partition_name=cfg.dataset.partition,
-                    batch_size=cfg.dataset.batch_size,
-                    num_workers=int(cfg.dataset.get("num_workers", 8)),
-                    return_val=True,
-                    image_size=effective_image_size,
-                    interpolation=effective_interpolation,
-                    bands=getattr(cfg.dataset, "bands", "rgb"),
-                    time_steps=cfg.dataset.get("time_steps", None),
-                )
-            except (FileNotFoundError, DatasetNotFoundError) as exc:
+        except (FileNotFoundError, DatasetNotFoundError) as exc:
+            if requested_all_datasets:
                 logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
                 continue
-            train_dataset, train_loader, val_loader, test_loader = result
-
-            num_channels = train_dataset[0]["image"].shape[0]
-            is_segmentation = ds_cls.task == "segmentation"
-            num_classes = ds_cls.num_classes
-
-            # Build the BandSpec list that matches the actual loaded channels.
-            bench = ds_cls()
-            bands_resolved = (
-                tuple(bench.rgb_bands)
-                if cfg.dataset.bands == "rgb"
-                else None
-                if cfg.dataset.bands in ("all", None)
-                else tuple(cfg.dataset.bands)
+            logger.error(
+                f"Dataset {ds_name!r} was explicitly requested but its data was not "
+                f"found: {exc}. Explicitly requested datasets must have their data "
+                "available; pass dataset.names=all to skip unavailable datasets "
+                "with a warning instead."
             )
-            bands_list = bench.select_band_specs(bands_resolved)
-            if len(bands_list) != num_channels:
-                raise ValueError(
-                    f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
-                    f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
+            raise
+        train_dataset, train_loader, val_loader, test_loader = result
+
+        num_channels = train_dataset[0]["image"].shape[0]
+        is_segmentation = ds_cls.task == "segmentation"
+        num_classes = ds_cls.num_classes
+
+        # Build the BandSpec list that matches the actual loaded channels.
+        bench = ds_cls()
+        bands_resolved = (
+            tuple(bench.rgb_bands)
+            if cfg.dataset.bands == "rgb"
+            else None
+            if cfg.dataset.bands in ("all", None)
+            else tuple(cfg.dataset.bands)
+        )
+        bands_list = bench.select_band_specs(bands_resolved)
+        if len(bands_list) != num_channels:
+            raise ValueError(
+                f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
+                f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
+            )
+
+        # `bands` is passed as a kwarg (not via the config) so the BandSpec
+        # dataclasses reach the constructor intact.
+        instantiate_kwargs: dict = {
+            "bands": bands_list,
+            "normalization": normalization,
+        }
+        if model_cfg.get("mode") == "empirical":
+            # Empirical RCF whitens against real patches, so it needs the dataset.
+            instantiate_kwargs["dataset"] = train_dataset
+        # Interpolation belongs to the loader rather than the model constructor.
+        model_cfg.pop("interpolation", None)
+        model: BenchModel = instantiate(model_cfg, **instantiate_kwargs)
+        model.to(device).eval()
+
+        common_meta = {
+            "dataset": ds_name,
+            "seed": cfg.seed,
+            "model": model_cfg["_target_"],
+            "name": model_cfg["name"],
+            "normalization": normalization,
+            "image_size": effective_image_size,
+            "interpolation": effective_interpolation,
+            "partition": cfg.dataset.partition,
+            "bands": bands_value,
+            "num_classes": num_classes,
+            "config_hash": config_hash,
+            "c_range_start": c_start,
+            "c_range_stop": c_stop,
+            "c_range_num": c_num,
+            "merge_val": cfg.eval.merge_val,
+            "bootstrap": cfg.eval.bootstrap,
+            "res": model_res,
+            "pool": model_pool,
+        }
+
+        if is_segmentation:
+            seg_cfg_merged = eval_cfg_merged.segmentation
+            save_viz = seg_cfg_merged.save_viz
+            segmentation_meta = {**common_meta, "merge_val": False}
+            metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
+                model,
+                train_loader,
+                val_loader,
+                test_loader,
+                eval_cfg_merged,
+                num_classes,
+                device,
+                seed=cfg.seed,
+                collect_preds=save_viz,
+                verbose=cfg.verbose,
+            )
+            all_rows.append(
+                metric_row(
+                    segmentation_meta,
+                    method=seg_method,
+                    metric_name="mIoU",
+                    metric_value=metrics.get("mIoU", float("nan")),
+                    ci_lower=metrics.get("ci_lower", float("nan")),
+                    ci_upper=metrics.get("ci_upper", float("nan")),
+                    feature_dim=feat_dim,
+                    n_counts={
+                        "train": len(train_dataset),
+                        "val": len(val_loader.dataset),
+                        "test": len(test_loader.dataset),
+                    },
+                    best_lr=best_lr,
+                    best_batch_size=best_bs,
+                    fw_iou=metrics.get("fw_IoU"),
+                    precision=metrics.get("precision"),
+                    recall=metrics.get("recall"),
+                    f1=metrics.get("f1"),
+                )
+            )
+            if save_viz and preds is not None:
+                from torchgeo_bench.segmentation_viz import (
+                    collect_viz_inputs,
+                    save_segmentation_viz,
                 )
 
-            # `bands` is passed as a kwarg (not via the config) so the BandSpec
-            # dataclasses reach the constructor intact.
-            instantiate_kwargs: dict = {
-                "bands": bands_list,
-                "normalization": normalization,
-            }
-            if model_cfg.get("mode", None) == "empirical":
-                # Empirical RCF whitens against real patches, so it needs the dataset.
-                instantiate_kwargs["dataset"] = train_dataset
-            # Interpolation belongs to the loader rather than the model constructor.
-            model_cfg.pop("interpolation", None)
-            model: BenchModel = instantiate(model_cfg, **instantiate_kwargs)
-            model.to(device).eval()
+                rgb_indices = bench.rgb_indices or [0, 1, 2]
+                test_imgs_t, test_gts_t = collect_viz_inputs(test_loader)
+                # Never a real per-model settings field (see
+                # SegmentationSettings): the ignore index always comes from
+                # the criterion block, so this is the fixed torchmetrics
+                # default, not a `.get(..., 255)` fallback that was ever hit.
+                ignore_idx = 255
+                n_viz = seg_cfg_merged.n_viz_samples
+                viz_dir = seg_cfg_merged.viz_dir
+                _class_names = list(getattr(train_dataset, "classes", None) or []) or None
+                save_segmentation_viz(
+                    out_dir=viz_dir,
+                    model_name=model_cfg["name"],
+                    dataset_name=ds_name,
+                    images=test_imgs_t,
+                    gt_masks=test_gts_t,
+                    pred_masks=preds,
+                    num_classes=num_classes,
+                    rgb_indices=rgb_indices,
+                    ignore_index=ignore_idx,
+                    n_samples=n_viz,
+                    class_names=_class_names,
+                )
+        else:
+            # Classification (single-label or multi-label)
+            metric_name = plan.metric_name
+            x_train, y_train = embed_split(model, train_loader, device, verbose=True, split="train")
+            x_val, y_val = embed_split(model, val_loader, device, verbose=True, split="val")
+            x_test, y_test = embed_split(model, test_loader, device, verbose=True, split="test")
+            feature_dim = x_train.shape[1]
+            n_counts = {"train": len(x_train), "val": len(x_val), "test": len(x_test)}
 
-            common_meta = {
-                "dataset": ds_name,
-                "seed": cfg.seed,
-                "model": model_cfg._target_,
-                "name": model_cfg.name,
-                "normalization": normalization,
-                "image_size": effective_image_size,
-                "interpolation": effective_interpolation,
-                "partition": cfg.dataset.partition,
-                "bands": bands_value,
-                "num_classes": num_classes,
-                "config_hash": config_hash,
-                "c_range_start": c_start,
-                "c_range_stop": c_stop,
-                "c_range_num": c_num,
-                "merge_val": cfg.eval.merge_val,
-                "bootstrap": cfg.eval.bootstrap,
-                "res": model_res,
-                "pool": model_pool,
-            }
+            cal_cfg = cfg.eval.calibration
+            cal_n_bins_knn = cal_cfg.n_bins_knn
+            cal_n_bins_linear = int(cal_cfg.n_bins_linear)
+            cal_temp_scale = bool(cal_cfg.temp_scale)
 
-            if is_segmentation:
-                seg_cfg_merged = eval_cfg_merged.segmentation
-                save_viz = seg_cfg_merged.get("save_viz", False)
-                segmentation_meta = {**common_meta, "merge_val": False}
-                metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
-                    model,
-                    train_loader,
-                    val_loader,
-                    test_loader,
-                    eval_cfg_merged,
-                    num_classes,
-                    device,
-                    seed=cfg.seed,
-                    collect_preds=save_viz,
+            if not plan.skip_knn:
+                assert knn_device is not None
+                knn_score, knn_lo, knn_hi, knn_cal, knn_n_bins = evaluate_knn(
+                    x_train,
+                    y_train,
+                    x_test,
+                    y_test,
+                    cfg.seed,
+                    cfg.eval.bootstrap,
                     verbose=cfg.verbose,
+                    device=knn_device,
+                    n_neighbors=knn_k,
+                    calibration_n_bins=cal_n_bins_knn,
                 )
                 all_rows.append(
                     metric_row(
-                        segmentation_meta,
-                        method=seg_method,
-                        metric_name="mIoU",
-                        metric_value=metrics.get("mIoU", float("nan")),
-                        ci_lower=metrics.get("ci_lower", float("nan")),
-                        ci_upper=metrics.get("ci_upper", float("nan")),
-                        feature_dim=feat_dim,
-                        n_counts={
-                            "train": len(train_dataset),
-                            "val": len(val_loader.dataset),
-                            "test": len(test_loader.dataset),
-                        },
-                        best_lr=best_lr,
-                        best_batch_size=best_bs,
-                        fw_iou=metrics.get("fw_IoU"),
-                        precision=metrics.get("precision"),
-                        recall=metrics.get("recall"),
-                        f1=metrics.get("f1"),
+                        common_meta,
+                        method=f"knn{knn_k}",
+                        metric_name=metric_name,
+                        metric_value=knn_score,
+                        ci_lower=knn_lo,
+                        ci_upper=knn_hi,
+                        feature_dim=feature_dim,
+                        n_counts=n_counts,
+                        ece=knn_cal["ece"],
+                        rms_ce=knn_cal["rms_ce"],
+                        mce=knn_cal["mce"],
+                        calibration_n_bins=knn_n_bins,
                     )
                 )
-                if save_viz and preds is not None:
-                    from torchgeo_bench.segmentation_viz import (
-                        collect_viz_inputs,
-                        save_segmentation_viz,
-                    )
 
-                    rgb_indices = bench.rgb_indices or [0, 1, 2]
-                    test_imgs_t, test_gts_t = collect_viz_inputs(test_loader)
-                    ignore_idx = seg_cfg_merged.get("ignore_index", 255)
-                    n_viz = seg_cfg_merged.get("n_viz_samples", 8)
-                    viz_dir = seg_cfg_merged.get("viz_dir", "viz")
-                    _class_names = list(getattr(train_dataset, "classes", None) or []) or None
-                    save_segmentation_viz(
-                        out_dir=viz_dir,
-                        model_name=model_cfg.name,
-                        dataset_name=ds_name,
-                        images=test_imgs_t,
-                        gt_masks=test_gts_t,
-                        pred_masks=preds,
-                        num_classes=num_classes,
-                        rgb_indices=rgb_indices,
-                        ignore_index=ignore_idx,
-                        n_samples=n_viz,
-                        class_names=_class_names,
-                    )
-            else:
-                # Classification (single-label or multi-label)
-                metric_name = plan.metric_name
-                x_train, y_train = embed_split(
-                    model, train_loader, device, verbose=True, split="train"
-                )
-                x_val, y_val = embed_split(model, val_loader, device, verbose=True, split="val")
-                x_test, y_test = embed_split(model, test_loader, device, verbose=True, split="test")
-                feature_dim = x_train.shape[1]
-                n_counts = {"train": len(x_train), "val": len(x_val), "test": len(x_test)}
-
-                cal_cfg = cfg.eval.get("calibration", {}) or {}
-                cal_n_bins_knn = cal_cfg.get("n_bins_knn", None)
-                cal_n_bins_linear = int(cal_cfg.get("n_bins_linear", 15))
-                cal_temp_scale = bool(cal_cfg.get("temp_scale", True))
-
-                if not plan.skip_knn:
-                    assert knn_device is not None
-                    knn_score, knn_lo, knn_hi, knn_cal, knn_n_bins = evaluate_knn(
+            if not plan.skip_linear:
+                try:
+                    lin_score, lin_lo, lin_hi, best_c, lin_cal, lin_cal_ts = evaluate_logistic(
                         x_train,
                         y_train,
+                        x_val,
+                        y_val,
                         x_test,
                         y_test,
+                        c_values_list,
                         cfg.seed,
                         cfg.eval.bootstrap,
-                        verbose=cfg.verbose,
-                        device=knn_device,
-                        n_neighbors=knn_k,
-                        calibration_n_bins=cal_n_bins_knn,
+                        cfg.eval.merge_val,
+                        cfg.device,
+                        cfg.verbose,
+                        calibration_n_bins=cal_n_bins_linear,
+                        temp_scale=cal_temp_scale,
                     )
+                except LinearProbeDivergedError as exc:
+                    # A handful of (backbone, dataset) pairings produce feature
+                    # magnitudes the probe can't fit at any C in the sweep. That's
+                    # a property of this one combination, not the rest of the
+                    # benchmark run, so skip just this row rather than losing
+                    # every other already-computed metric to an uncaught crash.
+                    logger.warning(
+                        f"[linear] model={common_meta.get('model')} "
+                        f"dataset={common_meta.get('dataset')} bands={common_meta.get('bands')} "
+                        f"norm={common_meta.get('normalization')}: skipping, no usable C found. "
+                        f"Diagnostic: {exc}"
+                    )
+                else:
                     all_rows.append(
                         metric_row(
                             common_meta,
-                            method=f"knn{knn_k}",
+                            method="linear",
                             metric_name=metric_name,
-                            metric_value=knn_score,
-                            ci_lower=knn_lo,
-                            ci_upper=knn_hi,
+                            metric_value=lin_score,
+                            ci_lower=lin_lo,
+                            ci_upper=lin_hi,
                             feature_dim=feature_dim,
                             n_counts=n_counts,
-                            ece=knn_cal["ece"],
-                            rms_ce=knn_cal["rms_ce"],
-                            mce=knn_cal["mce"],
-                            calibration_n_bins=knn_n_bins,
-                        )
-                    )
-
-                if not plan.skip_linear:
-                    try:
-                        lin_score, lin_lo, lin_hi, best_c, lin_cal, lin_cal_ts = evaluate_logistic(
-                            x_train,
-                            y_train,
-                            x_val,
-                            y_val,
-                            x_test,
-                            y_test,
-                            c_values_list,
-                            cfg.seed,
-                            cfg.eval.bootstrap,
-                            cfg.eval.merge_val,
-                            cfg.device,
-                            cfg.verbose,
+                            best_c=best_c,
+                            ece=lin_cal["ece"],
+                            rms_ce=lin_cal["rms_ce"],
+                            mce=lin_cal["mce"],
+                            ece_ts=lin_cal_ts["ece_ts"],
+                            rms_ce_ts=lin_cal_ts["rms_ce_ts"],
+                            mce_ts=lin_cal_ts["mce_ts"],
+                            temperature=lin_cal_ts["temperature"],
                             calibration_n_bins=cal_n_bins_linear,
-                            temp_scale=cal_temp_scale,
                         )
-                    except LinearProbeDivergedError as exc:
-                        # A handful of (backbone, dataset) pairings produce feature
-                        # magnitudes the probe can't fit at any C in the sweep. That's
-                        # a property of this one combination, not the rest of the
-                        # benchmark run, so skip just this row rather than losing
-                        # every other already-computed metric to an uncaught crash.
-                        logger.warning(
-                            f"[linear] model={common_meta.get('model')} "
-                            f"dataset={common_meta.get('dataset')} bands={common_meta.get('bands')} "
-                            f"norm={common_meta.get('normalization')}: skipping, no usable C found. "
-                            f"Diagnostic: {exc}"
-                        )
-                    else:
-                        all_rows.append(
-                            metric_row(
-                                common_meta,
-                                method="linear",
-                                metric_name=metric_name,
-                                metric_value=lin_score,
-                                ci_lower=lin_lo,
-                                ci_upper=lin_hi,
-                                feature_dim=feature_dim,
-                                n_counts=n_counts,
-                                best_c=best_c,
-                                ece=lin_cal["ece"],
-                                rms_ce=lin_cal["rms_ce"],
-                                mce=lin_cal["mce"],
-                                ece_ts=lin_cal_ts["ece_ts"],
-                                rms_ce_ts=lin_cal_ts["rms_ce_ts"],
-                                mce_ts=lin_cal_ts["mce_ts"],
-                                temperature=lin_cal_ts["temperature"],
-                                calibration_n_bins=cal_n_bins_linear,
-                            )
-                        )
-                if not plan.skip_id:
-                    id_cfg = cfg.eval.intrinsic_dim
-                    id_rows = evaluate_intrinsic_dim(
-                        splits={"train": x_train, "val": x_val, "test": x_test},
-                        estimators=list(id_cfg.estimators),
-                        selected_splits=list(id_cfg.splits),
-                        device=id_cfg.get("device", None) or cfg.device,
-                        max_samples=id_cfg.get("max_samples", None),
-                        seed=cfg.seed,
-                        common_meta=common_meta,
-                        feature_dim=feature_dim,
-                        n_counts=n_counts,
-                        verbose=cfg.verbose,
-                        only_metrics=plan.id_missing_metrics if cfg.resume else None,
                     )
-                    if cfg.resume:
-                        id_rows = _filter_completed_metric_rows(
-                            id_rows, completed_metrics, key_cols
-                        )
-                    id_out_rows.extend(id_rows)
+            if not plan.skip_id:
+                id_cfg = cfg.eval.intrinsic_dim
+                id_rows = evaluate_intrinsic_dim(
+                    splits={"train": x_train, "val": x_val, "test": x_test},
+                    estimators=list(id_cfg.estimators),
+                    selected_splits=list(id_cfg.splits),
+                    device=id_cfg.device or cfg.device,
+                    max_samples=id_cfg.max_samples,
+                    seed=cfg.seed,
+                    common_meta=common_meta,
+                    feature_dim=feature_dim,
+                    n_counts=n_counts,
+                    verbose=cfg.verbose,
+                    only_metrics=plan.id_missing_metrics if cfg.resume else None,
+                )
+                if cfg.resume:
+                    id_rows = _filter_completed_metric_rows(id_rows, completed_metrics, key_cols)
+                id_out_rows.extend(id_rows)
 
-                if not plan.skip_profile:
-                    profile_cfg = cfg.eval.profile
-                    cpu_cfg = profile_cfg.get("cpu_throughput", {}) if profile_cfg else {}
-                    profile_rows = evaluate_profile(
-                        model=model,
-                        sample_loader=train_loader,
-                        device=device,
-                        n_warmup=int(profile_cfg.get("n_warmup", 3)),
-                        n_measure=int(profile_cfg.get("n_measure", 20)),
-                        common_meta=common_meta,
-                        feature_dim=feature_dim,
-                        n_counts=n_counts,
-                        cpu_throughput_enabled=bool(cpu_cfg.get("enabled", False)),
-                        cpu_batch_size=int(cpu_cfg.get("batch_size", 8)),
-                        cpu_n_warmup=int(cpu_cfg.get("n_warmup", 1)),
-                        cpu_n_measure=int(cpu_cfg.get("n_measure", 5)),
-                        cpu_time_budget_s=float(cpu_cfg.get("time_budget_s", 300.0)),
+            if not plan.skip_profile:
+                profile_cfg = cfg.eval.profile
+                cpu_cfg = profile_cfg.cpu_throughput
+                profile_rows = evaluate_profile(
+                    model=model,
+                    sample_loader=train_loader,
+                    device=device,
+                    n_warmup=int(profile_cfg.n_warmup),
+                    n_measure=int(profile_cfg.n_measure),
+                    common_meta=common_meta,
+                    feature_dim=feature_dim,
+                    n_counts=n_counts,
+                    cpu_throughput_enabled=bool(cpu_cfg.enabled),
+                    cpu_batch_size=int(cpu_cfg.batch_size),
+                    cpu_n_warmup=int(cpu_cfg.n_warmup),
+                    cpu_n_measure=int(cpu_cfg.n_measure),
+                    cpu_time_budget_s=float(cpu_cfg.time_budget_s),
+                )
+                if cfg.resume:
+                    profile_rows = _filter_completed_metric_rows(
+                        profile_rows, completed_metrics, key_cols
                     )
-                    if cfg.resume:
-                        profile_rows = _filter_completed_metric_rows(
-                            profile_rows, completed_metrics, key_cols
-                        )
-                    profile_out_rows.extend(profile_rows)
+                profile_out_rows.extend(profile_rows)
 
-            append_rows_atomic(output_path, all_rows)
-            all_rows.clear()
-            append_rows_atomic(intrinsic_dim_output_path, id_out_rows)
-            id_out_rows.clear()
-            append_rows_atomic(profile_output_path, profile_out_rows)
-            profile_out_rows.clear()
-    finally:
-        dataset_progress.stop()
+        append_rows_atomic(output_path, all_rows)
+        all_rows.clear()
+        append_rows_atomic(intrinsic_dim_output_path, id_out_rows)
+        id_out_rows.clear()
+        append_rows_atomic(profile_output_path, profile_out_rows)
+        profile_out_rows.clear()
 
     result_paths = ", ".join(sorted({output_path, intrinsic_dim_output_path, profile_output_path}))
     logger.info(f"Benchmark complete. Results appended to {result_paths}")

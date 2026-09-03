@@ -12,9 +12,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pandas as pd
-from omegaconf import DictConfig, OmegaConf
 
 from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
+from torchgeo_bench.settings import ProfileSettings, RunSettings, to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def _normalize_bands_value(bands: object) -> str:
     return ",".join(items)
 
 
-def _resume_config_hash(cfg: DictConfig) -> str:
+def _resume_config_hash(cfg: RunSettings) -> str:
     """Return a stable fingerprint of settings that can change a result row.
 
     Resume must not treat a row from a different model/evaluation setup as
@@ -74,11 +74,9 @@ def _resume_config_hash(cfg: DictConfig) -> str:
     fingerprint and makes resume treat already-computed knn/linear rows as a
     different config -- rerunning and duplicating them instead of skipping.
     """
-    dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
-    assert isinstance(dataset_cfg, dict)
+    dataset_cfg = to_dict(cfg.dataset)
     dataset_cfg.pop("names", None)
-    eval_cfg = OmegaConf.to_container(cfg.eval, resolve=True)
-    assert isinstance(eval_cfg, dict)
+    eval_cfg = to_dict(cfg.eval)
     eval_cfg.pop("profile", None)
     eval_cfg.pop("intrinsic_dim", None)
     payload = {
@@ -87,9 +85,13 @@ def _resume_config_hash(cfg: DictConfig) -> str:
         "device": cfg.device,
         "dataset": dataset_cfg,
         "eval": eval_cfg,
-        "model": OmegaConf.to_container(cfg.model, resolve=True),
+        "model": to_dict(cfg.model),
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    # Strict JSON: every value here comes from plain settings/mappings
+    # (yaml.safe_load-parsed scalars, dicts, lists), so nothing should ever
+    # need `default=str` to serialize -- a value that does is a bug, not a
+    # type this hash should silently paper over.
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
@@ -151,15 +153,14 @@ def _filter_completed_metric_rows(
     return filtered
 
 
-def _profile_metric_names(profile_cfg: DictConfig | None) -> list[str]:
+def _profile_metric_names(profile_cfg: ProfileSettings | None) -> list[str]:
     """Return the required profile metrics for resume completeness checks."""
     names = [
         "throughput_samples_per_sec",
         "latency_ms_per_batch_p50",
         "params_m",
     ]
-    cpu_cfg = profile_cfg.get("cpu_throughput", {}) if profile_cfg else {}
-    if bool(cpu_cfg.get("enabled", False)):
+    if profile_cfg is not None and profile_cfg.cpu_throughput.enabled:
         names.extend(["throughput_samples_per_sec_cpu", "latency_ms_per_batch_p50_cpu"])
     return names
 
@@ -196,7 +197,7 @@ class DatasetRunPlan:
 
 
 def _plan_dataset_run(
-    cfg: DictConfig,
+    cfg: RunSettings,
     ds_name: str,
     ds_cls: type,
     knn_k: int,
@@ -206,7 +207,7 @@ def _plan_dataset_run(
     completed_metrics: dict[str, set[tuple[str, ...]]],
 ) -> DatasetRunPlan:
     """Plan which work remains for a dataset before loading data or a model."""
-    model_key = (cfg.model._target_, cfg.model.name, *config_tuple)
+    model_key = (cfg.model["_target_"], cfg.model["name"], *config_tuple)
 
     if ds_cls.task == "segmentation":
         seg_key = (ds_name, seg_method, *model_key)
@@ -227,8 +228,8 @@ def _plan_dataset_run(
     skip_knn = bool(cfg.resume and knn_key in completed_runs)
     skip_linear = bool((cfg.resume and linear_key in completed_runs) or cfg.eval.skip_linear)
 
-    id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
-    id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
+    id_cfg = cfg.eval.intrinsic_dim
+    id_enabled = id_cfg.enabled
     id_metric_names = []
     if id_enabled:
         for split in id_cfg.splits:
@@ -246,8 +247,8 @@ def _plan_dataset_run(
     )
     skip_id = (not id_enabled) or bool(id_metric_names and not id_missing_metrics)
 
-    profile_cfg = getattr(cfg.eval, "profile", None)
-    profile_enabled = bool(profile_cfg and profile_cfg.get("enabled", False))
+    profile_cfg = cfg.eval.profile
+    profile_enabled = profile_cfg.enabled
     profile_metric_names = _profile_metric_names(profile_cfg) if profile_enabled else []
     skip_profile = (not profile_enabled) or bool(
         cfg.resume

@@ -21,8 +21,8 @@ def _bands() -> list[BandSpec]:
 
 
 def test_instantiate_preserves_bandspec_objects():
-    """Kwargs bypass OmegaConf, so BandSpec dataclasses reach the constructor intact."""
-    cfg = compose_config(["model=rcf"])
+    """Kwargs bypass config plumbing, so BandSpec dataclasses reach the constructor intact."""
+    cfg = compose_config(model="rcf")
 
     bands = _bands()
     model = instantiate(cfg.model, bands=bands)

@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
-from omegaconf import OmegaConf
 
 from torchgeo_bench.coordbench import (
     CoordBenchmark,
@@ -16,6 +15,7 @@ from torchgeo_bench.coordbench import (
     spatial_fold_ids,
 )
 from torchgeo_bench.coordbench import datasets as cb_datasets
+from torchgeo_bench.settings import CoordSettings, RunSettings
 
 
 @pytest.fixture
@@ -113,7 +113,7 @@ def _synthetic_benchmarks() -> list[CoordBenchmark]:
     return [reg, clf]
 
 
-def _coord_cfg(tmp_path, **coord_overrides) -> OmegaConf:
+def _coord_cfg(tmp_path, **coord_overrides) -> RunSettings:
     coord = {
         "output": str(tmp_path / "coord.csv"),
         "names": "all",
@@ -124,19 +124,30 @@ def _coord_cfg(tmp_path, **coord_overrides) -> OmegaConf:
         "knn_k": 5,
     }
     coord.update(coord_overrides)
-    return OmegaConf.create(
-        {
-            "seed": 0,
-            "device": "cpu",
-            "resume": False,
-            "mode": "coord",
-            "model": {
-                "_target_": "torchgeo_bench.coordbench.models.SinCosLocationEncoder",
-                "name": "sincos",
-            },
-            "coord": coord,
-        }
+    return RunSettings(
+        seed=0,
+        device="cpu",
+        resume=False,
+        mode="coord",
+        model={
+            "_target_": "torchgeo_bench.coordbench.models.SinCosLocationEncoder",
+            "name": "sincos",
+        },
+        coord=CoordSettings(**coord),
     )
+
+
+def test_run_coordbench_explicit_cuda_fails_fast_when_unavailable(tmp_path, monkeypatch) -> None:
+    """An explicit (non-"auto") device must raise before any real work starts,
+    never silently fall back to CPU."""
+    monkeypatch.setattr(
+        "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
+    )
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    cfg = _coord_cfg(tmp_path)
+    cfg.device = "cuda:0"
+    with pytest.raises(RuntimeError, match="CUDA is unavailable"):
+        run_coordbench(cfg)
 
 
 def test_run_coordbench_end_to_end(tmp_path, monkeypatch) -> None:

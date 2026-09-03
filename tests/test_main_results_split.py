@@ -6,56 +6,54 @@ per-model files under ``profile_results_dir`` / ``intrinsic_dim_results_dir``,
 separate from the ``results_dir`` metrics file.
 """
 
-from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
 
 import pandas as pd
-from omegaconf import DictConfig
 
 from torchgeo_bench.config import compose_config
 from torchgeo_bench.main import main
 from torchgeo_bench.results import model_results_path
+from torchgeo_bench.settings import RunSettings, merge
 
 from .test_main_fast import _synthetic_embeddings, _synthetic_loaders
 
 
-def _compose_default_routing_cfg(
-    tmp_path: Path, overrides: Sequence[str] | None = None
-) -> DictConfig:
+def _compose_default_routing_cfg(tmp_path: Path, overrides: dict | None = None) -> RunSettings:
     """Compose a config with no explicit ``output=``, routed at ``tmp_path``."""
-    extra = list(overrides or [])
-    return compose_config(
-        [
-            "model=rcf",
-            "dataset.names=[m-eurosat]",
-            "dataset.partition=default",
-            "dataset.batch_size=4",
-            "dataset.num_workers=0",
-            "eval.bootstrap=5",
-            "eval.c_range=[-2,-1,2]",
-            "device=cpu",
-            f"results_dir={tmp_path / 'models'}",
-            f"profile_results_dir={tmp_path / 'profiles'}",
-            f"intrinsic_dim_results_dir={tmp_path / 'intrinsic_dim'}",
-            *extra,
-        ]
-    )
+    base = {
+        "dataset": {
+            "names": ["m-eurosat"],
+            "partition": "default",
+            "batch_size": 4,
+            "num_workers": 0,
+        },
+        "eval": {"bootstrap": 5, "c_range": [-2, -1, 2]},
+        "device": "cpu",
+        "results_dir": str(tmp_path / "models"),
+        "profile_results_dir": str(tmp_path / "profiles"),
+        "intrinsic_dim_results_dir": str(tmp_path / "intrinsic_dim"),
+    }
+    if overrides:
+        base = merge(base, overrides)
+    return compose_config(base, model="rcf")
 
 
 def test_default_routing_splits_profile_and_intrinsic_dim_into_own_files(tmp_path: Path):
     cfg = _compose_default_routing_cfg(
         tmp_path,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "eval": {
+                "skip_linear": True,
+                "intrinsic_dim": {
+                    "enabled": True,
+                    "estimators": ["twonn"],
+                    "splits": ["train"],
+                    "max_samples": 100,
+                },
+                "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+            },
+        },
     )
     profile_metrics = {
         "params_m": 0.01,
@@ -102,17 +100,19 @@ def test_default_routing_resume_reads_all_three_files(tmp_path: Path):
     """resume=true must merge completed_metrics across all 3 per-model files."""
     cfg = _compose_default_routing_cfg(
         tmp_path,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "resume": True,
+            "eval": {
+                "skip_linear": True,
+                "intrinsic_dim": {
+                    "enabled": True,
+                    "estimators": ["twonn"],
+                    "splits": ["train"],
+                    "max_samples": 100,
+                },
+                "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+            },
+        },
     )
 
     def _mock_compute(*args, **kwargs):
