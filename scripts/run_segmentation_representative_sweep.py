@@ -83,28 +83,36 @@ MODELS = [
     ),
 ]
 
+# Scale-MAE FMOW_RGB accepts exactly three ordered RGB bands. Some datasets'
+# ``rgb`` aliases are grayscale, SAR, or use unsupported short names.
+SCALEMAE_CONFIGS = {
+    "torchgeo/scalemae_large_fmow",
+    "torchgeo/scalemae_large_fmow_cls",
+}
+SCALEMAE_UNSUPPORTED_INPUTS = {
+    ("burn_scars", "all"),
+    ("caffe", "rgb"),
+    ("caffe", "all"),
+    ("cloudsen12", "all"),
+    ("dynamic_earthnet", "rgb"),
+    ("dynamic_earthnet", "all"),
+    ("flair2", "all"),
+    ("fotw", "all"),
+    ("kuro_siwo", "rgb"),
+    ("kuro_siwo", "all"),
+    ("pastis", "all"),
+    ("spacenet2", "all"),
+}
+
 # These inputs violate pretrained wrapper contracts, independent of probe head
 # or batch size.
 UNSUPPORTED_INPUTS = {
     ("torchgeo/swinv2b_s2rgb_satlas_mi", "pastis", "all"),
-}
-
-SCALEMAE_INPUTS = {
-    ("burn_scars", "rgb"),
-    ("cloudsen12", "rgb"),
-    ("flair2", "rgb"),
-    ("fotw", "rgb"),
-    ("pastis", "rgb"),
-    ("spacenet2", "rgb"),
-    ("spacenet7", "rgb"),
-    ("spacenet7", "all"),
-}
-
-# Scale-MAE FMOW_RGB accepts exactly three ordered RGB bands. Some datasets'
-# ``rgb`` aliases are grayscale, SAR, or use unsupported short names.
-MODEL_INPUT_ALLOWLISTS = {
-    "torchgeo/scalemae_large_fmow": SCALEMAE_INPUTS,
-    "torchgeo/scalemae_large_fmow_cls": SCALEMAE_INPUTS,
+    *{
+        (model, dataset, bands)
+        for model in SCALEMAE_CONFIGS
+        for dataset, bands in SCALEMAE_UNSUPPORTED_INPUTS
+    },
 }
 
 
@@ -129,9 +137,6 @@ def build_jobs(
             for head in heads:
                 for band_mode in _effective_bands(dataset, bands):
                     job = Job(model, dataset, head, band_mode)
-                    allowlist = MODEL_INPUT_ALLOWLISTS.get(model.config)
-                    if allowlist is not None and (dataset, band_mode) not in allowlist:
-                        continue
                     if (model.config, dataset, band_mode) not in UNSUPPORTED_INPUTS:
                         jobs.append(job)
     return jobs
@@ -159,7 +164,7 @@ def sweep_metadata(
 ) -> dict[str, object]:
     """Return the result-affecting configuration fingerprint."""
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "source_hash": _source_hash(root),
         "epochs": EPOCHS,
         "image_size": image_size,
@@ -174,10 +179,6 @@ def sweep_metadata(
         "heads": list(heads),
         "bands": list(bands),
         "equivalent_band_datasets": sorted(EQUIVALENT_BAND_DATASETS),
-        "model_input_allowlists": {
-            model: [list(item) for item in sorted(inputs)]
-            for model, inputs in sorted(MODEL_INPUT_ALLOWLISTS.items())
-        },
         "unsupported_inputs": [list(item) for item in sorted(UNSUPPORTED_INPUTS)],
     }
 

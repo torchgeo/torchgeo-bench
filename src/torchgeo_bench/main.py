@@ -393,6 +393,7 @@ def _cache_fits_device(
 
     required_bytes = _estimate_cache_bytes(train_cache) + _estimate_cache_bytes(val_cache)
     free_bytes, _ = torch.cuda.mem_get_info(device)
+    # Placement is result-neutral: both paths keep fp16 features and use the device RNG.
     fits = required_bytes <= int(free_bytes * 0.8)
     logger.info(
         "Segmentation cache requires %.1f GiB; %.1f GiB is free on %s. Using %s cache.",

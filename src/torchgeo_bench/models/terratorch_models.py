@@ -1,7 +1,6 @@
 """TerraTorch backbone wrappers for torchgeo-bench."""
 
 import logging
-import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -20,18 +19,7 @@ from .interface import BenchModel
 logger = logging.getLogger(__name__)
 
 
-def _patch_torchgeo_trainer_utils() -> None:
-    """Expose TorchGeo 0.10's moved task utilities at TerraTorch's legacy path."""
-    import torchgeo.trainers
-    from torchgeo.tasks import utils
-
-    if not hasattr(torchgeo.trainers, "utils"):
-        torchgeo.trainers.utils = utils
-        sys.modules["torchgeo.trainers.utils"] = utils
-
-
 def _build_backbone(name: str, **kwargs: Any) -> nn.Module:
-    _patch_torchgeo_trainer_utils()
     try:
         import terratorch.models.backbones  # noqa: F401 — populate registry
         from terratorch.registry import BACKBONE_REGISTRY
@@ -357,7 +345,6 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
 
     def _pretrain_normalizer(self) -> Callable[[torch.Tensor], torch.Tensor]:
         """z-score with TerraMind's per-modality pretraining statistics."""
-        _patch_torchgeo_trainer_utils()
         from terratorch.models.backbones.terramind.model.terramind_register import (
             v1_pretraining_mean,
             v1_pretraining_std,

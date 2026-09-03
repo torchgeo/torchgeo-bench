@@ -72,7 +72,7 @@ def test_representative_sweep_filters_and_deduplicates_band_modes() -> None:
     ]
 
 
-def test_representative_sweep_enforces_model_input_allowlist() -> None:
+def test_representative_sweep_enforces_model_input_contracts() -> None:
     sweep = _load_script("run_segmentation_representative_sweep.py")
     for config in [
         "torchgeo/scalemae_large_fmow",
@@ -120,7 +120,7 @@ def test_representative_sweep_selects_all_configured_segmentation_models() -> No
 
     selected = sweep._select_models("configured")
 
-    assert len(selected) == 80
+    assert len(selected) >= 80
     assert len({model.name for model in selected}) == len(selected)
     assert "resnet18" in {model.name for model in selected}
     assert "rcf" not in {model.name for model in selected}

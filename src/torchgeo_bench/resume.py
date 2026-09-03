@@ -81,6 +81,10 @@ def _resume_config_hash(cfg: DictConfig) -> str:
     assert isinstance(eval_cfg, dict)
     eval_cfg.pop("profile", None)
     eval_cfg.pop("intrinsic_dim", None)
+    segmentation_cfg = eval_cfg.get("segmentation")
+    if isinstance(segmentation_cfg, dict):
+        # Cache placement changes memory use, not the trained samples or batch order.
+        segmentation_cfg.pop("cache_device", None)
     payload = {
         "version": 1,
         "seed": cfg.seed,
