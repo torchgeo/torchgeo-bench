@@ -28,7 +28,6 @@ from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.model_profile import (
     _count_gflops,
     _count_params,
-    lenient_grad_hooks,
     measure_profile,
 )
 from torchgeo_bench.results import append_rows_atomic
@@ -184,25 +183,13 @@ def _measure_backbone(
     n_warmup: int,
     n_measure: int,
 ) -> tuple[dict[str, float | None], int]:
-    """Run ``measure_profile`` on a synthetic batch, halving on CUDA OOM.
+    """Run ``measure_profile`` on one fixed synthetic batch.
 
-    Returns the metrics dict and the batch size actually used, so a cell that
-    fell back to a smaller batch stays interpretable (GFLOPs is per-sample
-    either way; throughput/memory/energy are not).
+    The requested batch size is part of the profile identity. OOM is therefore
+    allowed to propagate instead of silently changing the measurement.
     """
-    while True:
-        try:
-            x = torch.randn(batch_size, n_channels, image_size, image_size, device=device)
-            with lenient_grad_hooks():
-                return measure_profile(
-                    model, x, device, n_warmup=n_warmup, n_measure=n_measure
-                ), batch_size
-        except torch.cuda.OutOfMemoryError:
-            if batch_size <= 1:
-                raise
-            batch_size //= 2
-            torch.cuda.empty_cache()
-            logger.warning("CUDA OOM — retrying at timing_batch_size=%d", batch_size)
+    x = torch.randn(batch_size, n_channels, image_size, image_size, device=device)
+    return measure_profile(model, x, device, n_warmup=n_warmup, n_measure=n_measure), batch_size
 
 
 def _probe_gflops(
@@ -302,7 +289,7 @@ def _seg_head_gflops(
     # batch-1 here, so hand it straight through.
     from torch.utils.flop_counter import FlopCounterMode
 
-    with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, torch.inference_mode():
+    with FlopCounterMode(display=False) as counter, torch.inference_mode():
         wrapper(features)
     return float(counter.get_total_flops()) / 1e9
 
@@ -336,7 +323,7 @@ def _flops_row(
         "peak_gpu_mem_gb": None,
         "reserved_gpu_mem_gb": None,
         "timing_batch_size": None,
-        "lenient_grad_hooks": True,
+        "lenient_grad_hooks": False,
         "measured_at": _now(),
     }
     row.update(values)
