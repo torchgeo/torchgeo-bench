@@ -11,3 +11,6 @@ import torchgeo_bench.main as benchmark_main
 def run(config: DictConfig) -> None:
     """Execute the benchmark runtime."""
     benchmark_main.main(config)
+
+
+run_benchmark = run
