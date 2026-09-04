@@ -47,15 +47,7 @@ class _UniqueKeyLoader(yaml.SafeLoader):
                     f"found duplicate key {key!r}",
                     key_node.start_mark,
                 )
-            try:
-                mapping[key] = self.construct_object(value_node, deep=deep)
-            except TypeError as error:
-                raise ConstructorError(
-                    "while constructing a mapping",
-                    node.start_mark,
-                    "found an unhashable key",
-                    key_node.start_mark,
-                ) from error
+            mapping[key] = self.construct_object(value_node, deep=deep)
         return mapping
 
 

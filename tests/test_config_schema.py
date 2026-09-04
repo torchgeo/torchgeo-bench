@@ -89,6 +89,16 @@ def test_invalid_ranges_and_calibration_are_rejected() -> None:
     }
     with pytest.raises(ValidationError, match="refit_train_val"):
         validate_run_config(config)
+    config["classification"] = {"linear": {"c_log10_start": float("inf")}}
+    with pytest.raises(ValidationError, match="finite"):
+        validate_run_config(config)
+
+
+def test_invalid_device_is_rejected() -> None:
+    config = valid_config()
+    config["runtime"] = {"device": "gpu:0"}
+    with pytest.raises(ValidationError, match="device"):
+        validate_run_config(config)
 
 
 def test_yaml_loads_bare_exponent_as_float(tmp_path: Path) -> None:
@@ -104,6 +114,20 @@ def test_duplicate_yaml_keys_are_rejected(tmp_path: Path) -> None:
     path = tmp_path / "duplicate.yaml"
     path.write_text("model: {name: rcf}\nmodel: {name: other}\n", encoding="utf-8")
     with pytest.raises(yaml.constructor.ConstructorError, match="duplicate key"):
+        load_run_config(path)
+
+
+def test_unhashable_yaml_key_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "unhashable.yaml"
+    path.write_text("[a, b]: value\n", encoding="utf-8")
+    with pytest.raises(yaml.constructor.ConstructorError, match="unhashable key"):
+        load_run_config(path)
+
+
+def test_non_mapping_yaml_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "scalar.yaml"
+    path.write_text("null\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="top level"):
         load_run_config(path)
 
 
@@ -129,3 +153,4 @@ def test_round_trip_dump_is_valid() -> None:
     config = RunConfig.model_validate(valid_config(), strict=True)
     restored = RunConfig.model_validate(config.model_dump(mode="json"), strict=True)
     assert restored == config
+    assert config.model_dump_yaml()["model"]["name"] == "timm/resnet50"
