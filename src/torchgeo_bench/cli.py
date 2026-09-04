@@ -95,7 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print a model config's YAML (available key=value overrides) and exit",
     )
     _add_override_arg(run)
-    run.set_defaults(func='run')
+    run.set_defaults(func="run")
 
     flops = sub.add_parser("flops", help="Measure per-sample compute cost (GFLOPs)")
     flops.add_argument(
@@ -107,7 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--print-config", action="store_true", help="Print the merged config and exit"
     )
     _add_override_arg(flops)
-    flops.set_defaults(func='flops')
+    flops.set_defaults(func="flops")
 
     download = sub.add_parser("download", help="Download benchmark datasets")
     download.add_argument(
@@ -121,75 +121,9 @@ def _build_parser() -> argparse.ArgumentParser:
     download.add_argument(
         "--datasets", default=None, help="(GeoBench only) comma-separated dataset names"
     )
-    download.set_defaults(func='download')
+    download.set_defaults(func="download")
 
     return parser
-
-
-def _setup_logging(verbose: bool = False) -> None:
-    import logging
-
-    from rich.logging import RichHandler
-
-    logging.basicConfig(
-        level=logging.INFO if verbose else logging.WARNING,
-        format="%(message)s",
-        datefmt="[%X]",
-        handlers=[RichHandler(rich_tracebacks=True, markup=True)],
-    )
-
-
-def _flag_overrides(args: argparse.Namespace) -> list[str]:
-    """Translate convenience flags into config dotlist overrides."""
-    overrides = []
-    if args.model is not None:
-        overrides.append(f"model={args.model}")
-    if getattr(args, "datasets", None) is not None:
-        names = args.datasets if args.datasets == "all" else f"[{args.datasets}]"
-        overrides.append(f"dataset.names={names}")
-    if args.device is not None:
-        overrides.append(f"device={args.device}")
-    if args.output is not None:
-        overrides.append(f"output={args.output}")
-    if getattr(args, "resume", False):
-        overrides.append("resume=true")
-    if getattr(args, "seed", None) is not None:
-        overrides.append(f"seed={args.seed}")
-    if getattr(args, "partition", None) is not None:
-        overrides.append(f"dataset.partition={args.partition}")
-    if getattr(args, "bands", None) is not None:
-        bands = args.bands if args.bands in ("rgb", "all") else f"[{args.bands}]"
-        overrides.append(f"dataset.bands={bands}")
-    if getattr(args, "batch_size", None) is not None:
-        overrides.append(f"dataset.batch_size={args.batch_size}")
-    if getattr(args, "image_size", None) is not None:
-        overrides.append(f"dataset.image_size={args.image_size}")
-    if getattr(args, "normalization", None) is not None:
-        overrides.append(f"dataset.normalization={args.normalization}")
-    if getattr(args, "skip_linear", False):
-        overrides.append("eval.skip_linear=true")
-    if getattr(args, "bootstrap", None) is not None:
-        overrides.append(f"eval.bootstrap={args.bootstrap}")
-    if getattr(args, "verbose", False):
-        overrides.append("verbose=true")
-    return overrides
-
-
-def _compose(args: argparse.Namespace, *, config_name: str, default_model: str | None):
-    from omegaconf.errors import OmegaConfBaseException
-
-    from torchgeo_bench.config import compose_config
-
-    try:
-        return compose_config(
-            [*args.overrides, *_flag_overrides(args)],
-            config_name=config_name,
-            default_model=default_model,
-        )
-    except OmegaConfBaseException as err:
-        raise SystemExit(f"error: bad config override: {err}") from err
-    except ValueError as err:
-        raise SystemExit(f"error: {err}") from err
 
 
 def main(argv: list[str] | None = None) -> None:
