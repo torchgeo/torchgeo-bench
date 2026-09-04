@@ -64,3 +64,6 @@ Existing implementation: [#306](https://github.com/torchgeo/torchgeo-bench/pull/
 Source observations are pinned to `9c8e4af`; refresh before implementation.
 
 - [Current parser](https://github.com/torchgeo/torchgeo-bench/blob/9c8e4afab46675d7279c88828dfcbf0ca99b3a07/src/torchgeo_bench/cli.py#L1)
+
+This draft supports KNN alone or KNN plus linear probing; it rejects linear-only selections during validation.
+Use `--bands red,green,blue` on the CLI, or `input.bands: [red, green, blue]` in YAML.

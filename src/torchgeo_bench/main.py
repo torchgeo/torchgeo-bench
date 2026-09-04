@@ -720,7 +720,7 @@ def main(cfg: DictConfig, *, strict: bool = False) -> None:
     id_out_rows: list[dict] = []
     profile_out_rows: list[dict] = []
     model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
-    if model_eval is not None and model_eval.get("c_range", None) is not None:
+    if not strict and model_eval is not None and model_eval.get("c_range", None) is not None:
         c_start, c_stop, c_num = model_eval.c_range
     else:
         c_start, c_stop, c_num = cfg.eval.c_range

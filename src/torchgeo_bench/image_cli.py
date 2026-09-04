@@ -6,7 +6,8 @@
 import argparse
 import pathlib
 import sys
-from typing import Any
+
+from . import commands
 
 _DATASETS = (
     'm-eurosat',
@@ -73,8 +74,8 @@ def _dataset_detail(name: str) -> str:
 def _parser() -> argparse.ArgumentParser:
     """Build the CLI parser without importing numerical dependencies."""
     parser = argparse.ArgumentParser(prog='torchgeo-bench')
-    commands = parser.add_subparsers(dest='command', required=True)
-    run = commands.add_parser(
+    subcommands = parser.add_subparsers(dest='command', required=True)
+    run = subcommands.add_parser(
         'run', help='Run image benchmarks', argument_default=argparse.SUPPRESS
     )
     run.add_argument('--config', type=pathlib.Path, help='YAML configuration file')
@@ -86,7 +87,10 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument('--batch-size', type=int)
     run.add_argument('--workers', type=int)
     run.add_argument('--seed', type=int)
-    run.add_argument('--bands')
+    run.add_argument('--bands', help='rgb, all, or comma-separated band names')
+    run.add_argument(
+        '--interpolation', choices=('area', 'bilinear', 'bicubic', 'nearest')
+    )
     run.add_argument('--image-size', type=_image_size, metavar='PX|none')
     run.add_argument('--normalization', choices=('dataset', 'model', 'minmax', 'none'))
     run.add_argument('--partition')
@@ -107,13 +111,13 @@ def _parser() -> argparse.ArgumentParser:
         ('models', 'List model presets or show one preset'),
         ('datasets', 'List datasets or show one dataset'),
     ):
-        command = commands.add_parser(name, help=help_text)
+        command = subcommands.add_parser(name, help=help_text)
         command.add_argument('name', nargs='?')
-    download = commands.add_parser('download', help='Download benchmark datasets')
+    download = subcommands.add_parser('download', help='Download benchmark datasets')
     download.add_argument('target', nargs='+')
     download.add_argument('--output-dir', default='data')
     download.add_argument('--datasets')
-    profile = commands.add_parser('profile', help='Measure one real inference batch')
+    profile = subcommands.add_parser('profile', help='Measure one real inference batch')
     profile.add_argument('--model', required=True)
     profile.add_argument('--dataset', required=True)
     profile.add_argument('--partition', default='default')
@@ -135,15 +139,6 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _set(overrides: dict[str, Any], section: str, key: str, value: Any) -> None:
-    """Set one explicit CLI override in a nested mapping."""
-    if '.' in section:
-        parent, child = section.split('.', maxsplit=1)
-        overrides.setdefault(parent, {}).setdefault(child, {})[key] = value
-    else:
-        overrides.setdefault(section, {})[key] = value
-
-
 def _image_size(value: str) -> int | None:
     """Parse a positive image size or the explicit ``none`` value."""
     if value == 'none':
@@ -156,12 +151,10 @@ def _image_size(value: str) -> int | None:
 
 def _run(args: argparse.Namespace) -> None:
     """Validate and execute one image benchmark."""
-    from torchgeo_bench.commands import _image
-
-    _image.run(args, _model_names(), _DATASETS)
+    commands._image.run(args, _model_names(), _DATASETS)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> None:  # noqa: PLR0912 - explicit command dispatch
     """Run the image benchmark CLI."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     if args.command == 'run':
@@ -185,10 +178,10 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(f'unknown dataset {args.name!r}')
         else:
             print(_dataset_detail(args.name), end='')
-    elif args.command in {'download', 'profile'}:
-        from torchgeo_bench import commands
-
-        getattr(commands, args.command)(args)
+    elif args.command == 'download':
+        commands.download(args)
+    elif args.command == 'profile':
+        commands.profile(args)
     else:
         raise SystemExit(f'{args.command} is not implemented by the image CLI yet')
 

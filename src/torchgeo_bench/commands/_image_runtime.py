@@ -6,9 +6,9 @@
 import torch
 from omegaconf import open_dict
 
-from torchgeo_bench.config import compose_config
-from torchgeo_bench.config_schema import RunConfig
-from torchgeo_bench.main import main
+from ..config import compose_config
+from ..config_schema import RunConfig
+from ..main import main
 
 
 def run(config: RunConfig) -> None:  # noqa: C901, PLR0915 - explicit schema-to-legacy mapping

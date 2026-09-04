@@ -8,7 +8,8 @@ from typing import Any
 
 import yaml
 
-from torchgeo_bench.config_schema import RunConfig, load_yaml, validate_run_config
+from .. import commands
+from ..config_schema import RunConfig, load_yaml, validate_run_config
 
 
 def _set(overrides: dict[str, Any], section: str, key: str, value: Any) -> None:
@@ -30,9 +31,19 @@ def _run_mapping(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901 - fl
     for name in ('device', 'batch_size', 'workers', 'seed', 'verbose'):
         if hasattr(args, name):
             _set(overrides, 'runtime', name, getattr(args, name))
-    for name in ('bands', 'image_size', 'normalization', 'partition', 'time_steps'):
+    for name in (
+        'bands',
+        'image_size',
+        'interpolation',
+        'normalization',
+        'partition',
+        'time_steps',
+    ):
         if hasattr(args, name):
-            _set(overrides, 'input', name, getattr(args, name))
+            value = getattr(args, name)
+            if name == 'bands' and value not in {'rgb', 'all'}:
+                value = [band.strip() for band in value.split(',')]
+            _set(overrides, 'input', name, value)
     for name in ('methods', 'knn_k', 'knn_device', 'bootstrap_samples'):
         if hasattr(args, name):
             _set(overrides, 'classification', name, getattr(args, name))
@@ -78,23 +89,18 @@ def _load_run(
     if getattr(args, 'config_help', False):
         print(yaml.safe_dump(RunConfig.model_json_schema(), sort_keys=False), end='')
         raise SystemExit(0)
-    if 'model' not in values or 'name' not in values['model']:
+    config = validate_run_config(values)
+    unknown_model = config.model.name not in model_names
+    unknown_datasets = [name for name in config.datasets if name not in datasets]
+    if unknown_model or unknown_datasets:
         raise ValueError(
-            'model is required; pass --model or set model.name in --config'
+            f'unknown model or dataset: model={config.model.name}, datasets={unknown_datasets}'
         )
-    if 'datasets' not in values:
-        raise ValueError(
-            'at least one dataset is required; pass --dataset or set datasets'
-        )
-    unknown_models = (
-        [] if values['model']['name'] in model_names else [values['model']['name']]
-    )
-    unknown_datasets = [name for name in values['datasets'] if name not in datasets]
-    if unknown_models or unknown_datasets:
-        raise ValueError(
-            f'unknown model or dataset: models={unknown_models}, datasets={unknown_datasets}'
-        )
-    return validate_run_config(values)
+    if set(config.classification.methods) not in ({'knn', 'linear'}, {'knn'}):
+        raise ValueError('this draft supports methods [knn, linear] or [knn]')
+    if isinstance(config.input.bands, str) and config.input.bands not in {'rgb', 'all'}:
+        raise ValueError('input.bands must be rgb, all, or a YAML list of band names')
+    return config
 
 
 def run(
@@ -105,11 +111,4 @@ def run(
     if getattr(args, 'dry_run', False):
         print(yaml.safe_dump(config.model_dump_yaml(), sort_keys=False), end='')
         return
-    methods = set(config.classification.methods)
-    if methods != {'knn', 'linear'} and methods != {'knn'}:
-        raise ValueError(
-            'legacy runner currently supports methods [knn, linear] or [knn]'
-        )
-    from torchgeo_bench import legacy_run
-
-    legacy_run.run(config)
+    commands._image_runtime.run(config)

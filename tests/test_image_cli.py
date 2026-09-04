@@ -15,8 +15,9 @@ from _pytest.capture import CaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
 from omegaconf import DictConfig, open_dict
 
+from torchgeo_bench.commands._image import _set
 from torchgeo_bench.config_schema import validate_run_config
-from torchgeo_bench.image_cli import _image_size, _model_names, _set, main
+from torchgeo_bench.image_cli import _image_size, _model_names, main
 
 
 def test_dry_run_applies_explicit_flags_and_preserves_false_values(
@@ -105,7 +106,7 @@ def test_missing_model_or_dataset_fails_before_execution() -> None:
 
 def test_non_dry_run_calls_legacy_adapter(monkeypatch: MonkeyPatch) -> None:
     received = []
-    monkeypatch.setattr('torchgeo_bench.legacy_run.run', received.append)
+    monkeypatch.setattr('torchgeo_bench.commands._image_runtime.run', received.append)
     main(['run', '--model', 'rcf', '--dataset', 'm-eurosat'])
     assert received[0].model.name == 'rcf'
 
@@ -119,7 +120,7 @@ def test_legacy_adapter_composes_and_translates_schema(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr('torchgeo_bench.legacy_run.main', capture)
+    monkeypatch.setattr('torchgeo_bench.commands._image_runtime.main', capture)
     config = validate_run_config(
         {
             'model': {'name': 'rcf'},
@@ -134,7 +135,7 @@ def test_legacy_adapter_composes_and_translates_schema(
             'classification': {'methods': ['knn']},
         }
     )
-    from torchgeo_bench.legacy_run import run
+    from torchgeo_bench.commands._image_runtime import run
 
     run(config)
     assert received[0].device == 'cpu'
@@ -153,7 +154,7 @@ def test_legacy_adapter_rejects_unavailable_cuda(monkeypatch: MonkeyPatch) -> No
         }
     )
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
-    from torchgeo_bench.legacy_run import run
+    from torchgeo_bench.commands._image_runtime import run
 
     with pytest.raises(RuntimeError, match='CUDA device'):
         run(config)
@@ -163,7 +164,7 @@ def test_legacy_adapter_preserves_model_and_segmentation_overrides(
     monkeypatch: MonkeyPatch,
 ) -> None:
     from torchgeo_bench import config as config_module
-    from torchgeo_bench import legacy_run
+    from torchgeo_bench.commands import _image_runtime as legacy_run
 
     received = []
 
@@ -171,7 +172,7 @@ def test_legacy_adapter_preserves_model_and_segmentation_overrides(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr('torchgeo_bench.legacy_run.main', capture)
+    monkeypatch.setattr('torchgeo_bench.commands._image_runtime.main', capture)
     original_compose = config_module.compose_config
 
     def compose_with_optional_sections(
@@ -203,7 +204,7 @@ def test_legacy_adapter_preserves_model_and_segmentation_overrides(
             'segmentation': {'layers': ['layer1']},
         }
     )
-    from torchgeo_bench.legacy_run import run
+    from torchgeo_bench.commands._image_runtime import run
 
     run(config)
     assert received[0].model.eval == {}
@@ -219,7 +220,7 @@ def test_legacy_adapter_preserves_preset_layers_when_schema_omits_them(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr('torchgeo_bench.legacy_run.main', capture)
+    monkeypatch.setattr('torchgeo_bench.commands._image_runtime.main', capture)
     config = validate_run_config(
         {
             'model': {'name': 'torchgeo/resnet50_s2rgb_satlas_si'},
@@ -227,7 +228,7 @@ def test_legacy_adapter_preserves_preset_layers_when_schema_omits_them(
             'runtime': {'device': 'cpu'},
         }
     )
-    from torchgeo_bench.legacy_run import run
+    from torchgeo_bench.commands._image_runtime import run
 
     run(config)
     assert received[0].model.eval.segmentation.layers == [
@@ -247,7 +248,7 @@ def test_legacy_adapter_explicit_empty_layers_clear_preset(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr('torchgeo_bench.legacy_run.main', capture)
+    monkeypatch.setattr('torchgeo_bench.commands._image_runtime.main', capture)
     config = validate_run_config(
         {
             'model': {'name': 'torchgeo/resnet50_s2rgb_satlas_si'},
@@ -256,7 +257,7 @@ def test_legacy_adapter_explicit_empty_layers_clear_preset(
             'segmentation': {'layers': []},
         }
     )
-    from torchgeo_bench.legacy_run import run
+    from torchgeo_bench.commands._image_runtime import run
 
     run(config)
     assert received[0].eval.segmentation.layers == []
@@ -280,7 +281,7 @@ def test_runtime_failure_propagates_from_image_cli(monkeypatch: MonkeyPatch) -> 
     def fail(_: object) -> None:
         raise FileNotFoundError('dataset missing')
 
-    monkeypatch.setattr('torchgeo_bench.legacy_run.run', fail)
+    monkeypatch.setattr('torchgeo_bench.commands._image_runtime.run', fail)
     with pytest.raises(FileNotFoundError, match='dataset missing'):
         main(['run', '--model', 'rcf', '--dataset', 'm-eurosat'])
 
@@ -374,3 +375,24 @@ def test_main_rejects_unknown_parser_command(monkeypatch: MonkeyPatch) -> None:
 def test_module_entrypoint(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(sys, 'argv', ['torchgeo-bench', 'models', 'rcf'])
     runpy.run_module('torchgeo_bench.image_cli', run_name='__main__')
+
+
+@pytest.mark.parametrize('value', ['null', '3', '[]'])
+def test_invalid_model_section_has_a_field_error(
+    value: str, tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    path = tmp_path / 'invalid.yaml'
+    path.write_text(f'model: {value}\ndatasets: [m-eurosat]\n')
+    with pytest.raises(SystemExit) as error:
+        main(['run', '--config', str(path), '--dry-run'])
+    assert error.value.code == 2
+    assert 'model' in capsys.readouterr().err
+
+
+def test_dry_run_rejects_unsupported_method_and_band_selections() -> None:
+    for flags in (['--methods', 'linear'], ['--bands', 'red,,blue']):
+        with pytest.raises(SystemExit) as error:
+            main(
+                ['run', '--model', 'rcf', '--dataset', 'm-eurosat', '--dry-run', *flags]
+            )
+        assert error.value.code == 2

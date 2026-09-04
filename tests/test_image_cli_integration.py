@@ -1,3 +1,6 @@
+# Copyright (c) TorchGeo Contributors. All rights reserved.
+# Licensed under the MIT License.
+
 """Offline end-to-end image benchmark smoke test."""
 
 from pathlib import Path
@@ -42,6 +45,9 @@ def test_cli_runs_real_knn_and_resume(monkeypatch: MonkeyPatch, tmp_path: Path) 
     ) -> tuple[object, DataLoader, DataLoader, DataLoader]:
         nonlocal calls
         calls += 1
+        assert kwargs['bands'] == ['red', 'green', 'blue']
+        assert kwargs['image_size'] == 8
+        assert kwargs['interpolation'] == 'nearest'
 
         class Samples(Dataset[dict[str, Tensor]]):
             def __len__(self) -> int:
@@ -77,6 +83,10 @@ def test_cli_runs_real_knn_and_resume(monkeypatch: MonkeyPatch, tmp_path: Path) 
         'cpu',
         '--image-size',
         '8',
+        '--bands',
+        'red,green,blue',
+        '--interpolation',
+        'nearest',
         '--batch-size',
         '4',
         '--workers',
