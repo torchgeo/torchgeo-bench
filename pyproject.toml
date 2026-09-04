@@ -118,7 +118,7 @@ urls.Documentation = "https://torchgeo.org/torchgeo-bench/"
 urls.Homepage = "https://github.com/torchgeo/torchgeo-bench"
 urls.Issues = "https://github.com/torchgeo/torchgeo-bench/issues"
 urls.Repository = "https://github.com/torchgeo/torchgeo-bench"
-scripts.torchgeo-bench = "torchgeo_bench.cli:main"
+scripts.torchgeo-bench = "torchgeo_bench.image_cli:main"
 
 [tool.hatch]
 build.targets.wheel.packages = [ "src/torchgeo_bench" ]
@@ -150,6 +150,7 @@ extend-exclude = [
   "src/torchgeo_bench/preprocessing.py",
   "tests/test_config_schema.py",
   "tests/test_image_cli.py",
+  "tests/test_image_cli_integration.py",
   "tests/test_lazy_commands.py",
   "tests/test_legacy_run.py",
   "tests/test_model_build.py",

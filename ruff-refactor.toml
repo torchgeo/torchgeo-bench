@@ -12,6 +12,8 @@ ignore = ['ANN401', 'D104', 'D105', 'D107']
 
 [lint.per-file-ignores]
 'tests/**' = ['D']
+# Keep the flat flag-to-schema table visible at its call sites.
+'src/torchgeo_bench/image_cli.py' = ['C901']
 
 [lint.isort]
 split-on-trailing-comma = false

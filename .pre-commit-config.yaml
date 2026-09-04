@@ -3,10 +3,10 @@ repos:
     rev: v0.15.10
     hooks:
       - id: ruff
-        exclude: ^(scripts/check_refactor_style\.py|src/torchgeo_bench/config_schema\.py|src/torchgeo_bench/image_cli\.py|src/torchgeo_bench/legacy_run\.py|src/torchgeo_bench/preprocessing\.py|src/torchgeo_bench/models/build\.py|src/torchgeo_bench/commands|tests/test_config_schema\.py|tests/test_image_cli\.py|tests/test_legacy_run\.py|tests/test_preprocessing\.py|tests/test_model_build\.py|tests/test_lazy_commands\.py|tests/test_profile_command\.py)
+        exclude: ^(scripts/check_refactor_style\.py|src/torchgeo_bench/config_schema\.py|src/torchgeo_bench/image_cli\.py|src/torchgeo_bench/legacy_run\.py|src/torchgeo_bench/preprocessing\.py|src/torchgeo_bench/models/build\.py|src/torchgeo_bench/commands|tests/test_config_schema\.py|tests/test_image_cli\.py|tests/test_image_cli_integration\.py|tests/test_legacy_run\.py|tests/test_preprocessing\.py|tests/test_model_build\.py|tests/test_lazy_commands\.py|tests/test_profile_command\.py)
         args: ["--fix", "--show-fixes"]
       - id: ruff-format
-        exclude: ^(scripts/check_refactor_style\.py|src/torchgeo_bench/config_schema\.py|src/torchgeo_bench/image_cli\.py|src/torchgeo_bench/legacy_run\.py|src/torchgeo_bench/preprocessing\.py|src/torchgeo_bench/models/build\.py|src/torchgeo_bench/commands|tests/test_config_schema\.py|tests/test_image_cli\.py|tests/test_legacy_run\.py|tests/test_preprocessing\.py|tests/test_model_build\.py|tests/test_lazy_commands\.py|tests/test_profile_command\.py)
+        exclude: ^(scripts/check_refactor_style\.py|src/torchgeo_bench/config_schema\.py|src/torchgeo_bench/image_cli\.py|src/torchgeo_bench/legacy_run\.py|src/torchgeo_bench/preprocessing\.py|src/torchgeo_bench/models/build\.py|src/torchgeo_bench/commands|tests/test_config_schema\.py|tests/test_image_cli\.py|tests/test_image_cli_integration\.py|tests/test_legacy_run\.py|tests/test_preprocessing\.py|tests/test_model_build\.py|tests/test_lazy_commands\.py|tests/test_profile_command\.py)
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

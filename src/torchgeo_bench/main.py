@@ -686,7 +686,7 @@ def _merge_completed_metrics(
         base.setdefault(metric_name, set()).update(keys)
 
 
-def main(cfg: DictConfig) -> None:
+def main(cfg: DictConfig, *, strict: bool = False) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
@@ -720,7 +720,7 @@ def main(cfg: DictConfig) -> None:
     id_out_rows: list[dict] = []
     profile_out_rows: list[dict] = []
     model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
-    if model_eval is not None and model_eval.get("c_range", None) is not None:
+    if not strict and model_eval is not None and model_eval.get("c_range", None) is not None:
         c_start, c_stop, c_num = model_eval.c_range
     else:
         c_start, c_stop, c_num = cfg.eval.c_range
@@ -756,6 +756,8 @@ def main(cfg: DictConfig) -> None:
             try:
                 ds_cls = get_bench_dataset_class(ds_name)
             except KeyError:
+                if strict:
+                    raise
                 logger.warning(f"Skipping dataset {ds_name} (not in registry)")
                 continue
 
@@ -782,7 +784,10 @@ def main(cfg: DictConfig) -> None:
                     config_hash,
                 )
             )
-            eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
+            if strict:
+                eval_cfg_merged = OmegaConf.merge(OmegaConf.create(model_eval or {}), cfg.eval)
+            else:
+                eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
             knn_k = int(getattr(eval_cfg_merged, "knn_k", 5))
             seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
             plan = _plan_dataset_run(
@@ -819,6 +824,10 @@ def main(cfg: DictConfig) -> None:
                     time_steps=cfg.dataset.get("time_steps", None),
                 )
             except (FileNotFoundError, DatasetNotFoundError) as exc:
+                if strict:
+                    raise FileNotFoundError(
+                        f"Dataset {ds_name!r} is unavailable; download it before running"
+                    ) from exc
                 logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
                 continue
             train_dataset, train_loader, val_loader, test_loader = result
@@ -1007,6 +1016,8 @@ def main(cfg: DictConfig) -> None:
                             temp_scale=cal_temp_scale,
                         )
                     except LinearProbeDivergedError as exc:
+                        if strict:
+                            raise
                         # A handful of (backbone, dataset) pairings produce feature
                         # magnitudes the probe can't fit at any C in the sweep. That's
                         # a property of this one combination, not the rest of the

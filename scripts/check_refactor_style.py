@@ -17,6 +17,7 @@ PATHS = (
     'src/torchgeo_bench/commands',
     'tests/test_config_schema.py',
     'tests/test_image_cli.py',
+    'tests/test_image_cli_integration.py',
     'tests/test_legacy_run.py',
     'tests/test_preprocessing.py',
     'tests/test_model_build.py',
