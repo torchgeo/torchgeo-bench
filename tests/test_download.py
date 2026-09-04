@@ -149,3 +149,14 @@ def test_download_datasets_deduplicates_names(tmp_path: Path) -> None:
 
     eurosat.assert_called_once_with(tmp_path)
 
+
+def test_v1_loader_reports_explicit_download_for_missing_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from torchgeo_bench.datasets import geobench_v1
+    from torchgeo_bench.datasets.m_eurosat import MEurosat
+
+    monkeypatch.setattr(geobench_v1, "V1_ROOT", tmp_path / "hdf5")
+    monkeypatch.setattr(geobench_v1, "V1_SHARDED_ROOT", tmp_path / "sharded")
+    with pytest.raises(FileNotFoundError, match="download m-eurosat"):
+        MEurosat().get_dataset("train")

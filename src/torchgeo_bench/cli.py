@@ -112,8 +112,9 @@ def _build_parser() -> argparse.ArgumentParser:
     download = sub.add_parser("download", help="Download benchmark datasets")
     download.add_argument(
         "target",
-        choices=["geobench_v1", "geobench_v2", "eurosat", "resisc45"],
-        help="What to download",
+        nargs="+",
+        metavar="DATASET",
+        help="Dataset names, or one legacy collection target",
     )
     download.add_argument(
         "-o", "--output-dir", default="data", help="Benchmark data root (default: data)"
