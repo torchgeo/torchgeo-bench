@@ -64,12 +64,6 @@ class ProfileResult:
         }
 
 
-@contextlib.contextmanager
-def lenient_grad_hooks() -> Iterator[None]:
-    """Retain the old API as a no-op; never modify PyTorch globals."""
-    yield
-
-
 def _count_params(model: nn.Module) -> float:
     """Return the number of model parameters in millions."""
     return sum(parameter.numel() for parameter in model.parameters()) / 1e6
@@ -94,6 +88,17 @@ def _precision_context(
     if precision == "bfloat16":
         return torch.autocast(device_type=device.type, dtype=torch.bfloat16)
     raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
+
+
+@contextlib.contextmanager
+def _evaluation_mode(model: nn.Module) -> Iterator[None]:
+    states = {module: module.training for module in model.modules()}
+    model.eval()
+    try:
+        yield
+    finally:
+        for module, training in states.items():
+            module.train(training)
 
 
 def profile_inference(
@@ -130,11 +135,11 @@ def profile_inference(
         raise ValueError("sample_batch must have a non-empty batch dimension")
     if sample_batch.device != device:
         raise ValueError(f"sample_batch is on {sample_batch.device}, expected {device}")
-    _precision_context(device, precision)
-    model.eval()
+    if precision not in {"float32", "float16", "bfloat16"}:
+        raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
     batch_size = sample_batch.shape[0]
     is_cuda = device.type == "cuda"
-    with torch.inference_mode(), _precision_context(device, precision):
+    with _evaluation_mode(model), torch.inference_mode(), _precision_context(device, precision):
         for _ in range(n_warmup):
             model(sample_batch)
         if is_cuda:
@@ -150,10 +155,7 @@ def profile_inference(
             timings.append((time.perf_counter() - pass_started) * 1000)
         elapsed = time.perf_counter() - started
     if count_flops:
-        try:
-            flops = FlopMeasurement(_count_gflops(model, sample_batch), "measured")
-        except NotImplementedError as exc:
-            flops = FlopMeasurement(None, "unsupported", str(exc))
+        flops = FlopMeasurement(_count_gflops(model, sample_batch), "measured")
     else:
         flops = FlopMeasurement(None, "disabled", "FLOP counting was not requested")
     return ProfileResult(
@@ -203,10 +205,13 @@ def measure_cpu_throughput(
     time_budget_s: float,
 ) -> dict[str, float | None]:
     """Measure CPU throughput in a separate, fixed-size invocation."""
-    if batch_size <= 0 or n_warmup < 0 or n_measure <= 0 or time_budget_s <= 0:
+    if batch_size <= 0 or batch_size > sample.shape[0]:
+        raise ValueError("batch_size must be within the sample batch")
+    if n_warmup < 0 or n_measure <= 0 or time_budget_s <= 0:
         raise ValueError("CPU profiling settings must be positive")
     original_device = next(model.parameters(), sample).device
     cpu_sample = sample[:batch_size].detach().to("cpu")
+    states = {module: module.training for module in model.modules()}
     model.to("cpu").eval()
     try:
         with torch.inference_mode():
@@ -218,6 +223,8 @@ def measure_cpu_throughput(
                 pass_started = time.perf_counter()
                 model(cpu_sample)
                 timings.append((time.perf_counter() - pass_started) * 1000)
+                if time.perf_counter() - started >= time_budget_s:
+                    break
             elapsed = time.perf_counter() - started
         return {
             "throughput_samples_per_sec_cpu": batch_size * n_measure / elapsed,
@@ -225,3 +232,5 @@ def measure_cpu_throughput(
         }
     finally:
         model.to(original_device)
+        for module, training in states.items():
+            module.train(training)
