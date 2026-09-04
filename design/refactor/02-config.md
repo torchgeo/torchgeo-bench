@@ -15,7 +15,7 @@ Should command configuration use Pydantic models or standard-library dataclasses
 | A | Pydantic models (recommended) | Nested validation, useful field errors, constraints, and schema export with little loader code. |
 | B | Dataclasses and explicit validation | Smaller dependency surface; maintain nested conversion and validation ourselves. |
 
-Vote in the linked issue. Comment `Vote: A` or `Vote: B` with a short rationale. If neither fits, propose a concrete amendment. Recommendations are proposals, not recorded votes or maintainer approval. Maintainers will summarize the outcome in the issue. Reactions indicate interest, not a choice between options.
+Discuss the two options in the linked issue. We will collect feedback before choosing.
 
 ## Proposed contract
 
@@ -25,7 +25,7 @@ Prefer Pydantic for configuration and ordinary dataclasses for internal records 
 
 Define separate `RunConfig`, `ProfileConfig`, and later `CoordBenchConfig`. Image runs have explicit classification and segmentation sections. Reject settings for a task absent from the selected datasets; mixed-task runs validate each applicable section and resolve one experiment per dataset. Model options have named schema fields, not an unvalidated kwargs dictionary.
 
-Illustrative classification config (proposed, not executable today):
+Example for the new image CLI:
 
 ```yaml
 schema_version: 1
@@ -39,8 +39,7 @@ input:
   normalization: dataset
 classification:
   methods: [knn, linear]
-  knn:
-    neighbors: 5
+  knn_k: 5
   linear:
     c_log10_start: -6
     c_log10_stop: 4
@@ -53,11 +52,12 @@ runtime:
   workers: 4
   seed: 0
 output:
-  directory: results
+  directory: results/models
   resume: true
 ```
 
-Defaults live in the schema. Model presets supply documented model settings but cannot silently change the evaluation protocol. Remove `_target_`, arbitrary key additions, environment substitution, and interpolation from the new format. Save the resolved configuration with each run. Old-config translation is a separate migration boundary.
+Defaults live in the schema. Model presets supply documented model settings but cannot silently change the evaluation protocol. Remove `_target_`, arbitrary key additions, environment substitution, and interpolation from the new format. The image CLI can print the validated configuration before execution.
+Persisting a complete resolved experiment record remains part of the results migration. Old-config translation is a separate migration boundary.
 
 If dataclasses win, use explicit constructors and short validators for each section. Do not build a generic reflection-based configuration engine. Preserve accepted work in the existing schema/CLI PRs whichever option is chosen.
 
@@ -94,9 +94,8 @@ packages. Callers apply explicit CLI overrides to a mapping and then call
 
 Schema definitions, YAML parsing, explicit overrides, and config migration. Model construction and result identity are distinct concerns.
 
-This draft contains only this decision document. Implementation must pass
-the oracle and migration requirements described in the refactor overview;
-adding this document does not satisfy the criteria above.
+The draft implements the image schema and YAML loader.
+Task-specific validation and named fields for every model family still need migration work.
 
 ## Existing work and references
 
