@@ -46,7 +46,7 @@ def test_wrong_types_are_rejected(section: str, field: str, value: object) -> No
 
 def test_false_and_null_values_are_preserved() -> None:
     config = valid_config()
-    config["output"] = {"directory": "results", "file": None, "resume": False, "verbose": False}
+    config["output"] = {"directory": "results", "file": None, "resume": False}
     config["input"] = {"image_size": None, "normalization": "none"}
     parsed = validate_run_config(config)
     assert parsed.output.resume is False
