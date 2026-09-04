@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from torch import nn
+from torchgeo.datasets import NonGeoDataset
 
 from torchgeo_bench.datasets.base import BandSpec
 
@@ -18,6 +18,19 @@ class TimmModelConfig:
     pretrained: bool = True
     global_pool: str | None = 'avg'
     input_normalization: str = 'bands_zscore'
+    normalize: bool = False
+    auto_resize: bool = False
+    target_size: int | None = None
+    use_cls_token: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate settings before importing or constructing a backbone."""
+        if not self.model_name:
+            raise ValueError('model_name must not be empty')
+        if self.target_size is not None and self.target_size <= 0:
+            raise ValueError('target_size must be positive')
+        if self.global_pool not in (None, '', 'avg', 'max', 'avgmax', 'catavgmax'):
+            raise ValueError(f'unsupported global_pool: {self.global_pool!r}')
 
 
 @dataclass(frozen=True)
@@ -29,6 +42,20 @@ class RCFModelConfig:
     mode: str = 'gaussian'
     stats_mode: str = 'mean'
     seed: int | None = None
+    dataset: NonGeoDataset | None = None
+
+    def __post_init__(self) -> None:
+        """Validate settings before constructing the filter bank."""
+        if self.features <= 0 or self.features % 2:
+            raise ValueError('features must be a positive even number')
+        if self.kernel_size <= 0:
+            raise ValueError('kernel_size must be positive')
+        if self.mode not in ('gaussian', 'empirical'):
+            raise ValueError("mode must be 'gaussian' or 'empirical'")
+        if self.stats_mode not in ('mean', 'stdev', 'all'):
+            raise ValueError("stats_mode must be 'mean', 'stdev', or 'all'")
+        if self.mode == 'empirical' and self.dataset is None:
+            raise ValueError("dataset must be provided for empirical mode")
 
 
 def build_timm_model(
@@ -42,7 +69,11 @@ def build_timm_model(
         bands=bands,
         model_name=config.model_name,
         pretrained=config.pretrained,
+        normalize=config.normalize,
         global_pool=config.global_pool,
+        auto_resize=config.auto_resize,
+        target_size=config.target_size,
+        use_cls_token=config.use_cls_token,
         input_normalization=config.input_normalization,
         normalization=normalization,
     )
@@ -62,33 +93,6 @@ def build_rcf_model(
         mode=config.mode,
         stats_mode=config.stats_mode,
         seed=config.seed,
+        dataset=config.dataset,
         normalization=normalization,
     )
-
-
-def build_model(
-    name: str,
-    bands: list[BandSpec],
-    *,
-    normalization: str = 'bandspec_zscore',
-    timm: TimmModelConfig | None = None,
-    rcf: RCFModelConfig | None = None,
-) -> nn.Module:
-    """Construct a migrated model by its public preset name.
-
-    ``timm`` and ``rcf`` are mutually exclusive explicit configuration
-    objects. They are optional so the small dispatcher can reject settings
-    that do not belong to the selected model family.
-    """
-    if name == 'rcf':
-        if timm is not None:
-            raise ValueError("timm settings cannot be used with model 'rcf'")
-        return build_rcf_model(rcf or RCFModelConfig(), bands, normalization=normalization)
-    if name.startswith('timm/'):
-        if rcf is not None:
-            raise ValueError(f"rcf settings cannot be used with model {name!r}")
-        config = timm or TimmModelConfig(model_name=name.removeprefix('timm/'))
-        if config.model_name != name.removeprefix('timm/'):
-            raise ValueError(f"timm model_name does not match preset {name!r}")
-        return build_timm_model(config, bands, normalization=normalization)
-    raise ValueError(f"Model preset {name!r} is not migrated to explicit construction")
