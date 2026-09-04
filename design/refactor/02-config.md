@@ -1,6 +1,7 @@
 # R02 - Choose a validated YAML configuration schema
 
-Status: proposed; no option has been accepted. This file changes no runtime behavior.
+Status: implementation started in the isolated R02 worktree; the legacy config
+path remains unchanged until the compatibility adapter lands.
 Decision issue: https://github.com/torchgeo/torchgeo-bench/issues/308
 
 Load YAML with PyYAML and validate explicit command-specific settings before execution.
@@ -59,6 +60,21 @@ output:
 Defaults live in the schema. Model presets supply documented model settings but cannot silently change the evaluation protocol. Remove `_target_`, arbitrary key additions, environment substitution, and interpolation from the new format. Save the resolved configuration with each run. Old-config translation is a separate migration boundary.
 
 If dataclasses win, use explicit constructors and short validators for each section. Do not build a generic reflection-based configuration engine. Preserve accepted work in the existing schema/CLI PRs whichever option is chosen.
+
+## Initial implementation
+
+The new `torchgeo_bench.config_schema` module implements option A for the core
+image workflow. `RunConfig` has explicit sections for model preset, datasets,
+input preprocessing, classification, segmentation, runtime, and output. It
+uses strict Pydantic fields and rejects unknown keys at every level. Model
+presets are names only; the legacy `_target_` mapping remains behind the
+compatibility adapter and is not part of this schema.
+
+`load_run_config(path)` uses a PyYAML `SafeLoader` subclass that rejects
+duplicate keys and accepts bare-exponent floats such as `1e-3`. It returns a
+validated `RunConfig` without importing Torch, TorchGeo, pandas, or model
+packages. Callers apply explicit CLI overrides to a mapping and then call
+`validate_run_config` once; there is no generic merge engine in the new path.
 
 ## Acceptance criteria for implementation
 

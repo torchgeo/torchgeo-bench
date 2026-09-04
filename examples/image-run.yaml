@@ -1,0 +1,27 @@
+# Core image benchmark configuration (schema version 1).
+schema_version: 1
+model:
+  preset: timm/resnet50
+datasets:
+  - m-eurosat
+input:
+  bands: rgb
+  image_size: 224
+  interpolation: bilinear
+  normalization: bandspec_zscore
+classification:
+  methods: [knn, linear]
+  knn_neighbors: 5
+  linear_c_range: [-6, 4, 40]
+  merge_train_val: true
+  bootstrap_samples: 200
+segmentation:
+  enabled: false
+runtime:
+  device: auto
+  batch_size: 64
+  workers: 4
+  seed: 0
+output:
+  directory: results
+  resume: false
