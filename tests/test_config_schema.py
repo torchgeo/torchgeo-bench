@@ -87,7 +87,7 @@ def test_invalid_ranges_and_calibration_are_rejected() -> None:
         "calibration": {"temp_scale": True},
         "linear": {"refit_train_val": True},
     }
-    with pytest.raises(ValidationError, match="refit_train_val"):
+    with pytest.raises(ValidationError, match="linear selected"):
         validate_run_config(config)
     config["classification"] = {"linear": {"c_log10_start": float("inf")}}
     with pytest.raises(ValidationError, match="finite"):
@@ -99,6 +99,21 @@ def test_invalid_device_is_rejected() -> None:
     config["runtime"] = {"device": "gpu:0"}
     with pytest.raises(ValidationError, match="device"):
         validate_run_config(config)
+
+
+def test_blank_names_paths_and_invalid_knn_device_are_rejected() -> None:
+    for config in (
+        {"model": {"name": " "}, "datasets": ["x"]},
+        {"model": {"name": "x"}, "datasets": ["x"], "input": {"partition": " "}},
+        {"model": {"name": "x"}, "datasets": ["x"], "output": {"directory": " "}},
+        {
+            "model": {"name": "x"},
+            "datasets": ["x"],
+            "classification": {"knn_device": "gpu"},
+        },
+    ):
+        with pytest.raises(ValidationError):
+            validate_run_config(config)
 
 
 def test_yaml_loads_bare_exponent_as_float(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@
 import math
 import pathlib
 import re
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import (
@@ -66,13 +66,23 @@ _UniqueKeyLoader.add_implicit_resolver(
 class StrictModel(BaseModel):
     """Base for configuration sections with strict fields and no extras."""
 
-    model_config = ConfigDict(extra="forbid", strict=True, validate_default=True)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, validate_default=True, allow_inf_nan=False
+    )
 
 
 class ModelConfig(StrictModel):
     """Selected model preset."""
 
     name: StrictStr = Field(min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        """Reject whitespace-only model names."""
+        if not value.strip():
+            raise ValueError("model name must not be blank")
+        return value
 
 
 class InputConfig(StrictModel):
@@ -85,13 +95,23 @@ class InputConfig(StrictModel):
     interpolation: Literal["area", "bilinear", "bicubic", "nearest"] = "bilinear"
     normalization: Literal["dataset", "model", "minmax", "none"] = "dataset"
 
+    @field_validator("partition")
+    @classmethod
+    def validate_partition(cls, value: str) -> str:
+        """Reject whitespace-only partition names."""
+        if not value.strip():
+            raise ValueError("partition must not be blank")
+        return value
+
     @field_validator("bands")
     @classmethod
     def validate_bands(cls, value: StrictStr | list[StrictStr]) -> StrictStr | list[StrictStr]:
         """Reject empty band specifications."""
         if isinstance(value, str) and not value.strip():
             raise ValueError("bands must not be empty")
-        if isinstance(value, list) and (not value or any(not band.strip() for band in value)):
+        if isinstance(value, list) and (
+            not value or any(not band.strip() for band in value) or len(set(value)) != len(value)
+        ):
             raise ValueError("bands must contain non-empty names")
         return value
 
@@ -148,9 +168,19 @@ class ClassificationConfig(StrictModel):
     @model_validator(mode="after")
     def validate_calibration(self) -> "ClassificationConfig":
         """Require held-out validation when temperature scaling is enabled."""
-        if self.calibration.temp_scale and self.linear.refit_train_val:
-            raise ValueError("temp_scale requires linear.refit_train_val=false")
+        if self.calibration.temp_scale and (
+            "linear" not in self.methods or self.linear.refit_train_val
+        ):
+            raise ValueError("temp_scale requires linear selected and refit_train_val=false")
         return self
+
+    @field_validator("knn_device")
+    @classmethod
+    def validate_knn_device(cls, value: str | None) -> str | None:
+        """Reject malformed KNN device strings without importing Torch."""
+        if value is None or value in {"cpu", "cuda"} or re.fullmatch(r"cuda:[0-9]+", value):
+            return value
+        raise ValueError("knn_device must be 'cpu', 'cuda', or 'cuda:<index>'")
 
 
 class SegmentationConfig(StrictModel):
@@ -175,6 +205,7 @@ class RuntimeConfig(StrictModel):
     batch_size: StrictInt = Field(default=64, gt=0)
     workers: StrictInt = Field(default=4, ge=0)
     seed: StrictInt = 0
+    verbose: StrictBool = False
 
     @field_validator("device")
     @classmethod
@@ -191,7 +222,14 @@ class OutputConfig(StrictModel):
     directory: StrictStr = "results/models"
     file: StrictStr | None = None
     resume: StrictBool = False
-    verbose: StrictBool = False
+
+    @field_validator("directory", "file")
+    @classmethod
+    def validate_paths(cls, value: str | None) -> str | None:
+        """Reject blank paths while allowing a null optional file."""
+        if value is not None and not value.strip():
+            raise ValueError("paths must not be blank")
+        return value
 
 
 class RunConfig(StrictModel):
@@ -224,12 +262,12 @@ class RunConfig(StrictModel):
             raise ValueError("datasets must not contain duplicates")
         return value
 
-    def model_dump_yaml(self) -> dict:
+    def model_dump_yaml(self) -> dict[str, Any]:
         """Return a YAML-serializable resolved configuration."""
         return self.model_dump(mode="json")
 
 
-def load_yaml(path: str | pathlib.Path) -> dict:
+def load_yaml(path: str | pathlib.Path) -> dict[str, Any]:
     """Load one YAML mapping with safe tags and unique keys."""
     with pathlib.Path(path).open(encoding="utf-8") as file:
         value = yaml.load(file, Loader=_UniqueKeyLoader)
@@ -243,6 +281,6 @@ def load_run_config(path: str | pathlib.Path) -> RunConfig:
     return RunConfig.model_validate(load_yaml(path), strict=True)
 
 
-def validate_run_config(value: dict) -> RunConfig:
+def validate_run_config(value: dict[str, Any]) -> RunConfig:
     """Validate a mapping after explicit CLI overrides are applied."""
     return RunConfig.model_validate(value, strict=True)
