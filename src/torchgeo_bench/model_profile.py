@@ -246,8 +246,13 @@ def measure_cpu_throughput(
     """
     if batch_size <= 0 or batch_size > sample.shape[0]:
         raise ValueError("batch_size must be within the sample batch")
-    if n_warmup < 0 or n_measure <= 0 or time_budget_s <= 0:
+    if n_warmup < 0 or n_measure <= 0 or time_budget_s < 0:
         raise ValueError("CPU profiling settings must be positive")
+    if time_budget_s == 0:
+        return {
+            "throughput_samples_per_sec_cpu": None,
+            "latency_ms_per_batch_p50_cpu": None,
+        }
     original_device = next(model.parameters(), sample).device
     cpu_sample = sample[:batch_size].detach().to("cpu")
     states = {module: module.training for module in model.modules()}
