@@ -3,6 +3,7 @@
 
 """Tests for the discoverable image CLI."""
 
+import argparse
 import runpy
 import subprocess
 import sys
@@ -62,10 +63,14 @@ def test_config_values_are_overridden_by_explicit_flags(
 def test_nested_flag_mapping_and_image_size_validation() -> None:
     mapping = {}
     _set(mapping, 'classification.linear', 'refit_train_val', False)
-    assert mapping == {'classification': {'linear': {'refit_train_val': False}}}
+    _set(mapping, 'runtime', 'workers', 0)
+    assert mapping == {
+        'classification': {'linear': {'refit_train_val': False}},
+        'runtime': {'workers': 0},
+    }
     assert _image_size('none') is None
     assert _image_size('224') == 224
-    with pytest.raises(Exception, match='positive'):
+    with pytest.raises(argparse.ArgumentTypeError, match='positive'):
         _image_size('0')
 
 
@@ -114,7 +119,7 @@ def test_legacy_adapter_composes_and_translates_schema(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr('torchgeo_bench.main.main', capture)
+    monkeypatch.setattr('torchgeo_bench.legacy_run.main', capture)
     config = validate_run_config(
         {
             'model': {'name': 'rcf'},
@@ -158,6 +163,7 @@ def test_legacy_adapter_preserves_model_and_segmentation_overrides(
     monkeypatch: MonkeyPatch,
 ) -> None:
     from torchgeo_bench import config as config_module
+    from torchgeo_bench import legacy_run
 
     received = []
 
@@ -165,7 +171,7 @@ def test_legacy_adapter_preserves_model_and_segmentation_overrides(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr('torchgeo_bench.main.main', capture)
+    monkeypatch.setattr('torchgeo_bench.legacy_run.main', capture)
     original_compose = config_module.compose_config
 
     def compose_with_optional_sections(
@@ -179,16 +185,21 @@ def test_legacy_adapter_preserves_model_and_segmentation_overrides(
         )
         with open_dict(legacy.model):
             legacy.model.eval = {}
+            legacy.model.dataset_overrides = {
+                'm-eurosat': {'image_size': 16, 'interpolation': 'bicubic'}
+            }
         with open_dict(legacy.eval.segmentation):
             legacy.eval.segmentation.layers = ['layer1']
         return legacy
 
     monkeypatch.setattr(config_module, 'compose_config', compose_with_optional_sections)
+    monkeypatch.setattr(legacy_run, 'compose_config', compose_with_optional_sections)
     config = validate_run_config(
         {
             'model': {'name': 'rcf'},
             'datasets': ['m-eurosat'],
             'runtime': {'device': 'cpu'},
+            'input': {'image_size': 8, 'interpolation': 'nearest'},
             'segmentation': {'layers': ['layer1']},
         }
     )
@@ -208,7 +219,7 @@ def test_legacy_adapter_preserves_preset_layers_when_schema_omits_them(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr('torchgeo_bench.main.main', capture)
+    monkeypatch.setattr('torchgeo_bench.legacy_run.main', capture)
     config = validate_run_config(
         {
             'model': {'name': 'torchgeo/resnet50_s2rgb_satlas_si'},
@@ -236,7 +247,7 @@ def test_legacy_adapter_explicit_empty_layers_clear_preset(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr('torchgeo_bench.main.main', capture)
+    monkeypatch.setattr('torchgeo_bench.legacy_run.main', capture)
     config = validate_run_config(
         {
             'model': {'name': 'torchgeo/resnet50_s2rgb_satlas_si'},

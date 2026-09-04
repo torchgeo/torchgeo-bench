@@ -3,21 +3,19 @@
 
 """Compatibility adapter from the R01 schema to the legacy runner."""
 
-from typing import Any
+import torch
+from omegaconf import open_dict
+
+from torchgeo_bench.config import compose_config
+from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.main import main
 
 
-def run(config: Any) -> None:  # noqa: PLR0915 - explicit schema-to-legacy mapping
+def run(config: RunConfig) -> None:  # noqa: C901, PLR0915 - explicit schema-to-legacy mapping
     """Execute a validated image config through the legacy runner."""
-    import torch
-
     device = config.runtime.device
     if device.startswith('cuda') and not torch.cuda.is_available():
         raise RuntimeError(f'CUDA device {device!r} requested but CUDA is unavailable')
-
-    from omegaconf import open_dict
-
-    from torchgeo_bench.config import compose_config
-    from torchgeo_bench.main import main
 
     legacy = compose_config([f'model={config.model.name}'])
     # Keep model-specific eval defaults, then apply schema-owned settings below.
@@ -27,6 +25,12 @@ def run(config: Any) -> None:  # noqa: PLR0915 - explicit schema-to-legacy mappi
             legacy.model.pop('image_size', None)
         if 'interpolation' in explicit_input:
             legacy.model.pop('interpolation', None)
+        dataset_overrides = legacy.model.get('dataset_overrides', {})
+        for override in dataset_overrides.values():
+            if 'image_size' in explicit_input:
+                override.pop('image_size', None)
+            if 'interpolation' in explicit_input:
+                override.pop('interpolation', None)
     legacy.seed = config.runtime.seed
     legacy.device = device
     legacy.verbose = config.runtime.verbose
@@ -68,6 +72,8 @@ def run(config: Any) -> None:  # noqa: PLR0915 - explicit schema-to-legacy mappi
     legacy.eval.segmentation.head_type = config.segmentation.head
     if 'layers' in config.segmentation.model_fields_set:
         legacy.eval.segmentation.layers = config.segmentation.layers
+    elif 'eval' in legacy.model and 'segmentation' in legacy.model.eval:
+        legacy.eval.segmentation.layers = legacy.model.eval.segmentation.layers
     legacy.eval.segmentation.lr = config.segmentation.learning_rate
     legacy.eval.segmentation.epochs = config.segmentation.epochs
     legacy.eval.segmentation.batch_size = config.segmentation.batch_size
