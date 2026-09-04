@@ -95,7 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print a model config's YAML (available key=value overrides) and exit",
     )
     _add_override_arg(run)
-    run.set_defaults(func=_cmd_run)
+    run.set_defaults(func='run')
 
     flops = sub.add_parser("flops", help="Measure per-sample compute cost (GFLOPs)")
     flops.add_argument(
@@ -107,7 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--print-config", action="store_true", help="Print the merged config and exit"
     )
     _add_override_arg(flops)
-    flops.set_defaults(func=_cmd_flops)
+    flops.set_defaults(func='flops')
 
     download = sub.add_parser("download", help="Download benchmark datasets")
     download.add_argument(
@@ -121,7 +121,7 @@ def _build_parser() -> argparse.ArgumentParser:
     download.add_argument(
         "--datasets", default=None, help="(GeoBench only) comma-separated dataset names"
     )
-    download.set_defaults(func=_cmd_download)
+    download.set_defaults(func='download')
 
     return parser
 
@@ -192,81 +192,6 @@ def _compose(args: argparse.Namespace, *, config_name: str, default_model: str |
         raise SystemExit(f"error: {err}") from err
 
 
-def _cmd_run(args: argparse.Namespace) -> None:
-    if args.list_models:
-        from torchgeo_bench.config import list_model_configs
-
-        print("\n".join(list_model_configs()))
-        return
-    if args.list_datasets:
-        from torchgeo_bench.datasets import list_datasets
-
-        print("\n".join(list_datasets()))
-        return
-    if args.model_help is not None:
-        from torchgeo_bench.config import model_config_path
-
-        try:
-            print(model_config_path(args.model_help).read_text(), end="")
-        except ValueError as err:
-            raise SystemExit(f"error: {err}") from err
-        return
-    cfg = _compose(args, config_name="config", default_model="rcf")
-    if args.print_config:
-        from omegaconf import OmegaConf
-
-        print(OmegaConf.to_yaml(cfg), end="")
-        return
-    _setup_logging(bool(cfg.verbose))
-    from torchgeo_bench.main import main
-
-    main(cfg)
-
-
-def _cmd_flops(args: argparse.Namespace) -> None:
-    cfg = _compose(args, config_name="flops_config", default_model=None)
-    if args.print_config:
-        from omegaconf import OmegaConf
-
-        print(OmegaConf.to_yaml(cfg), end="")
-        return
-    _setup_logging(verbose=True)
-    from torchgeo_bench.flops_pipeline import main
-
-    main(cfg)
-
-
-def _cmd_download(args: argparse.Namespace) -> None:
-    from pathlib import Path
-
-    _setup_logging(verbose=True)
-    from torchgeo_bench.download import (
-        download_eurosat,
-        download_geobench_v1,
-        download_geobench_v2,
-        download_resisc45,
-    )
-
-    names = None
-    if args.datasets is not None:
-        names = [n.strip() for n in args.datasets.split(",") if n.strip()]
-        if not names:
-            raise SystemExit("error: --datasets must contain at least one dataset name")
-
-    output_dir = Path(args.output_dir)
-    if args.target == "geobench_v1":
-        download_geobench_v1(output_dir, datasets=names)
-    elif args.target == "geobench_v2":
-        download_geobench_v2(output_dir, datasets=names)
-    else:
-        if names is not None:
-            raise SystemExit("error: --datasets is only supported for GeoBench downloads")
-        if args.target == "eurosat":
-            download_eurosat(output_dir)
-        else:
-            download_resisc45(output_dir)
-
-
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``torchgeo-bench`` console script."""
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -285,7 +210,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if hasattr(args, "overrides"):
         args.overrides = [*args.overrides, *overrides]
-    args.func(args)
+    from torchgeo_bench import commands
+
+    getattr(commands, args.func)(args)
 
 
 if __name__ == "__main__":
