@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from torchgeo_bench.config import compose_config, instantiate
 from torchgeo_bench.models.build import (
     RCFModelConfig,
     TimmModelConfig,
@@ -46,6 +47,22 @@ def test_timm_transformer_builder_constructs_without_checkpoint() -> None:
     assert features.ndim == 2
 
 
+def test_instantiate_routes_timm_preset_to_explicit_builder() -> None:
+    config = compose_config(['model=timm/resnet18', 'model.pretrained=false'])
+    model = instantiate(config.model, bands=_bands(3), normalization='identity')
+
+    assert isinstance(model, TimmPatchBenchModel)
+    assert model.pretrained is False
+
+
+def test_instantiate_routes_rcf_preset_to_explicit_builder() -> None:
+    config = compose_config(['model=rcf'])
+    model = instantiate(config.model, bands=_bands(3), normalization='identity')
+
+    assert isinstance(model, RCFBench)
+    assert model.rcf.weights.shape[0] == 256
+
+
 def test_rcf_builder_matches_direct_constructor() -> None:
     bands = _bands(3)
     config = RCFModelConfig(features=16, kernel_size=3, seed=7)
@@ -68,6 +85,17 @@ def test_rcf_builder_matches_direct_constructor() -> None:
 def test_model_config_rejects_unknown_fields() -> None:
     with pytest.raises(TypeError, match='unexpected'):
         TimmModelConfig(model_name='resnet18', unexpected=True)  # type: ignore[call-arg]
+
+
+def test_legacy_model_translation_rejects_unknown_fields() -> None:
+    with pytest.raises(ValueError, match='Unknown settings'):
+        instantiate(
+            {
+                '_target_': 'torchgeo_bench.models.RCFBench',
+                'unknown': True,
+            },
+            bands=_bands(3),
+        )
 
 
 @pytest.mark.parametrize(
