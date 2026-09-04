@@ -67,11 +67,12 @@ for all options.
 ## Run a basic experiment
 
 ```bash
-# Default: random convolutional features (RCF) on every available dataset
-torchgeo-bench run
+# Inspect available presets and datasets without loading ML dependencies
+torchgeo-bench models
+torchgeo-bench datasets
 
 # A single dataset with a pretrained ImageNet ResNet-50
-torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
+torchgeo-bench run --model timm/resnet50 --dataset m-eurosat
 ```
 
 The default device is `cuda:0`. On a machine without a working CUDA GPU (or if
@@ -79,7 +80,7 @@ a GPU run crashes — see [troubleshooting](https://torchgeo.org/torchgeo-bench/
 fall back to CPU:
 
 ```bash
-torchgeo-bench run dataset.names=[m-eurosat] device=cpu
+torchgeo-bench run --model rcf --dataset m-eurosat --device cpu
 ```
 
 Results are appended to `results/models/<model name>.csv`, which **ship pre-populated

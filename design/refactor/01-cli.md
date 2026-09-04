@@ -1,6 +1,7 @@
 # R01 - Choose the refactor CLI command surface
 
-Status: proposed; no option has been accepted. This file changes no runtime behavior.
+Status: proposed; the explicit argparse surface is implemented as a candidate in
+the refactor branch. Maintainer approval and final migration remain open.
 Decision issue: https://github.com/torchgeo/torchgeo-bench/issues/307
 
 Use discoverable commands with separate image, coordinate, and profiling workflows.
@@ -49,9 +50,12 @@ Precedence is schema defaults, then one YAML file, then explicitly supplied flag
 
 Parser, routing, help, catalogs, and migration examples. Schema-library choice, lazy-import implementation, and numerical evaluation are separate decisions.
 
-This draft contains only this decision document. Implementation must pass
-the oracle and migration requirements described in the refactor overview;
-adding this document does not satisfy the criteria above.
+The candidate entry point is `torchgeo_bench.image_cli:main`. Its `run`,
+`models`, `datasets`, `download`, and `profile` commands load command modules
+after parsing, so help and catalog queries stay lightweight. `coordbench` and
+legacy `flops` routing remain follow-up work. The existing `torchgeo_bench.cli`
+module remains available for the key=value and coordinate workflows during
+migration.
 
 ## Existing work and references
 

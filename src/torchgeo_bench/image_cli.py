@@ -109,6 +109,29 @@ def _parser() -> argparse.ArgumentParser:
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument('name', nargs='?')
+    download = commands.add_parser('download', help='Download benchmark datasets')
+    download.add_argument('target', nargs='+')
+    download.add_argument('--output-dir', default='data')
+    download.add_argument('--datasets')
+    profile = commands.add_parser('profile', help='Measure one real inference batch')
+    profile.add_argument('--model', required=True)
+    profile.add_argument('--dataset', required=True)
+    profile.add_argument('--partition', default='default')
+    profile.add_argument('--device', default='cpu')
+    profile.add_argument('--bands', default='rgb')
+    profile.add_argument('--image-size', type=int)
+    profile.add_argument(
+        '--interpolation', choices=('area', 'bilinear', 'bicubic', 'nearest')
+    )
+    profile.add_argument('--batch-size', type=int, default=32)
+    profile.add_argument('--warmup', type=int, default=3)
+    profile.add_argument('--measurements', type=int, default=20)
+    profile.add_argument('--seed', type=int, default=0)
+    profile.add_argument('--normalization')
+    profile.add_argument(
+        '--precision', choices=('float32', 'float16', 'bfloat16'), default='float32'
+    )
+    profile.add_argument('--count-flops', action='store_true')
     return parser
 
 
@@ -162,6 +185,10 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(f'unknown dataset {args.name!r}')
         else:
             print(_dataset_detail(args.name), end='')
+    elif args.command in {'download', 'profile'}:
+        from torchgeo_bench import commands
+
+        getattr(commands, args.command)(args)
     else:
         raise SystemExit(f'{args.command} is not implemented by the image CLI yet')
 
