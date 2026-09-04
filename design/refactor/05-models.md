@@ -42,9 +42,7 @@ Adding a model should require one understandable adapter, catalog/schema entries
 
 Dispatch, adapter interfaces, capabilities, and a representative migration. Port other model families separately; do not rewrite all adapters in one PR.
 
-This draft contains only this decision document. Implementation must pass
-the oracle and migration requirements described in the refactor overview;
-adding this document does not satisfy the criteria above.
+The draft implements explicit timm and RCF settings and constructors. The legacy preset loader translates these two known targets into named fields and rejects unknown arguments; other families retain their current construction path. Seeded CNN and ViT tests compare embeddings with direct construction, and tests cover RCF settings and empirical-mode requirements. Spatial-feature adapters and remaining families are separate migrations.
 
 ## Existing work and references
 
