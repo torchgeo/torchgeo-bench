@@ -11,13 +11,15 @@ from ._common import setup_logging
 
 
 def download(args: argparse.Namespace) -> None:
-    """Download named datasets or one legacy dataset collection."""
+    """Download named datasets or one GeoBench collection."""
     setup_logging(verbose=True)
     targets = list(args.target)
     collections = {'geobench_v1', 'geobench_v2'}
     if any(target in collections for target in targets):
         if len(targets) != 1:
-            raise SystemExit('error: legacy collection targets cannot be mixed with dataset names')
+            raise SystemExit(
+                'error: collection targets cannot be mixed with dataset names'
+            )
         target = targets[0]
     else:
         if args.datasets is not None:
@@ -35,12 +37,5 @@ def download(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     if target == "geobench_v1":
         commands.download_module.download_geobench_v1(output_dir, datasets=names)
-    elif target == "geobench_v2":
-        commands.download_module.download_geobench_v2(output_dir, datasets=names)
     else:
-        if names is not None:
-            raise SystemExit("error: --datasets is only supported for GeoBench downloads")
-        if target == "eurosat":
-            commands.download_module.download_eurosat(output_dir)
-        else:
-            commands.download_module.download_resisc45(output_dir)
+        commands.download_module.download_geobench_v2(output_dir, datasets=names)
