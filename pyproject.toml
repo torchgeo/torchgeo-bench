@@ -43,6 +43,7 @@ dependencies = [
   "geobenchv2>=0.9",
   "h5py>=3.8",
   "huggingface-hub>=0.20",
+  "lazy-loader>=0.4",
   "numpy>=1.24",
   "omegaconf>=2.3",
   "pandas>=2",

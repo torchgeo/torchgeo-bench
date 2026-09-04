@@ -6,7 +6,6 @@ HDF5 files using the partition JSON files distributed alongside them.
 """
 
 import json
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -159,24 +158,14 @@ class _V1Dataset(BenchDataset):
            ``num_workers``).
         2. **Per-sample HDF5** at :data:`V1_ROOT` if the legacy distribution
            layout is present.
-        3. **HuggingFace mirror** :data:`V1_HF_REPO_ID` — auto-downloaded into
-           :data:`V1_SHARDED_ROOT` on first use, then served via the sharded
-           backend.  Disabled by ``GEOBENCH_V1_NO_HF_DOWNLOAD=1``.
+        3. A missing dataset raises an error with the explicit download
+           command. Evaluation never downloads data as a side effect.
         """
         v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split  # type: ignore[assignment]
         source_bands = tuple(spec.source_name for spec in self.select_band_specs(bands))
 
         sharded_dir = V1_SHARDED_ROOT / self.name
         hdf5_dir = self.data_root() / self.name
-        if (
-            not (sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")))
-            and not hdf5_dir.exists()
-            and os.environ.get("GEOBENCH_V1_NO_HF_DOWNLOAD") != "1"
-        ):
-            from ._v1_webdataset import ensure_sharded_root
-
-            ensure_sharded_root(self.name, V1_SHARDED_ROOT)
-
         if sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")):
             from ._v1_webdataset import GeoBenchv1Sharded
 
@@ -187,6 +176,11 @@ class _V1Dataset(BenchDataset):
                 partition=partition,
                 bands=source_bands,
                 transform=transform,
+            )
+        if not hdf5_dir.exists():
+            raise FileNotFoundError(
+                f"GeoBench V1 dataset '{self.name}' is not downloaded. "
+                f"Run `torchgeo-bench download {self.name}` first."
             )
         return GeoBenchv1(
             root=self.data_root(),
