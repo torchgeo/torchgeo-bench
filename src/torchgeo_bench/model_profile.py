@@ -165,8 +165,8 @@ def profile_inference(
     if model_tensors and model_tensors[0].device != device:
         raise ValueError(f"model tensors are on {model_tensors[0].device}, expected {device}")
     floating_dtypes = {tensor.dtype for tensor in model_tensors if tensor.is_floating_point()}
-    if len(floating_dtypes) > 1:
-        raise ValueError("model parameters and buffers must use one dtype")
+    if floating_dtypes - {torch.float32} or sample_batch.dtype != torch.float32:
+        raise ValueError("profiling requires float32 inputs and model tensors before autocast")
     batch_size = sample_batch.shape[0]
     is_cuda = device.type == "cuda"
     with _evaluation_mode(model), torch.inference_mode(), _precision_context(device, precision):
@@ -215,9 +215,9 @@ def measure_profile(
     n_warmup: int = 3,
     n_measure: int = 20,
 ) -> dict[str, float | None]:
-    """Compatibility wrapper returning the historical metric mapping."""
+    """Return historical metrics, including the always-enabled FLOP count."""
     result = profile_inference(
-        model, sample_batch, device=device, n_warmup=n_warmup, n_measure=n_measure
+        model, sample_batch, device=device, n_warmup=n_warmup, n_measure=n_measure, count_flops=True
     )
     return {
         "throughput_samples_per_sec": result.throughput_samples_per_sec,
@@ -238,7 +238,12 @@ def measure_cpu_throughput(
     n_measure: int,
     time_budget_s: float,
 ) -> dict[str, float | None]:
-    """Measure CPU throughput in a separate, fixed-size invocation."""
+    """Measure CPU throughput with a best-effort total time budget.
+
+    Check the budget after each forward; a single forward can exceed it.
+    Return null metrics if warmup exhausts the budget. Throughput excludes
+    warmup and uses the number of completed measurement passes.
+    """
     if batch_size <= 0 or batch_size > sample.shape[0]:
         raise ValueError("batch_size must be within the sample batch")
     if n_warmup < 0 or n_measure <= 0 or time_budget_s <= 0:
@@ -258,13 +263,14 @@ def measure_cpu_throughput(
                         "latency_ms_per_batch_p50_cpu": None,
                     }
             timings: list[float] = []
+            measured_started = time.perf_counter()
             for _ in range(n_measure):
                 pass_started = time.perf_counter()
                 model(cpu_sample)
                 timings.append((time.perf_counter() - pass_started) * 1000)
                 if time.perf_counter() - started >= time_budget_s:
                     break
-            elapsed = time.perf_counter() - started
+            elapsed = time.perf_counter() - measured_started
         return {
             "throughput_samples_per_sec_cpu": batch_size * len(timings) / elapsed,
             "latency_ms_per_batch_p50_cpu": float(median(timings)),
