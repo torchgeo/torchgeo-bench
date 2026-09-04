@@ -36,6 +36,20 @@ _DATASETS = (
     'eurosat-spatial',
     'resisc45',
 )
+_SEGMENTATION_DATASETS = frozenset(
+    {
+        'caffe',
+        'burn_scars',
+        'cloudsen12',
+        'dynamic_earthnet',
+        'flair2',
+        'fotw',
+        'kuro_siwo',
+        'pastis',
+        'spacenet2',
+        'spacenet7',
+    }
+)
 
 
 def _model_names() -> list[str]:
@@ -45,6 +59,18 @@ def _model_names() -> list[str]:
         path.relative_to(root).with_suffix('').as_posix()
         for path in root.rglob('*.yaml')
     )
+
+
+def _model_detail(name: str) -> str:
+    """Return the packaged model preset for a catalog detail request."""
+    path = pathlib.Path(__file__).parent / 'conf' / 'model' / f'{name}.yaml'
+    return path.read_text(encoding='utf-8')
+
+
+def _dataset_detail(name: str) -> str:
+    """Return lightweight metadata for a dataset catalog detail request."""
+    task = 'segmentation' if name in _SEGMENTATION_DATASETS else 'classification'
+    return f'name: {name}\ntask: {task}\n'
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -222,14 +248,14 @@ def main(argv: list[str] | None = None) -> None:
         elif args.name not in names:
             raise SystemExit(f'unknown model {args.name!r}')
         else:
-            print(args.name)
+            print(_model_detail(args.name), end='')
     elif args.command == 'datasets':
         if args.name is None:
             print('\n'.join(_DATASETS))
         elif args.name not in _DATASETS:
             raise SystemExit(f'unknown dataset {args.name!r}')
         else:
-            print(args.name)
+            print(_dataset_detail(args.name), end='')
     else:
         raise SystemExit(f'{args.command} is not implemented by the image CLI yet')
 

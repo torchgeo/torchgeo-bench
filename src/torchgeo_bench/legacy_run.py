@@ -6,7 +6,7 @@
 from typing import Any
 
 
-def run(config: Any) -> None:
+def run(config: Any) -> None:  # noqa: PLR0915 - explicit schema-to-legacy mapping
     """Execute a validated image config through the legacy runner."""
     import torch
 
@@ -14,15 +14,19 @@ def run(config: Any) -> None:
     if device.startswith('cuda') and not torch.cuda.is_available():
         raise RuntimeError(f'CUDA device {device!r} requested but CUDA is unavailable')
 
+    from omegaconf import open_dict
+
     from torchgeo_bench.config import compose_config
     from torchgeo_bench.main import main
 
     legacy = compose_config([f'model={config.model.name}'])
-    # The new schema is the source of truth for protocol settings.  Prevent
-    # legacy preset ``eval`` fragments from silently overriding validated CLI
-    # values; model-specific segmentation layers are copied below when set.
-    if 'eval' in legacy.model:
-        legacy.model.eval = {}
+    # Keep model-specific eval defaults, then apply schema-owned settings below.
+    explicit_input = config.input.model_fields_set
+    with open_dict(legacy.model):
+        if 'image_size' in explicit_input:
+            legacy.model.pop('image_size', None)
+        if 'interpolation' in explicit_input:
+            legacy.model.pop('interpolation', None)
     legacy.seed = config.runtime.seed
     legacy.device = device
     legacy.verbose = config.runtime.verbose
@@ -34,9 +38,12 @@ def run(config: Any) -> None:
     legacy.dataset.batch_size = config.runtime.batch_size
     legacy.dataset.num_workers = config.runtime.workers
     legacy.dataset.bands = config.input.bands
-    legacy.dataset.image_size = config.input.image_size
-    legacy.dataset.time_steps = config.input.time_steps
-    legacy.dataset.interpolation = config.input.interpolation
+    if 'image_size' in explicit_input:
+        legacy.dataset.image_size = config.input.image_size
+    if 'time_steps' in explicit_input:
+        legacy.dataset.time_steps = config.input.time_steps
+    if 'interpolation' in explicit_input:
+        legacy.dataset.interpolation = config.input.interpolation
     legacy.dataset.normalization = {
         'dataset': 'bandspec_zscore',
         'model': 'model_native',
@@ -59,7 +66,7 @@ def run(config: Any) -> None:
         config.classification.calibration.n_bins_linear
     )
     legacy.eval.segmentation.head_type = config.segmentation.head
-    if config.segmentation.layers:
+    if 'layers' in config.segmentation.model_fields_set:
         legacy.eval.segmentation.layers = config.segmentation.layers
     legacy.eval.segmentation.lr = config.segmentation.learning_rate
     legacy.eval.segmentation.epochs = config.segmentation.epochs
@@ -72,4 +79,4 @@ def run(config: Any) -> None:
     }
     legacy.eval.segmentation.cache_features = config.segmentation.cache_features
     legacy.eval.segmentation.cache_dtype = config.segmentation.cache_dtype
-    main(legacy)
+    main(legacy, strict=True)

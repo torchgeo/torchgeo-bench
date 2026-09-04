@@ -18,11 +18,7 @@ from torchgeo_bench.calibration import (
     fit_temperature,
 )
 from torchgeo_bench.config import instantiate
-from torchgeo_bench.datasets import (
-    get_bench_dataset_class,
-    get_datasets,
-    list_datasets,
-)
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets, list_datasets
 from torchgeo_bench.intrinsic_dim import (
     FEATURE_SPECTRUM_METRICS,
     DegenerateManifoldError,
@@ -99,7 +95,12 @@ def embed_split(
     """Extract feature embeddings and labels from a data split."""
     description = f"Extracting ({split})" if split else "Extracting"
     return extract_features(
-        model, dataloader, device, transforms=None, verbose=verbose, description=description
+        model,
+        dataloader,
+        device,
+        transforms=None,
+        verbose=verbose,
+        description=description,
     )
 
 
@@ -606,7 +607,12 @@ def evaluate_segmentation(
             collect_confusions=collect_confusions,
         )
     else:
-        solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=verbose)
+        solver.fit(
+            train_loader=train_loader,
+            val_loader=val_loader,
+            epochs=epochs,
+            verbose=verbose,
+        )
         eval_result = solver.evaluate(
             test_loader,
             collect_preds=collect_preds,
@@ -631,9 +637,7 @@ def evaluate_segmentation(
         confusion_matrices = None
     if confusion_matrices is not None:
         metrics["ci_lower"], metrics["ci_upper"] = bootstrap_miou(
-            confusion_matrices,
-            n_boot=int(eval_cfg.bootstrap),
-            seed=seed,
+            confusion_matrices, n_boot=int(eval_cfg.bootstrap), seed=seed
         )
     return metrics, sum(probe.channels_list), lr, actual_batch_size, preds
 
@@ -686,7 +690,7 @@ def _merge_completed_metrics(
         base.setdefault(metric_name, set()).update(keys)
 
 
-def main(cfg: DictConfig) -> None:
+def main(cfg: DictConfig, *, strict: bool = False) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
@@ -720,7 +724,7 @@ def main(cfg: DictConfig) -> None:
     id_out_rows: list[dict] = []
     profile_out_rows: list[dict] = []
     model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
-    if model_eval is not None and model_eval.get("c_range", None) is not None:
+    if not strict and model_eval is not None and model_eval.get("c_range", None) is not None:
         c_start, c_stop, c_num = model_eval.c_range
     else:
         c_start, c_stop, c_num = cfg.eval.c_range
@@ -756,6 +760,8 @@ def main(cfg: DictConfig) -> None:
             try:
                 ds_cls = get_bench_dataset_class(ds_name)
             except KeyError:
+                if strict:
+                    raise
                 logger.warning(f"Skipping dataset {ds_name} (not in registry)")
                 continue
 
@@ -782,7 +788,7 @@ def main(cfg: DictConfig) -> None:
                     config_hash,
                 )
             )
-            eval_cfg_merged = OmegaConf.merge(cfg.eval, model_eval or {})
+            eval_cfg_merged = OmegaConf.merge(model_eval or {}, cfg.eval)
             knn_k = int(getattr(eval_cfg_merged, "knn_k", 5))
             seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
             plan = _plan_dataset_run(
@@ -819,6 +825,10 @@ def main(cfg: DictConfig) -> None:
                     time_steps=cfg.dataset.get("time_steps", None),
                 )
             except (FileNotFoundError, DatasetNotFoundError) as exc:
+                if strict:
+                    raise FileNotFoundError(
+                        f"Dataset {ds_name!r} is unavailable; download it before running"
+                    ) from exc
                 logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
                 continue
             train_dataset, train_loader, val_loader, test_loader = result
@@ -950,7 +960,11 @@ def main(cfg: DictConfig) -> None:
                 x_val, y_val = embed_split(model, val_loader, device, verbose=True, split="val")
                 x_test, y_test = embed_split(model, test_loader, device, verbose=True, split="test")
                 feature_dim = x_train.shape[1]
-                n_counts = {"train": len(x_train), "val": len(x_val), "test": len(x_test)}
+                n_counts = {
+                    "train": len(x_train),
+                    "val": len(x_val),
+                    "test": len(x_test),
+                }
 
                 cal_cfg = cfg.eval.get("calibration", {}) or {}
                 cal_n_bins_knn = cal_cfg.get("n_bins_knn", None)

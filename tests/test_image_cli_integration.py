@@ -5,11 +5,12 @@ from pathlib import Path
 import pandas as pd
 import torch
 import yaml
-from torch.utils.data import DataLoader, TensorDataset
 from _pytest.monkeypatch import MonkeyPatch
+from torch import Tensor
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
-from torchgeo_bench.image_cli import main as cli_main
 from torchgeo_bench.datasets import BandSpec
+from torchgeo_bench.image_cli import main as cli_main
 
 
 class FakeBench:
@@ -42,11 +43,11 @@ def test_cli_runs_real_knn_and_resume(monkeypatch: MonkeyPatch, tmp_path: Path) 
         nonlocal calls
         calls += 1
 
-        class Samples:
+        class Samples(Dataset[dict[str, Tensor]]):
             def __len__(self) -> int:
                 return len(dataset)
 
-            def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+            def __getitem__(self, index: int) -> dict[str, Tensor]:
                 image, label = dataset[index]
                 return {'image': image, 'label': label}
 
