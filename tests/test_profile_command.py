@@ -5,7 +5,9 @@
 
 import argparse
 import json
+from collections.abc import Iterator
 
+import pytest
 import torch
 from torch import nn
 
@@ -18,40 +20,61 @@ class _Band:
 
 
 class _Dataset:
-    rgb_bands = (_Band("red"), _Band("green"), _Band("blue"))
+    rgb_bands = (_Band('red'), _Band('green'), _Band('blue'))
 
-    def select_band_specs(self, bands):
+    def select_band_specs(self, bands: tuple[str, ...] | None) -> tuple[_Band, ...]:
         return self.rgb_bands if bands is None else tuple(bands)
 
 
 class _Loader:
-    def __iter__(self):
-        yield {"image": torch.ones(4, 3, 8, 8)}
+    def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
+        yield {'image': torch.ones(4, 3, 8, 8)}
 
 
-def test_profile_emits_real_batch_metadata(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(_profile_runtime, "get_bench_dataset_class", lambda _: _Dataset)
-    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
-    monkeypatch.setattr(_profile_runtime, "compose_config", lambda _: argparse.Namespace(model={}))
-    monkeypatch.setattr(_profile_runtime, "instantiate", lambda *_, **__: nn.Conv2d(3, 3, 1))
+def test_profile_emits_real_batch_metadata(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(_profile_runtime, 'get_bench_dataset_class', lambda _: _Dataset)
+    monkeypatch.setattr(_profile_runtime, 'list_model_configs', lambda: ['toy'])
+    monkeypatch.setattr(_profile_runtime, 'list_datasets', lambda: ['toy-dataset'])
+    monkeypatch.setattr(
+        _profile_runtime, 'get_datasets', lambda **_: (None, _Loader(), None, None)
+    )
+    monkeypatch.setattr(
+        _profile_runtime, 'compose_config', lambda _: argparse.Namespace(model={})
+    )
+    monkeypatch.setattr(
+        _profile_runtime, 'resolve_model_config', lambda model, dataset: {}
+    )
+    monkeypatch.setattr(
+        _profile_runtime,
+        'OmegaConf',
+        argparse.Namespace(to_container=lambda *args, **kwargs: {}),
+    )
+    monkeypatch.setattr(
+        _profile_runtime, 'instantiate', lambda *_, **__: nn.Conv2d(3, 3, 1)
+    )
     args = argparse.Namespace(
-        model="toy",
-        dataset="toy-dataset",
-        device="cpu",
-        bands="rgb",
+        model='toy',
+        dataset='toy-dataset',
+        partition='default',
+        device='cpu',
+        bands='rgb',
         image_size=8,
         batch_size=4,
         warmup=0,
         measurements=1,
-        precision="float32",
+        precision='float32',
         count_flops=False,
+        seed=0,
+        normalization='bandspec_zscore',
     )
 
     _profile_runtime.run(args)
     record = json.loads(capsys.readouterr().out)
-    assert record["model"] == "toy"
-    assert record["bands"] == ["red", "green", "blue"]
-    assert record["input_shape"] == [4, 3, 8, 8]
-    assert record["profile"]["batch_size"] == 4
-    assert record["profile"]["flops"]["status"] == "disabled"
-    assert record["scope"].startswith("encoder inference")
+    assert record['model'] == 'toy'
+    assert record['bands'] == ['red', 'green', 'blue']
+    assert record['input_shape'] == [4, 3, 8, 8]
+    assert record['profile']['batch_size'] == 4
+    assert record['profile']['flops']['status'] == 'disabled'
+    assert record['scope'].startswith('encoder inference')
