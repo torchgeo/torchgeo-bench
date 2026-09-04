@@ -41,6 +41,7 @@ runtime:
   batch_size: 64
   workers: 4
   seed: 0
+  verbose: false
 output:
   directory: results/models
   file: null

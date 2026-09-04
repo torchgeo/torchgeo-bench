@@ -3,7 +3,6 @@
 
 """Strict YAML configuration for the core image benchmark."""
 
-import math
 import pathlib
 import re
 from typing import Any, Literal
@@ -126,10 +125,7 @@ class LinearConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_range(self) -> "LinearConfig":
-        """Require a finite, ascending regularization range."""
-        values = (self.c_log10_start, self.c_log10_stop)
-        if not all(math.isfinite(value) for value in values):
-            raise ValueError("linear C range values must be finite")
+        """Require an ascending regularization range."""
         if self.c_log10_stop < self.c_log10_start:
             raise ValueError("c_log10_stop must be greater than or equal to c_log10_start")
         return self
