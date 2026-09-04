@@ -43,6 +43,7 @@ dependencies = [
   "geobenchv2>=0.9",
   "h5py>=3.8",
   "huggingface-hub>=0.20",
+  "lazy-loader>=0.4",
   "numpy>=1.24",
   "omegaconf>=2.3",
   "pandas>=2",
@@ -83,7 +84,9 @@ optional-dependencies.dev = [
   "pytest>=7.3",
   "pytest-cov>=4.1",
   "pytest-xdist>=3.6",
-  "ruff>=0.0.270",
+  "ruff==0.15.10",
+  "ty>=0.0.21",
+  "types-pyyaml>=6",
 ]
 optional-dependencies.docs = [
   "linkify-it-py>=2",
@@ -134,6 +137,21 @@ exclude = [
   "build",
   "dist",
   "outputs",
+]
+extend-exclude = [
+  "scripts/check_refactor_style.py",
+  "src/torchgeo_bench/commands",
+  "src/torchgeo_bench/config_schema.py",
+  "src/torchgeo_bench/image_cli.py",
+  "src/torchgeo_bench/legacy_run.py",
+  "src/torchgeo_bench/models/build.py",
+  "src/torchgeo_bench/preprocessing.py",
+  "tests/test_config_schema.py",
+  "tests/test_image_cli.py",
+  "tests/test_lazy_commands.py",
+  "tests/test_legacy_run.py",
+  "tests/test_model_build.py",
+  "tests/test_preprocessing.py",
 ]
 lint.select = [
   "ARG", # flake8-unused-arguments
