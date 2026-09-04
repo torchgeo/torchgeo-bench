@@ -6,7 +6,6 @@ Load command dependencies lazily so ``--help`` stays fast.
 """
 
 import argparse
-import logging
 
 _RUN_EPILOG = """\
 examples:

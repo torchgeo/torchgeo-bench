@@ -1,3 +1,6 @@
+# Copyright (c) TorchGeo Contributors. All rights reserved.
+# Licensed under the MIT License.
+
 """Lazy command handlers for the command line interface."""
 
 import lazy_loader as lazy
