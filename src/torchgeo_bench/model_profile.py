@@ -1,170 +1,211 @@
-"""Backbone compute/efficiency profile metrics for benchmark models.
+"""Measure the inference cost of a benchmark model.
 
-Measured once per (model, dataset, bands) combination, isolated from
-dataloader overhead. Reports:
-
-- ``throughput_samples_per_sec`` — sustained samples/s on a fixed batch
-- ``latency_ms_per_batch_p50`` — median per-batch forward latency
-- ``peak_gpu_mem_gb`` — peak CUDA memory during measurement
-- ``params_m`` — total parameter count (millions)
-- ``reserved_gpu_mem_gb`` — allocator-reserved VRAM (vs ``peak`` which is
-  the actually-used high-water mark; ratio reveals fragmentation)
-- ``gflops`` — FLOPs for one sample via ``torch.utils.flop_counter``
-  (stdlib, no extra dep; handles modern ops like SDPA / ViT attention)
-
-All metrics work without extras.
+The profiler deliberately measures one fixed batch. Data loading, host
+transfers, and automatic batch-size searches are outside its scope.
 """
 
 import contextlib
-import logging
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from statistics import median
 
 import torch
-import torch.autograd.graph as autograd_graph
-import torch.utils.module_tracker as module_tracker
 from torch import nn
+from torch.utils.flop_counter import FlopCounterMode
 
-logger = logging.getLogger(__name__)
 
+@dataclass(frozen=True)
+class FlopMeasurement:
+    """Result of an optional FLOP measurement.
 
-@contextlib.contextmanager
-def lenient_grad_hooks() -> Iterator[None]:
-    """Let ``module_tracker`` skip its bookkeeping for grad-less tensors.
-
-    ``FlopCounterMode`` counts at the ``TorchDispatchMode`` layer, which
-    never needs ``grad_fn``; only ``module_tracker``'s *per-module
-    attribution* does.  Its forward-pre-hook calls
-    ``register_multi_grad_hook`` on the module inputs, which asserts that
-    every input tensor has a ``grad_fn``.  Models that break the autograd
-    chain inside their forward — ``torchgeo.models.Panopticon`` does, via
-    ``self.conv3d(x.unsqueeze(1))`` in its patch-embed — trip that
-    assertion *before any counting happens*, so all three execution
-    contexts in :func:`_count_gflops` fail identically.
-
-    Swallowing the assertion loses module-level breakdown for those
-    modules, not FLOPs: the dispatch-layer totals are unaffected.
-
-    ``module_tracker`` binds the symbol at import time
-    (``from torch.autograd.graph import register_multi_grad_hook``), so
-    both the source module and that binding have to be patched.
+    Counts cover registered operators only; unregistered operators may make
+    the reported value a lower bound.
     """
-    original = autograd_graph.register_multi_grad_hook
 
-    class _NoopHandle:
-        def remove(self) -> None:
-            pass
+    gflops: float | None
+    status: str
+    reason: str | None = None
+    convention: str = "one multiply-add is two operations"
+    counter: str = "torch.utils.flop_counter.FlopCounterMode"
+    coverage: str = "registered operators only; total coverage unverified"
 
-    def safe(tensors, fn, *args, **kwargs):  # type: ignore[no-untyped-def]
-        try:
-            return original(tensors, fn, *args, **kwargs)
-        except AssertionError:
-            return _NoopHandle()
 
-    autograd_graph.register_multi_grad_hook = safe
-    module_tracker.register_multi_grad_hook = safe
-    try:
-        yield
-    finally:
-        autograd_graph.register_multi_grad_hook = original
-        module_tracker.register_multi_grad_hook = original
+@dataclass(frozen=True)
+class ProfileResult:
+    """Measurements for one explicit model and input configuration."""
+
+    params_m: float
+    throughput_samples_per_sec: float
+    latency_ms_per_batch_p50: float
+    peak_gpu_mem_gb: float | None
+    reserved_gpu_mem_gb: float | None
+    flops: FlopMeasurement
+    batch_size: int
+    device: str
+    precision: str
+    warmup: int
+    measurements: int
+    input_shape: tuple[int, ...]
+
+    def as_dict(self) -> dict[str, float | int | str | None]:
+        """Return a flat representation suitable for result storage."""
+        return {
+            "params_m": self.params_m,
+            "throughput_samples_per_sec": self.throughput_samples_per_sec,
+            "latency_ms_per_batch_p50": self.latency_ms_per_batch_p50,
+            "peak_gpu_mem_gb": self.peak_gpu_mem_gb,
+            "reserved_gpu_mem_gb": self.reserved_gpu_mem_gb,
+            "gflops": self.flops.gflops,
+            "gflops_status": self.flops.status,
+            "gflops_reason": self.flops.reason,
+            "gflops_counter": self.flops.counter,
+            "gflops_convention": self.flops.convention,
+            "gflops_coverage": self.flops.coverage,
+            "batch_size": self.batch_size,
+            "device": self.device,
+            "precision": self.precision,
+            "warmup": self.warmup,
+            "measurements": self.measurements,
+            "input_shape": str(self.input_shape),
+        }
 
 
 def _count_params(model: nn.Module) -> float:
-    total = sum(p.numel() for p in model.parameters())
-    return total / 1e6
+    """Return the number of model parameters in millions."""
+    return sum(parameter.numel() for parameter in model.parameters()) / 1e6
 
 
-def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
-    """Run one forward pass under torch's FlopCounterMode for a single sample.
+def _count_gflops(
+    model: nn.Module,
+    sample: torch.Tensor,
+    *,
+    device: torch.device | None = None,
+    precision: str = "float32",
+) -> float:
+    """Count FLOPs for one sample with PyTorch's standard counter."""
+    actual_device = sample.device if device is None else device
+    with (
+        FlopCounterMode(display=False) as counter,
+        torch.inference_mode(),
+        _precision_context(actual_device, precision),
+    ):
+        model(sample[:1])
+    return float(counter.get_total_flops()) / 1e9
 
-    Uses ``torch.utils.flop_counter`` (stdlib torch since 2.0).  The
-    counter's ``module_tracker`` wants to call
-    ``register_multi_grad_hook`` on the activations, which requires every
-    intermediate tensor to have a ``grad_fn`` (i.e. autograd must be
-    enabled).  Three different contexts have to be tried in order from
-    cheapest to most permissive:
 
-    1. ``torch.inference_mode``: cheapest.  Works for most timm /
-       torchgeo backbones because their forwards don't trigger the
-       module-tracker code paths that need grad_fn.
-    2. ``torch.no_grad``: keeps the version counter that
-       ``inference_mode`` disables.  Catches forwards that rely on
-       ``inference_tensor`` returning a regular tensor.
-    3. ``torch.enable_grad`` with ``requires_grad=True`` on the input:
-       only path that gives every activation a grad_fn.  Required by
-       ``torchgeo.models.Panopticon``, which inside ``MultiheadAttention``
-       triggers ``register_multi_grad_hook`` on a non-leaf tensor and
-       raises ``AssertionError: Expected gradient function to be set``
-       otherwise.  More expensive (autograd graph is built and then
-       discarded) but still a single forward pass.
+def _precision_context(
+    device: torch.device, precision: str
+) -> contextlib.AbstractContextManager[None]:
+    if precision == "float32":
+        return contextlib.nullcontext()
+    if precision == "float16":
+        return torch.autocast(device_type=device.type, dtype=torch.float16)
+    if precision == "bfloat16":
+        return torch.autocast(device_type=device.type, dtype=torch.bfloat16)
+    raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
 
-    Each fallback only triggers on the *specific* exception that earlier
-    fallback can't handle, so genuine bugs in the counter surface
-    instead of being papered over.
 
-    The whole ladder runs inside :func:`lenient_grad_hooks`, which makes
-    ``module_tracker``'s grad_fn assertion non-fatal.  Models that used to
-    exhaust all three tiers (Panopticon) now resolve early; models that
-    already worked are unaffected bit-for-bit, since the patch only
-    intercepts an error path they never take.
+@contextlib.contextmanager
+def _evaluation_mode(model: nn.Module) -> Iterator[None]:
+    states = {module: module.training for module in model.modules()}
+    model.eval()
+    try:
+        yield
+    finally:
+        for module, training in states.items():
+            module.train(training)
+
+
+def profile_inference(
+    model: nn.Module,
+    sample_batch: torch.Tensor,
+    *,
+    device: torch.device,
+    precision: str = "float32",
+    n_warmup: int = 3,
+    n_measure: int = 20,
+    count_flops: bool = False,
+) -> ProfileResult:
+    """Measure one fixed inference configuration.
+
+    Args:
+        model: Model to evaluate.
+        sample_batch: Input batch already placed on *device*.
+        device: Device used for inference.
+        precision: Inference precision policy.
+        n_warmup: Number of untimed warmup passes.
+        n_measure: Number of timed passes.
+        count_flops: Whether to run the optional FLOP counter.
+
+    Returns:
+        Parameters, timing, memory, and FLOP measurements.
+
+    Raises:
+        ValueError: If iteration counts, batch shape, device, or precision is
+            invalid.
     """
-    from torch.utils.flop_counter import FlopCounterMode
-
-    base = sample[:1]
-
-    def _measure_no_autograd(ctx_factory) -> float:
-        with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, ctx_factory():
-            model(base)
-        return float(counter.get_total_flops()) / 1e9
-
-    def _measure_with_autograd() -> float:
-        inp = base.detach().clone().requires_grad_(True)
-        with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, torch.enable_grad():
-            model(inp)
-        return float(counter.get_total_flops()) / 1e9
-
-    try:
-        return _measure_no_autograd(torch.inference_mode)
-    except AttributeError as exc:
-        # 'NoneType' object has no attribute 'next_functions' — only
-        # the dispatch-vs-inference-tensor mismatch.
-        if "next_functions" not in str(exc):
-            raise
-        logger.info(
-            f"FlopCounterMode inference_mode rejected by {type(model).__name__}: "
-            f"{exc}; retrying under no_grad."
-        )
-    try:
-        return _measure_no_autograd(torch.no_grad)
-    except AssertionError as exc:
-        # 'Expected gradient function to be set' — the module_tracker
-        # needs activations to have grad_fn; only enable_grad provides that.
-        if "Expected gradient function" not in str(exc):
-            raise
-        logger.info(
-            f"FlopCounterMode no_grad rejected by {type(model).__name__}: "
-            f"{exc}; retrying under enable_grad with requires_grad input."
-        )
-    try:
-        return _measure_with_autograd()
-    except AssertionError as exc:
-        # The lenient patch neutralises every module_tracker assertion we
-        # know of, so reaching here means the assertion no longer comes from
-        # module_tracker; raise a typed signal the caller can record as
-        # gflops=None.
-        if "Expected gradient function" not in str(exc):
-            raise
-        raise NotImplementedError(
-            f"{type(model).__name__} is incompatible with "
-            f"torch.utils.flop_counter.FlopCounterMode: all three execution "
-            f"contexts (inference_mode, no_grad, enable_grad+requires_grad) "
-            f"fail with an AssertionError that lenient_grad_hooks() does not "
-            f"intercept, so it does not originate from module_tracker's "
-            f"grad_fn bookkeeping.  GFLOPs cannot be measured for this model "
-            f"with the current tooling."
-        ) from exc
+    if n_warmup < 0 or n_measure <= 0:
+        raise ValueError("n_warmup must be non-negative and n_measure must be positive")
+    if sample_batch.ndim == 0 or sample_batch.shape[0] <= 0:
+        raise ValueError("sample_batch must have a non-empty batch dimension")
+    if device.type not in {"cpu", "cuda"}:
+        raise ValueError("device must be 'cpu' or 'cuda'")
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA is not available")
+    if device.type == "cuda" and device.index is None:
+        device = torch.device("cuda", torch.cuda.current_device())
+    if sample_batch.device != device:
+        raise ValueError(f"sample_batch is on {sample_batch.device}, expected {device}")
+    if precision not in {"float32", "float16", "bfloat16"}:
+        raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
+    model_tensors = (*model.parameters(), *model.buffers())
+    if len({tensor.device for tensor in model_tensors}) > 1:
+        raise ValueError("model parameters and buffers must use one device")
+    if model_tensors and model_tensors[0].device != device:
+        raise ValueError(f"model tensors are on {model_tensors[0].device}, expected {device}")
+    floating_dtypes = {tensor.dtype for tensor in model_tensors if tensor.is_floating_point()}
+    if floating_dtypes - {torch.float32} or sample_batch.dtype != torch.float32:
+        raise ValueError("profiling requires float32 inputs and model tensors before autocast")
+    batch_size = sample_batch.shape[0]
+    is_cuda = device.type == "cuda"
+    with _evaluation_mode(model), torch.inference_mode(), _precision_context(device, precision):
+        for _ in range(n_warmup):
+            model(sample_batch)
+        if is_cuda:
+            torch.cuda.synchronize(device)
+            torch.cuda.reset_peak_memory_stats(device)
+        timings: list[float] = []
+        started = time.perf_counter()
+        for _ in range(n_measure):
+            pass_started = time.perf_counter()
+            model(sample_batch)
+            if is_cuda:
+                torch.cuda.synchronize(device)
+            timings.append((time.perf_counter() - pass_started) * 1000)
+        elapsed = time.perf_counter() - started
+        peak_gpu_mem_gb = torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None
+        reserved_gpu_mem_gb = torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None
+        if count_flops:
+            flops = FlopMeasurement(
+                _count_gflops(model, sample_batch, device=device, precision=precision), "measured"
+            )
+        else:
+            flops = FlopMeasurement(None, "disabled", "FLOP counting was not requested")
+    return ProfileResult(
+        params_m=_count_params(model),
+        throughput_samples_per_sec=batch_size * n_measure / elapsed,
+        latency_ms_per_batch_p50=float(median(timings)),
+        peak_gpu_mem_gb=peak_gpu_mem_gb,
+        reserved_gpu_mem_gb=reserved_gpu_mem_gb,
+        flops=flops,
+        batch_size=batch_size,
+        device=str(device),
+        precision=precision,
+        warmup=n_warmup,
+        measurements=n_measure,
+        input_shape=tuple(sample_batch.shape),
+    )
 
 
 def measure_profile(
@@ -174,63 +215,17 @@ def measure_profile(
     n_warmup: int = 3,
     n_measure: int = 20,
 ) -> dict[str, float | None]:
-    """Run forward-only timing + memory profile on a fixed batch.
-
-    Args:
-        model: BenchModel (its ``forward`` goes through normalization +
-            ``_forward_patch_features``).
-        sample_batch: representative batch shaped ``(B, C, H, W)``, already
-            on ``device``.
-        device: torch device used for the measurement.
-        n_warmup: forward passes discarded before timing.
-        n_measure: timed forward passes.
-
-    Returns:
-        Mapping of metric name to value; entries may be ``None`` when the
-        underlying probe is unavailable (e.g. CPU device → no GPU-memory
-        metrics, or a model the FLOP counter can't trace → no ``gflops``).
-    """
-    model.eval()
-    batch_size = sample_batch.shape[0]
-    is_cuda = device.type == "cuda"
-
-    with torch.inference_mode():
-        for _ in range(n_warmup):
-            model(sample_batch)
-
-        if is_cuda:
-            torch.cuda.synchronize(device)
-            torch.cuda.reset_peak_memory_stats(device)
-
-        per_batch_ms: list[float] = []
-        t0 = time.perf_counter()
-        for _ in range(n_measure):
-            tb0 = time.perf_counter()
-            model(sample_batch)
-            if is_cuda:
-                torch.cuda.synchronize(device)
-            per_batch_ms.append((time.perf_counter() - tb0) * 1000.0)
-        total_s = time.perf_counter() - t0
-
-    throughput = (batch_size * n_measure) / total_s
-    latency_p50 = median(per_batch_ms)
-    peak_gb = torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None
-    reserved_gb = torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None
-    # Only the typed NotImplementedError from _count_gflops is tolerated.
-    try:
-        gflops: float | None = _count_gflops(model, sample_batch)
-    except NotImplementedError as exc:
-        logger.warning(f"[profile] {exc}")
-        gflops = None
-    params_m = _count_params(model)
-
+    """Return historical metrics, including the always-enabled FLOP count."""
+    result = profile_inference(
+        model, sample_batch, device=device, n_warmup=n_warmup, n_measure=n_measure, count_flops=True
+    )
     return {
-        "throughput_samples_per_sec": float(throughput),
-        "latency_ms_per_batch_p50": float(latency_p50),
-        "peak_gpu_mem_gb": float(peak_gb) if peak_gb is not None else None,
-        "reserved_gpu_mem_gb": float(reserved_gb) if reserved_gb is not None else None,
-        "params_m": float(params_m),
-        "gflops": gflops,
+        "throughput_samples_per_sec": result.throughput_samples_per_sec,
+        "latency_ms_per_batch_p50": result.latency_ms_per_batch_p50,
+        "peak_gpu_mem_gb": result.peak_gpu_mem_gb,
+        "reserved_gpu_mem_gb": result.reserved_gpu_mem_gb,
+        "params_m": result.params_m,
+        "gflops": result.flops.gflops,
     }
 
 
@@ -243,50 +238,49 @@ def measure_cpu_throughput(
     n_measure: int,
     time_budget_s: float,
 ) -> dict[str, float | None]:
-    """Wall-clock-budgeted CPU pass; returns ``*_cpu`` throughput and latency.
+    """Measure CPU throughput with a best-effort total time budget.
 
-    The model and a fresh batch are moved to CPU for the duration, then moved
-    back so the rest of the pipeline can keep using CUDA.  If even the first
-    warmup pass exceeds ``time_budget_s`` (big ViT-L backbones can take
-    minutes per batch on CPU), the metrics are returned as None with a
-    warning instead of burning the budget.
+    Check the budget after each forward; a single forward can exceed it.
+    Return null metrics if warmup exhausts the budget. Throughput excludes
+    warmup and uses the number of completed measurement passes.
     """
-    none_result: dict[str, float | None] = {
-        "throughput_samples_per_sec_cpu": None,
-        "latency_ms_per_batch_p50_cpu": None,
-    }
-    cpu_dev = torch.device("cpu")
-    # rcf/imagestats baselines have no parameters; use the input sample's
-    # device as the restoration target since model.to() is a no-op anyway.
-    first_param = next(iter(model.parameters()), None)
-    orig_dev = first_param.device if first_param is not None else sample.device
-    cpu_sample = sample[:batch_size].detach().to(cpu_dev)
-    model.to(cpu_dev)
+    if batch_size <= 0 or batch_size > sample.shape[0]:
+        raise ValueError("batch_size must be within the sample batch")
+    if n_warmup < 0 or n_measure <= 0 or time_budget_s < 0:
+        raise ValueError("CPU profiling settings must be positive")
+    if time_budget_s == 0:
+        return {
+            "throughput_samples_per_sec_cpu": None,
+            "latency_ms_per_batch_p50_cpu": None,
+        }
+    original_device = next(model.parameters(), sample).device
+    cpu_sample = sample[:batch_size].detach().to("cpu")
+    states = {module: module.training for module in model.modules()}
+    model.to("cpu").eval()
     try:
-        t0 = time.perf_counter()
+        started = time.perf_counter()
         with torch.inference_mode():
             for _ in range(n_warmup):
                 model(cpu_sample)
-                if time.perf_counter() - t0 > time_budget_s:
-                    logger.warning(
-                        f"[profile] CPU warmup exceeded {time_budget_s}s budget on "
-                        f"{type(model).__name__}; skipping CPU throughput."
-                    )
-                    return none_result
-            per_batch_ms: list[float] = []
-            t_loop = time.perf_counter()
+                if time.perf_counter() - started >= time_budget_s:
+                    return {
+                        "throughput_samples_per_sec_cpu": None,
+                        "latency_ms_per_batch_p50_cpu": None,
+                    }
+            timings: list[float] = []
+            measured_started = time.perf_counter()
             for _ in range(n_measure):
-                tb = time.perf_counter()
+                pass_started = time.perf_counter()
                 model(cpu_sample)
-                per_batch_ms.append((time.perf_counter() - tb) * 1000.0)
-                if time.perf_counter() - t0 > time_budget_s:
+                timings.append((time.perf_counter() - pass_started) * 1000)
+                if time.perf_counter() - started >= time_budget_s:
                     break
-            elapsed = time.perf_counter() - t_loop
-        if not per_batch_ms:
-            return none_result
+            elapsed = time.perf_counter() - measured_started
         return {
-            "throughput_samples_per_sec_cpu": (batch_size * len(per_batch_ms)) / elapsed,
-            "latency_ms_per_batch_p50_cpu": median(per_batch_ms),
+            "throughput_samples_per_sec_cpu": batch_size * len(timings) / elapsed,
+            "latency_ms_per_batch_p50_cpu": float(median(timings)),
         }
     finally:
-        model.to(orig_dev)
+        model.to(original_device)
+        for module, training in states.items():
+            module.train(training)

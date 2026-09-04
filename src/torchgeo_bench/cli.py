@@ -44,7 +44,10 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     run.add_argument(
-        "-m", "--model", default=None, help="Model config, e.g. timm/resnet50 (default: rcf)"
+        "-m",
+        "--model",
+        default=None,
+        help="Model config, e.g. timm/resnet50 (default: rcf)",
     )
     run.add_argument(
         "-d", "--datasets", default=None, help="Comma-separated dataset names, or 'all'"
@@ -65,28 +68,44 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--partition", default=None, help="GeoBench partition (default: 'default')")
     run.add_argument("--bands", default=None, help="rgb | all | comma-separated band names")
     run.add_argument(
-        "--batch-size", type=int, default=None, help="Dataloader batch size (default: 64)"
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Dataloader batch size (default: 64)",
     )
     run.add_argument(
         "--image-size", type=int, default=None, help="Resize edge in px (default: 224)"
     )
     run.add_argument(
         "--normalization",
-        choices=["bandspec_zscore", "model_native", "minmax", "minmax_zscore", "identity"],
+        choices=[
+            "bandspec_zscore",
+            "model_native",
+            "minmax",
+            "minmax_zscore",
+            "identity",
+        ],
         default=None,
         help="Input normalization strategy (default: bandspec_zscore)",
     )
     run.add_argument("--skip-linear", action="store_true", help="Skip the linear probe (KNN only)")
     run.add_argument(
-        "--bootstrap", type=int, default=None, help="Bootstrap resamples for CIs (default: 200)"
+        "--bootstrap",
+        type=int,
+        default=None,
+        help="Bootstrap resamples for CIs (default: 200)",
     )
     run.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging")
     run.add_argument("--print-config", action="store_true", help="Print the merged config and exit")
     run.add_argument(
-        "--list-models", action="store_true", help="List available model configs and exit"
+        "--list-models",
+        action="store_true",
+        help="List available model configs and exit",
     )
     run.add_argument(
-        "--list-datasets", action="store_true", help="List available dataset names and exit"
+        "--list-datasets",
+        action="store_true",
+        help="List available dataset names and exit",
     )
     run.add_argument(
         "--model-help",
@@ -108,6 +127,39 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_override_arg(flops)
     flops.set_defaults(func="flops")
+
+    profile = sub.add_parser("profile", help="Measure one real inference batch")
+    profile.add_argument("-m", "--model", required=True, help="Model preset")
+    profile.add_argument("-d", "--dataset", required=True, help="One dataset name")
+    profile.add_argument("--partition", default="default", help="Dataset partition")
+    profile.add_argument("--device", default="cpu", help="cpu, cuda, or cuda:<index>")
+    profile.add_argument("--bands", default="rgb", help="rgb, all, or comma-separated bands")
+    profile.add_argument("--image-size", type=int, default=None)
+    profile.add_argument(
+        "--interpolation",
+        choices=("area", "bilinear", "bicubic", "nearest"),
+        default=None,
+    )
+    profile.add_argument("--batch-size", type=int, default=32)
+    profile.add_argument("--warmup", type=int, default=3)
+    profile.add_argument("--measurements", type=int, default=20)
+    profile.add_argument("--seed", type=int, default=0)
+    profile.add_argument(
+        "--normalization",
+        choices=(
+            "bandspec_zscore",
+            "model_native",
+            "minmax",
+            "minmax_zscore",
+            "identity",
+        ),
+        default=None,
+    )
+    profile.add_argument(
+        "--precision", choices=("float32", "float16", "bfloat16"), default="float32"
+    )
+    profile.add_argument("--count-flops", action="store_true")
+    profile.set_defaults(func="profile")
 
     download = sub.add_parser("download", help="Download benchmark datasets")
     download.add_argument(
