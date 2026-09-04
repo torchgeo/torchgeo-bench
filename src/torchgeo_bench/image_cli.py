@@ -131,7 +131,16 @@ def _parser() -> argparse.ArgumentParser:
     profile.add_argument('--warmup', type=int, default=3)
     profile.add_argument('--measurements', type=int, default=20)
     profile.add_argument('--seed', type=int, default=0)
-    profile.add_argument('--normalization')
+    profile.add_argument(
+        '--normalization',
+        choices=(
+            'bandspec_zscore',
+            'model_native',
+            'minmax',
+            'minmax_zscore',
+            'identity',
+        ),
+    )
     profile.add_argument(
         '--precision', choices=('float32', 'float16', 'bfloat16'), default='float32'
     )
