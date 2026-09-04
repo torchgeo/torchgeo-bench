@@ -50,9 +50,13 @@ Inseparable vendor normalizers support `model` explicitly and reject incompatibl
 
 Units, normalization ownership/provenance, and representative adapters. New benchmark defaults and broad wrapper rewrites remain separate.
 
-This draft contains only this decision document. Implementation must pass
-the oracle and migration requirements described in the refactor overview;
-adding this document does not satisfy the criteria above.
+The draft implements `ImageNormalizer` with explicit `InputBand`, `ModelBand`, and `Statistics` records. It accepts BCHW and BTCHW tensors, fills invalid pixels after normalization, rejects degenerate statistics, and makes clipping opt-in.
+
+Supported conversions are declared `s2_dn` to/from reflectance and uint8 to/from scaled RGB. Decoders must apply file calibration offsets before this operation; these names do not establish an arbitrary sensor product's calibration. SAR log/linear and unknown cross-unit conversions fail explicitly.
+
+A CPU test compares a real ResNet-18 encoder preceded by this normalizer with the current wrapper's embeddings. The new path disables the wrapper's legacy normalizer. Other tensor tests cover mixed optical/SAR channels, channel order, min-max clipping, nodata, and metadata errors.
+
+This is an initial implementation for review. Existing benchmark wrappers keep their current defaults until their dataset/checkpoint units and statistics have been verified. No existing statistics are relabeled as verified training statistics, and no historical result labels are rewritten.
 
 ## Existing work and references
 
