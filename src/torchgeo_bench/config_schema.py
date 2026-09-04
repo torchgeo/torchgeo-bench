@@ -1,3 +1,6 @@
+# Copyright (c) TorchGeo Contributors. All rights reserved.
+# Licensed under the MIT License.
+
 """Validated configuration for the core image benchmark.
 
 This module is deliberately independent of the benchmark runner.  It parses

@@ -1,3 +1,6 @@
+# Copyright (c) TorchGeo Contributors. All rights reserved.
+# Licensed under the MIT License.
+
 """Tests for the core image configuration schema."""
 
 import sys
