@@ -21,6 +21,7 @@ PATHS = (
     'tests/test_preprocessing.py',
     'tests/test_model_build.py',
     'tests/test_lazy_commands.py',
+    'tests/test_profile_command.py',
 )
 
 
