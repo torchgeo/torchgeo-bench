@@ -76,10 +76,9 @@ def test_run_model_help_rejects_path_traversal() -> None:
         cli_main(["run", "--model-help", "../flops_config"])
 
 
-def test_download_invalid_target(capsys) -> None:
-    with pytest.raises(SystemExit):
+def test_download_invalid_target() -> None:
+    with pytest.raises(SystemExit, match="Unknown dataset"):
         cli_main(["download", "bogus"])
-    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_download_geobench_v1(monkeypatch) -> None:
@@ -102,6 +101,27 @@ def test_download_geobench_v2_with_datasets(monkeypatch) -> None:
     monkeypatch.setattr("torchgeo_bench.download.download_geobench_v2", _fake_download)
     cli_main(["download", "geobench_v2", "--datasets", "burn_scars,benv2"])
     assert calls == [("data", ["burn_scars", "benv2"])]
+
+
+def test_download_named_datasets(monkeypatch) -> None:
+    calls: list[tuple[list[str], str]] = []
+
+    def _fake_download(names, path) -> None:
+        calls.append((names, str(path)))
+
+    monkeypatch.setattr("torchgeo_bench.download.download_datasets", _fake_download)
+    cli_main(["download", "m-eurosat", "burn_scars"])
+    assert calls == [(["m-eurosat", "burn_scars"], "data")]
+
+
+def test_download_named_dataset_rejects_unknown_before_backend(monkeypatch) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "torchgeo_bench.download.snapshot_download", lambda *args, **kwargs: calls.append(args)
+    )
+    with pytest.raises(SystemExit, match="Unknown dataset"):
+        cli_main(["download", "m-eurosat", "unknown"])
+    assert calls == []
 
 
 def test_download_eurosat(monkeypatch) -> None:
