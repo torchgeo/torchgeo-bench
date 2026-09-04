@@ -68,9 +68,7 @@ Retain Python 3.12+ for this decision. Python 3.15 native `lazy import` is a fut
 
 Import boundaries, lightweight metadata, stubs, and startup tests. Command naming and model construction remain separate choices.
 
-This draft contains only this decision document. Implementation must pass
-the oracle and migration requirements described in the refactor overview;
-adding this document does not satisfy the criteria above.
+The draft now moves command handlers behind `lazy-loader` exports and places ML imports at the top of separate runtime modules. The existing command syntax is preserved. Fresh-process tests cover help and catalogs without ML imports; an installed wheel also verifies that stubs and runtime files are packaged. Command naming and config changes remain separate PRs.
 
 ## Existing work and references
 
