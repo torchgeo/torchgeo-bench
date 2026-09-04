@@ -6,11 +6,10 @@
 import argparse
 import pathlib
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import yaml
-
-from torchgeo_bench.config_schema import RunConfig, load_yaml, validate_run_config
+if TYPE_CHECKING:
+    from torchgeo_bench.config_schema import RunConfig
 
 _DATASETS = (
     "m-eurosat",
@@ -79,8 +78,6 @@ def _parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("models", "List model presets or show one preset"),
         ("datasets", "List datasets or show one dataset"),
-        ("download", "Download datasets"),
-        ("profile", "Profile a model"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("name", nargs="?")
@@ -129,15 +126,24 @@ def _apply_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> dict[st
         if key in ("model", "input", "classification", "runtime", "output"):
             section = dict(result.get(key, {}))
             for nested_key, nested_value in value.items():
-                section[nested_key] = nested_value
+                if isinstance(nested_value, dict) and isinstance(section.get(nested_key), dict):
+                    merged = dict(section[nested_key])
+                    merged.update(nested_value)
+                    section[nested_key] = merged
+                else:
+                    section[nested_key] = nested_value
             result[key] = section
         else:
             result[key] = value
     return result
 
 
-def _load_run(args: argparse.Namespace) -> RunConfig:
+def _load_run(args: argparse.Namespace) -> "RunConfig":
     """Load config file, apply explicit flags, and validate the result."""
+    import yaml
+
+    from torchgeo_bench.config_schema import RunConfig, load_yaml, validate_run_config
+
     config_path = getattr(args, "config", None)
     base = load_yaml(config_path) if config_path else {}
     values = _apply_overrides(base, _run_mapping(args))
@@ -148,6 +154,12 @@ def _load_run(args: argparse.Namespace) -> RunConfig:
         raise ValueError("model is required; pass --model or set model.name in --config")
     if "datasets" not in values:
         raise ValueError("at least one dataset is required; pass --dataset or set datasets")
+    unknown_models = [] if values["model"]["name"] in _model_names() else [values["model"]["name"]]
+    unknown_datasets = [name for name in values["datasets"] if name not in _DATASETS]
+    if unknown_models or unknown_datasets:
+        raise ValueError(
+            f"unknown model or dataset: models={unknown_models}, datasets={unknown_datasets}"
+        )
     return validate_run_config(values)
 
 
@@ -163,6 +175,8 @@ def _image_size(value: str) -> int | None:
 
 def _run(args: argparse.Namespace) -> None:
     """Validate and execute one image benchmark."""
+    import yaml
+
     config = _load_run(args)
     if getattr(args, "dry_run", False):
         print(yaml.safe_dump(config.model_dump_yaml(), sort_keys=False), end="")
@@ -179,7 +193,11 @@ def main(argv: list[str] | None = None) -> None:
     """Run the image benchmark CLI."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     if args.command == "run":
-        _run(args)
+        try:
+            _run(args)
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            raise SystemExit(2) from error
     elif args.command == "models":
         names = _model_names()
         if args.name is None:

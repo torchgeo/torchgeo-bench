@@ -17,7 +17,12 @@ def run(config: Any) -> None:
     from torchgeo_bench.config import compose_config
     from torchgeo_bench.main import main
 
-    legacy = compose_config(model=config.model.name)
+    legacy = compose_config([f"model={config.model.name}"])
+    # The new schema is the source of truth for protocol settings.  Prevent
+    # legacy preset ``eval`` fragments from silently overriding validated CLI
+    # values; model-specific segmentation layers are copied below when set.
+    if "eval" in legacy.model:
+        legacy.model.eval = {}
     legacy.seed = config.runtime.seed
     legacy.device = device
     legacy.verbose = config.runtime.verbose
@@ -52,13 +57,17 @@ def run(config: Any) -> None:
     legacy.eval.calibration.n_bins_knn = config.classification.calibration.n_bins_knn
     legacy.eval.calibration.n_bins_linear = config.classification.calibration.n_bins_linear
     legacy.eval.segmentation.head_type = config.segmentation.head
-    legacy.eval.segmentation.layers = config.segmentation.layers
+    if config.segmentation.layers:
+        legacy.eval.segmentation.layers = config.segmentation.layers
     legacy.eval.segmentation.lr = config.segmentation.learning_rate
     legacy.eval.segmentation.epochs = config.segmentation.epochs
     legacy.eval.segmentation.batch_size = config.segmentation.batch_size
     legacy.eval.segmentation.temporal_pool = config.segmentation.temporal_pool
     legacy.eval.segmentation.lr_scheduler = config.segmentation.scheduler
-    legacy.eval.segmentation.ignore_index = config.segmentation.ignore_index
+    legacy.eval.segmentation.criterion = {
+        "_target_": "torch.nn.CrossEntropyLoss",
+        "ignore_index": config.segmentation.ignore_index,
+    }
     legacy.eval.segmentation.cache_features = config.segmentation.cache_features
     legacy.eval.segmentation.cache_dtype = config.segmentation.cache_dtype
     main(legacy)

@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+from torchgeo_bench.config_schema import validate_run_config
 from torchgeo_bench.image_cli import _image_size, _model_names, _set, main
 
 
@@ -70,9 +71,9 @@ def test_boolean_flags_override_config(tmp_path, capsys) -> None:
 
 
 def test_missing_model_or_dataset_fails_before_execution() -> None:
-    with pytest.raises(ValueError, match="model is required"):
+    with pytest.raises(SystemExit, match="2"):
         main(["run", "--dataset", "m-eurosat", "--dry-run"])
-    with pytest.raises(ValueError, match="dataset"):
+    with pytest.raises(SystemExit, match="2"):
         main(["run", "--model", "rcf", "--dry-run"])
 
 
@@ -83,15 +84,35 @@ def test_non_dry_run_calls_legacy_adapter(monkeypatch) -> None:
     assert received[0].model.name == "rcf"
 
 
+def test_legacy_adapter_composes_and_translates_schema(monkeypatch) -> None:
+    received = []
+    monkeypatch.setattr("torchgeo_bench.main.main", received.append)
+    config = validate_run_config(
+        {
+            "model": {"name": "rcf"},
+            "datasets": ["m-eurosat"],
+            "runtime": {"device": "cpu", "batch_size": 2},
+            "input": {"normalization": "none"},
+            "classification": {"methods": ["knn"]},
+        }
+    )
+    from torchgeo_bench.legacy_run import run
+
+    run(config)
+    assert received[0].device == "cpu"
+    assert received[0].dataset.normalization == "identity"
+    assert received[0].eval.skip_linear is True
+
+
 def test_linear_only_is_rejected_by_legacy_adapter() -> None:
-    with pytest.raises(ValueError, match="legacy runner"):
+    with pytest.raises(SystemExit, match="2"):
         main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--methods", "linear"])
 
 
 def test_unknown_config_field_fails_before_execution(tmp_path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text("model: {name: rcf}\ndatasets: [m-eurosat]\nrunntim: {}\n", encoding="utf-8")
-    with pytest.raises(Exception, match="runntim"):
+    with pytest.raises(SystemExit, match="2"):
         main(["run", "--config", str(path), "--dry-run"])
 
 
@@ -109,7 +130,7 @@ def test_catalog_name_selection_and_unimplemented_commands(capsys) -> None:
     assert capsys.readouterr().out.strip() == "timm/resnet50"
     main(["datasets", "m-eurosat"])
     assert capsys.readouterr().out.strip() == "m-eurosat"
-    with pytest.raises(SystemExit, match="not implemented"):
+    with pytest.raises(SystemExit, match="2"):
         main(["profile"])
     with pytest.raises(SystemExit, match="unknown model"):
         main(["models", "unknown"])
