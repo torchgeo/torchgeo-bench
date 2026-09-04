@@ -16,13 +16,18 @@ from torch import nn
 
 @dataclass(frozen=True)
 class FlopMeasurement:
-    """Result of an optional FLOP measurement."""
+    """Result of an optional FLOP measurement.
+
+    Counts cover registered operators only; unregistered operators may make
+    the reported value a lower bound.
+    """
 
     gflops: float | None
     status: str
     reason: str | None = None
     convention: str = "one multiply-add is two operations"
     counter: str = "torch.utils.flop_counter.FlopCounterMode"
+    coverage: str = "registered operators only; total coverage unverified"
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,7 @@ class ProfileResult:
             "gflops_reason": self.flops.reason,
             "gflops_counter": self.flops.counter,
             "gflops_convention": self.flops.convention,
+            "gflops_coverage": self.flops.coverage,
             "batch_size": self.batch_size,
             "device": self.device,
             "precision": self.precision,
