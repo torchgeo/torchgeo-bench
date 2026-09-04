@@ -11,17 +11,17 @@ def run(config: Any) -> None:
     import torch
 
     device = config.runtime.device
-    if device.startswith("cuda") and not torch.cuda.is_available():
-        raise RuntimeError(f"CUDA device {device!r} requested but CUDA is unavailable")
+    if device.startswith('cuda') and not torch.cuda.is_available():
+        raise RuntimeError(f'CUDA device {device!r} requested but CUDA is unavailable')
 
     from torchgeo_bench.config import compose_config
     from torchgeo_bench.main import main
 
-    legacy = compose_config([f"model={config.model.name}"])
+    legacy = compose_config([f'model={config.model.name}'])
     # The new schema is the source of truth for protocol settings.  Prevent
     # legacy preset ``eval`` fragments from silently overriding validated CLI
     # values; model-specific segmentation layers are copied below when set.
-    if "eval" in legacy.model:
+    if 'eval' in legacy.model:
         legacy.model.eval = {}
     legacy.seed = config.runtime.seed
     legacy.device = device
@@ -38,12 +38,12 @@ def run(config: Any) -> None:
     legacy.dataset.time_steps = config.input.time_steps
     legacy.dataset.interpolation = config.input.interpolation
     legacy.dataset.normalization = {
-        "dataset": "bandspec_zscore",
-        "model": "model_native",
-        "minmax": "minmax",
-        "none": "identity",
+        'dataset': 'bandspec_zscore',
+        'model': 'model_native',
+        'minmax': 'minmax',
+        'none': 'identity',
     }[config.input.normalization]
-    legacy.eval.skip_linear = "linear" not in config.classification.methods
+    legacy.eval.skip_linear = 'linear' not in config.classification.methods
     legacy.eval.knn_k = config.classification.knn_k
     legacy.eval.knn_device = config.classification.knn_device
     legacy.eval.bootstrap = config.classification.bootstrap_samples
@@ -55,7 +55,9 @@ def run(config: Any) -> None:
     ]
     legacy.eval.calibration.temp_scale = config.classification.calibration.temp_scale
     legacy.eval.calibration.n_bins_knn = config.classification.calibration.n_bins_knn
-    legacy.eval.calibration.n_bins_linear = config.classification.calibration.n_bins_linear
+    legacy.eval.calibration.n_bins_linear = (
+        config.classification.calibration.n_bins_linear
+    )
     legacy.eval.segmentation.head_type = config.segmentation.head
     if config.segmentation.layers:
         legacy.eval.segmentation.layers = config.segmentation.layers
@@ -65,8 +67,8 @@ def run(config: Any) -> None:
     legacy.eval.segmentation.temporal_pool = config.segmentation.temporal_pool
     legacy.eval.segmentation.lr_scheduler = config.segmentation.scheduler
     legacy.eval.segmentation.criterion = {
-        "_target_": "torch.nn.CrossEntropyLoss",
-        "ignore_index": config.segmentation.ignore_index,
+        '_target_': 'torch.nn.CrossEntropyLoss',
+        'ignore_index': config.segmentation.ignore_index,
     }
     legacy.eval.segmentation.cache_features = config.segmentation.cache_features
     legacy.eval.segmentation.cache_dtype = config.segmentation.cache_dtype
