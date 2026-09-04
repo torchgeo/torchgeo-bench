@@ -9,9 +9,11 @@ from collections.abc import Iterator
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 from torch import nn
 
 from torchgeo_bench.commands import _profile_runtime
+from torchgeo_bench.main import resolve_model_config
 
 
 class _Band:
@@ -31,6 +33,66 @@ class _Loader:
         yield {'image': torch.ones(4, 3, 8, 8)}
 
 
+@pytest.mark.parametrize(
+    (
+        'model_data',
+        'image_size',
+        'interpolation',
+        'expected_size',
+        'expected_interpolation',
+    ),
+    [
+        (
+            {'dataset_overrides': {'toy': {'image_size': 96}}},
+            None,
+            None,
+            96,
+            'bilinear',
+        ),
+        ({}, None, None, 224, 'bilinear'),
+        (
+            {'dataset_overrides': {'toy': {'image_size': 96}}},
+            128,
+            'nearest',
+            128,
+            'nearest',
+        ),
+    ],
+)
+def test_input_settings_precedence(
+    model_data: dict[str, object],
+    image_size: int | None,
+    interpolation: str | None,
+    expected_size: int,
+    expected_interpolation: str,
+) -> None:
+    cfg = OmegaConf.create(
+        {'dataset': {'image_size': 224, 'interpolation': 'bilinear'}}
+    )
+    model_cfg = resolve_model_config(OmegaConf.create(model_data), 'toy')
+    args = argparse.Namespace(
+        image_size=image_size, interpolation=interpolation, normalization=None
+    )
+
+    effective = _profile_runtime._resolve_input_settings(args, cfg, model_cfg)
+
+    assert effective[:2] == (expected_size, expected_interpolation)
+
+
+def test_input_settings_preserve_model_normalization() -> None:
+    cfg = OmegaConf.create(
+        {'dataset': {'image_size': 224, 'interpolation': 'bilinear'}}
+    )
+    model_cfg = resolve_model_config(
+        OmegaConf.create({'input_normalization': 'imagenet'}), 'toy'
+    )
+    args = argparse.Namespace(image_size=None, interpolation=None, normalization=None)
+
+    effective = _profile_runtime._resolve_input_settings(args, cfg, model_cfg)
+
+    assert effective[2:] == ('bandspec_zscore', 'imagenet')
+
+
 def test_profile_emits_real_batch_metadata(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -41,15 +103,12 @@ def test_profile_emits_real_batch_metadata(
         _profile_runtime, 'get_datasets', lambda **_: (None, _Loader(), None, None)
     )
     monkeypatch.setattr(
-        _profile_runtime, 'compose_config', lambda _: argparse.Namespace(model={})
-    )
-    monkeypatch.setattr(
-        _profile_runtime, 'resolve_model_config', lambda model, dataset: {}
+        _profile_runtime, 'compose_config', lambda _: OmegaConf.create({'model': {}})
     )
     monkeypatch.setattr(
         _profile_runtime,
-        'OmegaConf',
-        argparse.Namespace(to_container=lambda *args, **kwargs: {}),
+        'resolve_model_config',
+        lambda model, dataset: OmegaConf.create({}),
     )
     monkeypatch.setattr(
         _profile_runtime, 'instantiate', lambda *_, **__: nn.Conv2d(3, 3, 1)
