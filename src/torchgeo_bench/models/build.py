@@ -1,3 +1,6 @@
+# Copyright (c) TorchGeo Contributors. All rights reserved.
+# Licensed under the MIT License.
+
 """Explicit constructors for the first migrated benchmark models."""
 
 from dataclasses import dataclass
@@ -27,10 +30,29 @@ class TimmModelConfig:
         """Validate settings before importing or constructing a backbone."""
         if not self.model_name:
             raise ValueError('model_name must not be empty')
+        if not isinstance(self.pretrained, bool) or not isinstance(
+            self.normalize, bool
+        ):
+            raise TypeError('pretrained and normalize must be booleans')
+        if not isinstance(self.auto_resize, bool) or not isinstance(
+            self.use_cls_token, bool
+        ):
+            raise TypeError('auto_resize and use_cls_token must be booleans')
+        if self.target_size is not None and not isinstance(self.target_size, int):
+            raise TypeError('target_size must be an integer')
         if self.target_size is not None and self.target_size <= 0:
             raise ValueError('target_size must be positive')
         if self.global_pool not in (None, '', 'avg', 'max', 'avgmax', 'catavgmax'):
             raise ValueError(f'unsupported global_pool: {self.global_pool!r}')
+        if self.input_normalization not in (
+            'bands_zscore',
+            'imagenet',
+            'timm_default',
+            'none',
+        ):
+            raise ValueError(
+                f'unsupported input_normalization: {self.input_normalization!r}'
+            )
 
 
 @dataclass(frozen=True)
@@ -46,6 +68,8 @@ class RCFModelConfig:
 
     def __post_init__(self) -> None:
         """Validate settings before constructing the filter bank."""
+        if not isinstance(self.features, int) or not isinstance(self.kernel_size, int):
+            raise TypeError('features and kernel_size must be integers')
         if self.features <= 0 or self.features % 2:
             raise ValueError('features must be a positive even number')
         if self.kernel_size <= 0:
@@ -55,7 +79,7 @@ class RCFModelConfig:
         if self.stats_mode not in ('mean', 'stdev', 'all'):
             raise ValueError("stats_mode must be 'mean', 'stdev', or 'all'")
         if self.mode == 'empirical' and self.dataset is None:
-            raise ValueError("dataset must be provided for empirical mode")
+            raise ValueError('dataset must be provided for empirical mode')
 
 
 def build_timm_model(
