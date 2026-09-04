@@ -22,7 +22,7 @@ class _Band:
 class _Dataset:
     rgb_bands = (_Band('red'), _Band('green'), _Band('blue'))
 
-    def select_band_specs(self, bands: tuple[str, ...] | None) -> tuple[_Band, ...]:
+    def select_band_specs(self, bands: tuple[_Band, ...] | None) -> tuple[_Band, ...]:
         return self.rgb_bands if bands is None else tuple(bands)
 
 
@@ -61,6 +61,7 @@ def test_profile_emits_real_batch_metadata(
         device='cpu',
         bands='rgb',
         image_size=8,
+        interpolation='bilinear',
         batch_size=4,
         warmup=0,
         measurements=1,

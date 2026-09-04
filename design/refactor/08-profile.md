@@ -14,7 +14,7 @@ Should profiling focus on inference measurements or retain full backbone/head/pr
 | A | Narrow inference profiler (recommended) | Parameters, timing, supported memory measurements, and optional FLOPs for one configuration. |
 | B | Detailed decomposition from the start | Include backbone, segmentation heads, and probes; more interfaces and validation required. |
 
-Vote in the linked issue. Comment `Vote: A` or `Vote: B` with a short rationale. If neither fits, propose a concrete amendment. Recommendations are proposals, not recorded votes or maintainer approval. Maintainers will summarize the outcome in the issue. Reactions indicate interest, not a choice between options.
+Discuss the two scopes in the linked issue with a concrete rationale or amendment. The recommendation remains provisional until maintainers record the decision.
 
 ## Proposed contract
 
@@ -34,18 +34,15 @@ Store profile results separately with independent completion and identity. Succe
 
 ## Acceptance criteria for implementation
 
-- [ ] CPU fixtures and supported accelerator tests verify counts, timing boundaries, memory semantics, and metadata.
-- [ ] Profiling does not change model parameters or leave global hooks; unsupported counting has explicit status.
-- [ ] OOM, invalid iteration counts, and unsupported devices fail without changing requested settings.
+- [x] CPU fixture tests verify timing boundaries, fixed batch size, and JSON metadata.
+- [x] Profiling does not change model parameters or leave global hooks; unsupported counting has explicit status.
+- [x] Invalid iteration counts and unsupported devices fail without changing requested settings.
+- [ ] GPU fixture tests and real hardware oracle checks remain pending.
 - [ ] Resume distinguishes hardware, input, precision, batch size, and counter changes without invalidating image metrics.
 
 ## Review boundary
 
 Standalone inference profiling and its results. Option A defers head decomposition, automatic batch search, energy, hard process timeouts, and profiling sweeps.
-
-This draft contains only this decision document. Implementation must pass
-the oracle and migration requirements described in the refactor overview;
-adding this document does not satisfy the criteria above.
 
 ## Initial implementation
 

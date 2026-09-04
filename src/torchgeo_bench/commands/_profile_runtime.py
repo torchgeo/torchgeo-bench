@@ -10,6 +10,7 @@ import platform
 import sys
 from dataclasses import asdict
 from datetime import UTC, datetime
+from typing import Any
 
 import numpy as np
 import torch
@@ -22,6 +23,23 @@ from ..model_profile import profile_inference
 from ..utils import resolve_device
 
 
+def _resolve_input_settings(
+    args: argparse.Namespace, cfg: Any, model_cfg: Any
+) -> tuple[int | None, str, str, str]:
+    """Resolve input settings with CLI, model, then dataset precedence."""
+    image_size = args.image_size
+    if image_size is None:
+        image_size = model_cfg.get('image_size', cfg.dataset.get('image_size'))
+    interpolation = args.interpolation
+    if interpolation is None:
+        interpolation = model_cfg.get(
+            'interpolation', cfg.dataset.get('interpolation', 'bilinear')
+        )
+    normalization = args.normalization or 'bandspec_zscore'
+    input_normalization = model_cfg.get('input_normalization', normalization)
+    return image_size, interpolation, normalization, input_normalization
+
+
 def run(args: argparse.Namespace) -> None:
     """Load one real dataset batch, measure it, and write one JSON record."""
     if args.batch_size <= 0 or args.warmup < 0 or args.measurements <= 0:
@@ -32,12 +50,20 @@ def run(args: argparse.Namespace) -> None:
         raise SystemExit(f'error: unknown model {args.model!r}')
     if args.dataset not in list_datasets():
         raise SystemExit(f'error: unknown dataset {args.dataset!r}')
-    if args.seed < 0 or args.image_size <= 0:
+    if args.seed < 0 or args.image_size is not None and args.image_size <= 0:
         raise SystemExit('error: seed must be non-negative and image-size positive')
     if args.device.startswith('cuda') and not torch.cuda.is_available():
         raise SystemExit(f'error: requested {args.device!r}, but CUDA is unavailable')
     requested = resolve_device(args.device)
 
+    cfg = compose_config([f'model={args.model}'])
+    model_cfg = resolve_model_config(cfg.model, args.dataset)
+    (
+        effective_image_size,
+        effective_interpolation,
+        requested_normalization,
+        input_normalization,
+    ) = _resolve_input_settings(args, cfg, model_cfg)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     dataset_class = get_bench_dataset_class(args.dataset)
@@ -53,7 +79,8 @@ def run(args: argparse.Namespace) -> None:
         batch_size=args.batch_size,
         num_workers=0,
         return_val=True,
-        image_size=args.image_size,
+        image_size=effective_image_size,
+        interpolation=effective_interpolation,
         bands=bands,
         partition_name=args.partition,
     )
@@ -70,13 +97,11 @@ def run(args: argparse.Namespace) -> None:
         if args.bands == 'all'
         else tuple(bands)
     )
-    cfg = compose_config([f'model={args.model}'])
-    model_cfg = resolve_model_config(cfg.model, args.dataset)
     resolved_model_config = OmegaConf.to_container(model_cfg, resolve=True)
     if 'eval' in model_cfg:
         model_cfg.eval = {}
     model = instantiate(
-        model_cfg, bands=selected_bands, normalization=args.normalization
+        model_cfg, bands=selected_bands, normalization=requested_normalization
     )
     model = model.to(requested).eval()
     sample = batch.to(requested)
@@ -110,14 +135,16 @@ def run(args: argparse.Namespace) -> None:
         'dataset': args.dataset,
         'seed': args.seed,
         'bands': [spec.name for spec in selected_bands],
-        'normalization': args.normalization,
-        'input_normalization': args.normalization,
+        'normalization': requested_normalization,
+        'input_normalization': input_normalization,
         'dataset_partition': args.partition,
         'sample_sha256': sample_hash,
         'model_config': resolved_model_config,
         'model_config_hash': model_config_hash,
         'device_index': device_index,
         'input_shape': list(sample.shape),
+        'image_size': effective_image_size,
+        'interpolation': effective_interpolation,
         'device': str(requested),
         'hardware': hardware,
         'torch_version': torch.__version__,
