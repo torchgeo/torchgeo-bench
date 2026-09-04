@@ -12,6 +12,7 @@ from statistics import median
 
 import torch
 from torch import nn
+from torch.utils.flop_counter import FlopCounterMode
 
 
 @dataclass(frozen=True)
@@ -75,11 +76,20 @@ def _count_params(model: nn.Module) -> float:
     return sum(parameter.numel() for parameter in model.parameters()) / 1e6
 
 
-def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
+def _count_gflops(
+    model: nn.Module,
+    sample: torch.Tensor,
+    *,
+    device: torch.device | None = None,
+    precision: str = "float32",
+) -> float:
     """Count FLOPs for one sample with PyTorch's standard counter."""
-    from torch.utils.flop_counter import FlopCounterMode
-
-    with FlopCounterMode(display=False) as counter, torch.inference_mode():
+    actual_device = sample.device if device is None else device
+    with (
+        FlopCounterMode(display=False) as counter,
+        torch.inference_mode(),
+        _precision_context(actual_device, precision),
+    ):
         model(sample[:1])
     return float(counter.get_total_flops()) / 1e9
 
@@ -115,7 +125,7 @@ def profile_inference(
     precision: str = "float32",
     n_warmup: int = 3,
     n_measure: int = 20,
-    count_flops: bool = True,
+    count_flops: bool = False,
 ) -> ProfileResult:
     """Measure one fixed inference configuration.
 
@@ -139,10 +149,24 @@ def profile_inference(
         raise ValueError("n_warmup must be non-negative and n_measure must be positive")
     if sample_batch.ndim == 0 or sample_batch.shape[0] <= 0:
         raise ValueError("sample_batch must have a non-empty batch dimension")
+    if device.type not in {"cpu", "cuda"}:
+        raise ValueError("device must be 'cpu' or 'cuda'")
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA is not available")
+    if device.type == "cuda" and device.index is None:
+        device = torch.device("cuda", torch.cuda.current_device())
     if sample_batch.device != device:
         raise ValueError(f"sample_batch is on {sample_batch.device}, expected {device}")
     if precision not in {"float32", "float16", "bfloat16"}:
         raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
+    model_tensors = (*model.parameters(), *model.buffers())
+    if len({tensor.device for tensor in model_tensors}) > 1:
+        raise ValueError("model parameters and buffers must use one device")
+    if model_tensors and model_tensors[0].device != device:
+        raise ValueError(f"model tensors are on {model_tensors[0].device}, expected {device}")
+    floating_dtypes = {tensor.dtype for tensor in model_tensors if tensor.is_floating_point()}
+    if len(floating_dtypes) > 1:
+        raise ValueError("model parameters and buffers must use one dtype")
     batch_size = sample_batch.shape[0]
     is_cuda = device.type == "cuda"
     with _evaluation_mode(model), torch.inference_mode(), _precision_context(device, precision):
@@ -160,16 +184,20 @@ def profile_inference(
                 torch.cuda.synchronize(device)
             timings.append((time.perf_counter() - pass_started) * 1000)
         elapsed = time.perf_counter() - started
-    if count_flops:
-        flops = FlopMeasurement(_count_gflops(model, sample_batch), "measured")
-    else:
-        flops = FlopMeasurement(None, "disabled", "FLOP counting was not requested")
+        peak_gpu_mem_gb = torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None
+        reserved_gpu_mem_gb = torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None
+        if count_flops:
+            flops = FlopMeasurement(
+                _count_gflops(model, sample_batch, device=device, precision=precision), "measured"
+            )
+        else:
+            flops = FlopMeasurement(None, "disabled", "FLOP counting was not requested")
     return ProfileResult(
         params_m=_count_params(model),
         throughput_samples_per_sec=batch_size * n_measure / elapsed,
         latency_ms_per_batch_p50=float(median(timings)),
-        peak_gpu_mem_gb=(torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None),
-        reserved_gpu_mem_gb=(torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None),
+        peak_gpu_mem_gb=peak_gpu_mem_gb,
+        reserved_gpu_mem_gb=reserved_gpu_mem_gb,
         flops=flops,
         batch_size=batch_size,
         device=str(device),
@@ -220,11 +248,16 @@ def measure_cpu_throughput(
     states = {module: module.training for module in model.modules()}
     model.to("cpu").eval()
     try:
+        started = time.perf_counter()
         with torch.inference_mode():
             for _ in range(n_warmup):
                 model(cpu_sample)
+                if time.perf_counter() - started >= time_budget_s:
+                    return {
+                        "throughput_samples_per_sec_cpu": None,
+                        "latency_ms_per_batch_p50_cpu": None,
+                    }
             timings: list[float] = []
-            started = time.perf_counter()
             for _ in range(n_measure):
                 pass_started = time.perf_counter()
                 model(cpu_sample)
@@ -233,7 +266,7 @@ def measure_cpu_throughput(
                     break
             elapsed = time.perf_counter() - started
         return {
-            "throughput_samples_per_sec_cpu": batch_size * n_measure / elapsed,
+            "throughput_samples_per_sec_cpu": batch_size * len(timings) / elapsed,
             "latency_ms_per_batch_p50_cpu": float(median(timings)),
         }
     finally:

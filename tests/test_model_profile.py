@@ -104,7 +104,7 @@ def test_profile_records_fixed_batch_and_precision() -> None:
 
 
 def test_profile_rejects_batch_on_wrong_device() -> None:
-    with pytest.raises(ValueError, match="expected meta"):
+    with pytest.raises(ValueError, match="device must be"):
         profile_inference(nn.Linear(4, 2), torch.rand(2, 4), device=torch.device("meta"))
 
 
