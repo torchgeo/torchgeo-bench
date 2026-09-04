@@ -266,12 +266,14 @@ def measure_cpu_throughput(
     """
     if timing.batch_size <= 0 or timing.batch_size > sample.shape[0]:
         raise ValueError("batch_size must be within the sample batch")
-    if timing.n_warmup < 0 or timing.n_measure <= 0 or time_budget_s <= 0:
+    if timing.n_warmup < 0 or timing.n_measure <= 0 or time_budget_s < 0:
         raise ValueError("CPU profiling settings must be positive")
     none_result: dict[str, float | None] = {
         "throughput_samples_per_sec_cpu": None,
         "latency_ms_per_batch_p50_cpu": None,
     }
+    if time_budget_s == 0:
+        return none_result
     cpu_dev = torch.device("cpu")
     # Parameter-free baselines use the sample's device as their restoration target.
     first_param = next(iter(model.parameters()), None)
