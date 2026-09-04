@@ -1,13 +1,12 @@
 # Refactor proposal
 
-Status: proposed, open for discussion and voting. These specifications do not
-change runtime behavior or approve any option. The first implementation target
-is the core image benchmark; coordinate and analysis workflows follow later.
+The draft PRs below implement individual design choices for review.
+The first target is the core image benchmark; coordinate and analysis workflows follow later.
+The issues each describe the current code and two alternatives, so people can discuss the choices before we merge them.
+Discussion will be collected later; there is no vote tally or automatic decision rule.
 
-The objective is a readable evaluation harness with discoverable, fast commands,
-validated YAML configuration, explicit model construction, individually
-downloadable datasets, and auditable preprocessing. Preserve trusted scientific
-behavior while removing unnecessary machinery.
+Keep the evaluation code readable, make commands quick to discover, and preserve the scientific behavior we already trust.
+The current implementation remains the reference while model and dataset families move over individually.
 
 ## Constraints from the design discussion
 
@@ -21,32 +20,32 @@ behavior while removing unnecessary machinery.
 - Keep each implementation PR focused on one adopted decision or model/dataset.
 - Keep the current Python 3.12+ baseline for this proposal.
 
-Library choices, formatting defaults, normalization ownership, and exact command
-names below are recommendations for voting, not previously accepted decisions.
+## Drafts for review
 
-## Decision index
+Each PR contains a focused implementation and its design notes under `design/refactor/`.
+The implementations demonstrate one proposed option; they do not settle the discussion.
+All issues and PRs carry the `refactor` label.
 
-Each issue contains the alternatives and voting instructions. Each draft PR
-adds one independent document under `design/refactor/` and targets `main`.
-The overview PR adds only this file. Merging a proposal document does not mark
-its implementation complete; the issues remain open until the adopted behavior
-and acceptance criteria have been delivered.
+| Decision | Discussion | Draft PR | Current scope |
+| --- | --- | --- | --- |
+| CLI | [#307](https://github.com/torchgeo/torchgeo-bench/issues/307) | [#315](https://github.com/torchgeo/torchgeo-bench/pull/315) | Explicit image commands and a compatibility adapter to the existing runner |
+| YAML schema | [#308](https://github.com/torchgeo/torchgeo-bench/issues/308) | [#316](https://github.com/torchgeo/torchgeo-bench/pull/316) | PyYAML loading and strict Pydantic image-run settings |
+| Lazy imports | [#309](https://github.com/torchgeo/torchgeo-bench/issues/309) | [#317](https://github.com/torchgeo/torchgeo-bench/pull/317) | A lazy command namespace with ordinary top-level imports in implementations |
+| Code style | [#310](https://github.com/torchgeo/torchgeo-bench/issues/310) | [#318](https://github.com/torchgeo/torchgeo-bench/pull/318) | Ruff formatting, annotations, docstrings, complexity checks, and ty for rewritten modules |
+| Model construction | [#311](https://github.com/torchgeo/torchgeo-bench/issues/311) | [#319](https://github.com/torchgeo/torchgeo-bench/pull/319) | Explicit timm and RCF constructors; other families retain their current path |
+| Normalization | [#312](https://github.com/torchgeo/torchgeo-bench/issues/312) | [#320](https://github.com/torchgeo/torchgeo-bench/pull/320) | Explicit units, band order, statistics, nodata, and a timm embedding comparison |
+| Downloads | [#313](https://github.com/torchgeo/torchgeo-bench/issues/313) | [#321](https://github.com/torchgeo/torchgeo-bench/pull/321) | Named dataset downloads using existing backends; no implicit download while loading |
+| Profiling | [#314](https://github.com/torchgeo/torchgeo-bench/issues/314) | [#322](https://github.com/torchgeo/torchgeo-bench/pull/322) | Fixed real-batch encoder timing, memory, and optional FLOP counting |
 
-| ID | Decision | Vote / discussion | Draft specification | Status |
-| --- | --- | --- | --- | --- |
-| R01 | Choose the refactor CLI command surface | [#307](https://github.com/torchgeo/torchgeo-bench/issues/307) | [#315](https://github.com/torchgeo/torchgeo-bench/pull/315) | Proposed |
-| R02 | Choose a validated YAML configuration schema | [#308](https://github.com/torchgeo/torchgeo-bench/issues/308) | [#316](https://github.com/torchgeo/torchgeo-bench/pull/316) | Proposed |
-| R03 | Choose lazy command imports while keeping top-level imports | [#309](https://github.com/torchgeo/torchgeo-bench/issues/309) | [#317](https://github.com/torchgeo/torchgeo-bench/pull/317) | Proposed |
-| R04 | Choose a human-readable coding style and enforcement gate | [#310](https://github.com/torchgeo/torchgeo-bench/issues/310) | [#318](https://github.com/torchgeo/torchgeo-bench/pull/318) | Proposed |
-| R05 | Choose explicit model constructors and feature contracts | [#311](https://github.com/torchgeo/torchgeo-bench/issues/311) | [#319](https://github.com/torchgeo/torchgeo-bench/pull/319) | Proposed |
-| R06 | Choose normalization ownership and explicit input units | [#312](https://github.com/torchgeo/torchgeo-bench/issues/312) | [#320](https://github.com/torchgeo/torchgeo-bench/pull/320) | Proposed |
-| R07 | Choose individual dataset downloads and canonical storage | [#313](https://github.com/torchgeo/torchgeo-bench/issues/313) | [#321](https://github.com/torchgeo/torchgeo-bench/pull/321) | Proposed |
-| R08 | Choose a narrow and reproducible profiling command | [#314](https://github.com/torchgeo/torchgeo-bench/issues/314) | [#322](https://github.com/torchgeo/torchgeo-bench/pull/322) | Proposed |
+The command PRs are stacked to keep shared code out of each diff:
+style → lazy imports → downloads → profiling → schema → image CLI.
+Model construction and normalization each build directly on the style PR.
+This overview is separate in [#323](https://github.com/torchgeo/torchgeo-bench/pull/323).
 
-Comment `Vote: A` or `Vote: B` with a short rationale in the relevant issue.
-Propose an amendment if neither option fits. A reaction expresses interest,
-not a vote for a particular option. Maintainers record the outcome and update
-the document; no deadline or automatic majority rule is assumed.
+The tests include synthetic image evaluation through RCF, KNN, CSV writing, and resume, plus seeded comparisons with existing model wrappers.
+Pinned real datasets/checkpoints, physical GPU measurements, and migration of every model's normalization remain follow-up work.
+The download draft uses existing mirrors; immutable asset manifests and source-to-mirror equivalence still need verification.
+FLOP counts cover registered PyTorch operators and are not certified complete for every model.
 
 ## Existing work
 
@@ -56,15 +55,15 @@ As inspected on 2026-09-04, Caleb Robinson has two open implementation PRs:
 - [#306: replace OmegaConf with explicit commands](https://github.com/torchgeo/torchgeo-bench/pull/306),
   stacked on #305 and covering typed dataclasses, PyYAML, and command separation.
 
-Treat these as implementation candidates and reuse accepted work. The decision
-PRs do not alter, supersede, or approve them. CLI discovery is also discussed in
+These remain separate implementation candidates.
+The drafts above leave their branches unchanged. CLI discovery is also discussed in
 [#255](https://github.com/torchgeo/torchgeo-bench/issues/255). Normalization discussions
 [#259](https://github.com/torchgeo/torchgeo-bench/issues/259) and [#260](https://github.com/torchgeo/torchgeo-bench/issues/260)
 remain relevant; opening new design issues does not close those discussions.
 
 Source observations use
 [`9c8e4af`](https://github.com/torchgeo/torchgeo-bench/tree/9c8e4afab46675d7279c88828dfcbf0ca99b3a07).
-Refresh source, open PRs, and reference artifacts before starting implementation.
+Use this revision for comparison, and record any later change to the reference.
 
 ## Oracle and scientific acceptance
 
@@ -140,15 +139,13 @@ input parity in addition to final score comparisons.
 
 ## Review and validation gates
 
-Every implementation PR names its adopted decision, scope, intentional behavior
-changes, and evidence. Use one logical change per PR; stack only when a real
+Every implementation PR identifies its proposed choice, scope, behavior changes, and evidence. Use one logical change per PR; stack only when a real
 dependency requires it. A model migration and a new normalization policy should
 not be bundled to make a failing comparison disappear.
 
 Use the adopted style/type gate and appropriate offline tests, then representative
 end-to-end oracle comparisons. Keep mechanical formatting separate. Document CLI
-and public behavior changes. For proposal-only PRs, validate Markdown, links,
-embedded examples, and diff scope; runtime acceptance remains future work.
+and public behavior changes. Validate documentation, examples, and diff scope alongside the code.
 
 Help timing is a product requirement. On the inspected local environment, five
 fresh-process measurements gave about 42 ms median for help. Use a reference
