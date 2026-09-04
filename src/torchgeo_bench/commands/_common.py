@@ -61,4 +61,4 @@ def compose(args: argparse.Namespace, *, config_name: str, default_model: str | 
             default_model=default_model,
         )
     except (OmegaConfBaseException, ValueError) as err:
-        raise SystemExit(f"error: {err}") from err
+        raise SystemExit(f"error: bad config override: {err}") from err
