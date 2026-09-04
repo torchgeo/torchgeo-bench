@@ -15,7 +15,7 @@ Should the rewrite use explicit argparse commands or generate the CLI from the c
 | A | Explicit argparse commands (recommended) | Visible command surface and ordinary flags; small handwritten mappings. |
 | B | Schema-generated CLI | Automatic flag coverage; additional parser dependency and coupling to schema layout. |
 
-Vote in the linked issue. Comment `Vote: A` or `Vote: B` with a short rationale. If neither fits, propose a concrete amendment. Recommendations are proposals, not recorded votes or maintainer approval. Maintainers will summarize the outcome in the issue. Reactions indicate interest, not a choice between options.
+Discuss the two options in the linked issue. We will collect feedback before choosing.
 
 ## Proposed contract
 

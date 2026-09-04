@@ -18,7 +18,7 @@ OmegaConf configs.
   random, spatial-block, and official holdouts.
 - **Config-driven** — sweep models, datasets, partitions, image sizes, and
   bands without code changes.
-- **Resumable** — `resume=true` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
+- **Resumable** — `--resume` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
 - **Bring your own model** — copy
   [`contrib_template.py`](src/torchgeo_bench/models/contrib_template.py),
   implement `_forward_patch_features`, and add a one-file model config.
@@ -85,10 +85,13 @@ torchgeo-bench run --model rcf --dataset m-eurosat --device cpu
 
 Results are appended to `results/models/<model name>.csv`, which **ship pre-populated
 with reference results** — to start from a clean slate, write to your own file
-with `output=results/my_run.csv`. Re-run with `resume=true` to skip
-already-completed rows. One-time profile/intrinsic-dim measurements go to their
-own `results/profiles/` and `results/intrinsic_dim/` files instead, so routine
-metrics reruns don't touch them.
+by setting `output.file: results/my_run.csv` in a YAML file passed with `--config`.
+Re-run with `--resume` to skip completed rows.
+See `examples/image-run.yaml` for a complete config and `run --config-help` for its schema.
+The standalone `profile` command writes a JSON record to stdout, so redirect it to a separate file when needed.
+
+The previous interface remains available through `python -m torchgeo_bench.cli` during migration.
+Use that module for existing `key=value` scripts, `flops`, and coordinate workflows.
 
 ## CoordBench — location encoders
 
@@ -102,10 +105,10 @@ is probed with **KNN** and a **ridge linear** head under **random** or
 
 ```bash
 # MIND location encoder on the whole suite, random + spatial CV
-torchgeo-bench run mode=coord model=mind coord.split=both
+python -m torchgeo_bench.cli run mode=coord model=mind coord.split=both
 
 # One family, linear probe only, trivial sin/cos baseline
-torchgeo-bench run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
+python -m torchgeo_bench.cli run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
 ```
 
 `model=mind` and `model=mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),

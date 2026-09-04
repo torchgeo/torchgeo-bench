@@ -14,6 +14,8 @@ from ..main import main
 def run(config: RunConfig) -> None:  # noqa: C901, PLR0915 - explicit schema-to-legacy mapping
     """Execute a validated image config through the legacy runner."""
     device = config.runtime.device
+    if device == 'auto':
+        device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     if device.startswith('cuda') and not torch.cuda.is_available():
         raise RuntimeError(f'CUDA device {device!r} requested but CUDA is unavailable')
 

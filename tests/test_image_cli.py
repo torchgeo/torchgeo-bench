@@ -420,3 +420,25 @@ def test_public_download_and_profile_dispatch(monkeypatch: MonkeyPatch) -> None:
     assert received[1].model == 'rcf'
     assert received[1].dataset == 'm-eurosat'
     assert received[1].batch_size == 4
+
+
+@pytest.mark.parametrize(('available', 'expected'), [(False, 'cpu'), (True, 'cuda:0')])
+def test_auto_device_resolves_before_legacy_execution(
+    monkeypatch: MonkeyPatch, available: bool, expected: str
+) -> None:
+    from torchgeo_bench.commands import _image_runtime
+
+    received = []
+    monkeypatch.setattr(_image_runtime.torch.cuda, 'is_available', lambda: available)
+    monkeypatch.setattr(
+        _image_runtime, 'main', lambda cfg, **kwargs: received.append(cfg)
+    )
+    config = validate_run_config(
+        {
+            'model': {'name': 'rcf'},
+            'datasets': ['m-eurosat'],
+            'runtime': {'device': 'auto'},
+        }
+    )
+    _image_runtime.run(config)
+    assert received[0].device == expected
