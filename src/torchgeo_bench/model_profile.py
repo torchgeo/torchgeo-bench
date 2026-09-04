@@ -7,6 +7,7 @@ transfers, and automatic batch-size searches are outside its scope.
 import contextlib
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from statistics import median
 
@@ -107,7 +108,18 @@ def _precision_context(
     raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
 
 
-def profile_inference(  # noqa: PLR0913 -- Keep profiling controls explicit in the public API.
+@contextlib.contextmanager
+def _evaluation_mode(model: nn.Module) -> Iterator[None]:
+    states = {module: module.training for module in model.modules()}
+    model.eval()
+    try:
+        yield
+    finally:
+        for module, training in states.items():
+            module.train(training)
+
+
+def profile_inference(  # noqa: PLR0913 - public profiling options
     model: nn.Module,
     sample_batch: torch.Tensor,
     *,
@@ -141,11 +153,11 @@ def profile_inference(  # noqa: PLR0913 -- Keep profiling controls explicit in t
         raise ValueError("sample_batch must have a non-empty batch dimension")
     if sample_batch.device != device:
         raise ValueError(f"sample_batch is on {sample_batch.device}, expected {device}")
-    _precision_context(device, precision)
-    model.eval()
+    if precision not in {"float32", "float16", "bfloat16"}:
+        raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
     batch_size = sample_batch.shape[0]
     is_cuda = device.type == "cuda"
-    with torch.inference_mode(), _precision_context(device, precision):
+    with _evaluation_mode(model), torch.inference_mode(), _precision_context(device, precision):
         for _ in range(n_warmup):
             model(sample_batch)
         if is_cuda:
@@ -161,10 +173,7 @@ def profile_inference(  # noqa: PLR0913 -- Keep profiling controls explicit in t
             timings.append((time.perf_counter() - pass_started) * 1000)
         elapsed = time.perf_counter() - started
     if count_flops:
-        try:
-            flops = FlopMeasurement(_count_gflops(model, sample_batch), "measured")
-        except NotImplementedError as exc:  # allow-except: Report unsupported FLOP counting.
-            flops = FlopMeasurement(None, "unsupported", str(exc))
+        flops = FlopMeasurement(_count_gflops(model, sample_batch), "measured")
     else:
         flops = FlopMeasurement(None, "disabled", "FLOP counting was not requested")
     return ProfileResult(
@@ -228,7 +237,7 @@ def measure_cpu_throughput(
     model.to(cpu_dev)
     try:
         t0 = time.perf_counter()
-        with torch.inference_mode():
+        with _evaluation_mode(model), torch.inference_mode():
             for _ in range(timing.n_warmup):
                 model(cpu_sample)
                 if time.perf_counter() - t0 > time_budget_s:
