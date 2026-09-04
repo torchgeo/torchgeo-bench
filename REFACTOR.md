@@ -43,6 +43,8 @@ Model construction and normalization each build directly on the style PR.
 This overview is separate in [#323](https://github.com/torchgeo/torchgeo-bench/pull/323).
 
 The tests include synthetic image evaluation through RCF, KNN, CSV writing, and resume, plus seeded comparisons with existing model wrappers.
+A built wheel passed help, catalog, and schema checks in an environment without ML packages; five fresh help calls took about 37 ms median locally.
+The image CLI currently supports KNN alone or KNN plus linear probing; linear-only selections are rejected before execution.
 Pinned real datasets/checkpoints, physical GPU measurements, and migration of every model's normalization remain follow-up work.
 The download draft uses existing mirrors; immutable asset manifests and source-to-mirror equivalence still need verification.
 FLOP counts cover registered PyTorch operators and are not certified complete for every model.
