@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, 'docs/refactor-**']
   workflow_dispatch:
 
 # Only one concurrent deployment.  Cancel in-progress runs that the new push supersedes,
