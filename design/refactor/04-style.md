@@ -60,9 +60,7 @@ Use Ruff, ty, pytest/coverage, and pre-commit. Mirror source modules in tests wi
 
 Conventions and enforcement for rewritten modules. Repository-wide formatting, dependency upgrades, and unrelated CI repairs stay separate.
 
-This draft contains only this decision document. Implementation must pass
-the oracle and migration requirements described in the refactor overview;
-adding this document does not satisfy the criteria above.
+The draft adds a separate Ruff profile and a non-mutating style/type gate for rewritten modules. Run `uv run --extra dev python scripts/check_refactor_style.py`, or `uv run --extra dev pre-commit run --all-files` for the repository checks. CI uses the same pre-commit hook. Legacy files retain their current formatting; the explicit file list grows as modules are migrated.
 
 ## Existing work and references
 
