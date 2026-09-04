@@ -14,15 +14,12 @@ from torchgeo_bench.datasets import BandSpec
 class FakeBench:
     """Minimal classification dataset metadata used by the real runner."""
 
-    name = 'm-eurosat'
-    task = 'classification'
+    name = "m-eurosat"
+    task = "classification"
     num_classes = 2
     multilabel = False
-    rgb_bands = ['red', 'green', 'blue']
-    bands = [
-        BandSpec('fake', name, name, 0.5, 0.25, 0.0, 1.0)
-        for name in rgb_bands
-    ]
+    rgb_bands = ["red", "green", "blue"]
+    bands = [BandSpec("fake", name, name, 0.5, 0.25, 0.0, 1.0) for name in rgb_bands]
 
     def select_band_specs(self, bands: tuple[str, ...] | None) -> list[BandSpec]:
         if bands is None:
@@ -41,13 +38,14 @@ def test_cli_runs_real_knn_and_resume(monkeypatch, tmp_path: Path) -> None:
     def fake_get_datasets(**kwargs: object) -> tuple[object, DataLoader, DataLoader, DataLoader]:
         nonlocal calls
         calls += 1
+
         class Samples:
             def __len__(self) -> int:
                 return len(dataset)
 
             def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
                 image, label = dataset[index]
-                return {'image': image, 'label': label}
+                return {"image": image, "label": label}
 
         samples = Samples()
         loader = lambda: DataLoader(samples, batch_size=4, num_workers=0)
@@ -55,27 +53,45 @@ def test_cli_runs_real_knn_and_resume(monkeypatch, tmp_path: Path) -> None:
 
     import torchgeo_bench.main as runner
 
-    monkeypatch.setattr(runner, 'get_datasets', fake_get_datasets)
-    monkeypatch.setattr(runner, 'get_bench_dataset_class', lambda _: FakeBench)
-    output = tmp_path / 'results.csv'
-    config_path = tmp_path / 'config.yaml'
-    config_path.write_text(yaml.safe_dump({'output': {'file': str(output)}}))
+    monkeypatch.setattr(runner, "get_datasets", fake_get_datasets)
+    monkeypatch.setattr(runner, "get_bench_dataset_class", lambda _: FakeBench)
+    output = tmp_path / "results.csv"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump({"output": {"file": str(output)}}))
     args = [
-        'run', '--config', str(config_path), '--model', 'rcf', '--dataset', 'm-eurosat',
-        '--device', 'cpu', '--image-size', '8', '--batch-size', '4', '--workers', '0',
-        '--methods', 'knn', '--bootstrap-samples', '2', '--seed', '7',
+        "run",
+        "--config",
+        str(config_path),
+        "--model",
+        "rcf",
+        "--dataset",
+        "m-eurosat",
+        "--device",
+        "cpu",
+        "--image-size",
+        "8",
+        "--batch-size",
+        "4",
+        "--workers",
+        "0",
+        "--methods",
+        "knn",
+        "--bootstrap-samples",
+        "2",
+        "--seed",
+        "7",
     ]
     # RCF features still flow through the real instantiate, extraction, KNN,
     # result writer, and resume planner. Only data and registry access are fake.
     cli_main(args)
     rows = pd.read_csv(output)
     assert len(rows) == 1
-    assert rows.loc[0, 'metric_value'] == rows.loc[0, 'metric_value']
-    assert rows.loc[0, 'dataset'] == 'm-eurosat'
-    assert rows.loc[0, 'normalization'] == 'bandspec_zscore'
-    assert rows.loc[0, 'seed'] == 7
+    assert rows.loc[0, "metric_value"] == rows.loc[0, "metric_value"]
+    assert rows.loc[0, "dataset"] == "m-eurosat"
+    assert rows.loc[0, "normalization"] == "bandspec_zscore"
+    assert rows.loc[0, "seed"] == 7
     assert calls == 1
     before = output.read_bytes()
-    monkeypatch.setattr(runner, 'get_datasets', lambda **_: (_ for _ in ()).throw(AssertionError()))
-    cli_main([*args, '--resume'])
+    monkeypatch.setattr(runner, "get_datasets", lambda **_: (_ for _ in ()).throw(AssertionError()))
+    cli_main([*args, "--resume"])
     assert output.read_bytes() == before
