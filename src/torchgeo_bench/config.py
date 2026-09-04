@@ -126,7 +126,51 @@ def instantiate(config: DictConfig | dict, **kwargs: Any) -> Any:
         config = OmegaConf.to_container(config, resolve=True)  # type: ignore[assignment]
     conf = dict(config)
     target = conf.pop("_target_")
+    if target in {
+        "torchgeo_bench.models.TimmPatchBenchModel",
+        "torchgeo_bench.models.RCFBench",
+    }:
+        return _instantiate_explicit_model(target, conf, kwargs)
     module_name, _, attr = target.rpartition(".")
     cls = getattr(importlib.import_module(module_name), attr)
     conf.update(kwargs)
     return cls(**conf)
+
+
+def _instantiate_explicit_model(target: str, config: dict, overrides: dict[str, Any]) -> Any:
+    """Translate legacy model YAML into one of the explicit model builders."""
+    from torchgeo_bench.models.build import (
+        RCFModelConfig,
+        TimmModelConfig,
+        build_rcf_model,
+        build_timm_model,
+    )
+
+    metadata = {"name", "eval", "seed", "image_size", "interpolation", "dataset_overrides"}
+    allowed = (
+        {
+            "model_name",
+            "pretrained",
+            "normalize",
+            "global_pool",
+            "auto_resize",
+            "target_size",
+            "use_cls_token",
+            "input_normalization",
+        }
+        if target.endswith("TimmPatchBenchModel")
+        else {"features", "kernel_size", "mode", "stats_mode", "dataset"}
+    )
+    unknown = set(config) - allowed - metadata
+    unknown.update(set(overrides) - allowed - {"bands", "normalization"})
+    if unknown:
+        raise ValueError(f"Unknown settings for {target.rsplit('.', 1)[-1]}: {sorted(unknown)}")
+    merged = {key: value for key, value in config.items() if key in allowed}
+    merged.update({key: value for key, value in overrides.items() if key in allowed})
+    bands = overrides.get("bands")
+    if bands is None:
+        raise ValueError(f"{target.rsplit('.', 1)[-1]} requires explicit bands")
+    normalization = str(overrides.get("normalization", "bandspec_zscore"))
+    if target.endswith("TimmPatchBenchModel"):
+        return build_timm_model(TimmModelConfig(**merged), bands, normalization=normalization)
+    return build_rcf_model(RCFModelConfig(**merged), bands, normalization=normalization)
