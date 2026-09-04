@@ -1,7 +1,7 @@
 # R02 - Choose a validated YAML configuration schema
 
-Status: implementation started in the isolated R02 worktree; the legacy config
-path remains unchanged until the compatibility adapter lands.
+Status: implemented for the v1 core image schema in the isolated R02 worktree;
+profile and coordinate schemas remain later work.
 Decision issue: https://github.com/torchgeo/torchgeo-bench/issues/308
 
 Load YAML with PyYAML and validate explicit command-specific settings before execution.
@@ -60,6 +60,13 @@ output:
 Defaults live in the schema. Model presets supply documented model settings but cannot silently change the evaluation protocol. Remove `_target_`, arbitrary key additions, environment substitution, and interpolation from the new format. Save the resolved configuration with each run. Old-config translation is a separate migration boundary.
 
 If dataclasses win, use explicit constructors and short validators for each section. Do not build a generic reflection-based configuration engine. Preserve accepted work in the existing schema/CLI PRs whichever option is chosen.
+
+## Implementation status
+
+The v1 schema is implemented for core image runs. Model presets are represented
+by an explicit preset name; per-model options remain in the preset compatibility
+layer until they receive named schema fields. Profile and coordinate workflows
+are intentionally deferred.
 
 ## Initial implementation
 
