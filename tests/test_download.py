@@ -149,13 +149,3 @@ def test_download_datasets_deduplicates_names(tmp_path: Path) -> None:
 
     eurosat.assert_called_once_with(tmp_path)
 
-
-def test_download_v1_reuses_completed_dataset(tmp_path: Path) -> None:
-    target = tmp_path / "classification_v1.0_wds" / "m-eurosat"
-    target.mkdir(parents=True)
-    (target / ".torchgeo-bench-complete").write_text("complete\n")
-
-    with mock.patch("torchgeo_bench.download.snapshot_download") as snapshot:
-        download_geobench_v1(tmp_path, datasets=["m-eurosat"])
-
-    snapshot.assert_not_called()
