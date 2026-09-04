@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+import yaml
 from torch.utils.data import DataLoader, TensorDataset
 
-from torchgeo_bench.cli import main as cli_main
+from torchgeo_bench.image_cli import main as cli_main
 from torchgeo_bench.datasets import BandSpec
 
 
@@ -35,7 +36,11 @@ def test_cli_runs_real_knn_and_resume(monkeypatch, tmp_path: Path) -> None:
     labels = torch.tensor([0, 1] * 6)
     dataset = TensorDataset(images, labels)
 
+    calls = 0
+
     def fake_get_datasets(**kwargs: object) -> tuple[object, DataLoader, DataLoader, DataLoader]:
+        nonlocal calls
+        calls += 1
         class Samples:
             def __len__(self) -> int:
                 return len(dataset)
@@ -53,10 +58,12 @@ def test_cli_runs_real_knn_and_resume(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(runner, 'get_datasets', fake_get_datasets)
     monkeypatch.setattr(runner, 'get_bench_dataset_class', lambda _: FakeBench)
     output = tmp_path / 'results.csv'
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(yaml.safe_dump({'output': {'file': str(output)}}))
     args = [
-        'run', '-m', 'rcf', '-d', 'm-eurosat', '--device', 'cpu', '--image-size', '8',
-        '--batch-size', '4', '--bootstrap', '2', '--output', str(output),
-        'dataset.num_workers=0', 'eval.skip_linear=true',
+        'run', '--config', str(config_path), '--model', 'rcf', '--dataset', 'm-eurosat',
+        '--device', 'cpu', '--image-size', '8', '--batch-size', '4', '--workers', '0',
+        '--methods', 'knn', '--bootstrap-samples', '2', '--seed', '7',
     ]
     # RCF features still flow through the real instantiate, extraction, KNN,
     # result writer, and resume planner. Only data and registry access are fake.
@@ -66,6 +73,9 @@ def test_cli_runs_real_knn_and_resume(monkeypatch, tmp_path: Path) -> None:
     assert rows.loc[0, 'metric_value'] == rows.loc[0, 'metric_value']
     assert rows.loc[0, 'dataset'] == 'm-eurosat'
     assert rows.loc[0, 'normalization'] == 'bandspec_zscore'
+    assert rows.loc[0, 'seed'] == 7
+    assert calls == 1
     before = output.read_bytes()
+    monkeypatch.setattr(runner, 'get_datasets', lambda **_: (_ for _ in ()).throw(AssertionError()))
     cli_main([*args, '--resume'])
     assert output.read_bytes() == before
