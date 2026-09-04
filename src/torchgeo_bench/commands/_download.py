@@ -7,13 +7,12 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from .. import commands
 from ._common import setup_logging
 
 
 def download(args: argparse.Namespace) -> None:
     """Download named datasets or one legacy dataset collection."""
-    from torchgeo_bench.commands._download_runtime import download_module
-
     setup_logging(verbose=True)
     targets = list(args.target)
     collections = {'geobench_v1', 'geobench_v2', 'eurosat', 'resisc45'}
@@ -29,7 +28,7 @@ def download(args: argparse.Namespace) -> None:
                 'error: --datasets is only supported for legacy GeoBench targets'
             )
         try:
-            download_module.download_datasets(targets, Path(args.output_dir))
+            commands.download_module.download_datasets(targets, Path(args.output_dir))
         except ValueError as err:
             raise SystemExit(f'error: {err}') from err
         return
@@ -39,7 +38,7 @@ def download(args: argparse.Namespace) -> None:
         if not names:
             raise SystemExit('error: --datasets must contain at least one dataset name')
     output_dir = Path(args.output_dir)
-    _download_legacy(download_module, target, output_dir, names)
+    _download_legacy(commands.download_module, target, output_dir, names)
 
 
 def _download_legacy(
