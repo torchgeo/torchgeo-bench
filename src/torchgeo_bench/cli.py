@@ -109,6 +109,21 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_override_arg(flops)
     flops.set_defaults(func="flops")
 
+    profile = sub.add_parser("profile", help="Measure one real inference batch")
+    profile.add_argument("-m", "--model", required=True, help="Model preset")
+    profile.add_argument("-d", "--dataset", required=True, help="One dataset name")
+    profile.add_argument("--device", default="cpu", help="cpu, cuda, or cuda:<index>")
+    profile.add_argument("--bands", default="rgb", help="rgb, all, or comma-separated bands")
+    profile.add_argument("--image-size", type=int, default=224)
+    profile.add_argument("--batch-size", type=int, default=32)
+    profile.add_argument("--warmup", type=int, default=3)
+    profile.add_argument("--measurements", type=int, default=20)
+    profile.add_argument(
+        "--precision", choices=("float32", "float16", "bfloat16"), default="float32"
+    )
+    profile.add_argument("--count-flops", action="store_true")
+    profile.set_defaults(func="profile")
+
     download = sub.add_parser("download", help="Download benchmark datasets")
     download.add_argument(
         "target",

@@ -1,6 +1,6 @@
 # R08 - Choose a narrow and reproducible profiling command
 
-Status: proposed; no option has been accepted. This file changes no runtime behavior.
+Status: implementation started in the profile worktree; GPU oracle validation remains pending.
 Decision issue: https://github.com/torchgeo/torchgeo-bench/issues/314
 
 Measure one explicit inference configuration and expose unsupported FLOP counting without global framework patches.
@@ -46,6 +46,16 @@ Standalone inference profiling and its results. Option A defers head decompositi
 This draft contains only this decision document. Implementation must pass
 the oracle and migration requirements described in the refactor overview;
 adding this document does not satisfy the criteria above.
+
+## Initial implementation
+
+The standalone `profile` command measures one real batch from one selected
+dataset. It uses `profile_inference` directly, keeps the requested batch size
+fixed, and emits one JSON record containing model, dataset, bands, shape,
+hardware, software, precision, scope, timing, memory, and parameter metadata.
+FLOP counting is opt-in and carries the counter status and coverage metadata;
+disabled or partial counts are never represented as zero or as a complete
+total. The legacy `flops` command remains separate for compatibility.
 
 ## Existing work and references
 
