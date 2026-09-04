@@ -37,20 +37,6 @@ V1_DATASETS: tuple[str, ...] = (
 )
 TORCHGEO_DATASETS: tuple[str, ...] = ("eurosat", "resisc45")
 DOWNLOADABLE_DATASETS: tuple[str, ...] = V1_DATASETS + DEFAULT_V2_DATASETS + TORCHGEO_DATASETS
-_COMPLETE_MARKER = ".torchgeo-bench-complete"
-
-
-def _complete(path: Path) -> bool:
-    """Return whether *path* has a successful download marker."""
-    return (path / _COMPLETE_MARKER).is_file()
-
-
-def _mark_complete(path: Path) -> None:
-    """Publish a download completion marker atomically."""
-    path.mkdir(parents=True, exist_ok=True)
-    temporary = path / f"{_COMPLETE_MARKER}.tmp"
-    temporary.write_text("torchgeo-bench download complete\n")
-    temporary.replace(path / _COMPLETE_MARKER)
 
 
 def _validate_names(names: list[str]) -> list[str]:
@@ -85,8 +71,6 @@ def download_geobench_v2_dataset(name: str, v2_root: Path) -> None:
     """Download a single GeoBench V2 dataset into ``v2_root/<name>``."""
     target = v2_root / name
     target.mkdir(parents=True, exist_ok=True)
-    if _complete(target):
-        return
     repo_id = f"{GEOBENCH_V2_REPO_PREFIX}/{name}"
     logger.info("Downloading %s -> %s", repo_id, target)
     snapshot_download(
@@ -94,7 +78,6 @@ def download_geobench_v2_dataset(name: str, v2_root: Path) -> None:
         repo_type="dataset",
         local_dir=target,
     )
-    _mark_complete(target)
 
 
 def download_geobench_v2(output_dir: Path, datasets: list[str] | None = None) -> None:
@@ -130,13 +113,10 @@ def download_eurosat(output_dir: Path) -> None:
     """Download EuroSAT imagery and both standard/spatial split definitions."""
     target = Path(output_dir) / "eurosat"
     target.mkdir(parents=True, exist_ok=True)
-    if _complete(target):
-        return
     logger.info("Downloading torchgeo EuroSAT -> %s", target)
     for dataset_cls in (EuroSAT, EuroSATSpatial):
         for split in ("train", "val", "test"):
             dataset_cls(root=str(target), split=split, download=True)
-    _mark_complete(target)
     logger.info("EuroSAT download complete.")
 
 
@@ -147,12 +127,9 @@ def download_resisc45(output_dir: Path) -> None:
     """
     target = Path(output_dir) / "resisc45"
     target.mkdir(parents=True, exist_ok=True)
-    if _complete(target):
-        return
     logger.info("Downloading torchgeo RESISC45 -> %s", target)
     for split in ("train", "val", "test"):
         RESISC45(root=str(target), split=split, download=True, checksum=True)
-    _mark_complete(target)
     logger.info("RESISC45 download complete.")
 
 
