@@ -1,0 +1,31 @@
+target-version = 'py312'
+line-length = 88
+
+[format]
+quote-style = 'single'
+skip-magic-trailing-comma = true
+docstring-code-format = true
+
+[lint]
+extend-select = ['ANN', 'B', 'C4', 'D', 'I', 'N', 'PT', 'UP', 'BLE001', 'PGH004', 'RUF100', 'TID251', 'C901', 'PLR0912', 'PLR0915']
+ignore = ['ANN401', 'D104', 'D105', 'D107']
+
+[lint.per-file-ignores]
+'tests/test_refactor_*.py' = ['D']
+
+[lint.isort]
+split-on-trailing-comma = false
+
+[lint.pydocstyle]
+convention = 'google'
+
+[lint.flake8-copyright]
+author = 'TorchGeo Contributors'
+notice-rgx = 'Copyright \\(c\\)'
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-branches = 12
+max-statements = 50
