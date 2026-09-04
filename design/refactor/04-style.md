@@ -14,7 +14,7 @@ Should rewritten modules use a TorchGeo-derived formatting profile or preserve t
 | A | TorchGeo-derived profile (recommended) | 88 columns, single quotes, collapsed trailing commas, full annotations, Google docstrings. |
 | B | Preserve current formatting profile | Keep 100 columns and current quotes/wrapping; still add typing, complexity, and suppression checks. |
 
-Vote in the linked issue. Comment `Vote: A` or `Vote: B` with a short rationale. If neither fits, propose a concrete amendment. Recommendations are proposals, not recorded votes or maintainer approval. Maintainers will summarize the outcome in the issue. Reactions indicate interest, not a choice between options.
+Discuss the two options in the linked issue. We will collect feedback before choosing.
 
 ## Proposed contract
 
@@ -60,7 +60,7 @@ Use Ruff, ty, pytest/coverage, and pre-commit. Mirror source modules in tests wi
 
 Conventions and enforcement for rewritten modules. Repository-wide formatting, dependency upgrades, and unrelated CI repairs stay separate.
 
-The draft adds a separate Ruff profile and a non-mutating style/type gate for rewritten modules. Run `uv run --extra dev python scripts/check_refactor_style.py`, or `uv run --extra dev pre-commit run --all-files` for the repository checks. CI uses the same pre-commit hook. Legacy files retain their current formatting; the explicit file list grows as modules are migrated.
+The proposal adds a separate Ruff profile and a non-mutating style/type gate for rewritten modules. Run `uv run --extra dev python scripts/check_refactor_style.py`, or `uv run --extra dev pre-commit run --all-files` for the repository checks. CI uses the same pre-commit hook. Legacy files retain their current formatting; the explicit file list grows as modules are migrated.
 
 ## Existing work and references
 
