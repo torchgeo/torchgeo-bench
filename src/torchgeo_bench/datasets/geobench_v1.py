@@ -156,6 +156,7 @@ class _V1Dataset(BenchDataset):
         source_bands = tuple(spec.source_name for spec in self.select_band_specs(bands))
 
         sharded_dir = V1_SHARDED_ROOT / self.name
+        hdf5_dir = self.data_root() / self.name
         if sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")):
             from ._v1_webdataset import GeoBenchv1Sharded
 
@@ -166,6 +167,11 @@ class _V1Dataset(BenchDataset):
                 partition=partition,
                 bands=source_bands,
                 transform=transform,
+            )
+        if not hdf5_dir.exists():
+            raise FileNotFoundError(
+                f"GeoBench V1 dataset '{self.name}' is not downloaded. "
+                f"Run `torchgeo-bench download {self.name}` first."
             )
         return GeoBenchv1(
             root=self.data_root(),
