@@ -1016,6 +1016,8 @@ def main(cfg: DictConfig, *, strict: bool = False) -> None:
                             temp_scale=cal_temp_scale,
                         )
                     except LinearProbeDivergedError as exc:
+                        if strict:
+                            raise
                         # A handful of (backbone, dataset) pairings produce feature
                         # magnitudes the probe can't fit at any C in the sweep. That's
                         # a property of this one combination, not the rest of the
