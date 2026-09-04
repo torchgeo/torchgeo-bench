@@ -1,6 +1,6 @@
 # R07 - Choose individual dataset downloads and canonical storage
 
-Status: proposed; no option has been accepted. This file changes no runtime behavior.
+Status: proposed; implementation draft exists on `docs/refactor-downloads-decision`; no option has been accepted.
 Decision issue: https://github.com/torchgeo/torchgeo-bench/issues/313
 
 Make download NAME install exactly the versioned representation read by run --dataset NAME.
@@ -22,7 +22,7 @@ Vote in the linked issue. Comment `Vote: A` or `Vote: B` with a short rationale.
 
 Choose a canonical format per dataset from actual loader requirements. Do not mandate one universal storage format for classification, segmentation, multimodal, and temporal data. Prefer individually downloadable upstream assets; mirror or repackage when necessary.
 
-Each dataset declares source/revision, independently fetchable assets, checksums, split manifests, sample IDs, band/unit metadata, and local layout. Revisions identify immutable content. Download to temporary files, verify assets, and publish completion atomically. A directory existing is not proof of a complete dataset.
+Each dataset declares source/revision, independently fetchable assets, checksums, split manifests, sample IDs, band/unit metadata, and local layout. Revisions identify immutable content. Use the selected backend's checksums and resumable cache rather than adding a second completion-marker system. A directory existing is not proof of a complete dataset.
 
 Repeated downloads verify/reuse complete assets without fetching the entire benchmark. Loading is offline when assets exist. Missing data errors name the exact download command; evaluation should not unexpectedly download a collection.
 
@@ -41,9 +41,11 @@ Provide an explicit migration for existing data. Reuse or convert verified local
 
 Download/load contracts, manifests, completion semantics, and one dataset migration. Mirror publication and other dataset migrations get separate implementation PRs.
 
-This draft contains only this decision document. Implementation must pass
-the oracle and migration requirements described in the refactor overview;
-adding this document does not satisfy the criteria above.
+The implementation draft adds named downloads, validates all names before
+dispatch, and prevents V1/V2 evaluation from implicitly downloading missing
+data. It keeps the legacy full V1 collection path. Backend and loader parity
+requirements above remain open; this draft does not claim mirror equivalence
+or a complete interrupted-download fixture.
 
 ## Existing work and references
 
