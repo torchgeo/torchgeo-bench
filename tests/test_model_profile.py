@@ -19,6 +19,11 @@ def test_count_params_correct() -> None:
     assert _count_params(model) == pytest.approx(40 / 1e6)
 
 
+def test_count_gflops_uses_two_operations_per_multiply_add() -> None:
+    model = nn.Linear(2, 2, bias=False)
+    assert _count_gflops(model, torch.rand(1, 2)) == pytest.approx(8 / 1e9)
+
+
 @pytest.mark.parametrize("requires_grad", [False, True])
 def test_count_gflops_matches_conv_and_linear_ops(requires_grad) -> None:
     model = nn.Sequential(
@@ -276,6 +281,7 @@ def test_profile_as_dict_includes_flop_metadata() -> None:
     values = result.as_dict()
     assert values["gflops_status"] == "disabled"
     assert values["gflops_convention"] == "one multiply-add is two operations"
+    assert values["gflops_coverage"] == "registered operators only; total coverage unverified"
 
 
 def test_cpu_profile_restores_model_and_reports_metrics() -> None:
