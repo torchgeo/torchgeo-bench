@@ -396,3 +396,27 @@ def test_dry_run_rejects_unsupported_method_and_band_selections() -> None:
                 ['run', '--model', 'rcf', '--dataset', 'm-eurosat', '--dry-run', *flags]
             )
         assert error.value.code == 2
+
+
+def test_yaml_bands_require_a_list(tmp_path: Path) -> None:
+    path = tmp_path / 'bands.yaml'
+    path.write_text(
+        'model: {name: rcf}\ndatasets: [m-eurosat]\ninput:\n  bands: red,green\n'
+    )
+    with pytest.raises(SystemExit) as error:
+        main(['run', '--config', str(path), '--dry-run'])
+    assert error.value.code == 2
+
+
+def test_public_download_and_profile_dispatch(monkeypatch: MonkeyPatch) -> None:
+    from torchgeo_bench import commands
+
+    received = []
+    monkeypatch.setattr(commands, 'download', received.append)
+    monkeypatch.setattr(commands, 'profile', received.append)
+    main(['download', 'm-eurosat', 'burn_scars'])
+    main(['profile', '--model', 'rcf', '--dataset', 'm-eurosat', '--batch-size', '4'])
+    assert received[0].target == ['m-eurosat', 'burn_scars']
+    assert received[1].model == 'rcf'
+    assert received[1].dataset == 'm-eurosat'
+    assert received[1].batch_size == 4
