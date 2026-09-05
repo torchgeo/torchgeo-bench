@@ -194,34 +194,7 @@ class SegmentationProbe(nn.Module):
         self._features: dict[str, torch.Tensor] = {}
         self.hooks: list[Any] = []
 
-        duplicate_layers = {name for name in self.layer_names if self.layer_names.count(name) > 1}
-        if duplicate_layers:
-            raise ValueError(
-                f"Segmentation probe layers must be unique; duplicates: {sorted(duplicate_layers)}."
-            )
-
-        found_layers = set()
-        for name, module in self.backbone.named_modules():
-            if name.startswith("backbone."):
-                name = name.replace("backbone.", "", 1)
-            if name in self.layer_names:
-                self.hooks.append(module.register_forward_hook(self._hook_fn(name)))
-                found_layers.add(name)
-
-        missing_layers = set(self.layer_names) - found_layers
-        if missing_layers:
-            # Warning-and-continue would train the head on however many taps
-            # happened to resolve, quietly reporting a multi-scale probe that
-            # never ran.  A wrong layer name is a config bug, so fail on it.
-            available = [
-                name.replace("backbone.", "", 1) if name.startswith("backbone.") else name
-                for name, _ in self.backbone.named_modules()
-            ]
-            raise ValueError(
-                f"Segmentation layers not found in backbone: {sorted(missing_layers)}. "
-                f"Set eval.segmentation.layers for this model to names it exposes, e.g. "
-                f"{[n for n in available if n][:8]}."
-            )
+        self._register_hooks()
 
         if self.freeze_backbone:
             for param in self.backbone.parameters():
@@ -259,6 +232,34 @@ class SegmentationProbe(nn.Module):
     # ------------------------------------------------------------------
     # Hook / dry-run helpers
     # ------------------------------------------------------------------
+
+    def _register_hooks(self) -> None:
+        """Register feature hooks and reject missing or duplicate layer names."""
+        duplicate_layers = {name for name in self.layer_names if self.layer_names.count(name) > 1}
+        if duplicate_layers:
+            raise ValueError(
+                f"Segmentation probe layers must be unique; duplicates: {sorted(duplicate_layers)}."
+            )
+
+        found_layers = set()
+        for name, module in self.backbone.named_modules():
+            if name.startswith("backbone."):
+                name = name.replace("backbone.", "", 1)
+            if name in self.layer_names:
+                self.hooks.append(module.register_forward_hook(self._hook_fn(name)))
+                found_layers.add(name)
+
+        missing_layers = set(self.layer_names) - found_layers
+        if missing_layers:
+            available = [
+                name.replace("backbone.", "", 1) if name.startswith("backbone.") else name
+                for name, _ in self.backbone.named_modules()
+            ]
+            raise ValueError(
+                f"Segmentation layers not found in backbone: {sorted(missing_layers)}. "
+                f"Set eval.segmentation.layers for this model to names it exposes, e.g. "
+                f"{[n for n in available if n][:8]}."
+            )
 
     def _hook_fn(self, name: str):
         """Return a forward hook that captures the output of the named layer."""
@@ -306,50 +307,7 @@ class SegmentationProbe(nn.Module):
         if feat.ndim == 2:
             return feat.view(feat.shape[0], feat.shape[1], 1, 1)
         if feat.ndim == 3:
-            # Handle transformer token features in either (B, L, C) or (B, C, L) layout.
-            # Prefer exact square token grids, dropping the model's *declared*
-            # number of prefix tokens first.  Assuming a single CLS token is not
-            # enough: DINOv3 carries 1 CLS + 4 registers, so a 16x16 grid arrives
-            # as L=261, which is neither s^2 nor s^2+1.
-            bsz, d1, d2 = feat.shape
-            n_prefix = _resolve_num_prefix_tokens(self.backbone)
-
-            # Try (B, L, C).  dict.fromkeys dedupes while preserving order, so a
-            # model declaring 0 or 1 prefix tokens does not retry the same slice.
-            for drop in dict.fromkeys(([n_prefix] if n_prefix else []) + [0, 1]):
-                if drop >= d1:
-                    continue
-                side = math.isqrt(d1 - drop)
-                if side * side == d1 - drop:
-                    return feat[:, drop:, :].permute(0, 2, 1).reshape(bsz, d2, side, side)
-
-            # Try (B, C, L), i.e. channel-first tokens.
-            #
-            # Gated, because ungated it is a trap rather than a fallback.
-            # Transformer widths are overwhelmingly powers of two (768, 1024,
-            # 1280), and every even power of two is a perfect square — so
-            # whenever a *token-first* tensor has a non-square token count, its
-            # channel dim still "looks like" a grid.  That is precisely how
-            # (B, 261, 1024) silently became a 32x32 map of 261 channels.
-            #
-            # A model that declares num_prefix_tokens is token-first by
-            # construction (that attribute describes the L axis), so for those
-            # the layout is already known and this branch must not apply: a
-            # token count that failed the loop above is a real mismatch to
-            # report, not a tensor to reinterpret.
-            if n_prefix is None and d1 < d2:
-                side = math.isqrt(d2)
-                if side * side == d2:
-                    return feat.reshape(bsz, d1, side, side)
-                side_no_cls = math.isqrt(d2 - 1) if d2 > 1 else 0
-                if side_no_cls * side_no_cls == d2 - 1:
-                    return feat[:, :, 1:].reshape(bsz, d1, side_no_cls, side_no_cls)
-
-            raise ValueError(
-                "Could not reshape 3D feature map to 2D grid. "
-                f"Got shape={tuple(feat.shape)}, num_prefix_tokens={n_prefix}. "
-                "Expected tokens with L=s^2 after dropping prefix tokens."
-            )
+            return self._reshape_tokens(feat)
         # 4D tensor: NCHW (standard) or NHWC (Swin-family).
         # Detect NHWC: spatial dims are square (H==W) and channel dim (last) is
         # larger than the spatial dims — the opposite of typical NCHW feature maps.
@@ -359,6 +317,34 @@ class SegmentationProbe(nn.Module):
                 # NHWC → NCHW
                 return feat.permute(0, 3, 1, 2).contiguous()
         return feat
+
+    def _reshape_tokens(self, feat: torch.Tensor) -> torch.Tensor:
+        """Reshape token features into a spatial grid, accounting for prefix tokens."""
+        bsz, d1, d2 = feat.shape
+        n_prefix = _resolve_num_prefix_tokens(self.backbone)
+
+        # DINOv3 prefixes include register tokens as well as the CLS token.
+        for drop in dict.fromkeys(([n_prefix] if n_prefix else []) + [0, 1]):
+            if drop >= d1:
+                continue
+            side = math.isqrt(d1 - drop)
+            if side * side == d1 - drop:
+                return feat[:, drop:, :].permute(0, 2, 1).reshape(bsz, d2, side, side)
+
+        # A declared prefix count fixes the token axis; never reinterpret channel width.
+        if n_prefix is None and d1 < d2:
+            side = math.isqrt(d2)
+            if side * side == d2:
+                return feat.reshape(bsz, d1, side, side)
+            side_no_cls = math.isqrt(d2 - 1) if d2 > 1 else 0
+            if side_no_cls * side_no_cls == d2 - 1:
+                return feat[:, :, 1:].reshape(bsz, d1, side_no_cls, side_no_cls)
+
+        raise ValueError(
+            "Could not reshape 3D feature map to 2D grid. "
+            f"Got shape={tuple(feat.shape)}, num_prefix_tokens={n_prefix}. "
+            "Expected tokens with L=s^2 after dropping prefix tokens."
+        )
 
     # ------------------------------------------------------------------
     # Feature caching

@@ -111,7 +111,8 @@ def test_predict_proba_shape_and_range():
     model.fit(X, y)
     proba = model.predict_proba(X)
     assert proba.shape == (len(X), 3)
-    assert np.all(proba >= 0) and np.all(proba <= 1)
+    assert np.all(proba >= 0)
+    assert np.all(proba <= 1)
     assert np.allclose(proba.sum(axis=1), 1.0, atol=1e-5)
 
 
@@ -155,7 +156,8 @@ def test_predict_proba_multilabel_range():
     model.fit(X, y)
     proba = model.predict_proba(X)
     assert proba.shape == (len(X), 4)
-    assert np.all(proba >= 0) and np.all(proba <= 1)
+    assert np.all(proba >= 0)
+    assert np.all(proba <= 1)
 
 
 # predict_proba / decision_function validation
@@ -195,3 +197,24 @@ def test_lbfgs_solver_fits():
     model.fit(X, y)
     preds = model.predict(X)
     assert preds.shape == (40,)
+
+
+@pytest.mark.parametrize("multi_label", [False, True])
+@pytest.mark.parametrize(("max_iter", "patience", "expected_iterations"), [(8, 2, 3), (2, 3, 2)])
+def test_adam_stops_at_patience_or_iteration_limit(
+    multi_label: bool, max_iter: int, patience: int, expected_iterations: int
+) -> None:
+    X, y = _xy_ml(n=7) if multi_label else _xy(n=7)
+    model = LogisticRegression(
+        solver="adam",
+        lr=0.0,
+        batch_size=3,
+        max_iter=max_iter,
+        patience=patience,
+        random_state=0,
+        multi_label=multi_label,
+    )
+
+    assert model.fit(X, y) is model
+    assert model.n_iter_ == expected_iterations
+    np.testing.assert_array_equal(model.coef_, 0.0)

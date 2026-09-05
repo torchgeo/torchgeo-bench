@@ -110,6 +110,16 @@ def build_normalizer(
 
         return _f
 
+    return _build_model_native_normalizer(bands, expected_input_unit, pretrain_mean, pretrain_std)
+
+
+def _build_model_native_normalizer(
+    bands: list[BandSpec],
+    expected_input_unit: InputUnit | None,
+    pretrain_mean: list[float] | None,
+    pretrain_std: list[float] | None,
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    """Convert sensor units before applying pretrained channel statistics."""
     if expected_input_unit is None:
         raise ValueError("model_native normalisation requires expected_input_unit")
     src = detect_input_unit(bands)
@@ -124,16 +134,7 @@ def build_normalizer(
         convert = lambda x: x  # noqa: E731
 
     if pretrain_mean is None:
-        # Unit conversion alone is not a normalisation: it would feed raw DN
-        # (0 - 10 000) straight into the backbone, which measurably collapses
-        # the features — Prithvi scored an identical 0.264 on treesatai at
-        # 86M, 304M and 631M parameters, below the imagestats baseline.
-        #
-        # Raising here would break wrappers that install their own
-        # model_native normaliser *after* super().__init__ (TerraMind) or that
-        # override normalize_inputs entirely (the torchgeo wrappers, which use
-        # the Normalize bound to their weights).  So defer: fail only if this
-        # normaliser is actually the one used.
+        # Some wrappers install their own normalizer after construction.
         def _undefined(_x: torch.Tensor) -> torch.Tensor:
             raise ValueError(
                 "model_native normalisation is undefined for this model: it declares "

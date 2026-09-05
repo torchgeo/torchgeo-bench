@@ -146,7 +146,8 @@ class TestKNNClassifierMultiLabel:
 
         probs = clf.predict_proba(d["x_test"])
         assert probs.shape == (len(d["x_test"]), d["n_classes"])
-        assert np.all(probs >= 0) and np.all(probs <= 1)
+        assert np.all(probs >= 0)
+        assert np.all(probs <= 1)
 
 
 # ---- LogisticRegression multi-label tests ----
@@ -168,7 +169,8 @@ class TestMultiLabelLogisticRegression:
 
         probs = clf.predict_proba(X_test)
         assert probs.shape == (len(d["x_test"]), d["n_classes"])
-        assert np.all(probs >= 0) and np.all(probs <= 1)
+        assert np.all(probs >= 0)
+        assert np.all(probs <= 1)
 
     def test_lbfgs_solver(self, multilabel_data):
         d = multilabel_data
@@ -405,7 +407,8 @@ class TestUnifiedEvaluateLogistic:
         assert best_c in [0.1, 1.0]
         assert set(cal) == {"ece", "rms_ce", "mce"}
         assert set(cal_ts) == {"ece_ts", "rms_ce_ts", "mce_ts", "temperature"}
-        assert cal_ts["temperature"] is not None and cal_ts["temperature"] > 0
+        assert cal_ts["temperature"] is not None
+        assert cal_ts["temperature"] > 0
 
     def test_multi_label(self, multilabel_data):
         from torchgeo_bench import evaluate_logistic

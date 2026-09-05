@@ -245,7 +245,7 @@ class TestKuroSiwoCanonicalization:
             yield mocked
 
     @pytest.mark.parametrize(
-        "bands,expected_channels",
+        ("bands", "expected_channels"),
         [
             (("vv", "vh"), 2),
             (("vv",), 1),
@@ -318,7 +318,7 @@ class TestKuroSiwoLive:
     """Smoke tests against real Kuro Siwo data (skipped if the dataset is missing)."""
 
     @pytest.mark.parametrize(
-        "bands,expected_channels",
+        ("bands", "expected_channels"),
         [
             (("vv", "vh"), 2),
             (None, 3),  # all bands: vv, vh, dem

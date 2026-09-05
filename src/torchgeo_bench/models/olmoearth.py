@@ -10,7 +10,7 @@ Reference implementations (canonical first):
 
 import logging
 from collections import defaultdict
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -237,90 +237,75 @@ _PASSTHROUGH_SENSORS: frozenset[str] = frozenset({"sar", "s1"})
 _DATASET_STATS_SENSORS: frozenset[str] = frozenset({"landsat"})
 
 
-def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
-    """Group bands by sensor and resolve per-group modality metadata.
+def _build_sensor_group(sensor: str, indexed_bands: list[tuple[int, BandSpec]]) -> dict[str, Any]:
+    """Resolve the channel layout and normalization metadata for one sensor."""
+    if sensor not in _MODALITY_INFO:
+        supported = sorted(set(_MODALITY_INFO))
+        raise ValueError(
+            f"OlmoEarth wrapper has no layout for sensor '{sensor}'.  Supported: {supported}."
+        )
+    info = _MODALITY_INFO[sensor]
+    name_to_idx = info["name_to_idx"]
+    src_indices: list[int] = []
+    dst_indices: list[int] = []
+    unknown: list[str] = []
+    group_bands: list[BandSpec] = []
+    for src_idx, b in indexed_bands:
+        key_name = b.name.lower()
+        if key_name not in name_to_idx:
+            unknown.append(b.name)
+        elif name_to_idx[key_name] is not None:
+            src_indices.append(src_idx)
+            group_bands.append(b)
+            dst_indices.append(name_to_idx[key_name])
+        # else: known-but-skippable band (e.g. swir_cirrus / B10 for S2) — zero-filled
+    if unknown:
+        raise ValueError(
+            f"OlmoEarth wrapper can't map BandSpec names {unknown} for "
+            f"sensor '{sensor}'.  Add them to "
+            f"_MODALITY_INFO['{sensor}']['name_to_idx'] "
+            f"with the correct OlmoEarth band index."
+        )
+    input_unit: InputUnit | None = (
+        None if sensor in _PASSTHROUGH_SENSORS else _detect_band_group_unit(group_bands)
+    )
+    # Imputation only borrows bands present in the original input.
+    filled = set(dst_indices)
+    impute_ops: list[tuple[int, int]] = []
+    for src_dst, tgt_dst in info.get("imputes", []):
+        if tgt_dst in filled:
+            continue  # real band present — never overwrite it
+        if src_dst not in filled:
+            logger.warning(
+                "OlmoEarth %s: cannot impute channel %d (source channel %d "
+                "is also missing); leaving it zero-filled.",
+                sensor,
+                tgt_dst,
+                src_dst,
+            )
+            continue
+        impute_ops.append((src_dst, tgt_dst))
+    return {
+        "sensor": sensor,
+        "modality_name": info["modality_name"],
+        "sample_field": info["sample_field"],
+        "channels": info["channels"],
+        "num_band_sets": info["num_band_sets"],
+        "src_indices": src_indices,
+        "dst_indices": dst_indices,
+        "input_unit": input_unit,
+        "impute_ops": impute_ops,
+        "src_means": [b.mean for b in group_bands],
+        "src_stds": [b.std for b in group_bands],
+    }
 
-    Returns a list of dicts (one per unique sensor) with keys:
-        sensor, modality_name, sample_field, channels, num_band_sets,
-        src_indices (indices into the original ``bands`` list),
-        dst_indices (target channel positions inside OlmoEarth's layout).
-    Preserves the order sensors first appear in ``bands``.
-    """
-    order: list[str] = []
+
+def _build_sensor_groups(bands: list[BandSpec]) -> list[dict[str, Any]]:
+    """Resolve modality groups in the order sensors appear in the input."""
     grouped: dict[str, list[tuple[int, BandSpec]]] = defaultdict(list)
-    for i, b in enumerate(bands):
-        key = b.sensor.lower()
-        if key not in grouped:
-            order.append(key)
-        grouped[key].append((i, b))
-
-    result = []
-    for sensor in order:
-        if sensor not in _MODALITY_INFO:
-            supported = sorted(set(_MODALITY_INFO))
-            raise ValueError(
-                f"OlmoEarth wrapper has no layout for sensor '{sensor}'.  Supported: {supported}."
-            )
-        info = _MODALITY_INFO[sensor]
-        name_to_idx = info["name_to_idx"]
-        src_indices: list[int] = []
-        dst_indices: list[int] = []
-        unknown: list[str] = []
-        for src_idx, b in grouped[sensor]:
-            key_name = b.name.lower()
-            if key_name not in name_to_idx:
-                unknown.append(b.name)
-            elif name_to_idx[key_name] is not None:
-                src_indices.append(src_idx)
-                dst_indices.append(name_to_idx[key_name])
-            # else: known-but-skippable band (e.g. swir_cirrus / B10 for S2) — zero-filled
-        if unknown:
-            raise ValueError(
-                f"OlmoEarth wrapper can't map BandSpec names {unknown} for "
-                f"sensor '{sensor}'.  Add them to "
-                f"_MODALITY_INFO['{sensor}']['name_to_idx'] "
-                f"with the correct OlmoEarth band index."
-            )
-        group_bands = [bands[i] for i in src_indices]
-        input_unit: InputUnit | None = (
-            None if sensor in _PASSTHROUGH_SENSORS else _detect_band_group_unit(group_bands)
-        )
-        # Resolve which imputations actually apply for this input: fill a
-        # missing OlmoEarth channel from the most-similar present band so the
-        # encoder never sees fabricated zeros (matches helios). Only fire when
-        # the target channel is absent and the source channel is present.
-        filled = set(dst_indices)
-        impute_ops: list[tuple[int, int]] = []
-        for src_dst, tgt_dst in info.get("imputes", []):
-            if tgt_dst in filled:
-                continue  # real band present — never overwrite it
-            if src_dst not in filled:
-                logger.warning(
-                    "OlmoEarth %s: cannot impute channel %d (source channel %d "
-                    "is also missing); leaving it zero-filled.",
-                    sensor,
-                    tgt_dst,
-                    src_dst,
-                )
-                continue
-            impute_ops.append((src_dst, tgt_dst))
-        result.append(
-            {
-                "sensor": sensor,
-                "modality_name": info["modality_name"],
-                "sample_field": info["sample_field"],
-                "channels": info["channels"],
-                "num_band_sets": info["num_band_sets"],
-                "src_indices": src_indices,
-                "dst_indices": dst_indices,
-                "input_unit": input_unit,
-                "impute_ops": impute_ops,
-                # Per-band dataset stats (src order) for the dataset-stats
-                # normalization path (norm_from_pretrained=False).
-                "src_means": [b.mean for b in group_bands],
-                "src_stds": [b.std for b in group_bands],
-            }
-        )
+    for i, band in enumerate(bands):
+        grouped[band.sensor.lower()].append((i, band))
+    result = [_build_sensor_group(sensor, group) for sensor, group in grouped.items()]
     fields: dict[str, str] = {}
     for group in result:
         field = group["sample_field"]
@@ -569,6 +554,40 @@ class OlmoEarthBenchModel(BenchModel):
             B, H, W, self.time_steps, num_band_sets, dtype=torch.float32, device=device
         )
 
+    def _normalize_sensor_group(self, images: torch.Tensor, group: dict[str, Any]) -> np.ndarray:
+        """Normalize and impute one sensor's channels in the OlmoEarth layout."""
+        g_images = images[:, group["src_indices"]]  # (B, Csensor, H, W)
+
+        if self.norm_from_pretrained == "auto":
+            use_pretrained = group["sensor"] not in _DATASET_STATS_SENSORS
+        else:
+            use_pretrained = self.norm_from_pretrained
+
+        if use_pretrained:
+            input_unit = group["input_unit"]
+            if input_unit is not None:
+                g_images = to_s2_dn(g_images, input_unit)
+                if group["sensor"] == "landsat" and self.landsat_scale_factor is not None:
+                    g_images = g_images * self.landsat_scale_factor
+            if group["sensor"] in ("sar", "s1") and self.sar_log_scale:
+                g_images = 10.0 * torch.log10(g_images.clamp(min=1e-6))
+
+            g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])
+            g_nhwtc = self._to_nhwtc(g_images)
+            g_nhwtc = self.normalizer.normalize(group["modality"], g_nhwtc)
+        else:
+            g_images = self._normalize_with_band_stats(
+                g_images, group["src_means"], group["src_stds"]
+            )
+            g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])
+            g_nhwtc = self._to_nhwtc(g_images)
+
+        # Impute after normalization so borrowed bands retain their source statistics.
+        for src_dst, tgt_dst in group["impute_ops"]:
+            g_nhwtc[..., tgt_dst] = g_nhwtc[..., src_dst]
+
+        return g_nhwtc
+
     @torch.no_grad()
     def _forward_patch_features(
         self,
@@ -606,51 +625,7 @@ class OlmoEarthBenchModel(BenchModel):
 
         sample_kwargs: dict = {}
         for group in self._sensor_groups:
-            # Extract this sensor's channels from the full input tensor.
-            g_images = images[:, group["src_indices"]]  # (B, Csensor, H, W)
-
-            # Pick the normalization path for this sensor group.  "auto" uses
-            # dataset stats for uint8-scale sensors (Landsat) and the pretrained
-            # normalizer for the rest (S2/SAR); True/False force one path.
-            if self.norm_from_pretrained == "auto":
-                use_pretrained = group["sensor"] not in _DATASET_STATS_SENSORS
-            else:
-                use_pretrained = self.norm_from_pretrained
-
-            if use_pretrained:
-                # Rescale to S2 DN unless the sensor is a passthrough type, then
-                # apply OlmoEarth's pretrained per-modality Normalizer.
-                input_unit = group["input_unit"]
-                if input_unit is not None:
-                    g_images = to_s2_dn(g_images, input_unit)
-                    if group["sensor"] == "landsat" and self.landsat_scale_factor is not None:
-                        g_images = g_images * self.landsat_scale_factor
-                if group["sensor"] in ("sar", "s1") and self.sar_log_scale:
-                    g_images = 10.0 * torch.log10(g_images.clamp(min=1e-6))
-
-                g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])
-                g_nhwtc = self._to_nhwtc(g_images)
-                g_nhwtc = self.normalizer.normalize(group["modality"], g_nhwtc)
-            else:
-                # Dataset-specific normalization: map each band's
-                # [mean - m·std, mean + m·std] to [0, 1] (no clip) using its own
-                # BandSpec stats, the same scheme OlmoEarth saw in pretraining.
-                # Required when the input scale doesn't match the pretrained
-                # normalizer (e.g. GeoBench uint8 Landsat).  No DN rescale.
-                g_images = self._normalize_with_band_stats(
-                    g_images, group["src_means"], group["src_stds"]
-                )
-                g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])
-                g_nhwtc = self._to_nhwtc(g_images)
-
-            # Impute missing channels *after* normalization so each imputed
-            # channel carries the normalized value of its source band. Doing
-            # it post-norm avoids applying the wrong per-band statistics to a
-            # borrowed band (the issue helios works around by re-imputing
-            # after normalization); the result is that the imputed channel is
-            # statistically identical to its source in normalized space.
-            for src_dst, tgt_dst in group["impute_ops"]:
-                g_nhwtc[..., tgt_dst] = g_nhwtc[..., src_dst]
+            g_nhwtc = self._normalize_sensor_group(images, group)
 
             field = group["sample_field"]
             mask = self._build_mask(B, H, W, group["num_band_sets"], device)

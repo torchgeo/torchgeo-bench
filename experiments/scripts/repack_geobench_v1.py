@@ -67,7 +67,7 @@ def _resolve_pickle_bytes(raw: object) -> bytes:
     if isinstance(raw, str):
         # The upstream V1 distribution stored the bytes as a Python repr
         # of a bytestring (``"b'...'"``), so eval the string back.
-        return eval(raw)  # noqa: S307 — trusted dataset payload
+        return eval(raw)
     raise TypeError(f"Unexpected pickle attr type: {type(raw)}")
 
 
@@ -112,6 +112,23 @@ def repack(dataset_dir: Path, out_dir: Path, shard_size: int = 1000) -> int:
     return written
 
 
+def _index_shards(shard_paths: list[Path]) -> dict[str, dict[str, tuple[Path, int, int]]]:
+    """Index tar members by suffix so sample IDs may contain dots."""
+    import tarfile
+
+    index: dict[str, dict[str, tuple[Path, int, int]]] = {}
+    for path in shard_paths:
+        with tarfile.open(path, "r") as t:
+            for m in t.getmembers():
+                for ext in ("bands.npz", "meta.pkl"):
+                    suffix = "." + ext
+                    if m.name.endswith(suffix):
+                        base = m.name[: -len(suffix)]
+                        index.setdefault(base, {})[ext] = (path, m.offset_data, m.size)
+                        break
+    return index
+
+
 def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
     """Cross-check the first ``n_samples`` between original HDF5 and shards."""
     import random
@@ -126,23 +143,9 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
         raise FileNotFoundError(f"No shards in {out_dir}")
 
     logger.info("Validating %d samples against %d shards...", len(targets), len(shard_paths))
-    # Index shards directly (matches the runtime loader's logic for sample
-    # IDs that contain ``.``) instead of relying on wds.WebDataset's
-    # first-dot key split.
-    import tarfile
+    index = _index_shards(shard_paths)
 
-    index: dict[str, dict[str, tuple]] = {}
-    for path in shard_paths:
-        with tarfile.open(path, "r") as t:
-            for m in t.getmembers():
-                for ext in ("bands.npz", "meta.pkl"):
-                    suffix = "." + ext
-                    if m.name.endswith(suffix):
-                        base = m.name[: -len(suffix)]
-                        index.setdefault(base, {})[ext] = (path, m.offset_data, m.size)
-                        break
-
-    def _read(ref):
+    def _read(ref: tuple[Path, int, int]) -> bytes:
         path, offset, size = ref
         with open(path, "rb") as f:
             f.seek(offset)

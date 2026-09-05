@@ -134,6 +134,40 @@ def _worker(
             results.append(result)
 
 
+def _summarize_results(results: list[_JobResult], total: int, elapsed: float, output: str) -> int:
+    """Print job timings and failures, returning the run exit code."""
+    passed = sum(1 for r in results if r.returncode == 0)
+    failed = total - passed
+
+    print()
+    print("=" * 60)
+    print("Run Complete")
+    print("=" * 60)
+    print(f"Total:    {total}")
+    print(f"Passed:   {passed}")
+    print(f"Failed:   {failed}")
+    print(f"Time:     {elapsed:.0f}s ({elapsed / 60:.1f}m)")
+    print(f"Output:   {output}")
+
+    if failed:
+        print("\nFailed jobs:")
+        for r in results:
+            if r.returncode != 0:
+                print(f"  {r.label} ({r.elapsed:.0f}s, cuda:{r.gpu})")
+
+    if passed:
+        times = sorted(
+            [(r.label, r.elapsed) for r in results if r.returncode == 0],
+            key=lambda x: x[1],
+        )
+        avg = sum(t for _, t in times) / len(times)
+        print(f"\nAvg time per job: {avg:.0f}s ({avg / 60:.1f}m)")
+        print(f"Fastest: {times[0][0]} ({times[0][1]:.0f}s)")
+        print(f"Slowest: {times[-1][0]} ({times[-1][1]:.0f}s)")
+
+    return 0 if failed == 0 else 1
+
+
 def run_jobs(
     jobs: list[Job],
     devices: list[int],
@@ -201,36 +235,7 @@ def run_jobs(
         t.join()
 
     elapsed = time.time() - start_time
-    passed = sum(1 for r in results if r.returncode == 0)
-    failed = total - passed
-
-    print()
-    print("=" * 60)
-    print("Run Complete")
-    print("=" * 60)
-    print(f"Total:    {total}")
-    print(f"Passed:   {passed}")
-    print(f"Failed:   {failed}")
-    print(f"Time:     {elapsed:.0f}s ({elapsed / 60:.1f}m)")
-    print(f"Output:   {output}")
-
-    if failed:
-        print("\nFailed jobs:")
-        for r in results:
-            if r.returncode != 0:
-                print(f"  {r.label} ({r.elapsed:.0f}s, cuda:{r.gpu})")
-
-    if passed:
-        times = sorted(
-            [(r.label, r.elapsed) for r in results if r.returncode == 0],
-            key=lambda x: x[1],
-        )
-        avg = sum(t for _, t in times) / len(times)
-        print(f"\nAvg time per job: {avg:.0f}s ({avg / 60:.1f}m)")
-        print(f"Fastest: {times[0][0]} ({times[0][1]:.0f}s)")
-        print(f"Slowest: {times[-1][0]} ({times[-1][1]:.0f}s)")
-
-    return 0 if failed == 0 else 1
+    return _summarize_results(results, total, elapsed, output)
 
 
 __all__ = [

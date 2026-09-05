@@ -84,8 +84,6 @@ optional-dependencies.dev = [
   "pytest-cov>=4.1",
   "pytest-xdist>=3.6",
   "ruff==0.15.10",
-  "ty>=0.0.21",
-  "types-pyyaml>=6",
 ]
 optional-dependencies.docs = [
   "linkify-it-py>=2",
@@ -137,45 +135,51 @@ exclude = [
   "dist",
   "outputs",
 ]
-extend-exclude = [
-  "scripts/check_refactor_style.py",
-  "src/torchgeo_bench/commands",
-  "src/torchgeo_bench/config_schema.py",
-  "src/torchgeo_bench/image_cli.py",
-  "src/torchgeo_bench/legacy_run.py",
-  "src/torchgeo_bench/models/build.py",
-  "src/torchgeo_bench/preprocessing.py",
-  "tests/test_config_schema.py",
-  "tests/test_image_cli.py",
-  "tests/test_lazy_commands.py",
-  "tests/test_legacy_run.py",
-  "tests/test_model_build.py",
-  "tests/test_preprocessing.py",
-  "tests/test_refactor_style.py",
-]
 lint.select = [
-  "ARG", # flake8-unused-arguments
-  "B",   # flake8-bugbear
-  "C4",  # flake8-comprehensions
-  "D",   # pydocstyle
-  "E",   # pycodestyle errors
-  "F",   # pyflakes
-  "I",   # isort
-  "SIM", # flake8-simplify
-  "UP",  # pyupgrade
-  "W",   # pycodestyle warnings
+  "ARG",     # flake8-unused-arguments
+  "B",       # flake8-bugbear
+  "C4",      # flake8-comprehensions
+  "C901",    # function complexity
+  "D",       # pydocstyle
+  "E",       # pycodestyle errors
+  "F",       # pyflakes
+  "I",       # isort
+  "PGH004",  # blanket noqa
+  "PIE",     # unnecessary code
+  "PLR0912", # too many branches
+  "PLR0915", # too many statements
+  "PLR5501", # collapsible else-if
+  "PT",      # pytest style
+  "RET505",  # else after return
+  "RET506",  # else after raise
+  "RET507",  # else after continue
+  "RET508",  # else after break
+  "RUF100",  # unused noqa
+  "SIM",     # flake8-simplify
+  "TID251",  # banned imports
+  "UP",      # pyupgrade
+  "W",       # pycodestyle warnings
+  "W505",    # long comments and docstrings
 ]
 lint.ignore = [
-  "B008", # do not perform function calls in argument defaults
-  "B905", # zip() without an explicit strict= parameter
-  "D104", # missing docstring in public package
-  "D105", # missing docstring in magic method
-  "D107", # missing docstring in __init__ (documented in class docstring)
-  "E501", # line too long (handled by ruff format)
+  "B008",   # do not perform function calls in argument defaults
+  "B905",   # zip() without an explicit strict= parameter
+  "D104",   # missing docstring in public package
+  "D105",   # missing docstring in magic method
+  "D107",   # missing docstring in __init__ (documented in class docstring)
+  "E501",   # line too long (handled by ruff format)
+  "SIM105", # allow explicit try/except
+  "SIM108", # allow explicit if/else
+  "SIM116", # allow explicit branches
 ]
 lint.per-file-ignores."experiments/scripts/**/*.py" = [ "D" ]
 lint.per-file-ignores."tests/**/*.py" = [ "ARG", "D" ]
+lint.flake8-tidy-imports.banned-api."__future__.annotations".msg = "Use ordinary annotations or quoted forward references."
+lint.mccabe.max-complexity = 10
+lint.pycodestyle.max-doc-length = 100
 lint.pydocstyle.convention = "google"
+lint.pylint.max-branches = 12
+lint.pylint.max-statements = 50
 
 [tool.pytest]
 ini_options.addopts = [

@@ -11,8 +11,6 @@ registry spec below, and ``get_bench_dataset_class`` imports just the one
 module that defines the requested dataset.
 """
 
-from __future__ import annotations
-
 import logging
 import warnings
 from importlib import import_module
@@ -150,7 +148,9 @@ class _ResizeTransform:
         return sample
 
 
-def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
+def _make_loader(
+    ds: "Dataset", *, batch_size: int, shuffle: bool, num_workers: int
+) -> "DataLoader":
     import torch
     from torch.utils.data import DataLoader
 
@@ -171,7 +171,7 @@ def get_datasets(
     num_workers: int = 8,
     image_size: int | None = None,
     interpolation: str = "bilinear",
-    bands: str | Iterable[str] | None = "rgb",
+    bands: "str | Iterable[str] | None" = "rgb",
     time_steps: int | None = None,
 ) -> tuple:
     """Load benchmark dataset splits and dataloaders.

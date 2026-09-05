@@ -199,6 +199,15 @@ def run_coordbench(cfg: DictConfig) -> None:
     logger.info("CoordBench complete. Results appended to %s", output_path)
 
 
+def _test_sample_count(labels: np.ndarray, task_type: str, test_mask: np.ndarray | None) -> int:
+    """Count held-out samples, or finite regression labels for cross-validation."""
+    if test_mask is not None:
+        return int(np.asarray(test_mask, dtype=bool).sum())
+    if task_type == "regression":
+        return int(np.isfinite(np.asarray(labels, dtype=np.float64)).sum())
+    return int(len(labels))
+
+
 def _evaluate_benchmark(
     bench: CoordBenchmark,
     encoder: LocationEncoder,
@@ -257,12 +266,7 @@ def _evaluate_benchmark(
                     fold_assign=fold_assign,
                 )
                 std = float(np.std(fold_scores)) if len(fold_scores) > 1 else 0.0
-                if test_mask is not None:
-                    n_test = int(np.asarray(test_mask, dtype=bool).sum())
-                elif bench.task_type == "regression":
-                    n_test = int(np.isfinite(np.asarray(labels, dtype=np.float64)).sum())
-                else:
-                    n_test = int(len(labels))
+                n_test = _test_sample_count(labels, bench.task_type, test_mask)
                 rows.append(
                     CoordResult(
                         dataset=bench.name,

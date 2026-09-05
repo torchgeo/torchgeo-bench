@@ -282,7 +282,7 @@ def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
 def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mixed-sensor band sets have no single input unit; must not eagerly call detect_input_unit() outside model_native."""
+    """Skip unit detection for mixed-sensor bands outside model_native normalization."""
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     monkeypatch.setattr(
@@ -305,7 +305,7 @@ def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
 def test_torchgeo_backbone_skips_unit_mismatch_warning_outside_model_native(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Same gap in _warn_unit_mismatch's own detect_input_unit() call: must not run outside model_native."""
+    """Skip unit mismatch warnings outside model_native normalization."""
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _TinyResNet(nn.Module):

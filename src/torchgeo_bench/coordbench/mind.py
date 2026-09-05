@@ -54,7 +54,7 @@ class SIRENLayer(nn.Module):
 
 
 class ReSIRENLocationEncoder(nn.Module):
-    """Equal-Earth coords (+ optional Fourier year) -> residual-SIREN MLP -> pooled trunk -> head."""
+    """Encode Equal-Earth coordinates and optional Fourier year with a residual-SIREN MLP."""
 
     def __init__(
         self,
@@ -92,7 +92,7 @@ class ReSIRENLocationEncoder(nn.Module):
     def forward(
         self, latlon: Tensor, year: Tensor | None = None, return_features: bool = False
     ) -> Tensor:
-        """Encode ``(lat, lon)`` degrees to the pooled trunk (``return_features``) or head output."""
+        """Encode ``(lat, lon)`` degrees to trunk features or head output."""
         loc = equal_earth_projection(latlon)
         if self.use_year:
             if year is None:
@@ -105,7 +105,7 @@ class ReSIRENLocationEncoder(nn.Module):
 
 
 def load_mind(ckpt_path: str, device: str = "cpu") -> ReSIRENLocationEncoder:
-    """Load a MIND checkpoint (``.safetensors`` or ``.pt``), inferring its shape from the weights."""
+    """Load a MIND checkpoint, inferring its shape from the weights."""
     if str(ckpt_path).endswith(".safetensors"):
         from safetensors.torch import load_file
 

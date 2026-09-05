@@ -139,6 +139,23 @@ def _setup_logging(verbose: bool = False) -> None:
     )
 
 
+def _input_overrides(args: argparse.Namespace) -> list[str]:
+    """Translate dataset input flags into config overrides."""
+    overrides = []
+    if getattr(args, "partition", None) is not None:
+        overrides.append(f"dataset.partition={args.partition}")
+    if getattr(args, "bands", None) is not None:
+        bands = args.bands if args.bands in ("rgb", "all") else f"[{args.bands}]"
+        overrides.append(f"dataset.bands={bands}")
+    if getattr(args, "batch_size", None) is not None:
+        overrides.append(f"dataset.batch_size={args.batch_size}")
+    if getattr(args, "image_size", None) is not None:
+        overrides.append(f"dataset.image_size={args.image_size}")
+    if getattr(args, "normalization", None) is not None:
+        overrides.append(f"dataset.normalization={args.normalization}")
+    return overrides
+
+
 def _flag_overrides(args: argparse.Namespace) -> list[str]:
     """Translate convenience flags into config dotlist overrides."""
     overrides = []
@@ -155,17 +172,7 @@ def _flag_overrides(args: argparse.Namespace) -> list[str]:
         overrides.append("resume=true")
     if getattr(args, "seed", None) is not None:
         overrides.append(f"seed={args.seed}")
-    if getattr(args, "partition", None) is not None:
-        overrides.append(f"dataset.partition={args.partition}")
-    if getattr(args, "bands", None) is not None:
-        bands = args.bands if args.bands in ("rgb", "all") else f"[{args.bands}]"
-        overrides.append(f"dataset.bands={bands}")
-    if getattr(args, "batch_size", None) is not None:
-        overrides.append(f"dataset.batch_size={args.batch_size}")
-    if getattr(args, "image_size", None) is not None:
-        overrides.append(f"dataset.image_size={args.image_size}")
-    if getattr(args, "normalization", None) is not None:
-        overrides.append(f"dataset.normalization={args.normalization}")
+    overrides.extend(_input_overrides(args))
     if getattr(args, "skip_linear", False):
         overrides.append("eval.skip_linear=true")
     if getattr(args, "bootstrap", None) is not None:

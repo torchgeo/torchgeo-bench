@@ -35,8 +35,6 @@ Extraction is deterministic: re-running against unchanged raw data reproduces
 byte-identical JSON.
 """
 
-from __future__ import annotations
-
 import glob
 import json
 import logging
@@ -121,7 +119,7 @@ class GeoRecord:
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: dict) -> GeoRecord:
+    def from_json(cls, data: dict) -> "GeoRecord":
         """Rebuild a record from its stored form, ignoring unknown keys."""
         known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in data.items() if k in known})
@@ -175,8 +173,8 @@ def _v1_origin(path: str) -> tuple[float | None, float | None, str]:
 
     try:
         with h5py.File(path, "r") as f:
-            meta = _safe_unpickle(eval(f.attrs["pickle"]))  # noqa: S307 - geobench's own format
-    except Exception as exc:  # noqa: BLE001 - surfaced via the failure-rate gate
+            meta = _safe_unpickle(eval(f.attrs["pickle"]))  # GeoBench's own format.
+    except Exception as exc:  # Surfaced via the failure-rate gate.
         return None, None, f"ERR {type(exc).__name__}: {exc}"
 
     for key, entry in meta.items():
@@ -259,7 +257,7 @@ def _natural_earth_countries() -> str | None:
         return shpreader.natural_earth(
             resolution="110m", category="cultural", name="admin_0_countries"
         )
-    except Exception as exc:  # noqa: BLE001 - continents are optional enrichment
+    except Exception as exc:  # Continents are optional enrichment.
         logger.warning("natural_earth lookup failed, skipping continents: %s", exc)
         return None
 

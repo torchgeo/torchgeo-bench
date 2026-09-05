@@ -42,6 +42,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets  # noqa: E402
+from torchgeo_bench.datasets.base import BandSpec, BenchDataset  # noqa: E402
 from torchgeo_bench.linear import LogisticRegression  # noqa: E402
 from torchgeo_bench.main import embed_split  # noqa: E402
 
@@ -92,7 +93,7 @@ def parse_bands(value: object) -> str | list[str]:
     return [b.strip() for b in s.split(",") if b.strip()]
 
 
-def main() -> None:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, help="Dataset name (e.g. m-eurosat).")
     parser.add_argument(
@@ -125,7 +126,53 @@ def main() -> None:
         help="Overwrite existing prob files instead of skipping.",
     )
     parser.add_argument("--verbose", action="store_true")
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def _fit_probe(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_val: np.ndarray,
+    y_val: np.ndarray,
+    best_c: float,
+    seed: int,
+    device: str,
+    is_multilabel: bool,
+) -> LogisticRegression:
+    """Fit the probe on the combined train and validation splits."""
+    x_fit_np = np.concatenate([x_train, x_val], axis=0)
+    y_fit_np = np.concatenate([y_train, y_val], axis=0)
+    if is_multilabel:
+        y_fit = torch.from_numpy(y_fit_np).float()
+    else:
+        y_fit = torch.from_numpy(y_fit_np).long()
+    x_fit = torch.from_numpy(x_fit_np)
+
+    clf = LogisticRegression(
+        C=best_c,
+        max_iter=4000,
+        tol=1e-6,
+        random_state=seed,
+        device=device,
+        multi_label=is_multilabel,
+    )
+    clf.fit(x_fit, y_fit)
+    return clf
+
+
+def _band_specs(bench: BenchDataset, bands: str | list[str] | None) -> list[BandSpec]:
+    """Resolve dataset band statistics in the requested order."""
+    if bands == "rgb":
+        names = tuple(bench.rgb_bands)
+    elif bands in ("all", None):
+        names = None
+    else:
+        names = tuple(bands)
+    return bench.select_band_specs(names)
+
+
+def main() -> None:
+    args = _parse_args()
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
@@ -197,15 +244,7 @@ def main() -> None:
         pin_memory=train_loader_shuffled.pin_memory,
     )
 
-    # Resolve BandSpecs for the model wrapper, exactly like main.py.
-    bench_for_bands = ds_cls()
-    if bands_value == "rgb":
-        bands_resolved = tuple(bench_for_bands.rgb_bands)
-    elif bands_value in ("all", None):
-        bands_resolved = None
-    else:
-        bands_resolved = tuple(bands_value)
-    bands_list = bench_for_bands.select_band_specs(bands_resolved)
+    bands_list = _band_specs(ds_cls(), bands_value)
 
     model = instantiate(
         model_cfg,
@@ -234,24 +273,7 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # Fit linear probe on train+val (matches merge_val=True default).
-    x_fit_np = np.concatenate([x_train, x_val], axis=0)
-    y_fit_np = np.concatenate([y_train, y_val], axis=0)
-    if is_multilabel:
-        y_fit = torch.from_numpy(y_fit_np).float()
-    else:
-        y_fit = torch.from_numpy(y_fit_np).long()
-    x_fit = torch.from_numpy(x_fit_np)
-
-    clf = LogisticRegression(
-        C=best_c,
-        max_iter=4000,
-        tol=1e-6,
-        random_state=args.seed,
-        device=args.device,
-        multi_label=is_multilabel,
-    )
-    clf.fit(x_fit, y_fit)
+    clf = _fit_probe(x_train, y_train, x_val, y_val, best_c, args.seed, args.device, is_multilabel)
 
     classes = (
         np.arange(y_train.shape[1], dtype=np.int64)

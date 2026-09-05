@@ -85,7 +85,7 @@ def measure(model, size: int = 224) -> dict[str, tuple[int, int]]:
     seen: dict[str, tuple[int, int]] = {}
     hooks = []
 
-    def make_hook(name):  # noqa: D401
+    def make_hook(name):
         def hook(_module, _inp, out):
             if isinstance(out, (tuple, list)) and out:
                 out = out[0]

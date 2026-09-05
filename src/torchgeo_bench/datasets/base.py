@@ -14,8 +14,6 @@ dependency-free :mod:`torchgeo_bench.bands`, and torch is only imported for
 type checking.
 """
 
-from __future__ import annotations
-
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -82,7 +80,7 @@ class BenchDataset(ABC):
         wrappers it is the dataset's own root (e.g. ``data/eurosat``).
         """
 
-    def select_band_specs(self, bands: Iterable[str] | None) -> list[BandSpec]:
+    def select_band_specs(self, bands: "Iterable[str] | None") -> list[BandSpec]:
         """Return the :class:`BandSpec` entries matching *bands*.
 
         Preserves the order given by *bands*. Raises ``ValueError`` if any
@@ -107,8 +105,8 @@ class BenchDataset(ABC):
         *,
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-    ) -> Dataset:
+        transform: "Callable | None" = None,
+    ) -> "Dataset":
         """Return a PyTorch :class:`~torch.utils.data.Dataset` for a split.
 
         Datasets always emit raw float32 values; normalization is the

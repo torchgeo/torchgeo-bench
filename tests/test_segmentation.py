@@ -53,7 +53,7 @@ class WrappedBackbone(nn.Module):
 
 
 class ViTBackbone(nn.Module):
-    """Backbone that emits (B, L, C) tokens from an intermediate layer, mimicking a ViT patch encoder."""
+    """Emit (B, L, C) tokens from an intermediate layer, mimicking a ViT patch encoder."""
 
     def __init__(self):
         super().__init__()
@@ -671,7 +671,7 @@ def test_probe_patch_linear_cached_features():
 
 
 def test_extract_segmentation_features_returns_cached_dataset(mock_backbone, dummy_data):
-    """extract_segmentation_features produces a CachedFeaturesDataset with correct length and dtypes."""
+    """Check the cached feature dataset's length and dtypes."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])

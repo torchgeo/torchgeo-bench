@@ -27,30 +27,17 @@ import pandas as pd
 logger = logging.getLogger("perclass-sl")
 
 
-def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFrame:
-    from cleanlab.filter import find_label_issues
-    from cleanlab.rank import get_label_quality_scores
+def _class_metrics(
+    y: np.ndarray,
+    probs: np.ndarray,
+    classes: np.ndarray,
+    pred: np.ndarray,
+    quality: np.ndarray,
+    is_issue: np.ndarray,
+) -> pd.DataFrame:
     from sklearn.metrics import average_precision_score
 
-    z = np.load(npz_path, allow_pickle=True)
-    labels = z["labels"]
-    probs = z["probs"].astype(np.float32)
-    classes = z["classes"]
-    if labels.ndim != 1:
-        raise SystemExit(f"{npz_path}: not single-label (labels ndim={labels.ndim})")
-
-    label_to_idx = {int(c): i for i, c in enumerate(classes.tolist())}
-    y = np.array([label_to_idx[int(v)] for v in labels], dtype=np.int64)
     K = probs.shape[1]
-    pred = probs.argmax(axis=1)
-
-    quality = get_label_quality_scores(labels=y, pred_probs=probs)
-    issues_idx = find_label_issues(
-        labels=y, pred_probs=probs, return_indices_ranked_by="self_confidence"
-    )
-    is_issue = np.zeros(len(y), dtype=bool)
-    is_issue[issues_idx] = True
-
     rows = []
     for c in range(K):
         in_class = y == c
@@ -94,7 +81,33 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
                 "mean_quality": float(quality[in_class].mean()),
             }
         )
-    df = pd.DataFrame(rows)
+    return pd.DataFrame(rows)
+
+
+def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFrame:
+    from cleanlab.filter import find_label_issues
+    from cleanlab.rank import get_label_quality_scores
+
+    z = np.load(npz_path, allow_pickle=True)
+    labels = z["labels"]
+    probs = z["probs"].astype(np.float32)
+    classes = z["classes"]
+    if labels.ndim != 1:
+        raise SystemExit(f"{npz_path}: not single-label (labels ndim={labels.ndim})")
+
+    label_to_idx = {int(c): i for i, c in enumerate(classes.tolist())}
+    y = np.array([label_to_idx[int(v)] for v in labels], dtype=np.int64)
+    K = probs.shape[1]
+    pred = probs.argmax(axis=1)
+
+    quality = get_label_quality_scores(labels=y, pred_probs=probs)
+    issues_idx = find_label_issues(
+        labels=y, pred_probs=probs, return_indices_ranked_by="self_confidence"
+    )
+    is_issue = np.zeros(len(y), dtype=bool)
+    is_issue[issues_idx] = True
+
+    df = _class_metrics(y, probs, classes, pred, quality, is_issue)
 
     stem = npz_path.stem
     dataset, rest = stem.split("__", 1)

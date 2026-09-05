@@ -62,25 +62,7 @@ def extract_features(
 
         with torch.no_grad(), torch.inference_mode():
             features = model(images)
-            if isinstance(features, torch.Tensor):
-                features = features.cpu().numpy()
-            else:
-                if "norm" in features:
-                    features = features["norm"].cpu().numpy()
-                elif "global_pool" in features:
-                    features = features["global_pool"].cpu().numpy()
-                elif "head.global_pool" in features:
-                    features = features["head.global_pool"].cpu().numpy()
-                    if features.ndim == 3 and features.shape[1] == 1:
-                        features = features[:, 0, :]
-                else:
-                    raise ValueError(f"Unexpected features format: {features.keys()}")
-
-            if features.ndim == 1:
-                features = features[np.newaxis, :]
-
-            if features.ndim == 3:
-                features = np.mean(features, axis=1, keepdims=False)
+            features = _pooled_features(features)
 
         x_all.append(features)
         y_all.append(labels)
@@ -89,3 +71,26 @@ def extract_features(
     y_all = np.concatenate(y_all, axis=0)
 
     return x_all, y_all
+
+
+def _pooled_features(features: torch.Tensor | dict[str, torch.Tensor]) -> np.ndarray:
+    """Convert supported model outputs to pooled NumPy features."""
+    if isinstance(features, torch.Tensor):
+        features = features.cpu().numpy()
+    elif "norm" in features:
+        features = features["norm"].cpu().numpy()
+    elif "global_pool" in features:
+        features = features["global_pool"].cpu().numpy()
+    elif "head.global_pool" in features:
+        features = features["head.global_pool"].cpu().numpy()
+        if features.ndim == 3 and features.shape[1] == 1:
+            features = features[:, 0, :]
+    else:
+        raise ValueError(f"Unexpected features format: {features.keys()}")
+
+    if features.ndim == 1:
+        features = features[np.newaxis, :]
+
+    if features.ndim == 3:
+        features = np.mean(features, axis=1, keepdims=False)
+    return features

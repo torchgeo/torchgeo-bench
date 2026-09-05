@@ -39,6 +39,56 @@ def _validation_curve(log_path: Path, expected_epochs: int) -> tuple[int, float,
     return best_epoch, best_value, matches[-1][1]
 
 
+def _write_summary(combined: pd.DataFrame, output: Path) -> None:
+    """Write bootstrap summaries and the best variant per model."""
+    summary = (
+        combined.groupby("variant")
+        .agg(
+            comparisons=("delta_vs_baseline_final_val", "size"),
+            mean_val_delta=("delta_vs_baseline_final_val", "mean"),
+            median_val_delta=("delta_vs_baseline_final_val", "median"),
+            min_val_delta=("delta_vs_baseline_final_val", "min"),
+            max_val_delta=("delta_vs_baseline_final_val", "max"),
+        )
+        .sort_values("mean_val_delta", ascending=False)
+    )
+    rng = np.random.default_rng(0)
+    ci_lower: list[float] = []
+    ci_upper: list[float] = []
+    for variant in summary.index:
+        deltas = combined.loc[
+            combined["variant"] == variant, "delta_vs_baseline_final_val"
+        ].to_numpy()
+        bootstrap_means = rng.choice(
+            deltas,
+            size=(20_000, len(deltas)),
+            replace=True,
+        ).mean(axis=1)
+        lower, upper = np.quantile(bootstrap_means, [0.025, 0.975])
+        ci_lower.append(float(lower))
+        ci_upper.append(float(upper))
+    summary["mean_val_delta_ci_lower"] = ci_lower
+    summary["mean_val_delta_ci_upper"] = ci_upper
+    summary_path = output.with_name(f"{output.stem}_summary.csv")
+    summary.to_csv(summary_path)
+
+    model_variant = (
+        combined.groupby(["model", "variant"])
+        .agg(
+            mean_final_val_miou=("final_val_miou", "mean"),
+            mean_test_miou=("test_miou", "mean"),
+            mean_test_delta=("delta_vs_baseline", "mean"),
+        )
+        .reset_index()
+    )
+    selected = model_variant.loc[
+        model_variant.groupby("model")["mean_final_val_miou"].idxmax()
+    ].sort_values("model")
+    selected_path = output.with_name(f"{output.stem}_selected.csv")
+    selected.to_csv(selected_path, index=False)
+    print(summary.to_string(float_format=lambda value: f"{value:.4f}"))
+
+
 def main() -> None:
     """Write one combined, analysis-ready row per study job."""
     args = _parse_args()
@@ -114,52 +164,7 @@ def main() -> None:
         combined.to_csv(temporary, index=False)
         temporary.replace(args.output)
 
-    summary = (
-        combined.groupby("variant")
-        .agg(
-            comparisons=("delta_vs_baseline_final_val", "size"),
-            mean_val_delta=("delta_vs_baseline_final_val", "mean"),
-            median_val_delta=("delta_vs_baseline_final_val", "median"),
-            min_val_delta=("delta_vs_baseline_final_val", "min"),
-            max_val_delta=("delta_vs_baseline_final_val", "max"),
-        )
-        .sort_values("mean_val_delta", ascending=False)
-    )
-    rng = np.random.default_rng(0)
-    ci_lower: list[float] = []
-    ci_upper: list[float] = []
-    for variant in summary.index:
-        deltas = combined.loc[
-            combined["variant"] == variant, "delta_vs_baseline_final_val"
-        ].to_numpy()
-        bootstrap_means = rng.choice(
-            deltas,
-            size=(20_000, len(deltas)),
-            replace=True,
-        ).mean(axis=1)
-        lower, upper = np.quantile(bootstrap_means, [0.025, 0.975])
-        ci_lower.append(float(lower))
-        ci_upper.append(float(upper))
-    summary["mean_val_delta_ci_lower"] = ci_lower
-    summary["mean_val_delta_ci_upper"] = ci_upper
-    summary_path = args.output.with_name(f"{args.output.stem}_summary.csv")
-    summary.to_csv(summary_path)
-
-    model_variant = (
-        combined.groupby(["model", "variant"])
-        .agg(
-            mean_final_val_miou=("final_val_miou", "mean"),
-            mean_test_miou=("test_miou", "mean"),
-            mean_test_delta=("delta_vs_baseline", "mean"),
-        )
-        .reset_index()
-    )
-    selected = model_variant.loc[
-        model_variant.groupby("model")["mean_final_val_miou"].idxmax()
-    ].sort_values("model")
-    selected_path = args.output.with_name(f"{args.output.stem}_selected.csv")
-    selected.to_csv(selected_path, index=False)
-    print(summary.to_string(float_format=lambda value: f"{value:.4f}"))
+    _write_summary(combined, args.output)
 
 
 if __name__ == "__main__":

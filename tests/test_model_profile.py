@@ -51,7 +51,8 @@ def test_measure_profile_cpu_returns_dict() -> None:
     assert isinstance(result, dict)
     assert "params_m" in result
     assert "throughput_samples_per_sec" in result
-    assert result["params_m"] is not None and result["params_m"] > 0
+    assert result["params_m"] is not None
+    assert result["params_m"] > 0
 
 
 def test_count_gflops_inference_attrerror_falls_back_to_no_grad() -> None:

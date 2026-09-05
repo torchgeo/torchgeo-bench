@@ -343,6 +343,150 @@ def _flops_row(
     return row
 
 
+def _classification_row(
+    cfg: DictConfig, model: nn.Module, base_meta: dict, device: torch.device
+) -> dict | None:
+    """Measure classification cost, skipping incompatible input bands."""
+    model_name = base_meta["name"]
+    band_config = base_meta["band_config"]
+    n_channels = base_meta["n_channels"]
+    image_size = base_meta["image_size"]
+    try:
+        metrics, used_batch = _measure_backbone(
+            model,
+            n_channels,
+            image_size,
+            device,
+            int(cfg.timing_batch_size),
+            int(cfg.n_warmup),
+            int(cfg.n_measure),
+        )
+        gflops_backbone = metrics["gflops"]
+        gflops_probe, params_probe_m, feature_dim = _probe_gflops(
+            model,
+            n_channels,
+            image_size,
+            device,
+            str(cfg.probe_head),
+            int(cfg.probe_num_classes),
+        )
+    except Exception as exc:
+        # Some wrappers only detect incompatible bands during their first forward pass.
+        cause = _is_band_incompatibility(exc)
+        if cause is None:
+            raise
+        logger.warning(
+            "Skipping %s/%s classification: model is incompatible with this "
+            "band config at forward time: %s",
+            model_name,
+            band_config,
+            cause,
+        )
+        return None
+    row = _flops_row(
+        base_meta,
+        model,
+        image_size,
+        task="classification",
+        gflops_backbone=gflops_backbone,
+        gflops_probe=gflops_probe,
+        gflops_total=(None if gflops_backbone is None else gflops_backbone + gflops_probe),
+        params_backbone_m=metrics["params_m"],
+        params_probe_m=params_probe_m,
+        feature_dim=feature_dim,
+        throughput_samples_per_sec=metrics["throughput_samples_per_sec"],
+        latency_ms_per_batch_p50=metrics["latency_ms_per_batch_p50"],
+        peak_gpu_mem_gb=metrics["peak_gpu_mem_gb"],
+        reserved_gpu_mem_gb=metrics["reserved_gpu_mem_gb"],
+        timing_batch_size=used_batch,
+    )
+    logger.info(
+        "%s/%s classification: backbone=%s GF probe=%.6f GF (D=%d)",
+        model_name,
+        band_config,
+        f"{gflops_backbone:.4f}" if gflops_backbone is not None else "None",
+        gflops_probe,
+        feature_dim,
+    )
+
+    return row
+
+
+def _segmentation_rows(
+    cfg: DictConfig,
+    model: nn.Module,
+    base_meta: dict,
+    device: torch.device,
+    seg_eval_cfg: DictConfig,
+    seg_layers: list[str],
+    completed: frozenset[tuple],
+) -> tuple[list[dict], int]:
+    """Measure configured segmentation heads that are not already complete."""
+    model_name = base_meta["name"]
+    band_config = base_meta["band_config"]
+    n_channels = base_meta["n_channels"]
+    image_size = base_meta["image_size"]
+    seg_band_configs = set(cfg.seg_band_configs)
+    if band_config not in seg_band_configs or not seg_layers:
+        if band_config in seg_band_configs and not seg_layers:
+            logger.info(
+                "No eval.segmentation.layers for %s — skipping segmentation cells", model_name
+            )
+        return [], 0
+
+    rows: list[dict] = []
+    n_skipped = 0
+    for head_type in list(cfg.seg_head_types):
+        seg_key = (model_name, band_config, "segmentation", head_type)
+        if seg_key in completed:
+            logger.info("Skip (%s, %s, %s) — already done", model_name, band_config, head_type)
+            continue
+        head_cfg = OmegaConf.merge(
+            seg_eval_cfg,
+            OmegaConf.create({"segmentation": {"head_type": head_type}}),
+        )
+        try:
+            # Probe construction runs a forward pass, so the model must be on-device.
+            probe, _solver = build_seg_probe_and_solver(
+                model, int(cfg.seg_num_classes), head_cfg, device, 1e-3
+            )
+        except (ValueError, RuntimeError) as exc:
+            logger.warning(
+                "Skipping %s/%s seg head=%s: %s", model_name, band_config, head_type, exc
+            )
+            n_skipped += 1
+            continue
+        probe.to(device).eval()
+
+        gflops_head = _seg_head_gflops(probe, n_channels, image_size, device)
+        rows.append(
+            _flops_row(
+                base_meta,
+                model,
+                image_size,
+                task="segmentation",
+                head_type=head_type,
+                num_classes=int(cfg.seg_num_classes),
+                gflops_head=gflops_head,
+                params_backbone_m=_count_params(model),
+                params_head_m=_count_params(probe.head),
+                feature_dim=sum(probe.channels_list),
+            )
+        )
+        logger.info(
+            "%s/%s segmentation head=%s: head=%.4f GF (taps=%s)",
+            model_name,
+            band_config,
+            head_type,
+            gflops_head,
+            probe.channels_list,
+        )
+        del probe
+        _free(device)
+
+    return rows, n_skipped
+
+
 def main(cfg: DictConfig) -> None:
     """Measure per-sample compute cost for one model config."""
     output_path = str(cfg.output)
@@ -353,12 +497,10 @@ def main(cfg: DictConfig) -> None:
     normalization = str(cfg.normalization)
     model_target = str(cfg.model._target_)
     config_name = str(cfg.model.get("name", model_target.split(".")[-1]))
-    # TerraMind's _rgb / non-_rgb configs are the same model at two points on
-    # the band axis, so they report under one merged name.
+    # TerraMind RGB and S2 configs report under the same model name.
     model_name = _TERRAMIND_MERGED_NAME.get(config_name, config_name)
 
-    ds_cls = get_bench_dataset_class(str(cfg.band_source))
-    bench = ds_cls()
+    bench = get_bench_dataset_class(str(cfg.band_source))()
     band_specs_for = {
         "rgb": bench.select_band_specs(bench.rgb_bands),
         "s2": bench.select_band_specs(None),
@@ -366,10 +508,7 @@ def main(cfg: DictConfig) -> None:
 
     completed = _load_completed(output_path) if bool(cfg.resume) else frozenset()
 
-    # Merge the model's eval block over the base eval config (models only
-    # override `layers` / `head_type`). Struct mode comes off first: model
-    # configs carry eval keys this pipeline ignores (e.g. `c_range`), which
-    # would otherwise raise ConfigKeyError on merge.
+    # Model presets may contain eval keys unused by this pipeline.
     seg_eval_cfg = OmegaConf.create(OmegaConf.to_container(cfg.eval, resolve=True))
     OmegaConf.set_struct(seg_eval_cfg, False)
     if "eval" in cfg.model and cfg.model.eval is not None:
@@ -380,8 +519,7 @@ def main(cfg: DictConfig) -> None:
     n_skipped = 0
 
     for band_config in list(cfg.band_configs):
-        # A TerraMind config only ever measures the band config its declared
-        # modality matches; the sibling `_rgb` / S2L2A config covers the other.
+        # Each TerraMind config measures only its declared modality.
         if _is_terramind(cfg.model):
             declared = str(cfg.model.get("modality", "S2L2A"))
             if declared != _MODALITY_FOR_BAND_CONFIG[band_config]:
@@ -405,138 +543,23 @@ def main(cfg: DictConfig) -> None:
             "num_classes": int(cfg.probe_num_classes),
         }
 
-        # --- classification cell ------------------------------------------
         cls_key = (model_name, band_config, "classification", "")
         if cls_key in completed:
             logger.info("Skip (%s, %s, classification) — already done", model_name, band_config)
         else:
-            try:
-                metrics, used_batch = _measure_backbone(
-                    model,
-                    n_channels,
-                    image_size,
-                    device,
-                    int(cfg.timing_batch_size),
-                    int(cfg.n_warmup),
-                    int(cfg.n_measure),
-                )
-                gflops_backbone = metrics["gflops"]
-                gflops_probe, params_probe_m, feature_dim = _probe_gflops(
-                    model,
-                    n_channels,
-                    image_size,
-                    device,
-                    str(cfg.probe_head),
-                    int(cfg.probe_num_classes),
-                )
-            except Exception as exc:
-                # Several wrappers only discover a band mismatch on the first
-                # forward pass (their band mapping runs inside
-                # `_forward_patch_features`). Same skip one stage later; must
-                # not abort — the other band config is usually fine.
-                cause = _is_band_incompatibility(exc)
-                if cause is None:
-                    raise
-                logger.warning(
-                    "Skipping %s/%s classification: model is incompatible with this "
-                    "band config at forward time: %s",
-                    model_name,
-                    band_config,
-                    cause,
-                )
+            row = _classification_row(cfg, model, base_meta, device)
+            if row is None:
                 n_skipped += 1
                 del model
                 _free(device)
                 continue
-            rows.append(
-                _flops_row(
-                    base_meta,
-                    model,
-                    image_size,
-                    task="classification",
-                    gflops_backbone=gflops_backbone,
-                    gflops_probe=gflops_probe,
-                    gflops_total=(
-                        None if gflops_backbone is None else gflops_backbone + gflops_probe
-                    ),
-                    params_backbone_m=metrics["params_m"],
-                    params_probe_m=params_probe_m,
-                    feature_dim=feature_dim,
-                    throughput_samples_per_sec=metrics["throughput_samples_per_sec"],
-                    latency_ms_per_batch_p50=metrics["latency_ms_per_batch_p50"],
-                    peak_gpu_mem_gb=metrics["peak_gpu_mem_gb"],
-                    reserved_gpu_mem_gb=metrics["reserved_gpu_mem_gb"],
-                    timing_batch_size=used_batch,
-                )
-            )
-            logger.info(
-                "%s/%s classification: backbone=%s GF probe=%.6f GF (D=%d)",
-                model_name,
-                band_config,
-                f"{gflops_backbone:.4f}" if gflops_backbone is not None else "None",
-                gflops_probe,
-                feature_dim,
-            )
+            rows.append(row)
 
-        # --- segmentation cells -------------------------------------------
-        seg_band_configs = set(cfg.seg_band_configs)
-        if band_config not in seg_band_configs or not seg_layers:
-            if band_config in seg_band_configs and not seg_layers:
-                logger.info(
-                    "No eval.segmentation.layers for %s — skipping segmentation cells", model_name
-                )
-            del model
-            _free(device)
-            continue
-
-        for head_type in list(cfg.seg_head_types):
-            seg_key = (model_name, band_config, "segmentation", head_type)
-            if seg_key in completed:
-                logger.info("Skip (%s, %s, %s) — already done", model_name, band_config, head_type)
-                continue
-            head_cfg = OmegaConf.merge(
-                seg_eval_cfg,
-                OmegaConf.create({"segmentation": {"head_type": head_type}}),
-            )
-            try:
-                # build_seg_probe_and_solver runs _dry_run_channels(), a real
-                # forward pass, so the model must already be on-device.
-                probe, _solver = build_seg_probe_and_solver(
-                    model, int(cfg.seg_num_classes), head_cfg, device, 1e-3
-                )
-            except (ValueError, RuntimeError) as exc:
-                logger.warning(
-                    "Skipping %s/%s seg head=%s: %s", model_name, band_config, head_type, exc
-                )
-                n_skipped += 1
-                continue
-            probe.to(device).eval()
-
-            gflops_head = _seg_head_gflops(probe, n_channels, image_size, device)
-            rows.append(
-                _flops_row(
-                    base_meta,
-                    model,
-                    image_size,
-                    task="segmentation",
-                    head_type=head_type,
-                    num_classes=int(cfg.seg_num_classes),
-                    gflops_head=gflops_head,
-                    params_backbone_m=_count_params(model),
-                    params_head_m=_count_params(probe.head),
-                    feature_dim=sum(probe.channels_list),
-                )
-            )
-            logger.info(
-                "%s/%s segmentation head=%s: head=%.4f GF (taps=%s)",
-                model_name,
-                band_config,
-                head_type,
-                gflops_head,
-                probe.channels_list,
-            )
-            del probe
-            _free(device)
+        segmentation_rows, skipped_heads = _segmentation_rows(
+            cfg, model, base_meta, device, seg_eval_cfg, seg_layers, completed
+        )
+        rows.extend(segmentation_rows)
+        n_skipped += skipped_heads
 
         del model
         _free(device)

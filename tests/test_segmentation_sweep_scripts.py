@@ -22,7 +22,8 @@ def _load_script(filename: str) -> ModuleType:
     path = ROOT / "scripts" / filename
     module_name = f"test_{path.stem}"
     spec = importlib.util.spec_from_file_location(module_name, path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)

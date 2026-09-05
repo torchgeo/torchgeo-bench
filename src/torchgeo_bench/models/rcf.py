@@ -195,7 +195,7 @@ class RCF(nn.Module):
 
             output = torch.cat((x1a_mean, x1b_mean, x1a_std, x1b_std), dim=1)
             return output
-        elif self.stats_mode == "all":
+        if self.stats_mode == "all":
             x1a_std = torch.std(x1a, dim=(2, 3), keepdim=False)
             x1b_std = torch.std(x1b, dim=(2, 3), keepdim=False)
             x1a_max = torch.amax(x1a, dim=(2, 3), keepdim=False)
@@ -207,11 +207,10 @@ class RCF(nn.Module):
                 (x1a_mean, x1b_mean, x1a_std, x1b_std, x1a_max, x1b_max, x1a_min, x1b_min), dim=1
             )
             return output
-        elif self.stats_mode == "mean":
+        if self.stats_mode == "mean":
             output = torch.cat((x1a_mean, x1b_mean), dim=1)
             return output
-        else:
-            raise ValueError(f"Unknown stats_mode: {self.stats_mode}")
+        raise ValueError(f"Unknown stats_mode: {self.stats_mode}")
 
 
 class _NormalizingDatasetView(Dataset):
