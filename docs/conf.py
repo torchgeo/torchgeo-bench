@@ -24,7 +24,7 @@ import torchgeo_bench
 # -- Project information -----------------------------------------------------
 
 project = "torchgeo-bench"
-copyright = "torchgeo-bench Contributors"
+copyright = "torchgeo-bench Contributors"  # noqa: A001 - Sphinx configuration key
 author = torchgeo_bench.__author__
 version = ".".join(torchgeo_bench.__version__.split(".")[:2])
 release = torchgeo_bench.__version__
@@ -218,7 +218,12 @@ def linkcode_resolve(domain: str, info: dict[str, str]) -> str | None:
         if sourcefile is None:
             return None
         source, lineno = inspect.getsource(obj), inspect.getsourcelines(obj)[1]
-    except Exception:
+    except (
+        ImportError,
+        AttributeError,
+        TypeError,
+        OSError,
+    ):  # allow-except: skip unavailable source links
         return None
 
     sourcefile = os.path.relpath(sourcefile, start=os.path.join(os.path.dirname(__file__), ".."))

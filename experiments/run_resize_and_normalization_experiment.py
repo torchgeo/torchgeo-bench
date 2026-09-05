@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Sweep resnet18 on m-eurosat varying image size, interpolation, and the model's input normalization mode.
+"""Sweep resnet18 on m-eurosat across image sizes, interpolation, and normalization modes.
 
 Sweeps the model-side ``input_normalization`` knob (``bands_zscore``,
 ``none``, ``imagenet``, ``timm_default``) — the dataset always emits raw
@@ -23,7 +23,7 @@ INTERPOLATIONS = ["bilinear", "bicubic", "nearest"]
 
 
 def build_jobs() -> list[Job]:
-    """Build the full norm × size × interpolation grid (skipping non-bilinear@null)."""
+    """Build the full normalization/size/interpolation grid (skipping non-bilinear@null)."""
     jobs: list[Job] = []
     for norm in NORMALIZATIONS:
         for size in IMAGE_SIZES:

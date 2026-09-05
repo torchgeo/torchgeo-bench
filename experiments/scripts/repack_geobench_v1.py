@@ -3,7 +3,7 @@ WebDataset tar shards.
 
 V1 ships ~22k tiny ``id_*.hdf5`` files per dataset, which makes the dataloader
 NFS-bound (one ``open()`` round-trip per sample).  Repacking into tar shards
-of ~1000 samples each cuts file-opens by 1000x and yields 5–10x dataloader
+of ~1000 samples each cuts file-opens by 1000x and yields 5-10x dataloader
 throughput on the same data.
 
 Usage::
@@ -49,7 +49,10 @@ class _StubUnpickler(pickle.Unpickler):
 def _safe_unpickle(b: bytes) -> dict:
     try:
         return pickle.loads(b)
-    except (ModuleNotFoundError, AttributeError):
+    except (
+        ModuleNotFoundError,
+        AttributeError,
+    ):  # allow-except: decode legacy GeoBench pickle classes
         return _StubUnpickler(io.BytesIO(b)).load()
 
 
@@ -67,7 +70,7 @@ def _resolve_pickle_bytes(raw: object) -> bytes:
     if isinstance(raw, str):
         # The upstream V1 distribution stored the bytes as a Python repr
         # of a bytestring (``"b'...'"``), so eval the string back.
-        return eval(raw)  # noqa: S307 — trusted dataset payload
+        return eval(raw)
     raise TypeError(f"Unexpected pickle attr type: {type(raw)}")
 
 
@@ -112,6 +115,23 @@ def repack(dataset_dir: Path, out_dir: Path, shard_size: int = 1000) -> int:
     return written
 
 
+def index_shards(shard_paths: list[Path]) -> dict[str, dict[str, tuple[Path, int, int]]]:
+    """Index tar members by suffix so sample IDs may contain dots."""
+    import tarfile
+
+    index: dict[str, dict[str, tuple[Path, int, int]]] = {}
+    for path in shard_paths:
+        with tarfile.open(path, "r") as t:
+            for m in t.getmembers():
+                for ext in ("bands.npz", "meta.pkl"):
+                    suffix = "." + ext
+                    if m.name.endswith(suffix):
+                        base = m.name[: -len(suffix)]
+                        index.setdefault(base, {})[ext] = (path, m.offset_data, m.size)
+                        break
+    return index
+
+
 def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
     """Cross-check the first ``n_samples`` between original HDF5 and shards."""
     import random
@@ -126,23 +146,9 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
         raise FileNotFoundError(f"No shards in {out_dir}")
 
     logger.info("Validating %d samples against %d shards...", len(targets), len(shard_paths))
-    # Index shards directly (matches the runtime loader's logic for sample
-    # IDs that contain ``.``) instead of relying on wds.WebDataset's
-    # first-dot key split.
-    import tarfile
+    index = index_shards(shard_paths)
 
-    index: dict[str, dict[str, tuple]] = {}
-    for path in shard_paths:
-        with tarfile.open(path, "r") as t:
-            for m in t.getmembers():
-                for ext in ("bands.npz", "meta.pkl"):
-                    suffix = "." + ext
-                    if m.name.endswith(suffix):
-                        base = m.name[: -len(suffix)]
-                        index.setdefault(base, {})[ext] = (path, m.offset_data, m.size)
-                        break
-
-    def _read(ref):
+    def _read(ref: tuple[Path, int, int]) -> bytes:
         path, offset, size = ref
         with open(path, "rb") as f:
             f.seek(offset)

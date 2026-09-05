@@ -1,6 +1,7 @@
 """Timm backbone wrapper for patch-level feature extraction."""
 
 import logging
+from typing import Any
 
 import timm
 import torch
@@ -8,7 +9,7 @@ import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._normalization import InputUnit
+from ._normalization import InputUnit, NormalizationStrategy
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,12 @@ class TimmPatchBenchModel(BenchModel):
             ``"none"`` (identity).
     """
 
-    def __init__(
+    _rgb_mean: torch.Tensor
+    _rgb_std: torch.Tensor
+    _band_min: torch.Tensor
+    _band_range: torch.Tensor
+
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -86,37 +92,12 @@ class TimmPatchBenchModel(BenchModel):
         target_size: int | None = None,
         use_cls_token: bool = False,
         input_normalization: str = "bands_zscore",
-        **_kwargs,
+        normalization: NormalizationStrategy | str = NormalizationStrategy.BANDSPEC_ZSCORE,
+        **_kwargs: object,
     ) -> None:
-        # Populate the BenchModel-level pretrain stats from timm's pretrained
-        # cfg *before* super().__init__ so the ``model_native`` normalisation
-        # strategy has mean/std to work with.  Without this, model_native
-        # raises ``requires expected_input_unit`` because timm wrappers don't
-        # subclass-declare those attrs (unlike terratorch / torchgeo
-        # wrappers that hard-code them).
-        #
-        # Only meaningful when num_channels == 3 — timm cfgs ship RGB stats.
-        # For multispectral inputs we leave the attrs at the class-level
-        # ``None`` defaults so build_normalizer raises a clear error if the
-        # caller asked for model_native (we have no per-channel stats).
-        if len(bands) == 3:
-            # timm.get_pretrained_cfg returns None for unknown model names.
-            # A typo should fail loudly at construction, not silently lose
-            # model_native — but only insist on a cfg existing when the
-            # caller is actually 3-band (the multispectral branch below
-            # already has no path to use it).
-            cfg = timm.get_pretrained_cfg(model_name)
-            if cfg is None:
-                raise RuntimeError(
-                    f"timm has no pretrained cfg for {model_name!r}; check the "
-                    f"model name (was the wrapper called with a fake/scratch model?)."
-                )
-            if cfg.mean is not None and cfg.std is not None:
-                self.expected_input_unit = InputUnit.REFLECTANCE_0_1
-                self.pretrain_mean = list(cfg.mean)
-                self.pretrain_std = list(cfg.std)
+        self.set_pretrain_stats(bands, model_name)
 
-        super().__init__(bands=bands, **_kwargs)
+        super().__init__(bands=bands, normalization=normalization, **_kwargs)
 
         if input_normalization not in _VALID_INPUT_NORMALIZATIONS:
             raise ValueError(
@@ -169,11 +150,24 @@ class TimmPatchBenchModel(BenchModel):
             )
             self.auto_resize = False
 
-        # Pre-compute fixed-RGB normalization tensors when applicable.  These
-        # ImageNet-style stats expect inputs in ``[0, 1]``, so we ALSO
-        # pre-compute per-channel min/max from the dataset's BandSpec list to
-        # rescale the raw input before applying mean/std.  Stored as buffers
-        # so they move with ``.to(device)``.
+        self.register_rgb_normalization(default_cfg)
+
+    def set_pretrain_stats(self, bands: list[BandSpec], model_name: str) -> None:
+        """Set RGB statistics before BenchModel creates its normalizer."""
+        if len(bands) == 3:
+            cfg = timm.get_pretrained_cfg(model_name)
+            if cfg is None:
+                raise RuntimeError(
+                    f"timm has no pretrained cfg for {model_name!r}; check the "
+                    f"model name (was the wrapper called with a fake/scratch model?)."
+                )
+            if cfg.mean is not None and cfg.std is not None:
+                self.expected_input_unit = InputUnit.REFLECTANCE_0_1
+                self.pretrain_mean = list(cfg.mean)
+                self.pretrain_std = list(cfg.std)
+
+    def register_rgb_normalization(self, default_cfg: dict[str, Any]) -> None:
+        """Register fixed RGB statistics and dataset ranges as buffers."""
         if self.input_normalization in ("imagenet", "timm_default"):
             if self.num_channels != 3:
                 raise ValueError(
@@ -190,7 +184,7 @@ class TimmPatchBenchModel(BenchModel):
                 cfg_std = default_cfg.get("std")
                 if cfg_mean is None or cfg_std is None:
                     raise ValueError(
-                        f"input_normalization='timm_default' but timm '{model_name}' has no "
+                        f"input_normalization='timm_default' but timm '{self.model_name}' has no "
                         "default_cfg mean/std — pick a different normalization mode."
                     )
 
@@ -199,9 +193,6 @@ class TimmPatchBenchModel(BenchModel):
             self.register_buffer("_rgb_mean", mean)
             self.register_buffer("_rgb_std", std)
 
-            # Per-channel raw-value range for the [0, 1] rescale step.  Use
-            # ``max - min`` as the divisor (band-min subtracted first); guard
-            # against degenerate zero-range bands.
             spec_min = torch.tensor([b.min for b in self.bands], dtype=torch.float32).view(
                 1, self.num_channels, 1, 1
             )
@@ -223,11 +214,11 @@ class TimmPatchBenchModel(BenchModel):
         # [0, 1] using BandSpec stats so the ImageNet (or timm-default)
         # mean/std (which were fitted on [0, 1] inputs) make sense, then
         # (x - mean) / std.
-        band_min = self._band_min.to(dtype=images.dtype)  # type: ignore[attr-defined]
-        band_range = self._band_range.to(dtype=images.dtype)  # type: ignore[attr-defined]
+        band_min = self._band_min.to(dtype=images.dtype)
+        band_range = self._band_range.to(dtype=images.dtype)
         scaled = (images - band_min) / band_range
-        mean = self._rgb_mean.to(dtype=images.dtype)  # type: ignore[attr-defined]
-        std = self._rgb_std.to(dtype=images.dtype)  # type: ignore[attr-defined]
+        mean = self._rgb_mean.to(dtype=images.dtype)
+        std = self._rgb_std.to(dtype=images.dtype)
         return (scaled - mean) / std
 
     def _permute_channels(self, images: torch.Tensor) -> torch.Tensor:

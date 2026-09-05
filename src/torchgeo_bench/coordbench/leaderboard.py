@@ -10,10 +10,13 @@ Usage: ``python -m torchgeo_bench.coordbench.leaderboard <results.csv> [--method
 """
 
 import argparse
+import logging
 
 import pandas as pd
 
 from torchgeo_bench.coordbench.taxonomy import FAMILIES, R2_FLOOR, family_of
+
+logger = logging.getLogger(__name__)
 
 
 def _bench_scores(df: pd.DataFrame) -> pd.DataFrame:
@@ -21,10 +24,8 @@ def _bench_scores(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     is_r2 = d["metric_name"] == "r2"
     d.loc[is_r2, "metric_value"] = d.loc[is_r2, "metric_value"].clip(lower=R2_FLOOR)
-    scores = (
-        d.groupby(["model_name", "dataset"], as_index=False)["metric_value"]
-        .mean()
-        .rename(columns={"metric_value": "score"})
+    scores = d.groupby(["model_name", "dataset"], as_index=False).agg(
+        score=("metric_value", "mean")
     )
     scores["family"] = scores["dataset"].map(family_of)
     return scores
@@ -56,6 +57,7 @@ def main() -> None:
     ap.add_argument("csv")
     ap.add_argument("--method", default="linear", help="probe method label (e.g. linear, knn5)")
     args = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     df = pd.read_csv(args.csv)
     method_col = df["method"].astype(str)
@@ -71,18 +73,20 @@ def main() -> None:
         scores = _bench_scores(sub)
         ranks, metrics = _leaderboard(scores)
         order = ranks["macro"].sort_values().index
-        print(
+        print(  # noqa: T201
             f"\n{'=' * 70}\n{view.upper()} holdout — {args.method} probe — MEAN RANK (lower=better)\n{'=' * 70}"
         )
         with pd.option_context("display.float_format", lambda v: f"{v:6.2f}"):
-            print(ranks.reindex(order))
-        print(f"\n{view.upper()} holdout — {args.method} probe — mean metric (R²/acc, per family)")
+            print(ranks.reindex(order))  # noqa: T201
+        print(  # noqa: T201
+            f"\n{view.upper()} holdout — {args.method} probe — mean metric (R²/acc, per family)"
+        )
         with pd.option_context("display.float_format", lambda v: f"{v:6.3f}"):
-            print(metrics.reindex(order))
+            print(metrics.reindex(order))  # noqa: T201
     # Surface anything unmapped so the taxonomy stays honest.
     unknown = sorted({d for d in df["dataset"].unique() if family_of(d) == "other"})
     if unknown:
-        print(f"\n[warn] benchmarks with no family (counted only in macro): {unknown}")
+        logger.warning("Benchmarks with no family (counted only in macro): %s", unknown)
 
 
 if __name__ == "__main__":

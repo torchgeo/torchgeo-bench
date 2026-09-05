@@ -4,11 +4,13 @@ from pathlib import Path
 from unittest import mock
 
 import pandas as pd
+import pytest
 import torch
+from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader, Dataset
 
-from torchgeo_bench.main import main
-from torchgeo_bench.resume import _resume_config_hash
+from torchgeo_bench.main import main, run_dataset
+from torchgeo_bench.resume import ResumeState, _resume_config_hash
 
 from .test_main_fast import _chainable_model_mock, _compose_cfg
 
@@ -110,6 +112,38 @@ def _mock_probe_and_solver():
 
     solver.evaluate.side_effect = evaluate
     return probe, solver
+
+
+def test_dataset_eval_merge_preserves_interpolation_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _cfg_for_segmentation(tmp_path / "out.csv")
+    with open_dict(cfg):
+        cfg.rate = 0.002
+        cfg.eval.epochs = 3
+        cfg.eval.segmentation.lr = "${rate}"
+        cfg.eval.segmentation.epochs = "${..epochs}"
+        cfg.model.eval = {"segmentation": {"batch_size": 6}}
+    original = OmegaConf.to_container(cfg, resolve=False)
+    captured: list[DictConfig] = []
+
+    def capture_eval(_cfg: DictConfig, eval_cfg: DictConfig, *_args: object) -> list[dict]:
+        captured.append(eval_cfg)
+        return []
+
+    loaders = _synthetic_segmentation_loaders()
+    monkeypatch.setattr("torchgeo_bench.main.get_datasets", lambda **_kwargs: loaders)
+    monkeypatch.setattr(
+        "torchgeo_bench.main.instantiate_dataset_model", lambda *_args: torch.nn.Identity()
+    )
+    monkeypatch.setattr("torchgeo_bench.main.run_segmentation", capture_eval)
+
+    run_dataset(cfg, "burn_scars", "test", ResumeState(set(), {}))
+
+    assert captured[0].segmentation.lr == 0.002
+    assert captured[0].segmentation.epochs == 3
+    assert captured[0].segmentation.batch_size == 6
+    assert OmegaConf.to_container(cfg, resolve=False) == original
 
 
 def test_segmentation_row_emitted(tmp_path: Path):

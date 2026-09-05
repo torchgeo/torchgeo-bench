@@ -1,5 +1,7 @@
 """BENV2 (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v2 import _V2Dataset
 
@@ -16,11 +18,11 @@ class BENV2(_V2Dataset):
     task = "classification"
     num_classes = 19
     multilabel = True
-    rgb_bands = ["b04", "b03", "b02"]
-    split_sizes = {"train": 20000, "val": 4000, "test": 4000}
+    rgb_bands: ClassVar[list[str]] = ["b04", "b03", "b02"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 20000, "val": 4000, "test": 4000}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("s2", "b01", "B01", mean=356.468, std=551.961, min=1, max=11450, wavelength_um=0.443),
         BandSpec("s2", "b02", "B02", mean=434.675, std=594.998, min=1, max=20592, wavelength_um=0.49),
         BandSpec("s2", "b03", "B03", mean=612.172, std=595.693, min=1, max=18640, wavelength_um=0.56),

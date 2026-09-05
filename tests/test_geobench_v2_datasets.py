@@ -63,9 +63,31 @@ def mock_v2_env():
 
 
 class TestV2Loading:
+    @pytest.mark.parametrize(
+        ("dataset_name", "download"),
+        [
+            ("m-eurosat", "geobench_v1 --datasets m-eurosat"),
+            ("burn_scars", "geobench_v2 --datasets burn_scars"),
+            ("eurosat", "eurosat"),
+            ("resisc45", "resisc45"),
+        ],
+    )
+    def test_missing_data_requires_download(self, tmp_path, monkeypatch, dataset_name, download):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("huggingface_hub.snapshot_download") as snapshot,
+            patch("geobench_v2.datasets.base.download_url") as download_url,
+            pytest.raises(FileNotFoundError) as error,
+        ):
+            get_datasets(dataset_name=dataset_name, num_workers=0)
+
+        assert f"torchgeo-bench download {download}" in str(error.value)
+        snapshot.assert_not_called()
+        download_url.assert_not_called()
+
     def test_benv2_classification(self, mock_v2_env):
         del mock_v2_env
-        ds, train_dl, val_dl, test_dl = get_datasets(
+        ds, train_dl, _, _ = get_datasets(
             dataset_name="benv2",
             return_val=True,
             batch_size=4,
@@ -82,7 +104,7 @@ class TestV2Loading:
 
     def test_burn_scars_segmentation(self, mock_v2_env):
         del mock_v2_env
-        ds, train_dl, test_dl = get_datasets(
+        _, train_dl, _ = get_datasets(
             dataset_name="burn_scars",
             batch_size=2,
             return_val=False,
@@ -141,6 +163,7 @@ class TestV2Loading:
             for call in mocked.call_args_list:
                 kwargs = call.kwargs
                 assert Path(kwargs["root"]) == Path("data/geobenchv2/benv2"), kwargs
+                assert kwargs["download"] is False
 
     def test_band_order_shape_dict(self, mock_v2_env):
         """Multi-modality V2 wrappers must hand a dict ``band_order`` upstream."""
@@ -191,7 +214,7 @@ class MockKuroSiwo:
     which is what the wrapper's ``band_order_strategy = "by_sensor"`` produces.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - matches the upstream dataset constructor.
         self,
         root,
         split,
@@ -245,7 +268,7 @@ class TestKuroSiwoCanonicalization:
             yield mocked
 
     @pytest.mark.parametrize(
-        "bands,expected_channels",
+        ("bands", "expected_channels"),
         [
             (("vv", "vh"), 2),
             (("vv",), 1),
@@ -318,7 +341,7 @@ class TestKuroSiwoLive:
     """Smoke tests against real Kuro Siwo data (skipped if the dataset is missing)."""
 
     @pytest.mark.parametrize(
-        "bands,expected_channels",
+        ("bands", "expected_channels"),
         [
             (("vv", "vh"), 2),
             (None, 3),  # all bands: vv, vh, dem

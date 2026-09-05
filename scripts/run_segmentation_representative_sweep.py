@@ -159,7 +159,7 @@ class SweepRunner(BaseGpuRunner):
     def _normalized_size(value: str) -> str:
         try:
             return str(int(float(value)))
-        except ValueError:
+        except ValueError:  # allow-except: preserve non-numeric size labels in resume keys
             return value
 
     def _completed_keys(self) -> set[tuple[str, str, str, str, str]]:

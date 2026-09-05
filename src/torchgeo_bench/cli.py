@@ -126,7 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _setup_logging(verbose: bool = False) -> None:
+def _setup_logging(*, verbose: bool = False) -> None:
     import logging
 
     from rich.logging import RichHandler
@@ -137,6 +137,23 @@ def _setup_logging(verbose: bool = False) -> None:
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True, markup=True)],
     )
+
+
+def input_overrides(args: argparse.Namespace) -> list[str]:
+    """Translate dataset input flags into config overrides."""
+    overrides = []
+    if getattr(args, "partition", None) is not None:
+        overrides.append(f"dataset.partition={args.partition}")
+    if getattr(args, "bands", None) is not None:
+        bands = args.bands if args.bands in ("rgb", "all") else f"[{args.bands}]"
+        overrides.append(f"dataset.bands={bands}")
+    if getattr(args, "batch_size", None) is not None:
+        overrides.append(f"dataset.batch_size={args.batch_size}")
+    if getattr(args, "image_size", None) is not None:
+        overrides.append(f"dataset.image_size={args.image_size}")
+    if getattr(args, "normalization", None) is not None:
+        overrides.append(f"dataset.normalization={args.normalization}")
+    return overrides
 
 
 def _flag_overrides(args: argparse.Namespace) -> list[str]:
@@ -155,17 +172,7 @@ def _flag_overrides(args: argparse.Namespace) -> list[str]:
         overrides.append("resume=true")
     if getattr(args, "seed", None) is not None:
         overrides.append(f"seed={args.seed}")
-    if getattr(args, "partition", None) is not None:
-        overrides.append(f"dataset.partition={args.partition}")
-    if getattr(args, "bands", None) is not None:
-        bands = args.bands if args.bands in ("rgb", "all") else f"[{args.bands}]"
-        overrides.append(f"dataset.bands={bands}")
-    if getattr(args, "batch_size", None) is not None:
-        overrides.append(f"dataset.batch_size={args.batch_size}")
-    if getattr(args, "image_size", None) is not None:
-        overrides.append(f"dataset.image_size={args.image_size}")
-    if getattr(args, "normalization", None) is not None:
-        overrides.append(f"dataset.normalization={args.normalization}")
+    overrides.extend(input_overrides(args))
     if getattr(args, "skip_linear", False):
         overrides.append("eval.skip_linear=true")
     if getattr(args, "bootstrap", None) is not None:
@@ -186,9 +193,9 @@ def _compose(args: argparse.Namespace, *, config_name: str, default_model: str |
             config_name=config_name,
             default_model=default_model,
         )
-    except OmegaConfBaseException as err:
+    except OmegaConfBaseException as err:  # allow-except: show a concise CLI configuration error
         raise SystemExit(f"error: bad config override: {err}") from err
-    except ValueError as err:
+    except ValueError as err:  # allow-except: show a concise CLI configuration error
         raise SystemExit(f"error: {err}") from err
 
 
@@ -208,7 +215,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
         try:
             print(model_config_path(args.model_help).read_text(), end="")
-        except ValueError as err:
+        except ValueError as err:  # allow-except: report an unknown model to the CLI user
             raise SystemExit(f"error: {err}") from err
         return
     cfg = _compose(args, config_name="config", default_model="rcf")
@@ -217,7 +224,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
         print(OmegaConf.to_yaml(cfg), end="")
         return
-    _setup_logging(bool(cfg.verbose))
+    _setup_logging(verbose=bool(cfg.verbose))
     from torchgeo_bench.main import main
 
     main(cfg)

@@ -10,7 +10,7 @@ overlap that turns IID-test accuracy into a leakage signal.
 Outputs:
 - ``results/cleanlab/dedup_eurosat_family.csv``: one row per (dataset, split,
   index) with its phash and any cross-dataset matches.
-- summary printed to stdout.
+- summary logged to stderr.
 """
 
 import argparse
@@ -75,11 +75,7 @@ def hash_dataset(dataset: str) -> pd.DataFrame:
             img = sample["image"]
             label = sample.get("label")
             label_val = int(label) if label is not None and np.ndim(label) == 0 else None
-            try:
-                ph = _phash_image(img)
-            except Exception as exc:
-                logger.warning("[%s/%s] hash failed for %d: %s", dataset, split, i, exc)
-                continue
+            ph = _phash_image(img)
             rows.append(
                 {
                     "dataset": dataset,
@@ -101,16 +97,11 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    frames = []
-    for d in args.datasets:
-        try:
-            frames.append(hash_dataset(d))
-        except Exception:
-            logger.exception("dataset %s failed", d)
+    frames = [hash_dataset(d) for d in args.datasets]
     if not frames:
         raise SystemExit("nothing hashed")
     df = pd.concat(frames, ignore_index=True)
@@ -125,13 +116,13 @@ def main() -> None:
         if len(ds_set) > 1:
             cross.append({"phash": ph, "n": len(sub), "datasets": ",".join(sorted(ds_set))})
     cross_df = pd.DataFrame(cross).sort_values("n", ascending=False) if cross else pd.DataFrame()
-    print(f"Hashed {len(df)} tiles across {df['dataset'].nunique()} datasets")
-    print(f"Cross-dataset collision groups: {len(cross_df)}")
+    logger.info("Hashed %d tiles across %d datasets", len(df), df["dataset"].nunique())
+    logger.info("Cross-dataset collision groups: %d", len(cross_df))
     if not cross_df.empty:
-        print(cross_df.head(20).to_string(index=False))
+        logger.info("\n%s", cross_df.head(20).to_string(index=False))
     cross_path = args.out.with_name(args.out.stem + "_collisions.csv")
     cross_df.to_csv(cross_path, index=False)
-    print(f"Wrote {args.out} and {cross_path}")
+    logger.info("Wrote %s and %s", args.out, cross_path)
 
 
 if __name__ == "__main__":

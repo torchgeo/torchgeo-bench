@@ -91,24 +91,22 @@ def instantiate_model(model_cfg: dict, bands: list) -> torch.nn.Module:
 
 def build_configs() -> list[dict]:
     """Build a flat list of ``(solver, C, lr)`` fit configurations."""
-    configs: list[dict] = []
-    for c in C_VALUES:
-        configs.append({"solver": "lbfgs", "C": float(c), "lr": 1.0})
-    for c in C_VALUES:
-        for lr in ADAM_LRS:
-            configs.append({"solver": "adam", "C": float(c), "lr": float(lr)})
+    configs = [{"solver": "lbfgs", "C": float(c), "lr": 1.0} for c in C_VALUES]
+    configs.extend(
+        {"solver": "adam", "C": float(c), "lr": float(lr)} for c in C_VALUES for lr in ADAM_LRS
+    )
     return configs
 
 
 def fit_one(
     cfg: dict,
-    x_train: torch.Tensor,
-    y_train: torch.Tensor,
+    train: tuple[torch.Tensor, torch.Tensor],
     x_val: torch.Tensor,
     x_test: torch.Tensor,
     device: torch.device,
 ) -> tuple[LogisticRegression, float, np.ndarray, np.ndarray, np.ndarray]:
     """Fit one config and return ``(clf, fit_seconds, train_pred, val_pred, test_pred)``."""
+    x_train, y_train = train
     clf = LogisticRegression(
         C=cfg["C"],
         lr=cfg["lr"],
@@ -197,9 +195,9 @@ def run_dataset(
         model.to(device).eval()
 
         logger.info("  Extracting features...")
-        x_train, y_train = extract_features(model, train_loader, device, verbose=False)
-        x_val, y_val = extract_features(model, val_loader, device, verbose=False)
-        x_test, y_test = extract_features(model, test_loader, device, verbose=False)
+        x_train, y_train = extract_features(model, train_loader, device, description=None)
+        x_val, y_val = extract_features(model, val_loader, device, description=None)
+        x_test, y_test = extract_features(model, test_loader, device, description=None)
         logger.info(
             "  Features: train=%s, val=%s, test=%s",
             x_train.shape,
@@ -219,8 +217,7 @@ def run_dataset(
         for cfg in tqdm(remaining, desc=f"  fits ({model_name})", leave=False):
             clf, fit_seconds, train_pred, val_pred, test_pred = fit_one(
                 cfg,
-                x_train_t,
-                y_train_t,
+                (x_train_t, y_train_t),
                 x_val_t,
                 x_test_t,
                 device,
@@ -239,9 +236,9 @@ def run_dataset(
                     "val_acc": float(accuracy_score(y_val, val_pred)),
                     "test_acc": float(accuracy_score(y_test, test_pred)),
                     "feature_dim": int(x_train.shape[1]),
-                    "n_train": int(len(x_train)),
-                    "n_val": int(len(x_val)),
-                    "n_test": int(len(x_test)),
+                    "n_train": len(x_train),
+                    "n_val": len(x_val),
+                    "n_test": len(x_test),
                     "max_iter": MAX_ITER,
                     "tol": TOL,
                     "device": str(device),
@@ -283,7 +280,6 @@ def main() -> int:
     )
 
     torch.manual_seed(SEED)
-    np.random.seed(SEED)
     logger.info("Running LBFGS-vs-Adam sweep on %d datasets -> %s", len(DATASETS), OUTPUT)
 
     for dataset_name in DATASETS:

@@ -4,8 +4,10 @@ from unittest import mock
 
 import numpy as np
 import pytest
+from omegaconf import OmegaConf
 
 from torchgeo_bench.main import LinearProbeDivergedError, evaluate_logistic
+from torchgeo_bench.utils import FeatureSplit, FeatureSplits
 
 
 def _multilabel_data(n_classes: int = 3):
@@ -48,18 +50,24 @@ def test_nan_candidate_c_does_not_crash_sweep():
 
     with mock.patch("torchgeo_bench.main.LogisticRegression", _StubModel):
         metric, lo, hi, best_c, calibration, calibration_ts = evaluate_logistic(
-            x_train,
-            y_train,
-            x_val,
-            y_val,
-            x_test,
-            y_test,
+            FeatureSplits(
+                FeatureSplit(x_train, y_train),
+                FeatureSplit(x_val, y_val),
+                FeatureSplit(x_test, y_test),
+            ),
             c_values=[0.1, 1.0, 10.0],
-            seed=0,
-            n_bootstrap=5,
-            merge_val=False,
-            device="cpu",
-            temp_scale=False,
+            cfg=OmegaConf.create(
+                {
+                    "seed": 0,
+                    "device": "cpu",
+                    "verbose": False,
+                    "eval": {
+                        "bootstrap": 5,
+                        "merge_val": False,
+                        "calibration": {"temp_scale": False},
+                    },
+                }
+            ),
         )
 
     assert best_c != 1.0
@@ -90,16 +98,22 @@ def test_total_divergence_raises_named_error_not_bare_assert():
         pytest.raises(LinearProbeDivergedError),
     ):
         evaluate_logistic(
-            x_train,
-            y_train,
-            x_val,
-            y_val,
-            x_test,
-            y_test,
+            FeatureSplits(
+                FeatureSplit(x_train, y_train),
+                FeatureSplit(x_val, y_val),
+                FeatureSplit(x_test, y_test),
+            ),
             c_values=[0.1, 1.0, 10.0],
-            seed=0,
-            n_bootstrap=5,
-            merge_val=False,
-            device="cpu",
-            temp_scale=False,
+            cfg=OmegaConf.create(
+                {
+                    "seed": 0,
+                    "device": "cpu",
+                    "verbose": False,
+                    "eval": {
+                        "bootstrap": 5,
+                        "merge_val": False,
+                        "calibration": {"temp_scale": False},
+                    },
+                }
+            ),
         )

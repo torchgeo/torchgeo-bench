@@ -138,8 +138,8 @@ def _diff_summary(old: pd.DataFrame | None, new: pd.DataFrame) -> None:
     if old is None or old.empty:
         logger.info("Created %d rows (no previous fixture)", len(new))
         return
-    old_keys = set(zip(*[old[c] for c in key]))
-    new_keys = set(zip(*[new[c] for c in key]))
+    old_keys = set(zip(*[old[c] for c in key], strict=True))
+    new_keys = set(zip(*[new[c] for c in key], strict=True))
     added = new_keys - old_keys
     removed = old_keys - new_keys
     logger.info("Fixture diff: +%d added, -%d removed rows", len(added), len(removed))

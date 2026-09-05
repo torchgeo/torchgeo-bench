@@ -112,41 +112,18 @@ def _methods_for(task_type: str, requested: Sequence[str], knn_k: int) -> list[t
     return methods
 
 
-def _score_one(
-    kind: str,
-    features: np.ndarray,
-    labels: np.ndarray,
-    task_type: str,
-    *,
-    folds: int,
-    seed: int,
-    device: str,
-    knn_device: str,
-    knn_k: int,
-    test_mask: np.ndarray | None,
-    fold_assign: np.ndarray | None,
-) -> tuple[float, list[float]]:
-    if kind == "knn":
-        return knn_probe_score(
-            features,
-            labels,
-            folds=folds,
-            seed=seed,
-            k=knn_k,
-            device=knn_device,
-            test_mask=test_mask,
-            fold_assign=fold_assign,
+def _evaluation_split(
+    bench: CoordBenchmark, split: str, coord: DictConfig, seed: int
+) -> tuple[np.ndarray | None, np.ndarray | None, str]:
+    """Use an official holdout when present, otherwise the requested CV split."""
+    if bench.test_mask is not None:
+        return bench.test_mask, None, "official"
+    if split == "spatial":
+        assignment = spatial_fold_ids(
+            bench.lat, bench.lon, int(coord.folds), float(coord.cell_deg), seed
         )
-    return linear_probe_score(
-        features,
-        labels,
-        task_type,
-        folds=folds,
-        seed=seed,
-        device=device,
-        test_mask=test_mask,
-        fold_assign=fold_assign,
-    )
+        return None, assignment, "spatial"
+    return None, None, "random"
 
 
 def run_coordbench(cfg: DictConfig) -> None:
@@ -155,19 +132,12 @@ def run_coordbench(cfg: DictConfig) -> None:
 
     coord = cfg.coord
     device = str(cfg.device)
-    seed = int(cfg.seed)
-    folds = int(coord.folds)
-    cell_deg = float(coord.cell_deg)
-    knn_k = int(coord.knn_k)
-    knn_device = str(coord.get("knn_device") or "cpu")
-    methods = list(coord.methods)
     splits = _resolve_splits(str(coord.split))
 
     output_path = str(coord.output)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     encoder, model_name = _instantiate_encoder(cfg.model, device)
-    model_target = str(cfg.model.get("_target_", type(encoder).__name__))
     logger.info("CoordBench: model=%s device=%s splits=%s", model_name, device, splits)
 
     completed = _completed_keys(output_path) if cfg.resume else set()
@@ -179,19 +149,7 @@ def run_coordbench(cfg: DictConfig) -> None:
 
     for bench in track(benchmarks, description="CoordBench"):
         rows = _evaluate_benchmark(
-            bench,
-            encoder,
-            methods=methods,
-            splits=splits,
-            folds=folds,
-            cell_deg=cell_deg,
-            knn_k=knn_k,
-            knn_device=knn_device,
-            seed=seed,
-            device=device,
-            model_name=model_name,
-            model_target=model_target,
-            completed=completed if cfg.resume else None,
+            bench, encoder, cfg, model_name, completed if cfg.resume else None
         )
         if rows:
             append_rows_atomic(output_path, rows)
@@ -199,25 +157,30 @@ def run_coordbench(cfg: DictConfig) -> None:
     logger.info("CoordBench complete. Results appended to %s", output_path)
 
 
+def test_sample_count(labels: np.ndarray, task_type: str, test_mask: np.ndarray | None) -> int:
+    """Count held-out samples, or finite regression labels for cross-validation."""
+    if test_mask is not None:
+        return int(np.asarray(test_mask, dtype=bool).sum())
+    if task_type == "regression":
+        return int(np.isfinite(np.asarray(labels, dtype=np.float64)).sum())
+    return len(labels)
+
+
 def _evaluate_benchmark(
     bench: CoordBenchmark,
     encoder: LocationEncoder,
-    *,
-    methods: Sequence[str],
-    splits: Sequence[str],
-    folds: int,
-    cell_deg: float,
-    knn_k: int,
-    knn_device: str,
-    seed: int,
-    device: str,
+    cfg: DictConfig,
     model_name: str,
-    model_target: str,
     completed: set[tuple[str, ...]] | None,
 ) -> list[dict]:
     """Embed one benchmark once and probe every (task, method, split) combination."""
+    coord = cfg.coord
+    seed = int(cfg.seed)
+    folds = int(coord.folds)
+    knn_k = int(coord.knn_k)
+    model_target = str(cfg.model.get("_target_", type(encoder).__name__))
     metric_name = "r2" if bench.task_type == "regression" else "accuracy"
-    method_kinds = _methods_for(bench.task_type, methods, knn_k)
+    method_kinds = _methods_for(bench.task_type, list(coord.methods), knn_k)
     if not method_kinds:
         return []
 
@@ -225,44 +188,38 @@ def _evaluate_benchmark(
     feature_dim = int(features.shape[1])
 
     rows: list[dict] = []
-    for split in splits:
-        # Official held-out split wins when present; else the requested CV mode.
-        if bench.test_mask is not None:
-            test_mask, fold_assign, split_label = bench.test_mask, None, "official"
-        elif split == "spatial":
-            test_mask, fold_assign, split_label = (
-                None,
-                spatial_fold_ids(bench.lat, bench.lon, folds, cell_deg, seed),
-                "spatial",
-            )
-        else:
-            test_mask, fold_assign, split_label = None, None, "random"
+    for split in _resolve_splits(str(coord.split)):
+        test_mask, fold_assign, split_label = _evaluation_split(bench, split, coord, seed)
 
         for task, labels in bench.tasks.items():
             for method_label, kind in method_kinds:
                 key = (bench.name, task, method_label, model_name, split_label)
                 if completed is not None and tuple(map(str, key)) in completed:
                     continue
-                score, fold_scores = _score_one(
-                    kind,
-                    features,
-                    np.asarray(labels),
-                    bench.task_type,
-                    folds=folds,
-                    seed=seed,
-                    device=device,
-                    knn_device=knn_device,
-                    knn_k=knn_k,
-                    test_mask=test_mask,
-                    fold_assign=fold_assign,
-                )
-                std = float(np.std(fold_scores)) if len(fold_scores) > 1 else 0.0
-                if test_mask is not None:
-                    n_test = int(np.asarray(test_mask, dtype=bool).sum())
-                elif bench.task_type == "regression":
-                    n_test = int(np.isfinite(np.asarray(labels, dtype=np.float64)).sum())
+                if kind == "knn":
+                    score, fold_scores = knn_probe_score(
+                        features,
+                        np.asarray(labels),
+                        folds=folds,
+                        seed=seed,
+                        k=knn_k,
+                        device=str(coord.get("knn_device") or "cpu"),
+                        test_mask=test_mask,
+                        fold_assign=fold_assign,
+                    )
                 else:
-                    n_test = int(len(labels))
+                    score, fold_scores = linear_probe_score(
+                        features,
+                        np.asarray(labels),
+                        bench.task_type,
+                        folds=folds,
+                        seed=seed,
+                        device=str(cfg.device),
+                        test_mask=test_mask,
+                        fold_assign=fold_assign,
+                    )
+                std = float(np.std(fold_scores)) if len(fold_scores) > 1 else 0.0
+                n_test = test_sample_count(labels, bench.task_type, test_mask)
                 rows.append(
                     CoordResult(
                         dataset=bench.name,
@@ -275,7 +232,7 @@ def _evaluate_benchmark(
                         ci_lower=score - std,
                         ci_upper=score + std,
                         n_folds=1 if split_label == "official" else folds,
-                        cell_deg=cell_deg,
+                        cell_deg=float(coord.cell_deg),
                         feature_dim=feature_dim,
                         n_samples=len(labels),
                         n_test=n_test,

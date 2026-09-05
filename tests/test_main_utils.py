@@ -16,7 +16,7 @@ from torchgeo_bench.main import (
     _resolve_segmentation_runtime_config,
     evaluate_profile,
 )
-from torchgeo_bench.model_profile import measure_cpu_throughput
+from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 
@@ -65,7 +65,7 @@ def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
             }
         }
     )
-    with pytest.raises(ValueError, match="requires eval.segmentation.layers"):
+    with pytest.raises(ValueError, match=r"requires eval\.segmentation\.layers"):
         build_seg_probe_and_solver(
             model=torch.nn.Identity(),
             num_classes=2,
@@ -99,7 +99,8 @@ def test_segmentation_runtime_config_rejects_invalid_values(
         }
     )
 
-    with pytest.raises(ValueError, match=message):
+    error = TypeError if field == "cache_features" else ValueError
+    with pytest.raises(error, match=message):
         _resolve_segmentation_runtime_config(cfg)
 
 
@@ -109,9 +110,7 @@ def test_measure_cpu_throughput_budget_exceeded_returns_none_metrics() -> None:
     metrics = measure_cpu_throughput(
         model,
         sample,
-        batch_size=2,
-        n_warmup=1,
-        n_measure=1,
+        timing=ProfileTiming(batch_size=2, n_warmup=1, n_measure=1),
         time_budget_s=0.0,
     )
     assert metrics == {
@@ -154,20 +153,29 @@ def test_evaluate_profile_adds_cpu_metrics_branch() -> None:
             },
         ),
     ):
+        common_meta.update(feature_dim=8, n_train=2, n_val=2, n_test=2)
         rows = evaluate_profile(
             model=torch.nn.Identity(),
             sample_loader=loader,
-            device=torch.device("cpu"),
-            n_warmup=0,
-            n_measure=1,
+            cfg=OmegaConf.create(
+                {
+                    "device": "cpu",
+                    "eval": {
+                        "profile": {
+                            "n_warmup": 0,
+                            "n_measure": 1,
+                            "cpu_throughput": {
+                                "enabled": True,
+                                "batch_size": 2,
+                                "n_warmup": 0,
+                                "n_measure": 1,
+                                "time_budget_s": 1.0,
+                            },
+                        }
+                    },
+                }
+            ),
             common_meta=common_meta,
-            feature_dim=8,
-            n_counts={"train": 2, "val": 2, "test": 2},
-            cpu_throughput_enabled=True,
-            cpu_batch_size=2,
-            cpu_n_warmup=0,
-            cpu_n_measure=1,
-            cpu_time_budget_s=1.0,
         )
 
     metric_names = {row["metric_name"] for row in rows}

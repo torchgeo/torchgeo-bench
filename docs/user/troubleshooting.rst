@@ -80,20 +80,19 @@ datasets.
 ``eurosat-spatial`` reports ``Dataset not found``
 -------------------------------------------------
 
-``torchgeo-bench download eurosat`` fetches EuroSAT plus the standard
-``eurosat-{train,val,test}.txt`` splits, but the ``eurosat-spatial`` dataset
-uses ``torchgeo.datasets.EuroSATSpatial``, which needs its own *spatial* split
-files.  Those download automatically on the first CLI run that uses
-``eurosat-spatial``; the plain ``download eurosat`` command does not provision
-them, so its slow test skips until that first run.
+``torchgeo-bench download eurosat`` fetches the shared EuroSAT images and
+both the standard and spatial train/val/test splits. If an older download
+is missing the spatial split files, rerun this command before benchmarking
+``eurosat-spatial``.
 
-V1 slow tests skip after the auto-download
-------------------------------------------
+V1 slow tests skip after a per-dataset download
+-----------------------------------------------
 
-The per-dataset auto-download (triggered by running a V1 dataset such as
-``dataset.names=[m-eurosat]``) writes the webdataset layout under
-``data/classification_v1.0_wds/``.  The V1 *slow* integration tests instead
-read the legacy HDF5 layout under ``data/classification_v1.0/`` and skip if only
+The per-dataset command
+``torchgeo-bench download geobench_v1 --datasets m-eurosat`` writes the
+webdataset layout under ``data/classification_v1.0_wds/``. The V1 *slow*
+integration tests instead read the legacy HDF5 layout under
+``data/classification_v1.0/`` and skip if only
 the ``_wds`` data is present.  Fetch the legacy bundle with
 ``torchgeo-bench download geobench_v1`` to run them.
 

@@ -21,7 +21,8 @@ follow-up on stronger guards.
 
 import logging
 import warnings
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, cast, override
 
 import torch
 import torch.nn as nn
@@ -32,7 +33,12 @@ from torchvision.transforms.v2 import Normalize as NormalizeV2
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._band_mapping import canonical_band_name, map_to_model_bands, resolve_src_indices
+from ._band_mapping import (
+    BandMappingPolicy,
+    canonical_band_name,
+    map_to_model_bands,
+    resolve_src_indices,
+)
 from ._input_units import InputUnit, convert_unit, detect_input_unit, to_reflectance, to_s2_dn
 from ._normalization import NormalizationStrategy
 from ._pooling import pool_tokens
@@ -81,7 +87,7 @@ def _adapt_first_conv(model: nn.Module, attr_path: str, in_chans: int) -> None:
 
     try:
         new_weight = adapt_input_conv(in_chans, conv.weight.data)
-    except NotImplementedError:
+    except NotImplementedError:  # allow-except: timm cannot adapt non-RGB pretrained kernels.
         new_weight = None
     if new_weight is None or new_weight.shape[1] != in_chans:
         # Fallback: average pretrained weight to a single channel then
@@ -104,7 +110,7 @@ def _adapt_first_conv(model: nn.Module, attr_path: str, in_chans: int) -> None:
     )
     new_conv.weight.data.copy_(new_weight)
     if conv.bias is not None:
-        new_conv.bias.data.copy_(conv.bias.data)
+        cast(nn.Parameter, new_conv.bias).data.copy_(conv.bias.data)
     setattr(parent, parts[-1], new_conv)
 
 
@@ -132,11 +138,9 @@ def _extract_normalize_transforms(weights) -> nn.Sequential | None:
         transform = transform()
     if isinstance(transform, nn.Identity):
         return None
-    try:
-        iterator = iter(transform)
-    except TypeError:
+    if not isinstance(transform, Iterable):
         return None
-    norms = [t for t in iterator if isinstance(t, (NormalizeV1, NormalizeV2))]
+    norms = [t for t in transform if isinstance(t, (NormalizeV1, NormalizeV2))]
     if not norms:
         return None
     return nn.Sequential(*norms)
@@ -216,7 +220,7 @@ class _TorchGeoBackboneBench(BenchModel):
 
     weights_input_unit: str | None = None
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -288,7 +292,7 @@ class _TorchGeoBackboneBench(BenchModel):
         # Pre-compute the unit conversion needed to bring dataset inputs into
         # the scale the weights' Normalize was calibrated for.  No-op when the
         # wrapper doesn't declare a unit, or the dataset already delivers the
-        # expected scale.  Without this, e.g., resnet50_s2rgb_moco × so2sat
+        # expected scale.  Without this, e.g., resnet50_s2rgb_moco x so2sat
         # collapses to chance because the Normalize ``/10000`` is applied to
         # already-reflectance ([0, 2.8]) values, producing near-zero inputs.
         self._weights_target_unit: InputUnit | None = _UNIT_EXPECTED_SOURCE.get(
@@ -392,9 +396,10 @@ class _TorchGeoBackboneBench(BenchModel):
         # transform, silently collapsing the normalization ablation.
         native = self.normalization is NormalizationStrategy.MODEL_NATIVE
         weights_norm = self._weights_normalize if native else None
-        _need_unit_conv = self._weights_target_unit is not None and native
-        if _need_unit_conv:
-            images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
+        if self._weights_target_unit is not None and native:
+            images = convert_unit(
+                images, cast(InputUnit, self._dataset_input_unit), self._weights_target_unit
+            )
         if weights_norm is not None:
             channel_counts: list[int] = []
             for m in weights_norm.modules():
@@ -434,7 +439,7 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
     weights_input_unit = "s2_dn_div10000"
     expected_input_unit = InputUnit.S2_DN
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -483,7 +488,7 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
 
     weights_input_unit = "uint8_div255"
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -534,7 +539,7 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
 
     weights_input_unit = "uint8_div255"
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -658,7 +663,7 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
     # torchgeo releases, and dataset units vary widely.
     weights_input_unit = None
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -703,7 +708,7 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
 
     weights_input_unit = "uint8_div255"
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -786,6 +791,9 @@ class TorchGeoDEOBench(BenchModel):
     RGB uses ImageNet statistics, while S2 uses DEO's exact published values.
     """
 
+    _deo_mean: torch.Tensor
+    _deo_std: torch.Tensor
+
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
     def __init__(
@@ -847,6 +855,7 @@ class TorchGeoDEOBench(BenchModel):
         self.backbone.requires_grad_(False)
         self.eval()
 
+    @override
     def train(self, mode: bool = True) -> "TorchGeoDEOBench":
         """Keep the pretrained DEO backbone frozen in evaluation mode."""
         del mode
@@ -867,7 +876,7 @@ class TorchGeoDEOBench(BenchModel):
                 images,
                 self.bands,
                 _DEO_S2_BANDS,
-                preferred_sensors=("s2",),
+                policy=BandMappingPolicy(preferred_sensors=("s2",)),
             )
             rgb = mapped[:, :3]
             finite_rgb = torch.where(torch.isfinite(rgb), rgb, torch.zeros_like(rgb))
@@ -919,7 +928,7 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
     weights_input_unit = "reflectance_0_1"
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -1013,10 +1022,12 @@ def _resolve_panopticon_chn_ids(bands: list[BandSpec]) -> list[float]:
 class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
     """Panopticon ViT-B/14 — per-channel wavelength tokens (nm) from BandSpec."""
 
+    _chn_ids: torch.Tensor
+
     weights_input_unit = "reflectance_0_1"
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,

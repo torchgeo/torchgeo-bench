@@ -187,7 +187,7 @@ class StudyRunner(BaseGpuRunner):
                 and float(row["best_lr"]) == job.variant.lr
                 and int(float(row["best_batch_size"])) == job.model.probe_batch_size
             )
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError):  # allow-except: incomplete results must be rerun
             return False
         if not valid_csv:
             return False

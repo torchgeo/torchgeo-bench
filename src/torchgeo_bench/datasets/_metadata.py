@@ -23,5 +23,5 @@ def unpickle_metadata(value: object) -> dict:
 
     try:
         return pickle.loads(value)
-    except (ModuleNotFoundError, AttributeError):
+    except (ModuleNotFoundError, AttributeError):  # allow-except: legacy GeoBench pickle classes.
         return _StubUnpickler(io.BytesIO(value)).load()

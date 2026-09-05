@@ -8,10 +8,9 @@ Prerequisites
 -------------
 
 * ``torchgeo-bench`` installed (see :doc:`installation`).
-* At least one GeoBench dataset under ``./data/``.  The lightest path is to
-  skip the bulk download entirely and let the **single-dataset auto-download**
-  run: the first time you benchmark a V1 dataset (e.g.
-  ``dataset.names=[m-eurosat]``) only that dataset is pulled.
+* At least one GeoBench dataset under ``./data/``. For a small first run,
+  download EuroSAT V1 with
+  ``torchgeo-bench download geobench_v1 --datasets m-eurosat``.
 
 Download data
 -------------
@@ -29,9 +28,9 @@ variables).  The bundled downloader fetches each family by name:
    $ torchgeo-bench download eurosat                           # torchgeo's EuroSAT mirror
 
 Note that ``download geobench_v1`` fetches the **entire** V1 classification
-bundle, not just one split.  For a quick first run you usually don't need it —
-just benchmark a single dataset and let the per-dataset auto-download fetch
-only what's used (see :doc:`datasets`).
+bundle, not just one split. Use ``--datasets m-eurosat`` to download only
+EuroSAT V1. Benchmark runs require local data and raise an error with the
+download command when it is missing (see :doc:`datasets`).
 
 See :doc:`datasets` for the full list of supported names and the
 canonical destination subdirectories.

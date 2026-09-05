@@ -36,20 +36,20 @@ from torchgeo_bench.coordbench.probe import (
 from torchgeo_bench.coordbench.run import CoordResult, run_coordbench
 
 __all__ = [
+    "ClimplicitLocationEncoder",
     "CoordBenchmark",
     "CoordResult",
-    "LocationEncoder",
-    "SinCosLocationEncoder",
-    "MINDLocationEncoder",
-    "ClimplicitLocationEncoder",
-    "SINRLocationEncoder",
     "GeoCLIPLocationEncoder",
+    "LocationEncoder",
+    "MINDLocationEncoder",
+    "SINRLocationEncoder",
     "SatCLIPLocationEncoder",
+    "SinCosLocationEncoder",
+    "knn_probe_score",
+    "linear_probe_score",
     "list_benchmarks",
     "list_families",
     "load_benchmarks",
-    "knn_probe_score",
-    "linear_probe_score",
-    "spatial_fold_ids",
     "run_coordbench",
+    "spatial_fold_ids",
 ]

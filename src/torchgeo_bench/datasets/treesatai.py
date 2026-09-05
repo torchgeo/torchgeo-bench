@@ -1,5 +1,7 @@
 """TreeSatAI (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v2 import _V2Dataset
 
@@ -19,11 +21,11 @@ class TreeSatAI(_V2Dataset):
     task = "classification"
     num_classes = 15
     multilabel = True
-    rgb_bands = ["red", "green", "blue"]
-    split_sizes = {"train": 4000, "val": 1000, "test": 2000}
+    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 4000, "val": 1000, "test": 2000}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         # German DOP ortho-aerial centre wavelengths (R/G/B/NIR).
         BandSpec("aerial", "red", "red", mean=154.416, std=48.5986, min=0, max=255, wavelength_um=0.66),
         BandSpec("aerial", "green", "green", mean=92.4992, std=33.6488, min=0, max=255, wavelength_um=0.55),

@@ -52,8 +52,8 @@ class RESISC45(BenchDataset):
     task = "classification"
     num_classes = 45
     multilabel = False
-    rgb_bands = ["red", "green", "blue"]
-    split_sizes = {"train": 18900, "val": 6300, "test": 6300}
+    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 18900, "val": 6300, "test": 6300}
     supports_partitions = False
 
     # Statistics computed over the 18,900-image train split in raw 0-255 units
@@ -67,7 +67,7 @@ class RESISC45(BenchDataset):
     # keeps sensor-routed models (OlmoEarth, UniverSat) working instead of
     # rejecting the dataset outright.
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("aerial", "red", "R", mean=93.8939, std=51.8492, min=0, max=255, wavelength_um=0.65),
         BandSpec("aerial", "green", "G", mean=97.1123, std=47.2366, min=0, max=255, wavelength_um=0.55),
         BandSpec("aerial", "blue", "B", mean=87.5678, std=47.0631, min=0, max=255, wavelength_um=0.45),

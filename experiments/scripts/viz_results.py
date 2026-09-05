@@ -893,7 +893,7 @@ def main() -> int:
         raise FileNotFoundError(f"CSV not found: {args.csv}")
 
     df = pd.read_csv(args.csv)
-    logger.info("Loaded %d rows × %d columns from %s", len(df), len(df.columns), args.csv)
+    logger.info("Loaded %d rows and %d columns from %s", len(df), len(df.columns), args.csv)
 
     numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
 

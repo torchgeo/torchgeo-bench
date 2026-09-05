@@ -32,7 +32,7 @@ SegMetrics = dict[str, float]
 class SegmentationSolver:
     """A lightweight trainer for the SegmentationProbe."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- Public constructor options.
         self,
         model: SegmentationProbe,
         num_classes: int,
@@ -128,6 +128,7 @@ class SegmentationSolver:
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
         epochs: int = 10,
+        *,
         verbose: bool = True,
     ) -> float | None:
         """Train the segmentation probe.
@@ -165,7 +166,7 @@ class SegmentationSolver:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                     logits = self.model(images)
-                    loss = self.criterion(logits, masks)
+                    loss: torch.Tensor = self.criterion(logits, masks)
 
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
@@ -176,6 +177,7 @@ class SegmentationSolver:
 
             if val_loader:
                 val_metrics = self.evaluate(val_loader)
+                assert isinstance(val_metrics, dict)
                 last_val_miou = val_metrics["mIoU"]
                 self.val_history.append(last_val_miou)
                 if verbose:
@@ -187,6 +189,7 @@ class SegmentationSolver:
     def evaluate(
         self,
         dataloader: DataLoader,
+        *,
         collect_preds: bool = False,
         collect_confusions: bool = False,
     ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
@@ -235,18 +238,21 @@ class SegmentationSolver:
 
         metrics = self._compute_metrics()
         return self._evaluation_result(
-            metrics, pred_list, confusion_list, collect_preds, collect_confusions
+            metrics,
+            pred_list,
+            confusion_list,
+            collect_preds=collect_preds,
+            collect_confusions=collect_confusions,
         )
 
     def fit_cached(
         self,
-        train_cache: CachedFeaturesDataset,
-        val_cache: CachedFeaturesDataset | None = None,
+        train_cache: "CachedFeaturesDataset | GPUTensorCache",
+        val_cache: "CachedFeaturesDataset | GPUTensorCache | None" = None,
         batch_size: int = 64,
         epochs: int = 10,
+        *,
         verbose: bool = True,
-        gpu_train: "GPUTensorCache | None" = None,
-        gpu_val: "GPUTensorCache | None" = None,
     ) -> float | None:
         """Train the segmentation head on pre-cached backbone features.
 
@@ -258,29 +264,27 @@ class SegmentationSolver:
         (:class:`GPUTensorCache`), eliminating per-batch CPU→GPU DMA transfers
         and ``torch.stack`` calls.
 
-        If ``gpu_train`` is provided, that pre-built cache is used directly,
-        allowing callers (e.g. an HPO loop) to transfer the cache once and
-        reuse it across many calls.
-
         Args:
             train_cache: Pre-extracted training features from
-                :meth:`SegmentationProbe.extract_segmentation_features`.
+                :meth:`SegmentationProbe.extract_segmentation_features`, or a GPU cache.
             val_cache: Optional validation cache for per-epoch mIoU logging.
             batch_size: Batch size for iterating over cached data.
             epochs: Number of training epochs.
             verbose: Whether to show progress bars and epoch logs.
-            gpu_train: Optional pre-built GPU cache for training. If provided,
-                the GPU transfer is skipped.
-            gpu_val: Optional pre-built GPU cache for validation. Used only
-                when ``gpu_train`` is also provided.
 
         Returns:
             Val mIoU from the final epoch if val_cache is given, else None.
         """
-        if gpu_train is None:
-            gpu_train = GPUTensorCache.from_cached(train_cache, self.device)
-        if gpu_val is None and val_cache is not None:
-            gpu_val = GPUTensorCache.from_cached(val_cache, self.device)
+        gpu_train = (
+            train_cache
+            if isinstance(train_cache, GPUTensorCache)
+            else GPUTensorCache.from_cached(train_cache, self.device)
+        )
+        gpu_val = (
+            GPUTensorCache.from_cached(val_cache, self.device)
+            if isinstance(val_cache, CachedFeaturesDataset)
+            else val_cache
+        )
 
         # Fast path: GPU tensor cache — no DataLoader, no host→device transfer per batch
         scheduler = self._make_scheduler(epochs)
@@ -302,7 +306,7 @@ class SegmentationSolver:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                     logits = self.model.head(features, *input_hw)
-                    loss = self.criterion(logits, masks)
+                    loss: torch.Tensor = self.criterion(logits, masks)
 
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
@@ -313,6 +317,7 @@ class SegmentationSolver:
 
             if gpu_val is not None:
                 val_metrics = self._evaluate_gpu_cache(gpu_val, batch_size)
+                assert isinstance(val_metrics, dict)
                 last_val_miou = val_metrics["mIoU"]
                 self.val_history.append(last_val_miou)
                 if verbose:
@@ -324,6 +329,7 @@ class SegmentationSolver:
         self,
         cache: CachedFeaturesDataset,
         batch_size: int = 64,
+        *,
         collect_preds: bool = False,
         collect_confusions: bool = False,
     ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
@@ -366,6 +372,7 @@ class SegmentationSolver:
         metrics: SegMetrics,
         pred_list: list[torch.Tensor],
         confusion_list: list[torch.Tensor],
+        *,
         collect_preds: bool,
         collect_confusions: bool,
     ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
@@ -392,6 +399,7 @@ class SegmentationSolver:
         self,
         gpu_cache: GPUTensorCache,
         batch_size: int,
+        *,
         collect_preds: bool = False,
         collect_confusions: bool = False,
     ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
@@ -419,7 +427,11 @@ class SegmentationSolver:
 
         metrics = self._compute_metrics()
         return self._evaluation_result(
-            metrics, pred_list, confusion_list, collect_preds, collect_confusions
+            metrics,
+            pred_list,
+            confusion_list,
+            collect_preds=collect_preds,
+            collect_confusions=collect_confusions,
         )
 
 

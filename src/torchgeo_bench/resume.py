@@ -8,7 +8,7 @@ Resume keys are assembled from two sources that format values differently
 import hashlib
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 import pandas as pd
@@ -41,7 +41,7 @@ KEY_COLS = (
 )
 
 
-def _normalize_bands_value(bands: object) -> str:
+def _normalize_bands_value(bands: Iterable[object] | None) -> str:
     """Canonicalize the ``cfg.dataset.bands`` value for logging/CSV/resume.
 
     The config hands us either ``"rgb"``/``"all"``, an explicit list
@@ -53,11 +53,7 @@ def _normalize_bands_value(bands: object) -> str:
         return "all"
     if isinstance(bands, str):
         return bands
-    try:
-        items = [str(b) for b in bands]
-    except TypeError:
-        return str(bands)
-    return ",".join(items)
+    return ",".join(str(b) for b in bands)
 
 
 def _resume_config_hash(cfg: DictConfig) -> str:
@@ -110,7 +106,7 @@ def _canonical_key_cell(value: object) -> str:
         return ""
     try:
         f = float(s)
-    except (TypeError, ValueError):
+    except ValueError:  # allow-except: resume keys contain both text and numeric CSV cells
         return s
     return str(int(f)) if f.is_integer() else s
 
@@ -182,6 +178,14 @@ def load_completed(
     return completed_runs, completed_metrics
 
 
+@dataclass
+class ResumeState:
+    """Completed result keys and per-metric keys from earlier runs."""
+
+    completed_runs: set[tuple[str, ...]]
+    completed_metrics: dict[str, set[tuple[str, ...]]]
+
+
 @dataclass(frozen=True)
 class DatasetRunPlan:
     """Resume-aware execution plan for one dataset/config combination."""
@@ -193,23 +197,27 @@ class DatasetRunPlan:
     skip_id: bool
     skip_profile: bool
     id_missing_metrics: frozenset[str] = frozenset()
+    knn_device: str | None = None
 
 
 def _plan_dataset_run(
     cfg: DictConfig,
-    ds_name: str,
     ds_cls: type,
-    knn_k: int,
-    seg_method: str,
-    config_tuple: tuple[str, ...],
-    completed_runs: set[tuple[str, ...]],
-    completed_metrics: dict[str, set[tuple[str, ...]]],
+    common_meta: Mapping[str, object],
+    completed: ResumeState,
+    eval_cfg: DictConfig,
 ) -> DatasetRunPlan:
     """Plan which work remains for a dataset before loading data or a model."""
-    model_key = (cfg.model._target_, cfg.model.name, *config_tuple)
+    ds_name = common_meta["dataset"]
+    model_key = (
+        cfg.model._target_,
+        cfg.model.name,
+        *(_canonical_key_cell(common_meta[key]) for key in KEY_COLS[4:]),
+    )
+    completed_runs, completed_metrics = completed.completed_runs, completed.completed_metrics
 
     if ds_cls.task == "segmentation":
-        seg_key = (ds_name, seg_method, *model_key)
+        seg_key = (ds_name, f"seg-{eval_cfg.segmentation.head_type}", *model_key)
         return DatasetRunPlan(
             metric_name="mIoU",
             skip_dataset=bool(cfg.resume and seg_key in completed_runs),
@@ -219,7 +227,7 @@ def _plan_dataset_run(
             skip_profile=True,
         )
 
-    knn_key = (ds_name, f"knn{knn_k}", *model_key)
+    knn_key = (ds_name, f"knn{int(eval_cfg.get('knn_k', 5))}", *model_key)
     linear_key = (ds_name, "linear", *model_key)
     id_key = (ds_name, "intrinsic_dim", *model_key)
     profile_key = (ds_name, "profile", *model_key)
@@ -230,7 +238,7 @@ def _plan_dataset_run(
     id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
     id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
     id_metric_names = []
-    if id_enabled:
+    if id_cfg is not None and id_enabled:
         for split in id_cfg.splits:
             id_metric_names.extend(f"id_{est}_{split}" for est in id_cfg.estimators)
             id_metric_names.extend(

@@ -1,5 +1,7 @@
 """MForestnet (GeoBench V1) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v1 import _V1Dataset
 
@@ -14,11 +16,11 @@ class MForestnet(_V1Dataset):
     task = "classification"
     num_classes = 12
     multilabel = False
-    rgb_bands = ["red", "green", "blue"]
-    split_sizes = {"train": 6464, "val": 989, "test": 993}
+    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 6464, "val": 989, "test": 993}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("landsat", "blue", "02 - Blue", mean=72.376, std=16.2839, min=0, max=255, wavelength_um=0.49),
         BandSpec("landsat", "green", "03 - Green", mean=83.1816, std=15.3587, min=0, max=255, wavelength_um=0.56),
         BandSpec("landsat", "red", "04 - Red", mean=77.0862, std=16.6665, min=0, max=255, wavelength_um=0.665),

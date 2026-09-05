@@ -5,6 +5,7 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
+from omegaconf import OmegaConf
 
 from torchgeo_bench.main import evaluate_intrinsic_dim, main
 
@@ -112,16 +113,24 @@ def test_degenerate_spectrum_writes_nan_and_keeps_other_splits(caplog) -> None:
     }
 
     with caplog.at_level("WARNING"):
+        common_meta.update(feature_dim=8, n_train=0, n_val=0, n_test=0)
         rows = evaluate_intrinsic_dim(
             splits={"train": good_X, "val": degenerate_X},
-            estimators=[],
-            selected_splits=["train", "val"],
-            device="cpu",
-            max_samples=None,
-            seed=0,
+            cfg=OmegaConf.create(
+                {
+                    "seed": 0,
+                    "device": "cpu",
+                    "verbose": False,
+                    "eval": {
+                        "intrinsic_dim": {
+                            "estimators": [],
+                            "splits": ["train", "val"],
+                            "max_samples": None,
+                        }
+                    },
+                }
+            ),
             common_meta=common_meta,
-            feature_dim=8,
-            n_counts={},
         )
 
     by_split = {row["metric_name"]: row["metric_value"] for row in rows}

@@ -10,13 +10,15 @@ which pooling statistics to concatenate.  It is module-private:
 :class:`RCFBench` is the only consumer.
 """
 
+from collections.abc import Sized
+from typing import cast
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data import Dataset
-from torchgeo.datasets import NonGeoDataset
 
 from torchgeo_bench.datasets.base import BandSpec
 
@@ -46,7 +48,7 @@ class RCF(nn.Module):
     weights: Tensor
     biases: Tensor
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         in_channels: int = 4,
         features: int = 16,
@@ -55,7 +57,7 @@ class RCF(nn.Module):
         seed: int | None = None,
         mode: str = "gaussian",
         stats_mode: str = "mean",
-        dataset: NonGeoDataset | None = None,
+        dataset: Dataset | None = None,
     ) -> None:
         """Initializes the RCF model.
 
@@ -70,7 +72,7 @@ class RCF(nn.Module):
             seed: random seed used to initialize the convolutional layer
             mode: "empirical" or "gaussian"
             stats_mode: "mean", "stdev", or "all" — controls pooling statistics
-            dataset: a NonGeoDataset to sample from when mode is "empirical"
+            dataset: a Dataset to sample from when mode is "empirical"
         """
         super().__init__()
         assert mode in ["empirical", "gaussian"]
@@ -108,13 +110,15 @@ class RCF(nn.Module):
             patches = np.zeros(
                 (num_patches, num_channels, kernel_size, kernel_size), dtype=np.float32
             )
-            idxs = torch.randint(0, len(dataset), (num_patches,), generator=generator).tolist()
+            idxs = torch.randint(
+                0, len(cast(Sized, dataset)), (num_patches,), generator=generator
+            ).tolist()
             ys = torch.randint(
                 0, height - kernel_size, (num_patches,), generator=generator
             ).tolist()
             xs = torch.randint(0, width - kernel_size, (num_patches,), generator=generator).tolist()
 
-            for i, (di, y, x) in enumerate(zip(idxs, ys, xs)):
+            for i, (di, y, x) in enumerate(zip(idxs, ys, xs, strict=True)):
                 img = dataset[di]["image"]
                 patches[i] = img[:, y : y + kernel_size, x : x + kernel_size]
 
@@ -195,7 +199,7 @@ class RCF(nn.Module):
 
             output = torch.cat((x1a_mean, x1b_mean, x1a_std, x1b_std), dim=1)
             return output
-        elif self.stats_mode == "all":
+        if self.stats_mode == "all":
             x1a_std = torch.std(x1a, dim=(2, 3), keepdim=False)
             x1b_std = torch.std(x1b, dim=(2, 3), keepdim=False)
             x1a_max = torch.amax(x1a, dim=(2, 3), keepdim=False)
@@ -207,11 +211,10 @@ class RCF(nn.Module):
                 (x1a_mean, x1b_mean, x1a_std, x1b_std, x1a_max, x1b_max, x1a_min, x1b_min), dim=1
             )
             return output
-        elif self.stats_mode == "mean":
+        if self.stats_mode == "mean":
             output = torch.cat((x1a_mean, x1b_mean), dim=1)
             return output
-        else:
-            raise ValueError(f"Unknown stats_mode: {self.stats_mode}")
+        raise ValueError(f"Unknown stats_mode: {self.stats_mode}")
 
 
 class _NormalizingDatasetView(Dataset):
@@ -229,10 +232,10 @@ class _NormalizingDatasetView(Dataset):
         self._std = std.detach().clamp_min(1e-8).view(-1, 1, 1).cpu().float()
 
     def __len__(self) -> int:
-        return len(self._base)  # type: ignore[arg-type]
+        return len(cast(Sized, self._base))
 
-    def __getitem__(self, idx: int) -> dict:
-        sample = self._base[idx]
+    def __getitem__(self, index: int) -> dict:
+        sample = self._base[index]
         img = sample["image"].float()
         sample = dict(sample)
         sample["image"] = (img - self._mean) / self._std
@@ -253,7 +256,7 @@ class RCFBench(BenchModel):
       same per-channel z-score this :class:`RCFBench` will use at inference.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         features: int = 512,
@@ -261,7 +264,7 @@ class RCFBench(BenchModel):
         mode: str = "gaussian",
         stats_mode: str = "mean",
         seed: int | None = None,
-        dataset: NonGeoDataset | None = None,
+        dataset: Dataset | None = None,
         **_kwargs,
     ) -> None:
         super().__init__(bands=bands, **_kwargs)

@@ -34,7 +34,7 @@ MODELS = [
 
 
 def build_jobs() -> list[Job]:
-    """Build dataset × model × use_cls_token jobs."""
+    """Build dataset/model/use_cls_token jobs."""
     jobs: list[Job] = []
     for dataset in DATASETS:
         for model in MODELS:
