@@ -1,6 +1,7 @@
 """Map dataset BandSpec lists onto pretrained-model band slots."""
 
 import logging
+from typing import cast
 
 import torch
 
@@ -267,5 +268,5 @@ def wavelengths_um(bands: list[BandSpec], default_um: float | None = None) -> li
         elif canonical_band_name(b.name) in S2_WAVELENGTHS_UM:
             resolved.append(S2_WAVELENGTHS_UM[canonical_band_name(b.name)])
         else:
-            resolved.append(float(default_um))
+            resolved.append(float(cast(float, default_um)))
     return resolved

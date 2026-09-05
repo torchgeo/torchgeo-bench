@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._normalization import InputUnit
+from ._normalization import InputUnit, NormalizationStrategy
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,11 @@ class TimmPatchBenchModel(BenchModel):
             ``"none"`` (identity).
     """
 
+    _rgb_mean: torch.Tensor
+    _rgb_std: torch.Tensor
+    _band_min: torch.Tensor
+    _band_range: torch.Tensor
+
     def __init__(
         self,
         bands: list[BandSpec],
@@ -87,11 +92,12 @@ class TimmPatchBenchModel(BenchModel):
         target_size: int | None = None,
         use_cls_token: bool = False,
         input_normalization: str = "bands_zscore",
+        normalization: NormalizationStrategy | str = NormalizationStrategy.BANDSPEC_ZSCORE,
         **_kwargs: object,
     ) -> None:
         self.set_pretrain_stats(bands, model_name)
 
-        super().__init__(bands=bands, **_kwargs)
+        super().__init__(bands=bands, normalization=normalization, **_kwargs)
 
         if input_normalization not in _VALID_INPUT_NORMALIZATIONS:
             raise ValueError(
@@ -208,11 +214,11 @@ class TimmPatchBenchModel(BenchModel):
         # [0, 1] using BandSpec stats so the ImageNet (or timm-default)
         # mean/std (which were fitted on [0, 1] inputs) make sense, then
         # (x - mean) / std.
-        band_min = self._band_min.to(dtype=images.dtype)  # type: ignore[attr-defined]
-        band_range = self._band_range.to(dtype=images.dtype)  # type: ignore[attr-defined]
+        band_min = self._band_min.to(dtype=images.dtype)
+        band_range = self._band_range.to(dtype=images.dtype)
         scaled = (images - band_min) / band_range
-        mean = self._rgb_mean.to(dtype=images.dtype)  # type: ignore[attr-defined]
-        std = self._rgb_std.to(dtype=images.dtype)  # type: ignore[attr-defined]
+        mean = self._rgb_mean.to(dtype=images.dtype)
+        std = self._rgb_std.to(dtype=images.dtype)
         return (scaled - mean) / std
 
     def _permute_channels(self, images: torch.Tensor) -> torch.Tensor:

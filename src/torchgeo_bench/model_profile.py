@@ -18,13 +18,16 @@ All metrics work without extras.
 import contextlib
 import logging
 import time
-from collections.abc import Iterator
+from collections import OrderedDict
+from collections.abc import Callable, Iterator, Sequence
 from statistics import median
+from typing import Literal
 
 import torch
 import torch.autograd.graph as autograd_graph
 import torch.utils.module_tracker as module_tracker
 from torch import nn
+from torch.utils.hooks import RemovableHandle
 
 logger = logging.getLogger(__name__)
 
@@ -52,15 +55,16 @@ def lenient_grad_hooks() -> Iterator[None]:
     """
     original = autograd_graph.register_multi_grad_hook
 
-    class _NoopHandle:
-        def remove(self) -> None:
-            pass
-
-    def safe(tensors, fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def safe(
+        tensors: Sequence[torch.Tensor],
+        fn: Callable[[Sequence[torch.Tensor | None]], None] | Callable[[torch.Tensor], None],
+        *,
+        mode: Literal["all", "any"] = "all",
+    ) -> RemovableHandle:
         try:
-            return original(tensors, fn, *args, **kwargs)
+            return original(tensors, fn, mode=mode)
         except AssertionError:
-            return _NoopHandle()
+            return RemovableHandle(OrderedDict())
 
     autograd_graph.register_multi_grad_hook = safe
     module_tracker.register_multi_grad_hook = safe

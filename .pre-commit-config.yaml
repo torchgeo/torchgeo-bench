@@ -6,6 +6,15 @@ repos:
         args: ["--fix", "--show-fixes"]
       - id: ruff-format
 
+  - repo: https://github.com/facebook/pyrefly-pre-commit
+    rev: 1.2.0
+    hooks:
+      - id: pyrefly-check
+        language: system
+        entry: uv run pyrefly check
+        pass_filenames: false
+        always_run: true
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

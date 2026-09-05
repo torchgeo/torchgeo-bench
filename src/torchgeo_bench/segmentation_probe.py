@@ -62,8 +62,8 @@ class CachedFeaturesDataset(Dataset):
     def __len__(self) -> int:
         return self.masks.shape[0]
 
-    def __getitem__(self, i: int) -> tuple[list[torch.Tensor], torch.Tensor]:
-        return [t[i] for t in self.layer_tensors], self.masks[i]
+    def __getitem__(self, index: int) -> tuple[list[torch.Tensor], torch.Tensor]:
+        return [t[index] for t in self.layer_tensors], self.masks[index]
 
 
 def _estimate_cache_bytes(cache: "CachedFeaturesDataset") -> int:

@@ -21,7 +21,8 @@ follow-up on stronger guards.
 
 import logging
 import warnings
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -104,7 +105,7 @@ def _adapt_first_conv(model: nn.Module, attr_path: str, in_chans: int) -> None:
     )
     new_conv.weight.data.copy_(new_weight)
     if conv.bias is not None:
-        new_conv.bias.data.copy_(conv.bias.data)
+        cast(nn.Parameter, new_conv.bias).data.copy_(conv.bias.data)
     setattr(parent, parts[-1], new_conv)
 
 
@@ -133,7 +134,7 @@ def _extract_normalize_transforms(weights) -> nn.Sequential | None:
     if isinstance(transform, nn.Identity):
         return None
     try:
-        iterator = iter(transform)
+        iterator = iter(cast(Iterable[object], transform))
     except TypeError:
         return None
     norms = [t for t in iterator if isinstance(t, (NormalizeV1, NormalizeV2))]
@@ -392,9 +393,10 @@ class _TorchGeoBackboneBench(BenchModel):
         # transform, silently collapsing the normalization ablation.
         native = self.normalization is NormalizationStrategy.MODEL_NATIVE
         weights_norm = self._weights_normalize if native else None
-        _need_unit_conv = self._weights_target_unit is not None and native
-        if _need_unit_conv:
-            images = convert_unit(images, self._dataset_input_unit, self._weights_target_unit)
+        if self._weights_target_unit is not None and native:
+            images = convert_unit(
+                images, cast(InputUnit, self._dataset_input_unit), self._weights_target_unit
+            )
         if weights_norm is not None:
             channel_counts: list[int] = []
             for m in weights_norm.modules():
@@ -786,6 +788,9 @@ class TorchGeoDEOBench(BenchModel):
     RGB uses ImageNet statistics, while S2 uses DEO's exact published values.
     """
 
+    _deo_mean: torch.Tensor
+    _deo_std: torch.Tensor
+
     expected_input_unit = InputUnit.REFLECTANCE_0_1
 
     def __init__(
@@ -1012,6 +1017,8 @@ def _resolve_panopticon_chn_ids(bands: list[BandSpec]) -> list[float]:
 
 class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
     """Panopticon ViT-B/14 — per-channel wavelength tokens (nm) from BandSpec."""
+
+    _chn_ids: torch.Tensor
 
     weights_input_unit = "reflectance_0_1"
     expected_input_unit = InputUnit.REFLECTANCE_0_1

@@ -10,13 +10,15 @@ which pooling statistics to concatenate.  It is module-private:
 :class:`RCFBench` is the only consumer.
 """
 
+from collections.abc import Sized
+from typing import cast
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data import Dataset
-from torchgeo.datasets import NonGeoDataset
 
 from torchgeo_bench.datasets.base import BandSpec
 
@@ -55,7 +57,7 @@ class RCF(nn.Module):
         seed: int | None = None,
         mode: str = "gaussian",
         stats_mode: str = "mean",
-        dataset: NonGeoDataset | None = None,
+        dataset: Dataset | None = None,
     ) -> None:
         """Initializes the RCF model.
 
@@ -70,7 +72,7 @@ class RCF(nn.Module):
             seed: random seed used to initialize the convolutional layer
             mode: "empirical" or "gaussian"
             stats_mode: "mean", "stdev", or "all" — controls pooling statistics
-            dataset: a NonGeoDataset to sample from when mode is "empirical"
+            dataset: a Dataset to sample from when mode is "empirical"
         """
         super().__init__()
         assert mode in ["empirical", "gaussian"]
@@ -108,7 +110,9 @@ class RCF(nn.Module):
             patches = np.zeros(
                 (num_patches, num_channels, kernel_size, kernel_size), dtype=np.float32
             )
-            idxs = torch.randint(0, len(dataset), (num_patches,), generator=generator).tolist()
+            idxs = torch.randint(
+                0, len(cast(Sized, dataset)), (num_patches,), generator=generator
+            ).tolist()
             ys = torch.randint(
                 0, height - kernel_size, (num_patches,), generator=generator
             ).tolist()
@@ -228,10 +232,10 @@ class _NormalizingDatasetView(Dataset):
         self._std = std.detach().clamp_min(1e-8).view(-1, 1, 1).cpu().float()
 
     def __len__(self) -> int:
-        return len(self._base)  # type: ignore[arg-type]
+        return len(cast(Sized, self._base))
 
-    def __getitem__(self, idx: int) -> dict:
-        sample = self._base[idx]
+    def __getitem__(self, index: int) -> dict:
+        sample = self._base[index]
         img = sample["image"].float()
         sample = dict(sample)
         sample["image"] = (img - self._mean) / self._std
@@ -260,7 +264,7 @@ class RCFBench(BenchModel):
         mode: str = "gaussian",
         stats_mode: str = "mean",
         seed: int | None = None,
-        dataset: NonGeoDataset | None = None,
+        dataset: Dataset | None = None,
         **_kwargs,
     ) -> None:
         super().__init__(bands=bands, **_kwargs)

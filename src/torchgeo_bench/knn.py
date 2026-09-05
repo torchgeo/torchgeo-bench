@@ -150,6 +150,8 @@ class KNNClassifier:
 
     def _neighbour_counts(self, indices: np.ndarray) -> np.ndarray:
         """Vectorized per-row bincount: shape (n_test, n_classes)."""
+        assert self._y is not None
+        assert self._n_classes is not None
         n_test, k = indices.shape
         labels = self._y[indices].astype(np.int64)  # (n_test, k)
         offsets = (np.arange(n_test) * self._n_classes)[:, None]
@@ -192,6 +194,7 @@ class KNNClassifier:
                 "Set eval.knn_device=cpu for CLI runs or request device='cpu'."
             )
 
+        assert self._effective_n_neighbors is not None
         kwargs = {
             "n_neighbors": self._effective_n_neighbors,
             "device": self.device,

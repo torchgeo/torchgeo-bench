@@ -12,8 +12,13 @@ dataset silently disappearing from the map.
 """
 
 import json
+import pickle
+from pathlib import Path
 
+import h5py
+import numpy as np
 import pytest
+from affine import Affine
 
 from torchgeo_bench.datasets import list_datasets
 from torchgeo_bench.geography import (
@@ -22,21 +27,55 @@ from torchgeo_bench.geography import (
     NO_GEO,
     STORE_DIR,
     GeoRecord,
+    _v1_origin,
+    build_index,
     list_geography,
     missing_datasets,
+    write_record,
 )
 
 VALID_STATUSES = {"extracted", "no_geo", "not_downloaded"}
 
-pytestmark = pytest.mark.skipif(
-    not STORE_DIR.is_dir(),
-    reason=f"geography store not generated at {STORE_DIR}",
-)
-
 
 @pytest.fixture(scope="module")
 def store() -> dict[str, GeoRecord]:
+    if not STORE_DIR.is_dir():
+        pytest.skip(f"geography store not generated at {STORE_DIR}")
     return list_geography()
+
+
+@pytest.mark.parametrize("storage", ["string", "opaque"])
+def test_v1_origin_reads_hdf5_metadata(tmp_path: Path, storage: str) -> None:
+    metadata = {
+        "label": 0,
+        "bands_order": ["B04"],
+        "B04": {"transform": Affine(10, 0, 456000, 0, -10, 1230000), "crs": "EPSG:32615"},
+    }
+    payload = pickle.dumps(metadata)
+    path = tmp_path / "sample.hdf5"
+    with h5py.File(path, "w") as file:
+        file.attrs["pickle"] = repr(payload) if storage == "string" else np.void(payload)
+
+    assert _v1_origin(str(path)) == (456000.0, 1230000.0, "EPSG:32615")
+
+
+def test_build_index_weights_continents_by_sample_count(tmp_path: Path) -> None:
+    for record in (
+        GeoRecord("a", "extracted", n=3, continents={"Europe": 100.0}),
+        GeoRecord("b", "extracted", n=1, continents={"Asia": 100.0}),
+        GeoRecord("c", "no_geo", reason="No coordinates"),
+    ):
+        write_record(record, tmp_path)
+
+    index = build_index(tmp_path)
+    assert index["totals"] == {
+        "datasets": 3,
+        "extracted": 2,
+        "samples": 4,
+        "continents": {"Europe": 75.0, "Asia": 25.0},
+    }
+    assert build_index(tmp_path) == index
+    assert json.loads((tmp_path / INDEX_NAME).read_text()) == index
 
 
 def test_all_registered_datasets_have_a_record(store: dict[str, GeoRecord]) -> None:
@@ -145,7 +184,7 @@ def test_records_roundtrip_through_json(store: dict[str, GeoRecord]) -> None:
         assert GeoRecord.from_json(record.to_json()) == record
 
 
-def test_stored_files_are_canonical_json() -> None:
+def test_stored_files_are_canonical_json(store: dict[str, GeoRecord]) -> None:
     """Files are written sorted and compact, so re-runs stay byte-identical."""
     for path in sorted(STORE_DIR.glob("*.json")):
         raw = path.read_text()

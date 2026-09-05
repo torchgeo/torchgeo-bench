@@ -80,6 +80,7 @@ optional-dependencies.dev = [
   "mdformat>=0.7.22",
   "pre-commit>=4.3",
   "pyproject-fmt>=2.21",
+  "pyrefly==1.2",
   "pytest>=7.3",
   "pytest-cov>=4.1",
   "pytest-xdist>=3.6",
@@ -181,6 +182,22 @@ lint.pycodestyle.max-doc-length = 100
 lint.pydocstyle.convention = "google"
 lint.pylint.max-branches = 12
 lint.pylint.max-statements = 50
+
+[tool.pyrefly]
+project-includes = [ "src/torchgeo_bench/**/*.py" ]
+search-path = [ "src" ]
+python-version = "3.12"
+preset = "default"
+# Optional extras are checked when installed.
+ignore-missing-imports = [
+  "olmoearth_pretrain_minimal",
+  "olmoearth_pretrain_minimal.*",
+  "rshf.*",
+  "terratorch.*",
+  "torchid",
+  "transformers",
+  "transformers.*",
+]
 
 [tool.pytest]
 ini_options.addopts = [

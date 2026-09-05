@@ -24,10 +24,8 @@ def _bench_scores(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     is_r2 = d["metric_name"] == "r2"
     d.loc[is_r2, "metric_value"] = d.loc[is_r2, "metric_value"].clip(lower=R2_FLOOR)
-    scores = (
-        d.groupby(["model_name", "dataset"], as_index=False)["metric_value"]
-        .mean()
-        .rename(columns={"metric_value": "score"})
+    scores = d.groupby(["model_name", "dataset"], as_index=False).agg(
+        score=("metric_value", "mean")
     )
     scores["family"] = scores["dataset"].map(family_of)
     return scores

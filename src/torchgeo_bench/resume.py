@@ -8,7 +8,7 @@ Resume keys are assembled from two sources that format values differently
 import hashlib
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 import pandas as pd
@@ -41,7 +41,7 @@ KEY_COLS = (
 )
 
 
-def _normalize_bands_value(bands: object) -> str:
+def _normalize_bands_value(bands: Iterable[object] | None) -> str:
     """Canonicalize the ``cfg.dataset.bands`` value for logging/CSV/resume.
 
     The config hands us either ``"rgb"``/``"all"``, an explicit list
@@ -230,7 +230,7 @@ def _plan_dataset_run(
     id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
     id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
     id_metric_names = []
-    if id_enabled:
+    if id_cfg is not None and id_enabled:
         for split in id_cfg.splits:
             id_metric_names.extend(f"id_{est}_{split}" for est in id_cfg.estimators)
             id_metric_names.extend(

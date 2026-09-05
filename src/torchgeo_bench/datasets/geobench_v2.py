@@ -134,8 +134,8 @@ class GeoBenchv2(Dataset):
     def __len__(self) -> int:
         return len(self._inner)  # type: ignore[arg-type]
 
-    def __getitem__(self, idx: int) -> dict:
-        return self._inner[idx]
+    def __getitem__(self, index: int) -> dict:
+        return self._inner[index]
 
 
 class _V2Dataset(BenchDataset):

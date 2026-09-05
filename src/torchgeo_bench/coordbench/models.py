@@ -14,6 +14,7 @@ over the ``rshf`` package and require the ``coordbench`` extra
 
 import logging
 from abc import ABC, abstractmethod
+from typing import override
 
 import numpy as np
 import torch
@@ -77,7 +78,8 @@ class SinCosLocationEncoder(LocationEncoder):
 
     name = "sincos"
 
-    def _encode(self, lon: np.ndarray, lat: np.ndarray, _year: np.ndarray | None) -> np.ndarray:
+    @override
+    def _encode(self, lon: np.ndarray, lat: np.ndarray, year: np.ndarray | None) -> np.ndarray:
         lat_r, lon_r = np.deg2rad(lat), np.deg2rad(lon)
         return np.stack(
             [np.sin(lat_r), np.cos(lat_r), np.sin(lon_r), np.cos(lon_r)], axis=1
@@ -146,9 +148,11 @@ class _RSHFEncoder(LocationEncoder):
 
     coord_order: str = "lonlat"
     dtype: torch.dtype = torch.float32
+    model: torch.nn.Module
 
+    @override
     @torch.no_grad()
-    def _encode(self, lon: np.ndarray, lat: np.ndarray, _year: np.ndarray | None) -> np.ndarray:
+    def _encode(self, lon: np.ndarray, lat: np.ndarray, year: np.ndarray | None) -> np.ndarray:
         first, second = (lon, lat) if self.coord_order == "lonlat" else (lat, lon)
         x = torch.stack([torch.as_tensor(first), torch.as_tensor(second)], dim=1).to(
             self.device, self.dtype
@@ -210,8 +214,9 @@ class SINRLocationEncoder(_RSHFEncoder):
         )
         self.model = SINR.from_pretrained(repo, config=conf).to(self.device).eval()
 
+    @override
     @torch.no_grad()
-    def _encode(self, lon: np.ndarray, lat: np.ndarray, _year: np.ndarray | None) -> np.ndarray:
+    def _encode(self, lon: np.ndarray, lat: np.ndarray, year: np.ndarray | None) -> np.ndarray:
         from rshf.sinr import preprocess_locs
 
         x = torch.stack([torch.as_tensor(lon), torch.as_tensor(lat)], dim=1).float().to(self.device)

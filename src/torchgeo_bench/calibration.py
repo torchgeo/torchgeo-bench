@@ -7,6 +7,8 @@ provides a single-parameter temperature-scaling baseline (Guo et al.,
 2017) for Linear Probing.
 """
 
+from typing import Literal
+
 import numpy as np
 import torch
 from torchmetrics.classification import (
@@ -14,7 +16,7 @@ from torchmetrics.classification import (
     MulticlassCalibrationError,
 )
 
-_NORMS: tuple[str, ...] = ("l1", "l2", "max")
+_NORMS: tuple[Literal["l1", "l2", "max"], ...] = ("l1", "l2", "max")
 _KEYS: dict[str, str] = {"l1": "ece", "l2": "rms_ce", "max": "mce"}
 
 

@@ -56,6 +56,8 @@ class SIRENLayer(nn.Module):
 class ReSIRENLocationEncoder(nn.Module):
     """Encode Equal-Earth coordinates and optional Fourier year with a residual-SIREN MLP."""
 
+    year_freqs: Tensor
+
     def __init__(
         self,
         embed_dim: int,

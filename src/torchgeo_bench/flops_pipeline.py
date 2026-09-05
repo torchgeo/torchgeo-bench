@@ -32,6 +32,7 @@ from torchgeo_bench.model_profile import (
     measure_profile,
 )
 from torchgeo_bench.results import append_rows_atomic
+from torchgeo_bench.segmentation_probe import SegmentationProbe
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 from torchgeo_bench.utils import resolve_device
 
@@ -270,7 +271,7 @@ def _n_tokens(model: nn.Module, image_size: int) -> int | None:
 
 
 def _seg_head_gflops(
-    probe: nn.Module,
+    probe: SegmentationProbe,
     n_channels: int,
     image_size: int,
     device: torch.device,
@@ -445,6 +446,7 @@ def segmentation_rows(
             seg_eval_cfg,
             OmegaConf.create({"segmentation": {"head_type": head_type}}),
         )
+        assert isinstance(head_cfg, DictConfig)
         try:
             # Probe construction runs a forward pass, so the model must be on-device.
             probe, _solver = build_seg_probe_and_solver(
@@ -509,10 +511,10 @@ def main(cfg: DictConfig) -> None:
     completed = _load_completed(output_path) if bool(cfg.resume) else frozenset()
 
     # Model presets may contain eval keys unused by this pipeline.
-    seg_eval_cfg = OmegaConf.create(OmegaConf.to_container(cfg.eval, resolve=True))
+    seg_eval_cfg = DictConfig(OmegaConf.to_container(cfg.eval, resolve=True))
     OmegaConf.set_struct(seg_eval_cfg, False)
     if "eval" in cfg.model and cfg.model.eval is not None:
-        seg_eval_cfg = OmegaConf.merge(seg_eval_cfg, cfg.model.eval)
+        seg_eval_cfg.merge_with(cfg.model.eval)
     seg_layers = list(seg_eval_cfg.segmentation.get("layers", []))
 
     rows: list[dict] = []

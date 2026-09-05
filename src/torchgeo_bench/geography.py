@@ -48,6 +48,7 @@ from typing import Any, Literal
 import numpy as np
 
 from .datasets import get_bench_dataset_class, list_datasets
+from .datasets._metadata import unpickle_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -169,11 +170,9 @@ def _v1_origin(path: str) -> tuple[float | None, float | None, str]:
     """
     import h5py
 
-    from .datasets._v1_webdataset import _safe_unpickle
-
     try:
         with h5py.File(path, "r") as f:
-            meta = _safe_unpickle(eval(f.attrs["pickle"]))  # GeoBench's own format.
+            meta = unpickle_metadata(f.attrs["pickle"])
     except Exception as exc:  # Surfaced via the failure-rate gate.
         return None, None, f"ERR {type(exc).__name__}: {exc}"
 
@@ -212,7 +211,7 @@ def _extract_v1(name: str, files: list[str], workers: int) -> dict | None:
         if rate > MAX_READ_FAILURE_RATE:
             raise RuntimeError(f"{name}: {rate:.1%} of samples failed to read; first: {errors[0]}")
 
-    usable = [(x, y, epsg) for x, y, epsg in results if x is not None]
+    usable = [(x, y, epsg) for x, y, epsg in results if x is not None and y is not None]
     if not usable:
         return None
 
@@ -432,11 +431,13 @@ def build_index(store_dir: Path | None = None) -> dict:
     coverage gaps without loading the bulky per-dataset point lists.
     """
     directory = store_dir or STORE_DIR
+    records = [
+        GeoRecord.from_json(json.loads(path.read_text()))
+        for path in sorted(directory.glob("*.json"))
+        if path.name != INDEX_NAME
+    ]
     entries = []
-    for path in sorted(directory.glob("*.json")):
-        if path.name == INDEX_NAME:
-            continue
-        record = GeoRecord.from_json(json.loads(path.read_text()))
+    for record in records:
         entries.append(
             {
                 "name": record.name,
@@ -450,10 +451,10 @@ def build_index(store_dir: Path | None = None) -> dict:
             }
         )
 
-    overall: Counter = Counter()
-    for entry in entries:
-        for continent, share in entry["continents"].items():
-            overall[continent] += share * entry["n"] / 100.0
+    overall: dict[str, float] = {}
+    for record in records:
+        for continent, share in record.continents.items():
+            overall[continent] = overall.get(continent, 0.0) + share * record.n / 100.0
     grand = sum(overall.values()) or 1
 
     index = {
@@ -462,8 +463,8 @@ def build_index(store_dir: Path | None = None) -> dict:
         "datasets": entries,
         "totals": {
             "datasets": len(entries),
-            "extracted": sum(1 for e in entries if e["status"] == "extracted"),
-            "samples": sum(e["n"] for e in entries),
+            "extracted": sum(1 for record in records if record.status == "extracted"),
+            "samples": sum(record.n for record in records),
             "continents": {
                 k: round(100.0 * v / grand, 2)
                 for k, v in sorted(overall.items(), key=lambda kv: (-kv[1], kv[0]))

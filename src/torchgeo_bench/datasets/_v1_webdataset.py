@@ -43,7 +43,7 @@ def ensure_sharded_root(
     sharded_root: Path,
     *,
     repo_id: str = V1_HF_REPO_ID,
-    cache_dir: str | os.PathLike | None = None,
+    cache_dir: str | os.PathLike[str] | None = None,
 ) -> Path:
     """Snapshot-download the sharded V1 mirror into ``sharded_root`` if absent.
 
@@ -72,7 +72,7 @@ def ensure_sharded_root(
         repo_type="dataset",
         local_dir=sharded_root,
         allow_patterns=[f"{dataset_name}/*"],
-        cache_dir=cache_dir,
+        cache_dir=Path(cache_dir) if cache_dir is not None else None,
     )
     if not any(target.glob("shard_*.tar")):
         raise RuntimeError(
@@ -149,8 +149,8 @@ class GeoBenchv1Sharded(Dataset):
     def __len__(self) -> int:
         return len(self.sample_ids)
 
-    def __getitem__(self, idx: int) -> dict:
-        sid = self.sample_ids[idx]
+    def __getitem__(self, index: int) -> dict:
+        sid = self.sample_ids[index]
         parts = self._index[sid]
         bands_dict = dict(np.load(io.BytesIO(self._read(parts["bands.npz"]))))
         meta = unpickle_metadata(self._read(parts["meta.pkl"]))

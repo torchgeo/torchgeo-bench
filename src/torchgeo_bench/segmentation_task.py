@@ -165,7 +165,7 @@ class SegmentationSolver:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                     logits = self.model(images)
-                    loss = self.criterion(logits, masks)
+                    loss: torch.Tensor = self.criterion(logits, masks)
 
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
@@ -176,6 +176,7 @@ class SegmentationSolver:
 
             if val_loader:
                 val_metrics = self.evaluate(val_loader)
+                assert isinstance(val_metrics, dict)
                 last_val_miou = val_metrics["mIoU"]
                 self.val_history.append(last_val_miou)
                 if verbose:
@@ -302,7 +303,7 @@ class SegmentationSolver:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
                     logits = self.model.head(features, *input_hw)
-                    loss = self.criterion(logits, masks)
+                    loss: torch.Tensor = self.criterion(logits, masks)
 
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
@@ -313,6 +314,7 @@ class SegmentationSolver:
 
             if gpu_val is not None:
                 val_metrics = self._evaluate_gpu_cache(gpu_val, batch_size)
+                assert isinstance(val_metrics, dict)
                 last_val_miou = val_metrics["mIoU"]
                 self.val_history.append(last_val_miou)
                 if verbose:

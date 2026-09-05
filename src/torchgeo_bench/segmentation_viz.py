@@ -226,6 +226,7 @@ def render_confusion_matrix(
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
     except ImportError as e:
         raise ImportError(
             "matplotlib is required for segmentation visualization. "
@@ -278,9 +279,10 @@ def render_confusion_matrix(
     plt.tight_layout()
 
     # Render to numpy array (tostring_rgb removed in matplotlib ≥ 3.8; use buffer_rgba)
-    fig.canvas.draw()
-    buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
-    w, h = fig.canvas.get_width_height()
+    canvas = FigureCanvasAgg(fig)
+    canvas.draw()
+    buf = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
+    w, h = canvas.get_width_height()
     arr = buf.reshape(h, w, 4)[:, :, :3].copy()  # drop alpha
     plt.close(fig)
     return arr

@@ -3,8 +3,8 @@
 import logging
 import math
 import os
-from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Sequence, Sized
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import torch
@@ -70,9 +70,10 @@ logger = logging.getLogger(__name__)
 
 def resolve_model_config(model_cfg: DictConfig, dataset_name: str) -> DictConfig:
     """Apply a dataset-specific partial override to a model configuration."""
-    resolved = OmegaConf.create(OmegaConf.to_container(model_cfg, resolve=True))
+    resolved = DictConfig(OmegaConf.to_container(model_cfg, resolve=True))
     dataset_overrides = resolved.pop("dataset_overrides", {})
-    return OmegaConf.merge(resolved, dataset_overrides.get(dataset_name, {}))
+    resolved.merge_with(dataset_overrides.get(dataset_name, {}))
+    return resolved
 
 
 def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
@@ -663,17 +664,16 @@ def evaluate_segmentation(
         else int(train_loader.batch_size or 1)
     )
 
-    if collect_preds and collect_confusions:
+    if isinstance(eval_result, dict):
+        metrics, preds, confusion_matrices = eval_result, None, None
+    elif len(eval_result) == 3:
         metrics, preds, confusion_matrices = eval_result
     elif collect_preds:
         metrics, preds = eval_result
         confusion_matrices = None
-    elif collect_confusions:
+    else:
         metrics, confusion_matrices = eval_result
         preds = None
-    else:
-        metrics, preds = eval_result, None
-        confusion_matrices = None
     if confusion_matrices is not None:
         metrics["ci_lower"], metrics["ci_upper"] = bootstrap_miou(
             confusion_matrices,
@@ -736,7 +736,7 @@ def run_segmentation(
     eval_cfg: DictConfig,
     model: BenchModel,
     bench: BenchDataset,
-    train_dataset: Dataset,
+    train_dataset: Sized,
     train_loader: DataLoader,
     val_loader: DataLoader,
     test_loader: DataLoader,
@@ -749,6 +749,8 @@ def run_segmentation(
     seg_cfg_merged = eval_cfg.segmentation
     save_viz = seg_cfg_merged.get("save_viz", False)
     segmentation_meta = {**common_meta, "merge_val": False}
+    assert isinstance(val_loader.dataset, Sized)
+    assert isinstance(test_loader.dataset, Sized)
     metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
         model,
         train_loader,
@@ -1078,7 +1080,7 @@ def run_dataset(
         )
     )
     model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
-    eval_cfg = OmegaConf.merge(cfg.eval, model_eval or {})
+    eval_cfg = cast(DictConfig, OmegaConf.merge(cfg.eval, model_eval or {}))
     knn_k = int(getattr(eval_cfg, "knn_k", 5))
     plan = _plan_dataset_run(
         cfg=cfg,
@@ -1105,8 +1107,10 @@ def run_dataset(
             batch_size=cfg.dataset.batch_size,
             num_workers=int(cfg.dataset.get("num_workers", 8)),
             return_val=True,
-            image_size=common_meta["image_size"],
-            interpolation=common_meta["interpolation"],
+            image_size=model_cfg.get("image_size", cfg.dataset.get("image_size")),
+            interpolation=model_cfg.get(
+                "interpolation", cfg.dataset.get("interpolation", "bilinear")
+            ),
             bands=getattr(cfg.dataset, "bands", "rgb"),
             time_steps=cfg.dataset.get("time_steps", None),
         )

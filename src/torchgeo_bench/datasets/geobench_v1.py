@@ -88,8 +88,8 @@ class GeoBenchv1(Dataset):
     def __len__(self) -> int:
         return len(self.sample_ids)
 
-    def __getitem__(self, idx: int) -> dict:
-        sample_id = self.sample_ids[idx]
+    def __getitem__(self, index: int) -> dict:
+        sample_id = self.sample_ids[index]
         sample_path = self.dataset_dir / f"{sample_id}.hdf5"
 
         metadata = self._load_sample_metadata(sample_id)

@@ -26,6 +26,7 @@ Layer naming for SegmentationProbe:
 """
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -33,12 +34,15 @@ from torchgeo_bench.datasets.base import BandSpec
 
 from .interface import BenchModel
 
+if TYPE_CHECKING:
+    from transformers.models.sam3.modeling_sam3 import Sam3VisionModel
+
 logger = logging.getLogger(__name__)
 
 _PATCH_SIZE = 14  # SAM3 ViT-H patch size (fixed by architecture)
 
 
-def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int) -> None:
+def _reset_sam3_rope(vision_encoder: "Sam3VisionModel", input_h: int, input_w: int) -> None:
     """Recompute RoPE buffers in every ViT layer for a new input resolution.
 
     Each ``Sam3ViTLayer`` owns a ``Sam3ViTRotaryEmbedding`` (``self.rotary_emb``)
