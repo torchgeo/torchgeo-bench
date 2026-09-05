@@ -164,13 +164,16 @@ def render_sample_grid(
         gt_masks: (N, H, W) int64 tensor.
         pred_masks: (N, H, W) int64 tensor.
         num_classes: Number of segmentation classes.
-        rgb_indices: Channel indices [R, G, B] into the C dimension.
+        rgb_indices: One to three display channels. Repeat the last selected
+            channel when fewer than three are supplied.
         n_samples: Maximum number of samples to visualise.
         ignore_index: Label value treated as ignore.
 
     Returns:
         (H_grid, W_grid, 3) uint8 numpy array.
     """
+    if not 1 <= len(rgb_indices) <= 3:
+        raise ValueError("rgb_indices must select one, two, or three display channels.")
     n = min(n_samples, len(images))
     # Deterministic sample selection: evenly spaced across the test set
     indices = np.linspace(0, len(images) - 1, n, dtype=int)
@@ -184,6 +187,7 @@ def render_sample_grid(
 
         # RGB image: pick channels, transpose to (H, W, 3)
         ri = [min(c, img.shape[0] - 1) for c in rgb_indices]
+        ri.extend([ri[-1]] * (3 - len(ri)))
         rgb = img[ri, :, :].transpose(1, 2, 0)  # (H, W, 3)
         rgb_u8 = _denorm_image(rgb)
 

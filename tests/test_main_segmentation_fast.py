@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 import pandas as pd
+import pytest
 import torch
 from torch.utils.data import DataLoader, Dataset
 
@@ -197,6 +198,27 @@ def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):
         main(cfg)
 
     viz_mock.assert_not_called()
+
+
+def test_failed_requested_viz_is_not_marked_complete(tmp_path: Path) -> None:
+    out = tmp_path / "out.csv"
+    cfg = _cfg_for_segmentation(out, overrides=["eval.segmentation.save_viz=true"])
+    with (
+        mock.patch(
+            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
+        ),
+        mock.patch(
+            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
+            return_value=_mock_probe_and_solver(),
+        ),
+        mock.patch(
+            "torchgeo_bench.segmentation_viz.save_segmentation_viz",
+            side_effect=RuntimeError("plot rendering failed"),
+        ),
+        pytest.raises(RuntimeError, match="plot rendering failed"),
+    ):
+        main(cfg)
+    assert not out.exists()
 
 
 def test_segmentation_resume_skips_complete_run(tmp_path: Path):

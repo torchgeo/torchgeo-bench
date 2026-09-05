@@ -96,12 +96,18 @@ def test_download_geobench_v2_deduplicates_names(tmp_path: Path) -> None:
 
 def test_download_eurosat_creates_target_and_downloads_splits(tmp_path: Path) -> None:
     out = tmp_path / "data"
-    with mock.patch("torchgeo_bench.download.EuroSAT") as eurosat_mock:
+    with (
+        mock.patch("torchgeo_bench.download.EuroSAT") as eurosat_mock,
+        mock.patch("torchgeo_bench.download.EuroSATSpatial") as spatial_mock,
+    ):
         download_eurosat(out)
 
     assert (out / "eurosat").exists()
-    called_splits = [kwargs["split"] for _, kwargs in eurosat_mock.call_args_list]
-    assert called_splits == ["train", "val", "test"]
+    for dataset in (eurosat_mock, spatial_mock):
+        assert dataset.call_args_list == [
+            mock.call(root=str(out / "eurosat"), split=split, download=True)
+            for split in ("train", "val", "test")
+        ]
 
 
 def test_download_resisc45_creates_target_and_downloads_splits(tmp_path: Path) -> None:

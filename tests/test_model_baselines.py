@@ -8,6 +8,9 @@ import pandas as pd
 import pytest
 import torch
 
+from .test_cli_program import run_cli
+from .test_integration import require_dataset_data
+
 _DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -26,28 +29,6 @@ _FIXTURE_COLS = {
 }
 
 _TOL = 0.02
-
-_V1_DATA = Path("data/classification_v1.0")
-_V2_DATA = Path("data/geobenchv2")
-
-_V1_DATASETS = {"m-eurosat", "m-forestnet", "m-so2sat", "m-pv4ger", "m-brick-kiln", "m-bigearthnet"}
-
-
-def _dataset_data_exists(dataset: str) -> bool:
-    if dataset in _V1_DATASETS:
-        return _V1_DATA.exists()
-    return (_V2_DATA / dataset).exists()
-
-
-def _run_bench(*overrides: str, timeout: int = 600) -> subprocess.CompletedProcess:
-    cmd = [sys.executable, "-m", "torchgeo_bench", *overrides]
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=str(_REPO_ROOT),
-    )
 
 
 def test_accuracy_check_marker_is_registered() -> None:
@@ -107,17 +88,20 @@ def test_accuracy(combo: dict, tmp_path: Path) -> None:
     dataset = combo["dataset"]
     bands = combo["bands"]
 
-    if not _dataset_data_exists(dataset):
-        pytest.skip(f"Dataset data not found for {dataset}")
+    require_dataset_data(dataset)
 
     out = tmp_path / "out.csv"
-    result = _run_bench(
+    result = run_cli(
+        "run",
         f"model={model_config}",
         f"dataset.names=[{dataset}]",
         f"dataset.bands={bands}",
         f"output={out}",
         "eval.bootstrap=10",
         f"device={_DEVICE}",
+        cwd=Path.cwd(),
+        timeout=600,
+        offline=False,
     )
     assert result.returncode == 0, f"CLI failed for {model_config} × {dataset}:\n{result.stderr}"
 

@@ -573,12 +573,13 @@ def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
     knn_mock.assert_called_once()
 
 
-def test_dataset_not_found_skips(tmp_path: Path):
+def test_no_available_dataset_fails(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out)
 
-    with mock.patch(
-        "torchgeo_bench.main.get_datasets", side_effect=DatasetNotFoundError("missing")
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", side_effect=DatasetNotFoundError("missing")),
+        pytest.raises(RuntimeError, match="None of the requested datasets were available"),
     ):
         main(cfg)
 

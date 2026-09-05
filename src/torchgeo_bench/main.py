@@ -285,8 +285,13 @@ def evaluate_logistic(
         test_scores = final_model.predict_proba(x_test_tensor)
         metric, lo, hi = bootstrap_accuracy(y_test, test_preds, n_boot=n_bootstrap, seed=seed)
 
+    class_labels = None if multi_label else final_model.classes_
     calibration = compute_calibration_metrics(
-        y_test, test_scores, multi_label=multi_label, n_bins=calibration_n_bins
+        y_test,
+        test_scores,
+        multi_label=multi_label,
+        n_bins=calibration_n_bins,
+        class_labels=class_labels,
     )
 
     calibration_ts: dict[str, float | None] = {
@@ -299,10 +304,16 @@ def evaluate_logistic(
         # Fit T on val logits, apply to test logits, recompute calibration.
         val_logits = final_model.decision_function(x_val_tensor)
         test_logits = final_model.decision_function(x_test_tensor)
-        temperature = fit_temperature(val_logits, y_val, multi_label=multi_label)
+        temperature = fit_temperature(
+            val_logits, y_val, multi_label=multi_label, class_labels=class_labels
+        )
         test_scores_ts = apply_temperature(test_logits, temperature, multi_label=multi_label)
         cal_ts = compute_calibration_metrics(
-            y_test, test_scores_ts, multi_label=multi_label, n_bins=calibration_n_bins
+            y_test,
+            test_scores_ts,
+            multi_label=multi_label,
+            n_bins=calibration_n_bins,
+            class_labels=class_labels,
         )
         calibration_ts = {
             "ece_ts": cal_ts["ece"],
@@ -712,6 +723,7 @@ def main(cfg: DictConfig) -> None:
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
     config_hash = _resume_config_hash(cfg)
 
+    datasets_available = False
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         try:
             ds_cls = get_bench_dataset_class(ds_name)
@@ -756,6 +768,7 @@ def main(cfg: DictConfig) -> None:
             completed_metrics=completed_metrics,
         )
         if plan.skip_dataset:
+            datasets_available = True
             if cfg.verbose:
                 logger.info(f"[{ds_name}] Resume preflight: all requested work already complete")
             continue
@@ -780,6 +793,7 @@ def main(cfg: DictConfig) -> None:
             logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
             continue
         train_dataset, train_loader, val_loader, test_loader = result
+        datasets_available = True
 
         num_channels = train_dataset[0]["image"].shape[0]
         is_segmentation = ds_cls.task == "segmentation"
@@ -872,7 +886,6 @@ def main(cfg: DictConfig) -> None:
                 recall=metrics.get("recall"),
                 f1=metrics.get("f1"),
             )
-            append_rows_atomic(output_path, [row])
             if save_viz and preds is not None:
                 from torchgeo_bench.segmentation_viz import (
                     collect_viz_inputs,
@@ -898,6 +911,8 @@ def main(cfg: DictConfig) -> None:
                     n_samples=n_viz,
                     class_names=_class_names,
                 )
+            # A saved row makes resume skip this dataset, including requested plots.
+            append_rows_atomic(output_path, [row])
         else:
             # Classification (single-label or multi-label)
             metric_name = plan.metric_name
@@ -1036,4 +1051,6 @@ def main(cfg: DictConfig) -> None:
                     )
                 append_rows_atomic(profile_output_path, profile_rows)
 
+    if not datasets_available:
+        raise RuntimeError("None of the requested datasets were available for evaluation.")
     logger.info("Benchmark complete. Results appended to %s", ", ".join(sorted(output_paths)))
