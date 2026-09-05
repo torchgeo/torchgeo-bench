@@ -360,10 +360,7 @@ Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision
 `filelock>=3.12`, `rich>=13`.
 
 Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everything):
-`cleanlab`, `coordbench`, `dev`, `docs`, `id` (intrinsic-dimension estimators),
-`olmoearth`, `sam3`, `terratorch`, `viz`. Model wrappers behind an extra
-(OlmoEarth, SAM3, terratorch-backed models) import that dependency lazily —
-don't add a top-level import for one at module scope.
+`coordbench`, `dev`, `docs`, `id` (intrinsic-dimension estimators), `olmoearth`, `sam3`, `terratorch`. Model wrappers behind an extra (OlmoEarth, SAM3, terratorch-backed models) import that dependency lazily — don't add a top-level import for one at module scope.
 
 ## Common Gotchas
 

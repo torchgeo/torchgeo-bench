@@ -81,7 +81,7 @@ def test_real_classification_program(
     assert output.read_bytes() == before
 
 
-@pytest.mark.parametrize("cached", [True, False], ids=["cached", "uncached-with-viz"])
+@pytest.mark.parametrize("cached", [True, False], ids=["cached", "uncached"])
 def test_real_segmentation_program(tmp_path: Path, cached: bool) -> None:
     require_dataset_data("caffe")
     output = tmp_path / "segmentation.csv"
@@ -102,14 +102,6 @@ def test_real_segmentation_program(tmp_path: Path, cached: bool) -> None:
         f"eval.segmentation.cache_features={str(cached).lower()}",
         f"output={output}",
     ]
-    if not cached:
-        arguments.extend(
-            [
-                "eval.segmentation.save_viz=true",
-                "eval.segmentation.n_viz_samples=2",
-                f"eval.segmentation.viz_dir={tmp_path / 'viz'}",
-            ]
-        )
     result = run_cli(*arguments, cwd=Path.cwd(), timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
     assert output.is_file(), result.stdout + result.stderr
@@ -123,14 +115,6 @@ def test_real_segmentation_program(tmp_path: Path, cached: bool) -> None:
     assert np.isfinite(row[["metric_value", "ci_lower", "ci_upper"]].astype(float)).all()
     assert row["ci_lower"] <= row["ci_upper"]
     assert row["best_batch_size"] == (16 if cached else 32)
-    if not cached:
-        from PIL import Image
-
-        images = list((tmp_path / "viz").rglob("*.png"))
-        assert len(images) >= 2
-        for path in images:
-            with Image.open(path) as image:
-                image.verify()
 
     before = output.read_bytes()
     resumed = run_cli(*arguments, "resume=true", cwd=Path.cwd(), timeout=120)

@@ -557,9 +557,9 @@ def evaluate_segmentation(
     num_classes: int,
     device: torch.device,
     seed: int,
-    collect_preds: bool = False,
+    *,
     verbose: bool = False,
-) -> "tuple[torchgeo_bench.segmentation_task.SegMetrics, int, float | None, int | None, torch.Tensor | None]":
+) -> "tuple[torchgeo_bench.segmentation_task.SegMetrics, int, float | None, int | None]":
     """Evaluate segmentation performance using a frozen-backbone segmentation probe.
 
     Trains a lightweight segmentation head on top of the frozen backbone and
@@ -576,12 +576,10 @@ def evaluate_segmentation(
         num_classes: Number of segmentation classes.
         device: Torch device.
         seed: RNG seed for the mIoU bootstrap when ``eval_cfg.bootstrap`` > 0.
-        collect_preds: If True, collect and return test predictions as (N, H, W) tensor.
         verbose: Show training progress.
 
     Returns:
-        Tuple of (metrics, feature_dim, lr, batch_size, preds); ``preds`` is
-        None unless ``collect_preds``.
+        Tuple of (metrics, feature_dim, lr, batch_size).
     """
     from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
@@ -610,14 +608,12 @@ def evaluate_segmentation(
         eval_result = solver.evaluate_cached(
             test_cache,
             batch_size=probe_batch_size,
-            collect_preds=collect_preds,
             collect_confusions=collect_confusions,
         )
     else:
         solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=verbose)
         eval_result = solver.evaluate(
             test_loader,
-            collect_preds=collect_preds,
             collect_confusions=collect_confusions,
         )
     actual_batch_size = (
@@ -626,24 +622,16 @@ def evaluate_segmentation(
         else int(train_loader.batch_size or 1)
     )
 
-    if collect_preds and collect_confusions:
-        metrics, preds, confusion_matrices = eval_result
-    elif collect_preds:
-        metrics, preds = eval_result
-        confusion_matrices = None
-    elif collect_confusions:
+    if collect_confusions:
         metrics, confusion_matrices = eval_result
-        preds = None
-    else:
-        metrics, preds = eval_result, None
-        confusion_matrices = None
-    if confusion_matrices is not None:
         metrics["ci_lower"], metrics["ci_upper"] = bootstrap_miou(
             confusion_matrices,
             n_boot=int(eval_cfg.bootstrap),
             seed=seed,
         )
-    return metrics, sum(probe.channels_list), lr, actual_batch_size, preds
+    else:
+        metrics = eval_result
+    return metrics, sum(probe.channels_list), lr, actual_batch_size
 
 
 def _resolve_output_path(
@@ -851,10 +839,8 @@ def main(cfg: DictConfig) -> None:
         }
 
         if is_segmentation:
-            seg_cfg_merged = eval_cfg_merged.segmentation
-            save_viz = seg_cfg_merged.get("save_viz", False)
             segmentation_meta = {**common_meta, "merge_val": False}
-            metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
+            metrics, feat_dim, best_lr, best_bs = evaluate_segmentation(
                 model,
                 train_loader,
                 val_loader,
@@ -863,7 +849,6 @@ def main(cfg: DictConfig) -> None:
                 num_classes,
                 device,
                 seed=cfg.seed,
-                collect_preds=save_viz,
                 verbose=cfg.verbose,
             )
             row = metric_row(
@@ -886,32 +871,6 @@ def main(cfg: DictConfig) -> None:
                 recall=metrics.get("recall"),
                 f1=metrics.get("f1"),
             )
-            if save_viz and preds is not None:
-                from torchgeo_bench.segmentation_viz import (
-                    collect_viz_inputs,
-                    save_segmentation_viz,
-                )
-
-                rgb_indices = bench.rgb_indices or [0, 1, 2]
-                test_imgs_t, test_gts_t = collect_viz_inputs(test_loader)
-                ignore_idx = seg_cfg_merged.get("ignore_index", 255)
-                n_viz = seg_cfg_merged.get("n_viz_samples", 8)
-                viz_dir = seg_cfg_merged.get("viz_dir", "viz")
-                _class_names = list(getattr(train_dataset, "classes", None) or []) or None
-                save_segmentation_viz(
-                    out_dir=viz_dir,
-                    model_name=model_cfg.name,
-                    dataset_name=ds_name,
-                    images=test_imgs_t,
-                    gt_masks=test_gts_t,
-                    pred_masks=preds,
-                    num_classes=num_classes,
-                    rgb_indices=rgb_indices,
-                    ignore_index=ignore_idx,
-                    n_samples=n_viz,
-                    class_names=_class_names,
-                )
-            # A saved row makes resume skip this dataset, including requested plots.
             append_rows_atomic(output_path, [row])
         else:
             # Classification (single-label or multi-label)

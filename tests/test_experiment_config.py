@@ -2,13 +2,11 @@
 
 import json
 
-import pandas as pd
 import pytest
 import torch
 
 from experiments.scripts import (
     audit_model_native,
-    cleanlab_extract_probs,
     introspect_seg_layers,
     tune_dataloader,
 )
@@ -22,51 +20,13 @@ def test_analysis_scripts_preserve_requested_rgb_order(script) -> None:
     assert [band.name for band in bands] == ["red", "green", "blue"]
 
 
-def test_scripts_discover_and_build_packaged_model_configs() -> None:
-    model_name = cleanlab_extract_probs.build_name_to_config_map()["rcf"]
+def test_tuner_builds_packaged_model_config() -> None:
     bands = audit_model_native.band_specs("m-eurosat", "rgb")
-    model = tune_dataloader._build_model(model_name, bands)
+    model = tune_dataloader._build_model("rcf", bands)
     features = model(torch.zeros(1, 3, 16, 16))
-    cfg = compose_config([f"model={model_name}"])
+    cfg = compose_config(["model=rcf"])
     assert features.shape == (1, cfg.model.features)
     assert torch.isfinite(features).all()
-
-
-@pytest.mark.parametrize("directory", [False, True])
-def test_cleanlab_selects_top_linear_result_from_file_or_directory(tmp_path, directory) -> None:
-    rows = pd.DataFrame(
-        [
-            {
-                "dataset": "m-eurosat",
-                "name": name,
-                "method": method,
-                "normalization": normalization,
-                "metric_value": score,
-            }
-            for name, method, normalization, score in [
-                ("lower", "linear", "identity", 0.7),
-                ("best", "linear", "bandspec_zscore", 0.9),
-                ("legacy", "linear", "raw", 1.0),
-                ("knn", "knn5", "identity", 1.0),
-            ]
-        ]
-    )
-    if directory:
-        path = tmp_path / "models"
-        path.mkdir()
-        rows.iloc[:2].to_csv(path / "first.csv", index=False)
-        rows.iloc[2:].to_csv(path / "second.csv", index=False)
-    else:
-        path = tmp_path / "results.csv"
-        rows.to_csv(path, index=False)
-    result = cleanlab_extract_probs.lookup_top1(path, "m-eurosat")
-    assert result["name"] == "best"
-    assert result["metric_value"] == 0.9
-
-
-def test_cleanlab_reports_empty_result_directory(tmp_path) -> None:
-    with pytest.raises(SystemExit, match="No linear-probe rows"):
-        cleanlab_extract_probs.lookup_top1(tmp_path, "m-eurosat")
 
 
 @pytest.mark.parametrize(

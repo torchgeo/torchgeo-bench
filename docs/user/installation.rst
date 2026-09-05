@@ -55,22 +55,21 @@ default.  Combine extras with comma-separated lists:
 
 .. code-block:: console
 
-   $ uv sync --extra docs --extra viz
+   $ uv sync --extra docs --extra dev
    $ # or
-   $ pip install -e ".[docs,viz]"
+   $ pip install -e ".[docs,dev]"
 
 .. note::
 
    ``uv sync`` installs *exactly* the extras you pass and removes anything not
    listed, so extras do **not** accumulate across calls.  Request them together
-   in one command (``uv sync --extra docs --extra viz``) rather than running
-   ``uv sync --extra docs`` and then ``uv sync --extra viz`` (the second drops
+   in one command (``uv sync --extra docs --extra dev``) rather than running
+   ``uv sync --extra docs`` and then ``uv sync --extra dev`` (the second drops
    the first).
 
 ================  ==============================================================
 Extra             Pulls in
 ================  ==============================================================
-``cleanlab``      ``cleanlab``, ``imagehash``, ``matplotlib``, ``pillow`` (label-noise audit)
 ``coordbench``    ``rshf`` for the SatCLIP, GeoCLIP, Climplicit, and SINR location encoders
 ``cuda``          ``faissknn[cuda]`` → ``faiss-cuda-cu128`` for GPU KNN (Linux only; shares the ``faiss`` namespace with the default ``faissknn[cpu]`` — install in a fresh env)
 ``dev``           ruff, pytest, pytest-cov, pytest-xdist, pre-commit, mdformat, pyproject-fmt
@@ -79,7 +78,6 @@ Extra             Pulls in
 ``olmoearth``     ``olmoearth-pretrain-minimal`` for the OlmoEarth backbone
 ``sam3``          ``transformers`` for the SAM 3 encoder
 ``terratorch``    ``terratorch`` for TerraTorch backbones
-``viz``           ``matplotlib``, ``pillow`` for segmentation visualisations
 ``all``           every extra above **except** ``cuda`` (FAISS conflict)
 ================  ==============================================================
 

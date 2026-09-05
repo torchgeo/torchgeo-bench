@@ -285,13 +285,11 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
-@pytest.mark.parametrize("collect_preds", [False, True])
 @pytest.mark.parametrize("collect_confusions", [False, True])
 @pytest.mark.parametrize(
     ("as_dict", "mask_4d", "ignore_index"), [(False, False, 255), (True, True, -1)]
 )
 def test_solver_evaluation_parity(
-    collect_preds: bool,
     collect_confusions: bool,
     as_dict: bool,
     mask_4d: bool,
@@ -331,9 +329,7 @@ def test_solver_evaluation_parity(
 
     solver.evaluate(make_loader(images, predictions))
     probe.train()
-    raw_result = solver.evaluate(
-        loader, collect_preds=collect_preds, collect_confusions=collect_confusions
-    )
+    raw_result = solver.evaluate(loader, collect_confusions=collect_confusions)
     assert not probe.training
     assert not probe.backbone.training
 
@@ -347,7 +343,7 @@ def test_solver_evaluation_parity(
         )
         probe.train()
         cached_result = solver.evaluate_cached(
-            cache, batch_size=3, collect_preds=collect_preds, collect_confusions=collect_confusions
+            cache, batch_size=3, collect_confusions=collect_confusions
         )
     assert not probe.training
     assert not probe.backbone.training
@@ -364,24 +360,18 @@ def test_solver_evaluation_parity(
         "recall": multiclass_recall(predictions, masks, average="macro", **metric_args).item(),
         "f1": multiclass_f1_score(predictions, masks, average="macro", **metric_args).item(),
     }
-    expected_outputs = []
-    if collect_preds:
-        expected_outputs.append(predictions)
     if collect_confusions:
-        expected_outputs.append(
-            torch.stack(
-                [
-                    multiclass_confusion_matrix(pred, mask, **metric_args)
-                    for pred, mask in zip(predictions, masks)
-                ]
-            )
+        expected_confusions = torch.stack(
+            [
+                multiclass_confusion_matrix(pred, mask, **metric_args)
+                for pred, mask in zip(predictions, masks)
+            ]
         )
     for result in (raw_result, cached_result):
-        if expected_outputs:
+        if collect_confusions:
             assert isinstance(result, tuple)
-            metrics, *outputs = result
-            for actual, expected in zip(outputs, expected_outputs, strict=True):
-                torch.testing.assert_close(actual, expected)
+            metrics, confusions = result
+            torch.testing.assert_close(confusions, expected_confusions)
         else:
             metrics = result
         assert isinstance(metrics, dict)

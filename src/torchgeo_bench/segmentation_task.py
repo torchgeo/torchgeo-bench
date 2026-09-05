@@ -186,22 +186,20 @@ class SegmentationSolver:
     def evaluate(
         self,
         dataloader: DataLoader,
-        collect_preds: bool = False,
+        *,
         collect_confusions: bool = False,
-    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
+    ) -> SegMetrics | tuple[SegMetrics, torch.Tensor]:
         """Evaluate the model on a dataloader and return segmentation metrics.
 
         Args:
             dataloader: Evaluation data loader.
-            collect_preds: If True, also return predicted class maps (N, H, W) int64.
             collect_confusions: If True, also return per-image confusion matrices.
 
         Returns:
-            Metrics, optionally followed by predictions and/or per-image confusion matrices.
+            Metrics, optionally followed by per-image confusion matrices.
         """
         return self._evaluate(
             dataloader,
-            collect_preds=collect_preds,
             collect_confusions=collect_confusions,
         )
 
@@ -293,9 +291,9 @@ class SegmentationSolver:
         self,
         cache: CachedFeaturesDataset,
         batch_size: int = 64,
-        collect_preds: bool = False,
+        *,
         collect_confusions: bool = False,
-    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
+    ) -> SegMetrics | tuple[SegMetrics, torch.Tensor]:
         """Evaluate on a CachedFeaturesDataset.
 
         The cache is moved to GPU as a :class:`GPUTensorCache` for zero
@@ -305,17 +303,15 @@ class SegmentationSolver:
             cache: Pre-extracted features (output of
                 :meth:`SegmentationProbe.extract_segmentation_features`).
             batch_size: Batch size for iterating over the cache.
-            collect_preds: If True, also return predicted class maps (N, H, W) int64.
             collect_confusions: If True, also return per-image confusion matrices.
 
         Returns:
-            Metrics, optionally followed by predictions and/or per-image confusion matrices.
+            Metrics, optionally followed by per-image confusion matrices.
         """
         gpu_cache = GPUTensorCache.from_cached(cache, self.device)
         return self._evaluate(
             gpu_cache,
             batch_size,
-            collect_preds=collect_preds,
             collect_confusions=collect_confusions,
         )
 
@@ -335,16 +331,14 @@ class SegmentationSolver:
         self,
         data: DataLoader | GPUTensorCache,
         batch_size: int = 64,
-        collect_preds: bool = False,
         collect_confusions: bool = False,
-    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
+    ) -> SegMetrics | tuple[SegMetrics, torch.Tensor]:
         """Evaluate raw images or device-resident features with the same metrics."""
         self.model.eval()
         for m in self._all_metrics:
             m.reset()
             m.to(self.device)
 
-        pred_list: list[torch.Tensor] = []
         confusion_list: list[torch.Tensor] = []
 
         batches = data.ordered_batches(batch_size) if isinstance(data, GPUTensorCache) else data
@@ -367,12 +361,9 @@ class SegmentationSolver:
 
             for m in self._all_metrics:
                 m.update(logits, masks)
-            if collect_preds or collect_confusions:
+            if collect_confusions:
                 predictions = logits.argmax(dim=1)
-                if collect_preds:
-                    pred_list.append(predictions.cpu())
-                if collect_confusions:
-                    confusion_list.append(self._per_image_confusions(predictions, masks).cpu())
+                confusion_list.append(self._per_image_confusions(predictions, masks).cpu())
 
         metrics = {
             "mIoU": self.metric.compute().item(),
@@ -381,10 +372,6 @@ class SegmentationSolver:
             "recall": self.metric_recall.compute().item(),
             "f1": self.metric_f1.compute().item(),
         }
-        if collect_preds and collect_confusions:
-            return metrics, torch.cat(pred_list, dim=0), torch.cat(confusion_list, dim=0)
-        if collect_preds:
-            return metrics, torch.cat(pred_list, dim=0)
         if collect_confusions:
             return metrics, torch.cat(confusion_list, dim=0)
         return metrics

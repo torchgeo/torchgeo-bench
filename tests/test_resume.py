@@ -39,3 +39,16 @@ def test_config_hash_changes_with_normalization():
     minmax = _cfg(["dataset.normalization=minmax"])
 
     assert _resume_config_hash(zscore) != _resume_config_hash(minmax)
+
+
+def test_removed_plot_defaults_keep_existing_resume_keys() -> None:
+    current = _cfg([])
+    previous = _cfg(
+        [
+            "+eval.segmentation.save_viz=false",
+            "+eval.segmentation.viz_dir=viz",
+            "+eval.segmentation.n_viz_samples=8",
+        ]
+    )
+    assert _resume_config_hash(current) == _resume_config_hash(previous)
+    assert not {"save_viz", "viz_dir", "n_viz_samples"} & set(current.eval.segmentation)
