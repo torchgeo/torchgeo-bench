@@ -52,6 +52,8 @@ convention = "google"
 
 Pin Ruff and explicitly select rules. Add `ANN`, `D`, `I`, `N`, `UP`, `B`, and `PT` alongside existing correctness checks. Add `C901`, `PLR0912`, and `PLR0915`; initially allow complexity 10, 12 branches, and 50 statements. Allow reviewed, specific exceptions for clear parser/catalog tables instead of artificial splitting.
 
+Use `C4`, `SIM`, and `PIE` to simplify comprehensions, repeated conditions, and redundant code. `RET505`–`RET508` and `PLR5501` remove unnecessary nesting after control-flow exits and in `else: if` blocks. Leave `SIM105`, `SIM108`, and `SIM116` disabled so explicit exception handling and branches do not have to become context managers, ternaries, or dictionary lookups. Do not cap arguments or return statements; explicit constructors and guard clauses should remain easy to write.
+
 Use `BLE001`, `PGH004`, `RUF100`, and `TID251` for broad catches, blanket/stale suppressions, and banned imports such as future annotations. Broad-catch lint has exceptions and still needs review. Fully annotate functions and tests; keep `Any` at genuine external boundaries. Use relative package imports and a sorted tuple for `__all__`.
 
 Use project copyright headers and one-line module docstrings. Check copyright-rule support against the pinned Ruff version before enabling it. Google docstring entries use capitalized descriptions and periods. Document public constructors; avoid repetitive private-helper/test prose.

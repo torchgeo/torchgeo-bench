@@ -7,8 +7,36 @@ skip-magic-trailing-comma = true
 docstring-code-format = true
 
 [lint]
-select = ['E4', 'E7', 'E9', 'F', 'ANN', 'B', 'C4', 'D', 'I', 'N', 'PT', 'UP', 'BLE001', 'PGH004', 'RUF100', 'TID251', 'C901', 'PLR0912', 'PLR0915', 'W505']
-ignore = ['ANN401', 'D104', 'D105', 'D107']
+select = [
+    'ANN',
+    'B',
+    'BLE001',
+    'C4',
+    'C901',
+    'D',
+    'E4',
+    'E7',
+    'E9',
+    'F',
+    'I',
+    'N',
+    'PGH004',
+    'PIE',
+    'PLR0912',
+    'PLR0915',
+    'PLR5501',
+    'PT',
+    'RET505',
+    'RET506',
+    'RET507',
+    'RET508',
+    'RUF100',
+    'SIM',
+    'TID251',
+    'UP',
+    'W505',
+]
+ignore = ['ANN401', 'D104', 'D105', 'D107', 'SIM105', 'SIM108', 'SIM116']
 
 [lint.per-file-ignores]
 'tests/**' = ['D']
