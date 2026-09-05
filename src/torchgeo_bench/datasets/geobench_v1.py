@@ -3,6 +3,7 @@
 Lightweight HDF5 reader that does not depend on the upstream ``geobench``
 package. Loads samples directly from ``classification_v1.0/<dataset>/``
 HDF5 files using the partition JSON files distributed alongside them.
+Each sample must carry data-only JSON in its ``metadata_json`` attribute.
 """
 
 import json
@@ -16,7 +17,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from ._metadata import unpickle_metadata
+from ._metadata import read_hdf5_metadata
 from .base import BenchDataset
 
 V1_ROOT = Path("data/classification_v1.0")
@@ -80,10 +81,10 @@ class GeoBenchv1(Dataset):
             self.band_names = list(bands)
 
     def _load_sample_metadata(self, sample_id: str) -> dict:
-        """Load pickled metadata from HDF5 attributes."""
+        """Load data-only JSON metadata from HDF5 attributes."""
         sample_path = self.dataset_dir / f"{sample_id}.hdf5"
         with h5py.File(sample_path, "r") as f:
-            return unpickle_metadata(f.attrs["pickle"])
+            return read_hdf5_metadata(f.attrs)
 
     def __len__(self) -> int:
         return len(self.sample_ids)

@@ -73,9 +73,9 @@ def _co_occur_top(y_col: np.ndarray, y_other: np.ndarray) -> tuple[int, float]:
 
 
 def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFrame:
-    z = np.load(npz_path, allow_pickle=True)
-    y = z["labels"].astype(np.int64)
-    probs = z["probs"].astype(np.float32)
+    with np.load(npz_path, allow_pickle=False) as z:
+        y = z["labels"].astype(np.int64)
+        probs = z["probs"].astype(np.float32)
     if y.ndim != 2:
         raise SystemExit(f"{npz_path}: not multi-label (labels ndim={y.ndim})")
     K = y.shape[1]

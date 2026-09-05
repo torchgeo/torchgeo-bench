@@ -27,9 +27,9 @@ Two coordinate sources are handled:
 * **V2** — ``<root>/<name>/*.tortilla``, whose metadata frame already carries
   ``lon``/``lat`` columns (plus a place label where the source provided one).
   Metadata-only, so this is fast.
-* **V1** — ``<root>/<name>/*.hdf5``, where the affine ``transform`` and
-  ``crs`` live in a pickle stashed in the HDF5 attributes.  The raster origin
-  is reprojected to EPSG:4326.
+* **V1** — ``<root>/<name>/*.hdf5``, where affine coefficients and CRS strings
+  live in the ``metadata_json`` attribute. The raster origin is reprojected
+  to EPSG:4326.
 
 Extraction is deterministic: re-running against unchanged raw data reproduces
 byte-identical JSON.
@@ -166,34 +166,32 @@ def _extract_v2(paths: list[str]) -> dict | None:
 def _v1_origin(path: str) -> tuple[float | None, float | None, str]:
     """Return the raster origin and CRS for one V1 sample.
 
-    The pickled metadata is a flat dict keyed by band name; band entries are
-    plain dicts carrying ``transform`` (affine) and ``crs``.
+    Band entries contain six or nine affine coefficients and a CRS string.
     """
     import h5py
 
-    from .datasets._v1_webdataset import _safe_unpickle
+    from .datasets._metadata import read_hdf5_metadata
 
     try:
         with h5py.File(path, "r") as f:
-            meta = _safe_unpickle(eval(f.attrs["pickle"]))  # noqa: S307 - geobench's own format
-    except Exception as exc:  # noqa: BLE001 - surfaced via the failure-rate gate
-        return None, None, f"ERR {type(exc).__name__}: {exc}"
-
-    for key, entry in meta.items():
-        if key in ("label", "bands_order") or not isinstance(entry, dict):
-            continue
-        transform, crs = entry.get("transform"), entry.get("crs")
-        if transform is None or crs is None:
-            continue
-        # crs is a plain str for some datasets and a rasterio CRS for others.
-        if isinstance(crs, str):
-            epsg = crs
-        else:
-            code = crs.to_epsg()
-            if code is None:
+            meta = read_hdf5_metadata(f.attrs)
+        for entry in meta.values():
+            if not isinstance(entry, dict):
                 continue
-            epsg = f"EPSG:{code}"
-        return float(transform.c), float(transform.f), epsg
+            transform, crs = entry.get("transform"), entry.get("crs")
+            if transform is None or crs is None:
+                continue
+            if not isinstance(crs, str):
+                raise ValueError("GeoBench JSON metadata CRS must be a string.")
+            if (
+                not isinstance(transform, list)
+                or len(transform) not in (6, 9)
+                or any(not isinstance(value, (int, float)) for value in transform)
+            ):
+                raise ValueError("GeoBench JSON metadata transform must have 6 or 9 coefficients.")
+            return float(transform[2]), float(transform[5]), crs
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        return None, None, f"ERR {type(exc).__name__}: {exc}"
 
     return None, None, "NOGEO"
 

@@ -15,93 +15,71 @@ Usage::
 Each output sample is::
 
     <id>.bands.npz   per-band float arrays keyed by their source name
-    <id>.meta.pkl    raw bytes of the original HDF5 ``pickle`` attribute
-    <id>.label       UTF-8 string of the integer/multilabel class
+    <id>.meta.json   data-only metadata from the HDF5 ``metadata_json`` attribute
 
 Partition JSON files are copied verbatim into the output dir so the new
-loader can read them without changes.
+loader can read them without changes. Legacy pickle metadata is not read or
+converted by this script.
 """
 
 import argparse
 import io
+import json
 import logging
-import pickle
 import shutil
+import tarfile
 from pathlib import Path
 
 import h5py
 import numpy as np
-import webdataset as wds
+
+from torchgeo_bench.datasets._metadata import decode_metadata, read_hdf5_metadata
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 
-class _StubUnpickler(pickle.Unpickler):
-    """Match GeoBenchv1._load_sample_metadata: stub geobench module classes."""
-
-    def find_class(self, module: str, name: str) -> type:  # type: ignore[override]
-        if module == "geobench.dataset":
-            return type(name, (), {})
-        return super().find_class(module, name)
-
-
-def _safe_unpickle(b: bytes) -> dict:
-    try:
-        return pickle.loads(b)
-    except (ModuleNotFoundError, AttributeError):
-        return _StubUnpickler(io.BytesIO(b)).load()
-
-
-def _read_sample(hdf5_path: Path) -> tuple[dict[str, np.ndarray], bytes]:
-    """Return ``(bands_dict, raw_pickle_bytes)`` for one V1 HDF5 sample."""
+def _read_sample(hdf5_path: Path) -> tuple[dict[str, np.ndarray], dict]:
+    """Return band arrays and data-only metadata for one V1 HDF5 sample."""
     with h5py.File(hdf5_path, "r") as f:
+        metadata = read_hdf5_metadata(f.attrs)
         bands = {k: f[k][:] for k in f}
-        raw_pickle = f.attrs["pickle"]
-    return bands, raw_pickle
-
-
-def _resolve_pickle_bytes(raw: object) -> bytes:
-    if isinstance(raw, bytes):
-        return raw
-    if isinstance(raw, str):
-        # The upstream V1 distribution stored the bytes as a Python repr
-        # of a bytestring (``"b'...'"``), so eval the string back.
-        return eval(raw)  # noqa: S307 — trusted dataset payload
-    raise TypeError(f"Unexpected pickle attr type: {type(raw)}")
+    if any(array.dtype.hasobject for array in bands.values()):
+        raise ValueError(f"Band arrays in {hdf5_path} must not contain Python objects.")
+    return bands, metadata
 
 
 def repack(dataset_dir: Path, out_dir: Path, shard_size: int = 1000) -> int:
+    if shard_size < 1:
+        raise ValueError("shard_size must be positive.")
     sample_paths = sorted(dataset_dir.glob("*.hdf5"))
     if not sample_paths:
         raise FileNotFoundError(f"No id_*.hdf5 files in {dataset_dir}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    pattern = str(out_dir / "shard_%05d.tar")
-
     logger.info("Packing %d samples into shards of %d...", len(sample_paths), shard_size)
     written = 0
-    with wds.ShardWriter(pattern, maxcount=shard_size, encoder=False) as sink:
-        for hp in sample_paths:
-            sid = hp.stem
-            bands, raw_pickle = _read_sample(hp)
-            bands_buf = io.BytesIO()
-            np.savez(bands_buf, **bands)
-            sink.write(
-                {
-                    "__key__": sid,
-                    "bands.npz": bands_buf.getvalue(),
-                    "meta.pkl": _resolve_pickle_bytes(raw_pickle),
-                }
-            )
-            written += 1
-            if written % 1000 == 0:
-                logger.info("  packed %d / %d", written, len(sample_paths))
+    for shard, start in enumerate(range(0, len(sample_paths), shard_size)):
+        with tarfile.open(out_dir / f"shard_{shard:05d}.tar", "w") as sink:
+            for hp in sample_paths[start : start + shard_size]:
+                bands, metadata = _read_sample(hp)
+                bands_buf = io.BytesIO()
+                np.savez(bands_buf, **bands)
+                for suffix, payload in (
+                    ("bands.npz", bands_buf.getvalue()),
+                    ("meta.json", json.dumps(metadata, allow_nan=False).encode("utf-8")),
+                ):
+                    member = tarfile.TarInfo(f"{hp.stem}.{suffix}")
+                    member.size = len(payload)
+                    sink.addfile(member, io.BytesIO(payload))
+                written += 1
+                if written % 1000 == 0:
+                    logger.info("  packed %d / %d", written, len(sample_paths))
 
     # Carry partition + metadata files over so the new loader can find them
     # in the same place.
     for sidecar in dataset_dir.iterdir():
-        if sidecar.suffix in (".json", ".pkl") or sidecar.name in (
+        if sidecar.suffix == ".json" or sidecar.name in (
             "LICENSE",
             "README",
             "README.md",
@@ -129,13 +107,11 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
     # Index shards directly (matches the runtime loader's logic for sample
     # IDs that contain ``.``) instead of relying on wds.WebDataset's
     # first-dot key split.
-    import tarfile
-
     index: dict[str, dict[str, tuple]] = {}
     for path in shard_paths:
         with tarfile.open(path, "r") as t:
             for m in t.getmembers():
-                for ext in ("bands.npz", "meta.pkl"):
+                for ext in ("bands.npz", "meta.json"):
                     suffix = "." + ext
                     if m.name.endswith(suffix):
                         base = m.name[: -len(suffix)]
@@ -153,22 +129,19 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
         parts = index.get(sid)
         if not parts:
             continue
-        new_bands = dict(np.load(io.BytesIO(_read(parts["bands.npz"]))))
-        new_meta = _safe_unpickle(_read(parts["meta.pkl"]))
+        if "meta.json" not in parts:
+            raise ValueError(f"{sid}: missing '.meta.json' metadata; regenerate the legacy shards.")
+        with np.load(io.BytesIO(_read(parts["bands.npz"])), allow_pickle=False) as archive:
+            new_bands = {name: archive[name] for name in archive.files}
+        new_meta = decode_metadata(_read(parts["meta.json"]))
 
         # Reference HDF5
-        ref_bands, ref_pkl = _read_sample(targets[sid])
-        ref_meta = _safe_unpickle(_resolve_pickle_bytes(ref_pkl))
+        ref_bands, ref_meta = _read_sample(targets[sid])
 
         assert set(new_bands) == set(ref_bands), f"{sid}: band keys differ"
         for k in ref_bands:
             assert np.array_equal(new_bands[k], ref_bands[k]), f"{sid}: band '{k}' differs"
-        assert np.array_equal(
-            np.asarray(ref_meta.get("label")), np.asarray(new_meta.get("label"))
-        ), f"{sid}: label differs"
-        assert ref_meta.get("bands_order") == new_meta.get("bands_order"), (
-            f"{sid}: bands_order differs"
-        )
+        assert ref_meta == new_meta, f"{sid}: metadata differs"
         found += 1
 
     if found != len(targets):

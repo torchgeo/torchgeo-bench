@@ -20,6 +20,7 @@ Each NPZ contains:
 - ``labels``: (N,) int64 single-label OR (N, C) float32 multi-label.
 - ``probs``: (N, C) float32 — softmax probabilities (sigmoid for multi-label).
 - ``classes``: (C,) int64 — class index ordering used in ``probs``.
+- ``meta``: Unicode strings describing the run, never an object array.
 
 This script is invoked once per dataset (typically as a SLURM array task).
 """
@@ -274,7 +275,7 @@ def main() -> None:
                 f"{best_c:g}",
                 "train",
             ],
-            dtype=object,
+            dtype=str,
         ),
     )
     np.savez_compressed(
@@ -294,7 +295,7 @@ def main() -> None:
                 f"{best_c:g}",
                 "test",
             ],
-            dtype=object,
+            dtype=str,
         ),
     )
     logger.warning(

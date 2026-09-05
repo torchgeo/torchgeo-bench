@@ -66,7 +66,34 @@ loader auto-downloads the requested dataset from the public mirror
 ``isaaccorley/geobenchv1-webdataset`` on the Hugging Face Hub.  Set
 ``GEOBENCH_V1_NO_HF_DOWNLOAD=1`` to disable the auto-download and force a
 local-only path (``torchgeo-bench download geobench_v1`` still works for
-the legacy per-sample HDF5 layout).
+the per-sample HDF5 layout). Downloading files does not convert their metadata.
+
+V1 metadata format
+^^^^^^^^^^^^^^^^^^
+
+V1 readers require data-only JSON metadata. HDF5 samples store it as a UTF-8 JSON string in the ``metadata_json`` attribute; tar shards pair ``<sample_id>.bands.npz`` with ``<sample_id>.meta.json``. The JSON object must contain a numeric ``label`` (or a numeric list for multilabel data) and a non-empty ``bands_order`` list of source-band names.
+
+.. code-block:: json
+
+   {
+     "label": 2,
+     "bands_order": ["04 - Red", "03 - Green", "02 - Blue"],
+     "04 - Red": {
+       "transform": [10, 0, 500000, 0, -10, 5200000],
+       "crs": "EPSG:32631"
+     }
+   }
+
+Per-band ``transform`` and ``crs`` entries are optional. Geographic extraction accepts six affine coefficients ``[a, b, c, d, e, f]`` (or the nine-element affine matrix) and a CRS string; use ``null`` when georeferencing is unavailable. Python objects such as affine/CRS classes and NumPy label arrays must be exported as JSON numbers, lists, and strings by the data producer.
+
+.. warning::
+
+   Legacy ``pickle`` HDF5 attributes and ``.meta.pkl`` shard members are not loaded. Existing V1 artifacts must have their metadata regenerated from a trusted source or replaced by data-only versions from the dataset publisher. There is no automatic pickle conversion or compatibility fallback. Existing image arrays and partition JSON files do not need to change, but a legacy download alone is not usable by these readers.
+
+``experiments/scripts/repack_geobench_v1.py`` repacks HDF5 files that already contain ``metadata_json`` into the JSON-based shard format. Its ``--validate`` mode compares band arrays and JSON metadata without loading pickled data.
+
+Supported V1 datasets
+^^^^^^^^^^^^^^^^^^^^^
 
 .. list-table::
    :header-rows: 1
