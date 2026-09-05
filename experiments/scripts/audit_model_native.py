@@ -39,7 +39,7 @@ def band_specs(dataset: str, bands: str):
 
 def main() -> None:
     """Entry point."""
-    logging.basicConfig(level=logging.ERROR)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--dataset", default="m-eurosat")
@@ -79,12 +79,12 @@ def main() -> None:
             entry["model_native"] = "unsupported"
             entry["reason"] = message[:160]
         results[name] = entry
-        print(f"{name:38} {entry['model_native']}", flush=True)
+        logger.info("%-38s %s", name, entry["model_native"])
 
     args.out.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
     unsupported = sorted(n for n, v in results.items() if v["model_native"] == "unsupported")
-    print(f"\n{len(unsupported)}/{len(results)} models do not support model_native")
-    print(json.dumps(unsupported, indent=1))
+    logger.info("%d/%d models do not support model_native", len(unsupported), len(results))
+    print(json.dumps(unsupported, indent=1))  # noqa: T201
 
 
 if __name__ == "__main__":

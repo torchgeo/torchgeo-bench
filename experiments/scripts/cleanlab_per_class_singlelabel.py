@@ -115,26 +115,28 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
     out_path = out_dir / f"perclass_{dataset}_{split}.csv"
     out_dir.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)
-    logger.warning("[%s/%s] K=%d wrote %s", dataset, split, K, out_path)
+    logger.info("[%s/%s] K=%d wrote %s", dataset, split, K, out_path)
 
     worst = df.sort_values("flag_rate", ascending=False).head(top_k)
-    print(f"\n=== {dataset}/{split} — top {top_k} classes by flag_rate ===")
-    print(
+    logger.info("%s/%s — top %d classes by flag_rate", dataset, split, top_k)
+    logger.info(
+        "\n%s",
         worst.to_string(
             index=False,
             float_format=lambda v: f"{v:.3f}" if isinstance(v, float) else str(v),
-        )
+        ),
     )
     sticky = df[df["top_conf_share"] > 0].sort_values("top_conf_share", ascending=False).head(top_k)
     if not sticky.empty:
-        print(f"\n=== {dataset}/{split} — top {top_k} classes by off-diag confusion ===")
-        print(
+        logger.info("%s/%s — top %d classes by off-diag confusion", dataset, split, top_k)
+        logger.info(
+            "\n%s",
             sticky[
                 ["class", "n", "acc", "top_conf_class", "top_conf_share", "flag_rate"]
             ].to_string(
                 index=False,
                 float_format=lambda v: f"{v:.3f}" if isinstance(v, float) else str(v),
-            )
+            ),
         )
     return df
 
@@ -162,7 +164,7 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
     for ds in args.datasets:

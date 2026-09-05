@@ -126,7 +126,7 @@ def choose(seen: dict[str, tuple[int, int]]) -> tuple[list[str], str]:
 
 def main() -> None:
     """Entry point."""
-    logging.basicConfig(level=logging.ERROR)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--dataset", default="m-eurosat")
@@ -157,7 +157,7 @@ def main() -> None:
                 "config": str(path.relative_to(CONF).with_suffix("")),
                 "unusable": "no tap produced a feature map the probe can reshape",
             }
-            print(f"{name:38} UNUSABLE (probe cannot reshape its features)", flush=True)
+            logger.warning("%-38s UNUSABLE (probe cannot reshape its features)", name)
             del model
             continue
         picks, strategy = choose(seen)
@@ -168,14 +168,14 @@ def main() -> None:
             "layers": picks,
             "shapes": {p: list(seen[p]) for p in picks},
         }
-        print(f"{name:38} {strategy:24} {picks}", flush=True)
+        logger.info("%-38s %-24s %s", name, strategy, picks)
         del model
 
     args.out.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
     unusable = sorted(n for n, v in results.items() if v.get("unusable"))
-    print(f"\n{len(results)} models introspected -> {args.out}")
+    logger.info("%d models introspected -> %s", len(results), args.out)
     if unusable:
-        print(f"{len(unusable)} model(s) cannot be probed as configured: {unusable}")
+        logger.error("%d model(s) cannot be probed as configured: %s", len(unusable), unusable)
         raise SystemExit(1)
 
 

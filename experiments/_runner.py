@@ -90,7 +90,7 @@ def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResul
         "resume=true",
     ]
 
-    print(f"[{idx}/{total}] START  {job.label} on cuda:{gpu}", flush=True)
+    logger.info("[%d/%d] START %s on cuda:%d", idx, total, job.label, gpu)
     start = time.time()
     proc = subprocess.run(
         cmd,
@@ -101,16 +101,18 @@ def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResul
     elapsed = time.time() - start
 
     if proc.returncode == 0:
-        print(
-            f"[{idx}/{total}] DONE   {job.label} ({elapsed:.0f}s) on cuda:{gpu}",
-            flush=True,
-        )
+        logger.info("[%d/%d] DONE %s (%.0fs) on cuda:%d", idx, total, job.label, elapsed, gpu)
         return _JobResult(job.label, gpu, elapsed, 0)
 
     stderr_tail = "\n".join(proc.stderr.strip().splitlines()[-5:])
-    print(
-        f"[{idx}/{total}] FAILED {job.label} ({elapsed:.0f}s) on cuda:{gpu}\n  {stderr_tail}",
-        flush=True,
+    logger.error(
+        "[%d/%d] FAILED %s (%.0fs) on cuda:%d\n%s",
+        idx,
+        total,
+        job.label,
+        elapsed,
+        gpu,
+        stderr_tail,
     )
     return _JobResult(job.label, gpu, elapsed, proc.returncode, stderr_tail)
 
@@ -135,25 +137,23 @@ def _worker(
 
 
 def _summarize_results(results: list[_JobResult], total: int, elapsed: float, output: str) -> int:
-    """Print job timings and failures, returning the run exit code."""
+    """Log job timings and failures, returning the run exit code."""
     passed = sum(1 for r in results if r.returncode == 0)
     failed = total - passed
 
-    print()
-    print("=" * 60)
-    print("Run Complete")
-    print("=" * 60)
-    print(f"Total:    {total}")
-    print(f"Passed:   {passed}")
-    print(f"Failed:   {failed}")
-    print(f"Time:     {elapsed:.0f}s ({elapsed / 60:.1f}m)")
-    print(f"Output:   {output}")
+    logger.info(
+        "Run complete: %d/%d passed, %d failed, %.0fs elapsed; results in %s",
+        passed,
+        total,
+        failed,
+        elapsed,
+        output,
+    )
 
     if failed:
-        print("\nFailed jobs:")
         for r in results:
             if r.returncode != 0:
-                print(f"  {r.label} ({r.elapsed:.0f}s, cuda:{r.gpu})")
+                logger.error("Failed job %s (%.0fs, cuda:%d)", r.label, r.elapsed, r.gpu)
 
     if passed:
         times = sorted(
@@ -161,9 +161,9 @@ def _summarize_results(results: list[_JobResult], total: int, elapsed: float, ou
             key=lambda x: x[1],
         )
         avg = sum(t for _, t in times) / len(times)
-        print(f"\nAvg time per job: {avg:.0f}s ({avg / 60:.1f}m)")
-        print(f"Fastest: {times[0][0]} ({times[0][1]:.0f}s)")
-        print(f"Slowest: {times[-1][0]} ({times[-1][1]:.0f}s)")
+        logger.info("Average time per job: %.0fs", avg)
+        logger.info("Fastest: %s (%.0fs)", times[0][0], times[0][1])
+        logger.info("Slowest: %s (%.0fs)", times[-1][0], times[-1][1])
 
     return 0 if failed == 0 else 1
 
@@ -183,20 +183,16 @@ def run_jobs(
             sequentially; with multiple devices each device gets a worker
             thread that pulls from a shared queue.
         output: CSV path passed as ``output=<path>`` to every invocation.
-        dry_run: If ``True``, print the planned jobs and return 0 without
+        dry_run: If ``True``, log the planned jobs and return 0 without
             running anything.
 
     Returns:
         ``0`` if every job succeeded, ``1`` otherwise (or if ``jobs`` is
         empty, ``0`` with a warning log).
     """
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     total = len(jobs)
-    print("=" * 60)
-    print(f"Jobs:    {total}")
-    print(f"Devices: {devices} ({len(devices)} worker{'s' if len(devices) != 1 else ''})")
-    print(f"Output:  {output}")
-    print("Resume:  true")
-    print("=" * 60)
+    logger.info("Running %d jobs on devices %s; output=%s, resume=true", total, devices, output)
 
     if total == 0:
         logger.warning("No jobs to run.")
@@ -205,12 +201,14 @@ def run_jobs(
     if dry_run:
         for i, job in enumerate(jobs, start=1):
             gpu = devices[(i - 1) % len(devices)]
-            print(f"  [{i}/{total}] {job.label} -> cuda:{gpu}")
-            print(
-                f"      torchgeo-bench run {' '.join(job.overrides)} "
-                f"device=cuda:{gpu} output={output} resume=true"
+            logger.info("[%d/%d] %s -> cuda:%d", i, total, job.label, gpu)
+            logger.info(
+                "torchgeo-bench run %s device=cuda:%d output=%s resume=true",
+                " ".join(job.overrides),
+                gpu,
+                output,
             )
-        print(f"\n[DRY RUN] {total} job(s) across {len(devices)} device(s)")
+        logger.info("Dry run complete: %d jobs across %d devices", total, len(devices))
         return 0
 
     job_queue: Queue[tuple[int, Job]] = Queue()
@@ -248,5 +246,5 @@ __all__ = [
 
 
 if __name__ == "__main__":  # pragma: no cover
-    print("This module is a helper; import from a script in experiments/.", file=sys.stderr)
+    logger.error("This module is a helper; import from a script in experiments/.")
     sys.exit(2)

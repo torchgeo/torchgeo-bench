@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -10,6 +11,8 @@ import numpy as np
 import pandas as pd
 from filelock import FileLock
 from run_segmentation_protocol_study import build_jobs
+
+logger = logging.getLogger(__name__)
 
 VAL_PATTERN = re.compile(r"Epoch (\d+) Val mIoU: (\S+)")
 
@@ -86,12 +89,13 @@ def _write_summary(combined: pd.DataFrame, output: Path) -> None:
     ].sort_values("model")
     selected_path = output.with_name(f"{output.stem}_selected.csv")
     selected.to_csv(selected_path, index=False)
-    print(summary.to_string(float_format=lambda value: f"{value:.4f}"))
+    logger.info("\n%s", summary.to_string(float_format=lambda value: f"{value:.4f}"))
 
 
 def main() -> None:
     """Write one combined, analysis-ready row per study job."""
     args = _parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     events = [json.loads(line) for line in args.events.read_text().splitlines()]
     successful_logs = {
         event["job_id"]: Path(event["log"]) for event in events if event["event"] == "completed"

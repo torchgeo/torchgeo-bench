@@ -156,6 +156,7 @@ lint.select = [
   "RET508",  # else after break
   "RUF100",  # unused noqa
   "SIM",     # flake8-simplify
+  "T201",    # use logging for diagnostics
   "TID251",  # banned imports
   "UP",      # pyupgrade
   "W",       # pycodestyle warnings
@@ -173,6 +174,7 @@ lint.ignore = [
   "SIM116", # allow explicit branches
 ]
 lint.per-file-ignores."experiments/scripts/**/*.py" = [ "D" ]
+lint.per-file-ignores."src/torchgeo_bench/cli.py" = [ "T201" ]  # CLI payloads go to stdout
 lint.per-file-ignores."tests/**/*.py" = [ "ARG", "D" ]
 lint.flake8-tidy-imports.banned-api."__future__.annotations".msg = "Use ordinary annotations or quoted forward references."
 lint.mccabe.max-complexity = 10
