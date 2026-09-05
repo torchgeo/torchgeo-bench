@@ -33,6 +33,10 @@ from torchgeo_bench.datasets.base import BandSpec
 from ._input_units import InputUnit, detect_input_unit, to_reflectance, to_s2_dn
 
 
+class UnsupportedNormalizationError(ValueError):
+    """A model does not define the requested normalization pipeline."""
+
+
 class NormalizationStrategy(StrEnum):
     BANDSPEC_ZSCORE = "bandspec_zscore"
     MODEL_NATIVE = "model_native"
@@ -121,7 +125,9 @@ def build_model_native_normalizer(
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     """Convert sensor units before applying pretrained channel statistics."""
     if expected_input_unit is None:
-        raise ValueError("model_native normalisation requires expected_input_unit")
+        raise UnsupportedNormalizationError(
+            "model_native normalisation requires expected_input_unit"
+        )
     src = detect_input_unit(bands)
     if expected_input_unit == InputUnit.S2_DN:
         convert = lambda x: to_s2_dn(x, src)  # noqa: E731
@@ -136,7 +142,7 @@ def build_model_native_normalizer(
     if pretrain_mean is None:
         # Some wrappers install their own normalizer after construction.
         def _undefined(_x: torch.Tensor) -> torch.Tensor:
-            raise ValueError(
+            raise UnsupportedNormalizationError(
                 "model_native normalisation is undefined for this model: it declares "
                 f"expected_input_unit={expected_input_unit.value!r} but no pretrain_mean/"
                 "pretrain_std, and it does not supply its own normaliser.  Converting "

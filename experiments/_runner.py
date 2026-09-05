@@ -32,7 +32,7 @@ class Job:
 
     Attributes:
         label: Short human-readable identifier for log lines.
-        overrides: Hydra-style overrides forwarded to ``torchgeo-bench run``
+        overrides: Config overrides forwarded to ``torchgeo-bench run``
             (e.g. ``["model=timm/resnet18", "dataset.names=[m-eurosat]"]``).
             ``device`` and ``output`` are appended automatically by the
             runner — do not include them here.
@@ -167,7 +167,6 @@ def run_jobs(
     devices: list[int],
     *,
     output: str,
-    dry_run: bool = False,
 ) -> int:
     """Dispatch ``jobs`` across ``devices`` and return a process exit code.
 
@@ -177,8 +176,6 @@ def run_jobs(
             sequentially; with multiple devices each device gets a worker
             thread that pulls from a shared queue.
         output: CSV path passed as ``output=<path>`` to every invocation.
-        dry_run: If ``True``, log the planned jobs and return 0 without
-            running anything.
 
     Returns:
         ``0`` if every job succeeded, ``1`` otherwise (or if ``jobs`` is
@@ -190,19 +187,6 @@ def run_jobs(
 
     if total == 0:
         logger.warning("No jobs to run.")
-        return 0
-
-    if dry_run:
-        for i, job in enumerate(jobs, start=1):
-            gpu = devices[(i - 1) % len(devices)]
-            logger.info("[%d/%d] %s -> cuda:%d", i, total, job.label, gpu)
-            logger.info(
-                "torchgeo-bench run %s device=cuda:%d output=%s resume=true",
-                " ".join(job.overrides),
-                gpu,
-                output,
-            )
-        logger.info("Dry run complete: %d jobs across %d devices", total, len(devices))
         return 0
 
     job_queue: Queue[tuple[int, Job] | None] = Queue()

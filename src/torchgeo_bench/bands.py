@@ -7,7 +7,11 @@ that ``from torchgeo_bench.bands import BandSpec`` — and the re-export in
 
 from dataclasses import dataclass
 
-__all__ = ["BandSpec"]
+__all__ = ["BandCompatibilityError", "BandSpec"]
+
+
+class BandCompatibilityError(ValueError):
+    """The selected dataset bands cannot supply a model's required inputs."""
 
 
 @dataclass(frozen=True)

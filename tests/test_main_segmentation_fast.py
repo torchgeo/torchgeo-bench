@@ -138,7 +138,7 @@ def test_dataset_eval_merge_preserves_interpolation_context(
     )
     monkeypatch.setattr("torchgeo_bench.main.run_segmentation", capture_eval)
 
-    run_dataset(cfg, "burn_scars", "test", ResumeState(set(), {}))
+    assert list(run_dataset(cfg, "burn_scars", "test", ResumeState(set(), {}))) == []
 
     assert captured[0].segmentation.lr == 0.002
     assert captured[0].segmentation.epochs == 3

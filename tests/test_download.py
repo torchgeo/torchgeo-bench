@@ -1,5 +1,6 @@
 """Unit tests for dataset download helpers."""
 
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -15,25 +16,29 @@ from torchgeo_bench.download import (
 )
 
 
-def test_download_geobench_v1_creates_output_and_decompresses(tmp_path: Path) -> None:
+def test_download_geobench_v1_creates_output_and_decompresses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     out = tmp_path / "data"
 
     def _fake_snapshot_download(*, repo_id: str, repo_type: str, local_dir: Path) -> None:
         del repo_id, repo_type
         nested = local_dir / "classification_v1.0"
         nested.mkdir(parents=True, exist_ok=True)
-        (nested / "archive.zip").write_bytes(b"placeholder")
+        with zipfile.ZipFile(nested / "archive.zip", "w") as archive:
+            archive.writestr("dataset/samples.txt", "sample 1\n")
+            archive.writestr("dataset/metadata.json", '{"num_classes": 10}')
 
-    with (
-        mock.patch(
-            "torchgeo_bench.download.snapshot_download", side_effect=_fake_snapshot_download
-        ),
-        mock.patch("torchgeo_bench.download._decompress_zip_with_progress") as decompress_mock,
+    with mock.patch(
+        "torchgeo_bench.download.snapshot_download", side_effect=_fake_snapshot_download
     ):
         download_geobench_v1(out)
 
-    assert out.exists()
-    decompress_mock.assert_called_once()
+    nested = out / "classification_v1.0"
+    assert (nested / "dataset/samples.txt").read_text() == "sample 1\n"
+    assert (nested / "dataset/metadata.json").read_text() == '{"num_classes": 10}'
+    assert not (nested / "archive.zip").exists()
+    assert "Extracting archive.zip" in capsys.readouterr().err
 
 
 def test_download_geobench_v1_subset_uses_sharded_mirror(tmp_path: Path) -> None:

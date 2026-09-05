@@ -3,15 +3,15 @@
 import logging
 import math
 import os
-from collections.abc import Sequence, Sized
+from collections.abc import Iterator, Sequence, Sized
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
 
 import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
-from rich.progress import Progress, track
 from torch.utils.data import DataLoader, Dataset
+from tqdm.auto import tqdm
 
 from torchgeo_bench.calibration import (
     apply_temperature,
@@ -237,11 +237,8 @@ def select_logistic_c(
             len(x_train),
             len(x_val),
         )
-        c_value_iterator = track(c_values, description="C values")
-    else:
-        c_value_iterator = c_values
 
-    for idx, c in enumerate(c_value_iterator):
+    for idx, c in enumerate(tqdm(c_values, desc="C values", disable=not verbose)):
         model = LogisticRegression(
             C=c,
             max_iter=2000,
@@ -715,38 +712,17 @@ def evaluate_segmentation(
     return metrics, sum(probe.channels_list), lr, actual_batch_size, preds
 
 
-def _resolve_output_path(cfg: DictConfig) -> str:
-    """Return the CSV to write: explicit ``output``, else the model's own file.
+def _resolve_output_path(
+    cfg: DictConfig, dir_key: str = "results_dir", default_dir: str = DEFAULT_RESULTS_DIR
+) -> str:
+    """Return explicit ``output``, else the model's CSV in the requested directory.
 
-    Per-model files keep a re-run of one model from rewriting every other
-    model's rows.  ``output=`` still wins so one-off experiment scripts can
-    send their rows to a scratch CSV.
+    An explicit ``output=`` routes metrics, profile, and intrinsic-dimension
+    rows to one file; otherwise each kind has its own per-model directory.
     """
     if cfg.get("output"):
         return str(cfg.output)
-    name = cfg.model.get("name") if "name" in cfg.model else None
-    if not name:
-        raise ValueError(
-            "model config has no 'name', so no per-model results file can be "
-            "derived; set output= explicitly or add a name to the model config."
-        )
-    return str(model_results_path(cfg.get("results_dir", DEFAULT_RESULTS_DIR), name))
-
-
-def _resolve_side_output_path(
-    cfg: DictConfig, output_path: str, dir_key: str, default_dir: str
-) -> str:
-    """Return the CSV for a one-time measurement kind (profile/intrinsic_dim).
-
-    Mirrors :func:`_resolve_output_path`'s "``output=`` wins" rule: when the
-    caller set an explicit ``output``, every row type -- knn/linear/seg as
-    well as profile/intrinsic_dim -- lands in that single file, unchanged
-    from prior behavior. Only the default per-model routing path splits
-    profile/intrinsic_dim into their own directory.
-    """
-    if cfg.get("output"):
-        return output_path
-    name = cfg.model.get("name") if "name" in cfg.model else None
+    name = cfg.model.get("name")
     if not name:
         raise ValueError(
             "model config has no 'name', so no per-model results file can be "
@@ -755,27 +731,18 @@ def _resolve_side_output_path(
     return str(model_results_path(cfg.get(dir_key, default_dir), name))
 
 
-def _merge_completed_metrics(
-    base: dict[str, set[tuple[str, ...]]], other: dict[str, set[tuple[str, ...]]]
-) -> None:
-    """Union ``other``'s per-metric resume-key sets into ``base`` in place."""
-    for metric_name, keys in other.items():
-        base.setdefault(metric_name, set()).update(keys)
-
-
 def run_segmentation(
     cfg: DictConfig,
     eval_cfg: DictConfig,
     model: BenchModel,
     loaders: LoaderSplits,
     common_meta: ResultMetadata,
-) -> list[dict]:
-    """Train the segmentation probe and optionally save its predictions."""
+) -> Iterator[list[dict]]:
+    """Yield the completed probe measurement before optionally saving predictions."""
     train_loader, val_loader, test_loader = loaders.train, loaders.val, loaders.test
     train_dataset = train_loader.dataset
     assert isinstance(train_dataset, Sized)
     bench = get_bench_dataset_class(str(common_meta["dataset"]))()
-    all_rows: list[dict] = []
     num_classes = bench.num_classes
     seg_cfg_merged = eval_cfg.segmentation
     save_viz = seg_cfg_merged.get("save_viz", False)
@@ -793,7 +760,7 @@ def run_segmentation(
         "n_val": len(val_loader.dataset),
         "n_test": len(test_loader.dataset),
     }
-    all_rows.append(
+    yield [
         EvaluationResult(
             **segmentation_meta,
             method=f"seg-{eval_cfg.segmentation.head_type}",
@@ -808,7 +775,7 @@ def run_segmentation(
             recall=metrics.get("recall"),
             f1=metrics.get("f1"),
         ).to_row()
-    )
+    ]
     if save_viz and preds is not None:
         from torchgeo_bench.segmentation_viz import (
             SegmentationSamples,
@@ -832,7 +799,6 @@ def run_segmentation(
             ),
             n_samples=n_viz,
         )
-    return all_rows
 
 
 def run_classification(
@@ -841,16 +807,13 @@ def run_classification(
     model: BenchModel,
     loaders: LoaderSplits,
     common_meta: ResultMetadata,
-) -> tuple[list[dict], list[dict], list[dict]]:
-    """Evaluate classification probes and optional feature measurements."""
+) -> Iterator[tuple[list[dict], list[dict], list[dict]]]:
+    """Yield each completed probe or feature measurement for immediate persistence."""
     train_loader, val_loader, test_loader = loaders.train, loaders.val, loaders.test
     model_eval = cfg.model.get("eval") or {}
     knn_k = int(model_eval["knn_k"]) if "knn_k" in model_eval else int(cfg.eval.get("knn_k", 5))
     c_start, c_stop, c_num = model_eval.get("c_range") or cfg.eval.c_range
     c_values_list = (10 ** np.linspace(float(c_start), float(c_stop), int(c_num))).tolist()
-    all_rows: list[dict] = []
-    id_out_rows: list[dict] = []
-    profile_out_rows: list[dict] = []
     device = torch.device(cfg.device)
     metric_name = plan.metric_name
     x_train, y_train = embed_split(model, train_loader, device, verbose=True, split="train")
@@ -876,20 +839,19 @@ def run_classification(
         knn_score, knn_lo, knn_hi, knn_cal, knn_n_bins = evaluate_knn(
             splits.train, splits.test, cfg, device=plan.knn_device, n_neighbors=knn_k
         )
-        all_rows.append(
-            EvaluationResult(
-                **common_meta,
-                method=f"knn{knn_k}",
-                metric_name=metric_name,
-                metric_value=knn_score,
-                ci_lower=knn_lo,
-                ci_upper=knn_hi,
-                ece=knn_cal["ece"],
-                rms_ce=knn_cal["rms_ce"],
-                mce=knn_cal["mce"],
-                calibration_n_bins=knn_n_bins,
-            ).to_row()
-        )
+        row = EvaluationResult(
+            **common_meta,
+            method=f"knn{knn_k}",
+            metric_name=metric_name,
+            metric_value=knn_score,
+            ci_lower=knn_lo,
+            ci_upper=knn_hi,
+            ece=knn_cal["ece"],
+            rms_ce=knn_cal["rms_ce"],
+            mce=knn_cal["mce"],
+            calibration_n_bins=knn_n_bins,
+        ).to_row()
+        yield [row], [], []
 
     if not plan.skip_linear:
         try:
@@ -906,25 +868,24 @@ def run_classification(
                 exc,
             )
         else:
-            all_rows.append(
-                EvaluationResult(
-                    **common_meta,
-                    method="linear",
-                    metric_name=metric_name,
-                    metric_value=lin_score,
-                    ci_lower=lin_lo,
-                    ci_upper=lin_hi,
-                    best_c=best_c,
-                    ece=lin_cal["ece"],
-                    rms_ce=lin_cal["rms_ce"],
-                    mce=lin_cal["mce"],
-                    ece_ts=lin_cal_ts["ece_ts"],
-                    rms_ce_ts=lin_cal_ts["rms_ce_ts"],
-                    mce_ts=lin_cal_ts["mce_ts"],
-                    temperature=lin_cal_ts["temperature"],
-                    calibration_n_bins=cal_n_bins_linear,
-                ).to_row()
-            )
+            row = EvaluationResult(
+                **common_meta,
+                method="linear",
+                metric_name=metric_name,
+                metric_value=lin_score,
+                ci_lower=lin_lo,
+                ci_upper=lin_hi,
+                best_c=best_c,
+                ece=lin_cal["ece"],
+                rms_ce=lin_cal["rms_ce"],
+                mce=lin_cal["mce"],
+                ece_ts=lin_cal_ts["ece_ts"],
+                rms_ce_ts=lin_cal_ts["rms_ce_ts"],
+                mce_ts=lin_cal_ts["mce_ts"],
+                temperature=lin_cal_ts["temperature"],
+                calibration_n_bins=cal_n_bins_linear,
+            ).to_row()
+            yield [row], [], []
     if not plan.skip_id:
         id_rows = evaluate_intrinsic_dim(
             {"train": x_train, "val": x_val, "test": x_test},
@@ -932,13 +893,11 @@ def run_classification(
             common_meta,
             only_metrics=plan.id_missing_metrics if cfg.resume else None,
         )
-        id_out_rows.extend(id_rows)
+        yield [], id_rows, []
 
     if not plan.skip_profile:
         profile_rows = evaluate_profile(model, train_loader, cfg, common_meta)
-        profile_out_rows.extend(profile_rows)
-
-    return all_rows, id_out_rows, profile_out_rows
+        yield [], [], profile_rows
 
 
 def instantiate_dataset_model(
@@ -1025,7 +984,7 @@ def run_dataset(
     ds_name: str,
     config_hash: str,
     completed: ResumeState,
-) -> tuple[list[dict], list[dict], list[dict]] | None:
+) -> Iterator[tuple[list[dict], list[dict], list[dict]]]:
     """Load and evaluate one dataset unless resume marks it complete."""
     ds_cls = get_bench_dataset_class(ds_name)
 
@@ -1037,7 +996,7 @@ def run_dataset(
     if plan.skip_dataset:
         if cfg.verbose:
             logger.info("[%s] Resume preflight: all requested work already complete", ds_name)
-        return None
+        return
 
     if ds_cls.task != "segmentation" and not plan.skip_knn:
         plan = replace(plan, knn_device=resolve_knn_device(cfg.eval.get("knn_device"), cfg.device))
@@ -1059,15 +1018,16 @@ def run_dataset(
     )
     loaders = LoaderSplits(train_loader, val_loader, test_loader)
     if ds_cls.task == "segmentation":
-        rows = run_segmentation(cfg, eval_cfg, model, loaders, common_meta)
-        return rows, [], []
-    rows, id_rows, profile_rows = run_classification(cfg, plan, model, loaders, common_meta)
-    if cfg.resume:
-        id_rows = _filter_completed_metric_rows(id_rows, completed.completed_metrics, KEY_COLS)
-        profile_rows = _filter_completed_metric_rows(
-            profile_rows, completed.completed_metrics, KEY_COLS
-        )
-    return rows, id_rows, profile_rows
+        for rows in run_segmentation(cfg, eval_cfg, model, loaders, common_meta):
+            yield rows, [], []
+        return
+    for rows, id_rows, profile_rows in run_classification(cfg, plan, model, loaders, common_meta):
+        if cfg.resume:
+            id_rows = _filter_completed_metric_rows(id_rows, completed.completed_metrics, KEY_COLS)
+            profile_rows = _filter_completed_metric_rows(
+                profile_rows, completed.completed_metrics, KEY_COLS
+            )
+        yield rows, id_rows, profile_rows
 
 
 def load_completed_outputs(
@@ -1076,20 +1036,19 @@ def load_completed_outputs(
     profile_output_path: str,
     intrinsic_dim_output_path: str,
 ) -> tuple[set[tuple[str, ...]], dict[str, set[tuple[str, ...]]]]:
-    """Read resume keys from the result CSV and optional measurement files."""
+    """Read each distinct output once, merging side files only into metric resume keys."""
     completed_runs: set[tuple[str, ...]] = set()
     completed_metrics: dict[str, set[tuple[str, ...]]] = {}
-    if cfg.resume and os.path.exists(output_path):
-        completed_runs, completed_metrics = load_completed(output_path)
-        logger.info(
-            "Resume mode: Found %s existing results in %s", len(completed_runs), output_path
-        )
-        logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
     if cfg.resume:
-        for side_path in {profile_output_path, intrinsic_dim_output_path} - {output_path}:
-            if os.path.exists(side_path):
-                _, side_metrics = load_completed(side_path)
-                _merge_completed_metrics(completed_metrics, side_metrics)
+        for path in {output_path, profile_output_path, intrinsic_dim_output_path}:
+            if not os.path.exists(path):
+                continue
+            runs, metrics = load_completed(path)
+            if path == output_path:
+                completed_runs.update(runs)
+            for metric_name, keys in metrics.items():
+                completed_metrics.setdefault(metric_name, set()).update(keys)
+            logger.info("Resume mode: Found %d existing results in %s", len(runs), path)
 
     return completed_runs, completed_metrics
 
@@ -1109,34 +1068,27 @@ def main(cfg: DictConfig) -> None:
     cfg.device = str(device)
 
     output_path = _resolve_output_path(cfg)
-    profile_output_path = _resolve_side_output_path(
-        cfg, output_path, "profile_results_dir", DEFAULT_PROFILE_RESULTS_DIR
+    profile_output_path = _resolve_output_path(
+        cfg, "profile_results_dir", DEFAULT_PROFILE_RESULTS_DIR
     )
-    intrinsic_dim_output_path = _resolve_side_output_path(
-        cfg, output_path, "intrinsic_dim_results_dir", DEFAULT_INTRINSIC_DIM_RESULTS_DIR
+    intrinsic_dim_output_path = _resolve_output_path(
+        cfg, "intrinsic_dim_results_dir", DEFAULT_INTRINSIC_DIM_RESULTS_DIR
     )
-    for path in {output_path, profile_output_path, intrinsic_dim_output_path}:
+    output_paths = {output_path, profile_output_path, intrinsic_dim_output_path}
+    for path in output_paths:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
     completed_runs, completed_metrics = load_completed_outputs(
         cfg, output_path, profile_output_path, intrinsic_dim_output_path
     )
     config_hash = _resume_config_hash(cfg)
-    dataset_progress = Progress(redirect_stdout=False, redirect_stderr=False, auto_refresh=False)
-    dataset_progress.start()
-    try:
-        for ds_name in dataset_progress.track(dataset_names, description="Datasets"):
-            rows = run_dataset(
-                cfg, ds_name, config_hash, ResumeState(completed_runs, completed_metrics)
-            )
-            if rows is None:
-                continue
-            all_rows, id_out_rows, profile_out_rows = rows
+    completed = ResumeState(completed_runs, completed_metrics)
+    for ds_name in tqdm(dataset_names, desc="Datasets"):
+        for all_rows, id_out_rows, profile_out_rows in run_dataset(
+            cfg, ds_name, config_hash, completed
+        ):
             append_rows_atomic(output_path, all_rows)
             append_rows_atomic(intrinsic_dim_output_path, id_out_rows)
             append_rows_atomic(profile_output_path, profile_out_rows)
-    finally:
-        dataset_progress.stop()
 
-    result_paths = ", ".join(sorted({output_path, intrinsic_dim_output_path, profile_output_path}))
-    logger.info("Benchmark complete. Results appended to %s", result_paths)
+    logger.info("Benchmark complete. Results appended to %s", ", ".join(sorted(output_paths)))

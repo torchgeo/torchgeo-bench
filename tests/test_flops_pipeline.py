@@ -11,31 +11,30 @@ from pathlib import Path
 import pytest
 import torch
 from omegaconf import DictConfig, OmegaConf
+from omegaconf.errors import InterpolationKeyError
 from torch import nn
 
 from torchgeo_bench import flops_pipeline
+from torchgeo_bench.bands import BandCompatibilityError
+from torchgeo_bench.config import compose_config
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.flops_pipeline import (
     _MODALITY_FOR_BAND_CONFIG,
-    _is_band_incompatibility,
+    _build_model,
     _load_completed,
     _n_tokens,
     _probe_gflops,
     _seg_head_gflops,
+    main,
 )
-from torchgeo_bench.model_profile import ProfileTiming, _count_gflops, lenient_grad_hooks
+from torchgeo_bench.model_profile import ProfileTiming, _count_gflops
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 CPU = torch.device("cpu")
 
 
-# ---------------------------------------------------------------------------
-# lenient_grad_hooks: the no-op guarantee
-# ---------------------------------------------------------------------------
-
-
 class _TinyConvNet(nn.Module):
-    """Healthy model — never trips module_tracker's grad_fn assertion."""
+    """Small backbone with known convolution and linear costs."""
 
     def __init__(self, in_ch: int = 3, width: int = 8) -> None:
         super().__init__()
@@ -49,12 +48,7 @@ class _TinyConvNet(nn.Module):
 
 
 class _GradBreakingNet(nn.Module):
-    """Reproduces Panopticon's failure shape.
-
-    A ``conv3d`` fed a tensor introduced *inside* the forward has no
-    ``grad_fn``, so ``module_tracker``'s forward-pre-hook raises before any
-    counting happens.  This is the structural pattern, not the model.
-    """
+    """Backbone that detaches intermediate features before a Conv3d."""
 
     def __init__(self, in_ch: int = 3) -> None:
         super().__init__()
@@ -69,52 +63,29 @@ class _GradBreakingNet(nn.Module):
         return self.head(y.mean(dim=(-2, -1)))
 
 
-def test_lenient_grad_hooks_is_bit_identical_for_healthy_models():
-    """The load-bearing check: the workaround must change nothing for models
-    that already work.  Bit-identical, not merely close."""
-    model = _TinyConvNet().eval()
-    x = torch.randn(2, 3, 32, 32)
-
-    plain = _count_gflops(model, x)
-    with lenient_grad_hooks():
-        lenient = _count_gflops(model, x)
-
-    assert plain == lenient, f"{plain!r} != {lenient!r}"
-    assert plain > 0
-
-
-def test_lenient_grad_hooks_restores_the_original_hook():
-    """The patch must not leak outside the context manager."""
+def test_counting_does_not_patch_autograd():
     import torch.autograd.graph as autograd_graph
     import torch.utils.module_tracker as module_tracker
 
     before = autograd_graph.register_multi_grad_hook
     before_mt = module_tracker.register_multi_grad_hook
-    with lenient_grad_hooks():
-        assert autograd_graph.register_multi_grad_hook is not before
+    model = _TinyConvNet().eval()
+
+    def check_hooks(module, inputs):
+        assert autograd_graph.register_multi_grad_hook is before
+        assert module_tracker.register_multi_grad_hook is before_mt
+        assert not torch.is_grad_enabled()
+
+    with model.register_forward_pre_hook(check_hooks):
+        assert _count_gflops(model, torch.randn(2, 3, 32, 32)) > 0
     assert autograd_graph.register_multi_grad_hook is before
     assert module_tracker.register_multi_grad_hook is before_mt
 
 
-def test_lenient_grad_hooks_restores_on_exception():
-    import torch.autograd.graph as autograd_graph
-
-    before = autograd_graph.register_multi_grad_hook
-    with pytest.raises(RuntimeError), lenient_grad_hooks():
-        raise RuntimeError("boom")
-    assert autograd_graph.register_multi_grad_hook is before
-
-
 def test_grad_breaking_model_is_measurable():
-    """A model with Panopticon's grad-breaking shape yields finite GFLOPs.
-
-    ``_count_gflops`` runs the whole tier ladder inside ``lenient_grad_hooks``,
-    so this must not raise ``NotImplementedError``.
-    """
     model = _GradBreakingNet().eval()
     gflops = _count_gflops(model, torch.randn(2, 3, 32, 32))
-    assert math.isfinite(gflops)
-    assert gflops > 0
+    assert gflops == pytest.approx((2 * 4 * 32 * 32 * 9 + 2 * 4 * 2) / 1e9)
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +164,11 @@ def test_mlp_probe_scales_as_feature_dim_squared():
     # The D x D projection dominates the D x n_classes classifier, so doubling
     # D roughly quadruples the probe.
     assert g_w / g_n == pytest.approx(4.0, rel=0.05)
+
+
+def test_unknown_probe_head_is_rejected():
+    with pytest.raises(ValueError, match="Unknown probe head"):
+        _probe_gflops(_WidthModel(8).eval(), (3, 32, 32), CPU, "typo", 10)
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +342,7 @@ def test_load_completed_reads_cell_keys(tmp_path):
     assert ("resnet50", "s2", "segmentation", "dpt") not in completed
 
 
-def test_load_completed_rejects_malformed_csv(tmp_path: Path) -> None:
+def test_load_completed_rejects_invalid_schema(tmp_path: Path) -> None:
     path = tmp_path / "broken.csv"
     path.write_text("this,is not\na valid;;csv\n")
     with pytest.raises(KeyError, match="name"):
@@ -374,77 +350,42 @@ def test_load_completed_rejects_malformed_csv(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Band-incompatibility detection
+# Band compatibility and genuine failures
 # ---------------------------------------------------------------------------
 
 
-def _wrap(exc: BaseException, depth: int = 2) -> BaseException:
-    """Nest *exc* in `depth` layers of wrapper exceptions."""
-    out: BaseException = exc
-    for i in range(depth):
-        wrapper = RuntimeError(f"instantiation failed (layer {i})")
-        wrapper.__cause__ = out
-        out = wrapper
-    return out
+def test_build_model_skips_explicit_band_incompatibility(monkeypatch, caplog):
+    def incompatible(config, **kwargs):
+        raise BandCompatibilityError("unsupported selection")
 
-
-def test_band_incompatibility_detected_through_wrapping():
-    """A wrapped band ValueError is still found by walking the chain."""
-    inner = ValueError("Missing required model band 'nir'. Available canonical bands: ...")
-    assert _is_band_incompatibility(_wrap(inner)) is inner
-
-
-def test_band_incompatibility_matches_empty_intersection():
-    inner = ValueError("select_src_bands: none of the target bands ['blue'] are present.")
-    assert _is_band_incompatibility(_wrap(inner)) is inner
-
-
-def test_interpolation_key_error_is_not_a_band_incompatibility():
-    """omegaconf's InterpolationKeyError subclasses ValueError, so an
-    unresolved ``${seed}`` must not be classified as a band incompatibility."""
-    from omegaconf.errors import InterpolationKeyError
-
-    assert issubclass(InterpolationKeyError, ValueError)  # why the narrowing is needed
-    exc = InterpolationKeyError("Interpolation key 'seed' not found")
-    assert _is_band_incompatibility(_wrap(exc)) is None
+    monkeypatch.setattr("torchgeo_bench.flops_pipeline.instantiate", incompatible)
+    cfg = OmegaConf.create({"_target_": "example.Model", "name": "example"})
+    assert _build_model(cfg, [], "identity", "rgb") is None
+    assert "unsupported selection" in caplog.text
 
 
 @pytest.mark.parametrize(
-    "exc",
+    "error",
     [
+        InterpolationKeyError("Interpolation key 'seed' not found"),
+        ValueError("input channels configuration is invalid"),
         ValueError("Could not find weights for 'tt_clay_v1_5'"),
         OSError("[Errno 122] Disk quota exceeded"),
         RuntimeError("CUDA error: out of memory"),
-        ValueError("invalid literal for int() with base 10: 'x'"),
     ],
 )
-def test_real_failures_are_not_swallowed(exc):
-    """A missing checkpoint or a full disk is a failure, not a skip."""
-    assert _is_band_incompatibility(_wrap(exc)) is None
+def test_build_model_propagates_real_failures(error, monkeypatch):
+    def broken(config, **kwargs):
+        raise error
+
+    monkeypatch.setattr("torchgeo_bench.flops_pipeline.instantiate", broken)
+    cfg = OmegaConf.create({"_target_": "example.Model", "name": "example"})
+    with pytest.raises(type(error)) as exc:
+        _build_model(cfg, [], "identity", "rgb")
+    assert exc.value is error
 
 
-def test_band_incompatibility_survives_a_cyclic_cause_chain():
-    """``__cause__ or __context__`` can cycle when an exception is raised while
-    handling itself; the walk must terminate rather than spin."""
-    a = ValueError("Missing required model band 'swir1'")
-    b = RuntimeError("wrapper")
-    a.__context__ = b
-    b.__context__ = a
-    assert _is_band_incompatibility(b) is a
-
-
-def test_band_incompatibility_terminates_on_unmatched_cycle():
-    a = RuntimeError("one")
-    b = RuntimeError("two")
-    a.__context__ = b
-    b.__context__ = a
-    assert _is_band_incompatibility(a) is None
-
-
-def test_band_markers_match_what_band_mapping_actually_raises():
-    """The markers are matched by message, so they are pinned against the real
-    raise sites.  A reword there without a matching update here would silently
-    widen the sweep's blind spot back out."""
+def test_missing_bands_raise_typed_incompatibility():
     from torchgeo_bench.datasets.base import BandSpec
     from torchgeo_bench.models._band_mapping import map_to_model_bands, select_src_bands
 
@@ -453,13 +394,11 @@ def test_band_markers_match_what_band_mapping_actually_raises():
         for n in ("red", "green", "blue")
     ]
 
-    with pytest.raises(ValueError, match="Missing required model band 'nir'") as missing:
+    with pytest.raises(BandCompatibilityError, match="Missing required model band 'nir'"):
         map_to_model_bands(torch.zeros(1, 3, 4, 4), rgb, ["blue", "green", "red", "nir"])
-    assert _is_band_incompatibility(missing.value) is missing.value
 
-    with pytest.raises(ValueError, match="none of the target bands") as empty:
+    with pytest.raises(BandCompatibilityError, match="none of the target bands"):
         select_src_bands(rgb, ["swir1", "swir2"])
-    assert _is_band_incompatibility(empty.value) is empty.value
 
 
 def test_channel_count_disagreement_is_a_bug_not_a_band_skip():
@@ -475,17 +414,68 @@ def test_channel_count_disagreement_is_a_bug_not_a_band_skip():
     ]
     with pytest.raises(ValueError, match="images has 7 channels but") as mismatch:
         map_to_model_bands(torch.zeros(1, 7, 4, 4), rgb, ["red", "green", "blue"])
-    assert _is_band_incompatibility(mismatch.value) is None
+    assert not isinstance(mismatch.value, BandCompatibilityError)
 
 
-def test_terramind_modality_mismatch_is_a_band_incompatibility():
-    """_build_model raises this itself for an S2L2A/rgb pairing."""
-    exc = ValueError(
-        "TerraMind modality 'S2L2A' does not match band config 'rgb' "
-        "(3 channels, expects 'RGB'). Measuring this pair would map through "
-        "the wrong band table."
+def test_terramind_modality_mismatch_is_rejected():
+    cfg = OmegaConf.create(
+        {"_target_": "example.TerraMind", "name": "example", "modality": "S2L2A"}
     )
-    assert _is_band_incompatibility(exc) is exc
+    with pytest.raises(ValueError, match="does not match band config"):
+        _build_model(cfg, [], "identity", "rgb")
+
+
+@pytest.fixture
+def flops_config(tmp_path):
+    cfg = compose_config(["model=rcf"], config_name="flops_config")
+    cfg.output = str(tmp_path / "flops.csv")
+    cfg.device = "cpu"
+    cfg.image_size = 32
+    cfg.band_configs = ["rgb"]
+    cfg.timing_batch_size = 2
+    cfg.n_warmup = 0
+    cfg.n_measure = 1
+    return cfg
+
+
+def test_completed_profile_survives_invalid_segmentation_head(flops_config, monkeypatch):
+    import pandas as pd
+
+    monkeypatch.setattr(
+        "torchgeo_bench.flops_pipeline.instantiate", lambda *args, **kwargs: _TinyConvNet()
+    )
+    flops_config.eval.segmentation.layers = ["stem"]
+    flops_config.seg_head_types = ["invalid"]
+    with pytest.raises(ValueError, match="head"):
+        main(flops_config)
+
+    rows = pd.read_csv(flops_config.output)
+    assert list(rows["task"]) == ["classification"]
+    assert rows.iloc[0]["gflops_total"] > 0
+    assert not rows.iloc[0]["lenient_grad_hooks"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        BandCompatibilityError("unsupported selection"),
+        ValueError("input channels implementation is broken"),
+    ],
+)
+def test_forward_pass_only_skips_explicit_band_errors(flops_config, monkeypatch, caplog, error):
+    class BrokenForward(nn.Module):
+        def forward(self, images):
+            raise error
+
+    monkeypatch.setattr(
+        "torchgeo_bench.flops_pipeline.instantiate", lambda *args, **kwargs: BrokenForward()
+    )
+    if isinstance(error, BandCompatibilityError):
+        main(flops_config)
+        assert "unsupported selection" in caplog.text
+    else:
+        with pytest.raises(ValueError, match="implementation is broken"):
+            main(flops_config)
 
 
 def test_flops_config_resolves_every_shipped_model_config():
@@ -666,7 +656,7 @@ def test_main_classification_failure_handling(
         channels = shape if isinstance(shape, int) else shape[0]
         if channels == 3:
             if band_mismatch:
-                raise ValueError("Missing required model band 'nir'")
+                raise BandCompatibilityError("Missing required model band 'nir'")
             raise RuntimeError("bad forward")
         return measure(model, shape, *args)
 
@@ -687,24 +677,28 @@ def test_main_classification_failure_handling(
     assert events.count("head:fpn") == 1
 
 
-def test_main_segmentation_failure_propagates(
-    flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("failed_head", ["fpn", "dpt"])
+def test_main_segmentation_failure_preserves_completed_rows(
+    flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch, failed_head: str
 ) -> None:
     cfg, rows, _events = flops_run
     cfg.band_configs = ["rgb"]
     build = flops_pipeline.build_seg_probe_and_solver
 
-    def fail_fpn(
+    def fail_head(
         model: nn.Module, classes: int, head_cfg: DictConfig, *args: object
     ) -> tuple[nn.Module, None]:
-        if head_cfg.segmentation.head_type == "fpn":
+        if head_cfg.segmentation.head_type == failed_head:
             raise ValueError("unsupported head")
         return build(model, classes, head_cfg, *args)
 
-    monkeypatch.setattr(flops_pipeline, "build_seg_probe_and_solver", fail_fpn)
+    monkeypatch.setattr(flops_pipeline, "build_seg_probe_and_solver", fail_head)
     with pytest.raises(ValueError, match="unsupported head"):
         flops_pipeline.main(cfg)
-    assert rows == []
+    expected = [("rgb", "classification", "")]
+    if failed_head == "dpt":
+        expected.append(("rgb", "segmentation", "fpn"))
+    assert written_keys(rows) == expected
 
 
 @pytest.mark.parametrize("empty_layers", [False, True])
@@ -739,7 +733,7 @@ def test_main_rejects_malformed_layers_before_measurement(
 
 @pytest.mark.slow
 def test_panopticon_yields_finite_gflops():
-    """Panopticon yields finite GFLOPs through the lenient_grad_hooks path."""
+    """Count the real Panopticon backbone without replacing PyTorch hooks."""
     from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()

@@ -17,21 +17,23 @@ One invocation handles one model config, matching ``seg_corruption_pipeline``;
 import logging
 import os
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC
 
 import pandas as pd
 import torch
+from filelock import FileLock
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
+from torchgeo_bench.bands import BandCompatibilityError
 from torchgeo_bench.config import instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.model_profile import (
     ProfileTiming,
     _count_gflops,
     _count_params,
-    lenient_grad_hooks,
     measure_profile,
 )
 from torchgeo_bench.results import append_rows_atomic
@@ -63,7 +65,8 @@ def _load_completed(path: str) -> frozenset[tuple]:
     """Return the ``(name, band_config, task, head_type)`` keys already in *path*."""
     if not os.path.exists(path):
         return frozenset()
-    df = pd.read_csv(path)
+    with FileLock(f"{path}.lock"):
+        df = pd.read_csv(path)
     return frozenset(
         zip(df["name"], df["band_config"], df["task"], df["head_type"].fillna(""), strict=True)
     )
@@ -73,68 +76,13 @@ def _is_terramind(cfg_model: DictConfig) -> bool:
     return "TerraMind" in str(cfg_model._target_)
 
 
-# A band incompatibility is identified by message, not by exception type alone.
-# `isinstance(exc, ValueError)` is far too wide: omegaconf's
-# InterpolationKeyError, ValidationError, UnsupportedValueType and
-# ConfigValueError are *all* ValueError subclasses, so a broken model config —
-# a `${seed}` interpolation with no `seed` key, say — would be logged as
-# "incompatible with this band config" and silently dropped from the CSV.
-_BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
-    # torchgeo_bench.models._band_mapping
-    "missing required model band",
-    "none of the target bands",
-    # TerraMind's modality/band-config disagreement, raised in _build_model
-    "does not match band config",
-    # third-party stems that validate channel count themselves (torchgeo's
-    # fixed-channel checkpoints, timm patch-embed).  Deliberately *not*
-    # included: "images has N channels but src_bands has M entries" from
-    # map_to_model_bands, which means the caller passed a tensor disagreeing
-    # with its own BandSpecs — a pipeline bug that must stay loud.  It cannot
-    # fire here anyway, since n_channels is len(band_specs) by construction.
-    "input channels",
-    "num_chans",
-    "in_chans",
-)
-
-
-def _is_band_incompatibility(exc: BaseException) -> BaseException | None:
-    """Return the band-incompatibility cause in *exc*'s chain, or None.
-
-    Model constructors may wrap the band-mismatch ``ValueError``, so the
-    exception chain is walked.  Only genuine band/shape mismatches match;
-    anything else (a missing checkpoint, an exhausted disk quota, a malformed
-    config) is a real failure and must propagate rather than be recorded as a
-    skip.
-    """
-    seen: set[int] = set()
-    cause: BaseException | None = exc
-    # `__cause__ or __context__` can cycle when an exception is raised while
-    # handling itself, so visited frames are tracked rather than trusted to
-    # terminate.
-    while cause is not None and id(cause) not in seen:
-        seen.add(id(cause))
-        if isinstance(cause, ValueError):
-            message = str(cause).lower()
-            if any(marker in message for marker in _BAND_INCOMPAT_MARKERS):
-                return cause
-        cause = cause.__cause__ or cause.__context__
-    return None
-
-
 def _build_model(
     cfg_model: DictConfig,
     band_specs: list,
     normalization: str,
     band_config: str,
 ) -> nn.Module | None:
-    """Instantiate the model for *band_config*, or None if incompatible.
-
-    Model/band incompatibilities are expected and numerous: several configs
-    are RGB-only (a 3-channel pretrained stem) and several are
-    multispectral-only (``tgeo_resnet50_s2all_moco`` has a 13-channel stem).
-    Those raise ``ValueError`` and are skipped with a warning, mirroring
-    ``seg_corruption_pipeline``.
-    """
+    """Instantiate the model, skipping only explicitly incompatible band selections."""
     if _is_terramind(cfg_model):
         # Each TerraMind config declares its own modality and is only ever
         # measured at the matching band config (enforced by the caller), so
@@ -152,15 +100,12 @@ def _build_model(
             )
     try:
         return instantiate(cfg_model, bands=band_specs, normalization=normalization)
-    except Exception as exc:  # allow-except: Skip only recognized input-band mismatches.
-        cause = _is_band_incompatibility(exc)
-        if cause is None:
-            raise
+    except BandCompatibilityError as exc:  # allow-except: Skip explicitly unsupported bands.
         logger.warning(
             "Skipping %s/%s: model is incompatible with this band config: %s",
             cfg_model.get("name", cfg_model._target_),
             band_config,
-            cause,
+            exc,
         )
         return None
 
@@ -182,10 +127,9 @@ def _measure_backbone(
     while True:
         try:
             x = torch.randn(batch_size, n_channels, image_size, image_size, device=device)
-            with lenient_grad_hooks():
-                return measure_profile(
-                    model, x, device, n_warmup=timing.n_warmup, n_measure=timing.n_measure
-                ), batch_size
+            return measure_profile(
+                model, x, device, n_warmup=timing.n_warmup, n_measure=timing.n_measure
+            ), batch_size
         except torch.cuda.OutOfMemoryError:  # allow-except: Retry with a smaller timing batch.
             if batch_size <= 1:
                 raise
@@ -218,8 +162,10 @@ def _probe_gflops(
             nn.SiLU(inplace=True),
             nn.Linear(feature_dim, n_classes, bias=True),
         )
-    else:
+    elif head == "linear":
         probe = nn.Linear(feature_dim, n_classes, bias=True)
+    else:
+        raise ValueError(f"Unknown probe head {head!r}; expected 'linear' or 'mlp'.")
     probe.to(device).eval()
 
     gflops = _count_gflops(probe, torch.randn(2, feature_dim, device=device))
@@ -286,13 +232,7 @@ def _seg_head_gflops(
             return self.head(feats, *self.size)
 
     wrapper = _HeadOnly(probe.head, (image_size, image_size)).to(device).eval()
-    # _count_gflops slices sample[:1]; a list of feature maps is already
-    # batch-1 here, so hand it straight through.
-    from torch.utils.flop_counter import FlopCounterMode
-
-    with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, torch.inference_mode():
-        wrapper(features)
-    return float(counter.get_total_flops()) / 1e9
+    return _count_gflops(wrapper, features)
 
 
 def _flops_row(
@@ -324,7 +264,7 @@ def _flops_row(
         "peak_gpu_mem_gb": None,
         "reserved_gpu_mem_gb": None,
         "timing_batch_size": None,
-        "lenient_grad_hooks": True,
+        "lenient_grad_hooks": False,
         "measured_at": _now(),
     }
     row.update(values)
@@ -359,17 +299,13 @@ def classification_row(
             str(cfg.probe_head),
             int(cfg.probe_num_classes),
         )
-    except Exception as exc:  # allow-except: Skip only recognized input-band mismatches.
-        # Some wrappers only detect incompatible bands during their first forward pass.
-        cause = _is_band_incompatibility(exc)
-        if cause is None:
-            raise
+    except BandCompatibilityError as exc:  # allow-except: Skip explicitly unsupported bands.
         logger.warning(
             "Skipping %s/%s classification: model is incompatible with this "
             "band config at forward time: %s",
             model_name,
             band_config,
-            cause,
+            exc,
         )
         return None
     row = _flops_row(
@@ -418,8 +354,8 @@ def segmentation_rows(
     base_meta: dict,
     device: torch.device,
     completed: frozenset[tuple],
-) -> list[dict]:
-    """Measure configured segmentation heads that are not already complete."""
+) -> Iterator[dict]:
+    """Yield each completed segmentation measurement before starting the next head."""
     model_name = base_meta["name"]
     band_config = base_meta["band_config"]
     n_channels = base_meta["n_channels"]
@@ -429,9 +365,8 @@ def segmentation_rows(
             logger.info(
                 "No eval.segmentation.layers for %s — skipping segmentation cells", model_name
             )
-        return []
+        return
 
-    rows: list[dict] = []
     for head_type in options.head_types:
         seg_key = (model_name, band_config, "segmentation", head_type)
         if seg_key in completed:
@@ -448,19 +383,17 @@ def segmentation_rows(
         probe.to(device).eval()
 
         gflops_head = _seg_head_gflops(probe, n_channels, image_size, device)
-        rows.append(
-            _flops_row(
-                base_meta,
-                model,
-                image_size,
-                task="segmentation",
-                head_type=head_type,
-                num_classes=options.num_classes,
-                gflops_head=gflops_head,
-                params_backbone_m=_count_params(model),
-                params_head_m=_count_params(probe.head),
-                feature_dim=sum(probe.channels_list),
-            )
+        yield _flops_row(
+            base_meta,
+            model,
+            image_size,
+            task="segmentation",
+            head_type=head_type,
+            num_classes=options.num_classes,
+            gflops_head=gflops_head,
+            params_backbone_m=_count_params(model),
+            params_head_m=_count_params(probe.head),
+            feature_dim=sum(probe.channels_list),
         )
         logger.info(
             "%s/%s segmentation head=%s: head=%.4f GF (taps=%s)",
@@ -472,8 +405,6 @@ def segmentation_rows(
         )
         del probe
         _free(device)
-
-    return rows
 
 
 def main(cfg: DictConfig) -> None:
@@ -510,7 +441,7 @@ def main(cfg: DictConfig) -> None:
         layers=list(seg_eval_cfg.segmentation.get("layers", [])),
     )
 
-    rows: list[dict] = []
+    n_written = 0
     n_skipped = 0
 
     for band_config in list(cfg.band_configs):
@@ -548,18 +479,19 @@ def main(cfg: DictConfig) -> None:
                 del model
                 _free(device)
                 continue
-            rows.append(row)
+            append_rows_atomic(output_path, [row])
+            n_written += 1
 
-        rows.extend(segmentation_rows(seg_options, model, base_meta, device, completed))
+        for row in segmentation_rows(seg_options, model, base_meta, device, completed):
+            append_rows_atomic(output_path, [row])
+            n_written += 1
 
         del model
         _free(device)
 
-    if rows:
-        append_rows_atomic(output_path, rows)
     logger.info(
         "Wrote %d rows for %s (%d cells skipped) → %s",
-        len(rows),
+        n_written,
         model_name,
         n_skipped,
         output_path,

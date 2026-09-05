@@ -314,6 +314,33 @@ def test_linear_row_emitted(tmp_path: Path):
     assert row["metric_name"] == "accuracy"
 
 
+def test_completed_knn_survives_later_linear_failure(tmp_path: Path) -> None:
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(out)
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.instantiate", return_value=_chainable_model_mock()),
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_logistic", side_effect=RuntimeError("linear probe failed")
+        ),
+        pytest.raises(RuntimeError, match="linear probe failed"),
+    ):
+        main(cfg)
+
+    df = pd.read_csv(out)
+    assert list(df["method"]) == ["knn5"]
+    row = df.iloc[0]
+    assert (row["metric_value"], row["ci_lower"], row["ci_upper"]) == (0.5, 0.45, 0.55)
+    assert row["ece"] == 0.05
+    assert row["config_hash"] == _resume_config_hash(cfg)
+
+
 def test_resume_skips_completed_knn_row(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])

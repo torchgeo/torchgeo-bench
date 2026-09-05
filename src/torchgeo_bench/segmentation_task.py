@@ -2,11 +2,11 @@
 
 import logging
 import math
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
-from rich.progress import track
 from torch.utils.data import DataLoader
 
 if TYPE_CHECKING:
@@ -17,6 +17,7 @@ from torchmetrics.classification import (
     MulticlassPrecision,
     MulticlassRecall,
 )
+from tqdm.auto import tqdm
 
 from .segmentation_probe import (
     CachedFeaturesDataset,
@@ -152,7 +153,7 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             desc = f"Epoch {epoch + 1}/{epochs}"
-            batches = track(train_loader, description=desc) if verbose else train_loader
+            batches = tqdm(train_loader, desc=desc, disable=not verbose)
             for batch in batches:
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
@@ -185,7 +186,6 @@ class SegmentationSolver:
 
         return last_val_miou
 
-    @torch.no_grad()
     def evaluate(
         self,
         dataloader: DataLoader,
@@ -203,44 +203,8 @@ class SegmentationSolver:
         Returns:
             Metrics, optionally followed by predictions and/or per-image confusion matrices.
         """
-        self.model.eval()
-        for m in self._all_metrics:
-            m.reset()
-            m.to(self.device)
-
-        pred_list: list[torch.Tensor] = []
-        confusion_list: list[torch.Tensor] = []
-
-        for batch in dataloader:
-            if isinstance(batch, dict):
-                images = batch["image"].to(self.device)
-                masks = batch["mask"].to(self.device)
-            else:
-                images, masks = batch[0].to(self.device), batch[1].to(self.device)
-
-            # Ensure masks are (B, H, W)
-            if masks.ndim == 4:
-                masks = masks.squeeze(1)
-            masks = masks.long()
-
-            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
-                logits = self.model(images)
-
-            for m in self._all_metrics:
-                m.update(logits, masks)
-
-            if collect_preds or collect_confusions:
-                predictions = logits.argmax(dim=1)
-                if collect_preds:
-                    pred_list.append(predictions.cpu())
-                if collect_confusions:
-                    confusion_list.append(self._per_image_confusions(predictions, masks).cpu())
-
-        metrics = self._compute_metrics()
-        return self._evaluation_result(
-            metrics,
-            pred_list,
-            confusion_list,
+        return self._evaluate(
+            dataloader,
             collect_preds=collect_preds,
             collect_confusions=collect_confusions,
         )
@@ -286,7 +250,6 @@ class SegmentationSolver:
             else val_cache
         )
 
-        # Fast path: GPU tensor cache — no DataLoader, no host→device transfer per batch
         scheduler = self._make_scheduler(epochs)
 
         input_hw: tuple[int, int] = (gpu_train.masks.shape[-2], gpu_train.masks.shape[-1])
@@ -300,8 +263,12 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             desc = f"Epoch {epoch + 1}/{epochs}"
-            batches = gpu_train.shuffled_batches(batch_size)
-            batches = track(batches, total=num_batches, description=desc) if verbose else batches
+            batches = tqdm(
+                gpu_train.shuffled_batches(batch_size),
+                total=num_batches,
+                desc=desc,
+                disable=not verbose,
+            )
             for features, masks in batches:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
@@ -316,7 +283,7 @@ class SegmentationSolver:
                 scheduler.step()
 
             if gpu_val is not None:
-                val_metrics = self._evaluate_gpu_cache(gpu_val, batch_size)
+                val_metrics = self._evaluate(gpu_val, batch_size)
                 assert isinstance(val_metrics, dict)
                 last_val_miou = val_metrics["mIoU"]
                 self.val_history.append(last_val_miou)
@@ -349,7 +316,7 @@ class SegmentationSolver:
             Metrics, optionally followed by predictions and/or per-image confusion matrices.
         """
         gpu_cache = GPUTensorCache.from_cached(cache, self.device)
-        return self._evaluate_gpu_cache(
+        return self._evaluate(
             gpu_cache,
             batch_size,
             collect_preds=collect_preds,
@@ -394,16 +361,42 @@ class SegmentationSolver:
             "f1": self.metric_f1.compute().item(),
         }
 
+    def _evaluation_batches(
+        self, data: DataLoader | GPUTensorCache, batch_size: int
+    ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+        """Yield logits and masks in input order using the appropriate forward path."""
+        if isinstance(data, GPUTensorCache):
+            input_hw = (data.masks.shape[-2], data.masks.shape[-1])
+            for features, masks in data.ordered_batches(batch_size):
+                with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+                    logits = self.model.head(features, *input_hw)
+                yield logits, masks
+            return
+
+        for batch in data:
+            if isinstance(batch, dict):
+                images, masks = batch["image"], batch["mask"]
+            else:
+                images, masks = batch[0], batch[1]
+            images = images.to(self.device)
+            masks = masks.to(self.device)
+            if masks.ndim == 4:
+                masks = masks.squeeze(1)
+            masks = masks.long()
+            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+                logits = self.model(images)
+            yield logits, masks
+
     @torch.no_grad()
-    def _evaluate_gpu_cache(
+    def _evaluate(
         self,
-        gpu_cache: GPUTensorCache,
-        batch_size: int,
+        data: DataLoader | GPUTensorCache,
+        batch_size: int = 64,
         *,
         collect_preds: bool = False,
         collect_confusions: bool = False,
     ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
-        """Evaluate on a :class:`GPUTensorCache` and return segmentation metrics."""
+        """Evaluate raw images or device-resident features with the same metrics."""
         self.model.eval()
         for m in self._all_metrics:
             m.reset()
@@ -412,10 +405,7 @@ class SegmentationSolver:
         pred_list: list[torch.Tensor] = []
         confusion_list: list[torch.Tensor] = []
 
-        input_hw = (gpu_cache.masks.shape[-2], gpu_cache.masks.shape[-1])
-        for features, masks in gpu_cache.ordered_batches(batch_size):
-            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
-                logits = self.model.head(features, *input_hw)
+        for logits, masks in self._evaluation_batches(data, batch_size):
             for m in self._all_metrics:
                 m.update(logits, masks)
             if collect_preds or collect_confusions:

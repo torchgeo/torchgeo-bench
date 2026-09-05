@@ -115,11 +115,15 @@ class TestSpaceNet7Canonicalize:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("dataset_cls", [EuroSAT, EuroSATSpatial])
+def test_eurosat_rejects_unknown_split(dataset_cls: type[EuroSAT]) -> None:
+    with pytest.raises(ValueError, match="Unknown split"):
+        dataset_cls().get_dataset("invalid")
+
+
 class TestEuroSATMeta:
     def test_get_dataset_mocked(self, monkeypatch):
         """get_dataset calls TGEuroSAT with correct band codes — test without disk."""
-
-        import torchgeo_bench.datasets.eurosat as mod
 
         captured = {}
 
@@ -127,7 +131,7 @@ class TestEuroSATMeta:
             def __init__(self, **kwargs):
                 captured.update(kwargs)
 
-        monkeypatch.setattr(mod, "TGEuroSAT", _FakeDS)
+        monkeypatch.setattr(EuroSAT, "_tg_class", _FakeDS)
         ds_inst = EuroSAT.__new__(EuroSAT)
         ds_inst.get_dataset("train", bands=("red", "green", "blue"))
         assert "split" in captured
@@ -142,15 +146,13 @@ class TestEuroSATSpatialMeta:
 
     def test_get_dataset_mocked(self, monkeypatch):
 
-        import torchgeo_bench.datasets.eurosat as mod
-
         captured = {}
 
         class _FakeDS:
             def __init__(self, **kwargs):
                 captured.update(kwargs)
 
-        monkeypatch.setattr(mod, "TGEuroSATSpatial", _FakeDS)
+        monkeypatch.setattr(EuroSATSpatial, "_tg_class", _FakeDS)
         ds_inst = EuroSATSpatial.__new__(EuroSATSpatial)
         ds_inst.get_dataset("test", bands=None)
         assert captured["split"] == "test"
