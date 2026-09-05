@@ -1,7 +1,6 @@
 """Logistic regression (single-label and multi-label) with PyTorch optimizers."""
 
 import logging
-from contextlib import suppress
 from typing import Self
 
 import numpy as np
@@ -23,7 +22,7 @@ class LogisticRegression:
 
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- Public constructor options.
         self,
         C: float = 1.0,
         max_iter: int = 1000,
@@ -34,6 +33,7 @@ class LogisticRegression:
         patience: int = 1,  # only used by Adam path now
         random_state: int | None = None,
         device: str | torch.device | None = None,
+        *,
         verbose: bool = False,
         use_tf32: bool = True,  # enable TF32 on CUDA for speed
         multi_label: bool = False,
@@ -67,12 +67,10 @@ class LogisticRegression:
 
         if self.random_state is not None:
             torch.manual_seed(self.random_state)
-            np.random.seed(self.random_state)
 
         # CUDA matmul speedup (TF32) if available & allowed
         if self.device.type == "cuda" and self.use_tf32:
-            with suppress(Exception):
-                torch.set_float32_matmul_precision("high")
+            torch.set_float32_matmul_precision("high")
 
     def _build_model(self, n_features: int, n_classes: int) -> None:
         model = torch.nn.Linear(n_features, n_classes, bias=True)

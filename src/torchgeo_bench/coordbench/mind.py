@@ -36,7 +36,7 @@ class SIRENLayer(nn.Module):
     """Sinusoidal-activation linear layer: ``sin(w0 * z)``, or the ``finer``/``hsiren`` variants."""
 
     def __init__(
-        self, in_f: int, out_f: int, w0: float = 1.0, is_first: bool = False, act: str = "siren"
+        self, in_f: int, out_f: int, w0: float = 1.0, *, is_first: bool = False, act: str = "siren"
     ) -> None:
         super().__init__()
         self.linear = nn.Linear(in_f, out_f)
@@ -58,11 +58,12 @@ class ReSIRENLocationEncoder(nn.Module):
 
     year_freqs: Tensor
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - checkpoint architecture options.
         self,
         embed_dim: int,
         out_dim: int,
         depth: int,
+        *,
         use_year: bool = False,
         w0_first: float = 30.0,
         w0: float = 1.0,
@@ -92,7 +93,7 @@ class ReSIRENLocationEncoder(nn.Module):
         return torch.cat([torch.sin(ang), torch.cos(ang)], dim=-1)
 
     def forward(
-        self, latlon: Tensor, year: Tensor | None = None, return_features: bool = False
+        self, latlon: Tensor, year: Tensor | None = None, *, return_features: bool = False
     ) -> Tensor:
         """Encode ``(lat, lon)`` degrees to trunk features or head output."""
         loc = equal_earth_projection(latlon)

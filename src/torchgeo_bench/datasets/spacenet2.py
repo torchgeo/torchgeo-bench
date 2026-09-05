@@ -1,5 +1,7 @@
 """SpaceNet2 (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v2 import _OffsetMaskV2Dataset
 
@@ -18,11 +20,11 @@ class SpaceNet2(_OffsetMaskV2Dataset):
     task = "segmentation"
     num_classes = 2
     multilabel = False
-    rgb_bands = ["red", "green", "blue"]
-    split_sizes = {"train": 5186, "val": 1461, "test": 2961}
+    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 5186, "val": 1461, "test": 2961}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("worldview", "coastal", "coastal", mean=296.081, std=107.482, min=0, max=1227),
         BandSpec("worldview", "blue", "blue", mean=357.957, std=151.518, min=0, max=1570),
         BandSpec("worldview", "green", "green", mean=465.239, std=229.433, min=0, max=2047),

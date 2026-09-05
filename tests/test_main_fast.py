@@ -460,9 +460,10 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
     linear_mock.assert_called_once()
 
     linear_call = linear_mock.call_args
-    assert linear_call.args[8] == cfg.eval.bootstrap
-    assert linear_call.args[9] is cfg.eval.merge_val
-    assert linear_call.kwargs["calibration_n_bins"] == cfg.eval.calibration.n_bins_linear
+    evaluation_cfg = linear_call.args[2].eval
+    assert evaluation_cfg.bootstrap == cfg.eval.bootstrap
+    assert evaluation_cfg.merge_val is cfg.eval.merge_val
+    assert evaluation_cfg.calibration.n_bins_linear == cfg.eval.calibration.n_bins_linear
 
     df = pd.read_csv(out)
     linear_row = df[df["method"] == "linear"].iloc[0]
@@ -546,16 +547,29 @@ def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
     knn_mock.assert_called_once()
 
 
-def test_dataset_not_found_skips(tmp_path: Path):
+@pytest.mark.parametrize(
+    "error", [FileNotFoundError("missing dataset"), DatasetNotFoundError("missing")]
+)
+def test_missing_dataset_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out)
 
-    with mock.patch(
-        "torchgeo_bench.main.get_datasets", side_effect=DatasetNotFoundError("missing")
-    ):
-        main(cfg)
+    def missing_dataset(**_kwargs: object) -> None:
+        raise error
 
+    monkeypatch.setattr("torchgeo_bench.main.get_datasets", missing_dataset)
+    with pytest.raises(type(error)) as exc_info:
+        main(cfg)
+    assert exc_info.value is error
     assert not out.exists()
+
+
+def test_unknown_dataset_raises(tmp_path: Path) -> None:
+    cfg = _compose_cfg(tmp_path / "out.csv", overrides=["dataset.names=[unknown-dataset]"])
+    with pytest.raises(KeyError, match="unknown-dataset"):
+        main(cfg)
 
 
 def test_csv_row_has_required_columns(tmp_path: Path):

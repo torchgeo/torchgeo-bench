@@ -23,6 +23,7 @@ _KEYS: dict[str, str] = {"l1": "ece", "l2": "rms_ce", "max": "mce"}
 def compute_calibration_metrics(
     y_true: np.ndarray,
     y_proba: np.ndarray,
+    *,
     multi_label: bool,
     n_bins: int = 15,
 ) -> dict[str, float]:
@@ -76,6 +77,7 @@ def compute_calibration_metrics(
 def fit_temperature(
     logits: np.ndarray,
     y_true: np.ndarray,
+    *,
     multi_label: bool,
     max_iter: int = 100,
 ) -> float:
@@ -124,7 +126,7 @@ def fit_temperature(
     return float(log_T.exp().item())
 
 
-def apply_temperature(logits: np.ndarray, temperature: float, multi_label: bool) -> np.ndarray:
+def apply_temperature(logits: np.ndarray, temperature: float, *, multi_label: bool) -> np.ndarray:
     """Convert logits to probabilities at the given temperature."""
     z = torch.as_tensor(logits, dtype=torch.float32) / float(temperature)
     if multi_label:

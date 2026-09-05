@@ -52,14 +52,14 @@ def test_cuda_fallback_to_cpu(monkeypatch):
 
 def test_fit_non_tensor_raises():
     model = LogisticRegression()
-    with pytest.raises(TypeError, match="torch.Tensor"):
+    with pytest.raises(TypeError, match=r"torch\.Tensor"):
         model.fit(np.ones((10, 4)), torch.zeros(10, dtype=torch.long))  # type: ignore[arg-type]
 
 
 def test_fit_y_non_tensor_raises():
     model = LogisticRegression()
     X = torch.randn(10, 4)
-    with pytest.raises(TypeError, match="torch.Tensor"):
+    with pytest.raises(TypeError, match=r"torch\.Tensor"):
         model.fit(X, np.zeros(10))  # type: ignore[arg-type]
 
 
@@ -173,7 +173,7 @@ def test_predict_proba_non_tensor_raises():
     X, y = _xy()
     model = LogisticRegression(C=1.0, max_iter=10, random_state=0)
     model.fit(X, y)
-    with pytest.raises(TypeError, match="torch.Tensor"):
+    with pytest.raises(TypeError, match=r"torch\.Tensor"):
         model.predict_proba(np.ones((5, 8)))  # type: ignore[arg-type]
 
 
@@ -202,7 +202,7 @@ def test_lbfgs_solver_fits():
 @pytest.mark.parametrize("multi_label", [False, True])
 @pytest.mark.parametrize(("max_iter", "patience", "expected_iterations"), [(8, 2, 3), (2, 3, 2)])
 def test_adam_stops_at_patience_or_iteration_limit(
-    multi_label: bool, max_iter: int, patience: int, expected_iterations: int
+    *, multi_label: bool, max_iter: int, patience: int, expected_iterations: int
 ) -> None:
     X, y = _xy_ml(n=7) if multi_label else _xy(n=7)
     model = LogisticRegression(

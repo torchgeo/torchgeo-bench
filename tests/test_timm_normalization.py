@@ -91,7 +91,7 @@ def test_imagenet_normalization_rejects_non_rgb():
     """``imagenet`` mode must refuse to instantiate with a non-3-channel band list."""
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 
-    bands = _rgb_bands() + [_rgb_bands()[0]]  # 4 bands
+    bands = [*_rgb_bands(), _rgb_bands()[0]]  # 4 bands
     with pytest.raises(ValueError, match="requires 3 input channels"):
         TimmPatchBenchModel(
             bands=bands,

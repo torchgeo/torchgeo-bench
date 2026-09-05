@@ -1,5 +1,7 @@
 """FLAIR2 (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v2 import _V2Dataset
 
@@ -17,11 +19,11 @@ class FLAIR2(_V2Dataset):
     task = "segmentation"
     num_classes = 13
     multilabel = False
-    rgb_bands = ["red", "green", "blue"]
-    split_sizes = {"train": 4049, "val": 1022, "test": 3022}
+    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 4049, "val": 1022, "test": 3022}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         # IGN BD ORTHO centre wavelengths (R/G/B/NIR); elevation is non-spectral.
         BandSpec("aerial", "red", "red", mean=111.395, std=51.2846, min=0, max=255, wavelength_um=0.66),
         BandSpec("aerial", "green", "green", mean=115.788, std=45.1, min=0, max=255, wavelength_um=0.55),

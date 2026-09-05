@@ -80,7 +80,7 @@ class TimmPatchBenchModel(BenchModel):
     _band_min: torch.Tensor
     _band_range: torch.Tensor
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,

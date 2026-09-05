@@ -106,7 +106,7 @@ class MINDLocationEncoder(LocationEncoder):
 
     name = "mind"
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - pretrained model options.
         self,
         repo: str = "isaaccorley/MIND",
         filename: str = "mind.safetensors",

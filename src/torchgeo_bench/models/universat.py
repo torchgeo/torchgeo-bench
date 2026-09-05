@@ -149,7 +149,7 @@ class UniverSatEncoder(Protocol):
         """Switch to inference mode."""
         ...
 
-    def encode(
+    def encode(  # noqa: PLR0913 - upstream model API
         self,
         x: dict[str, torch.Tensor],
         *,
@@ -180,7 +180,7 @@ class UniverSatBenchModel(BenchModel):
             m-brick-kiln; https://github.com/gastruc/UniverSat's other GeoBench
             configs tune this per dataset GSD and have no S2 classification
             entry to match otherwise).
-        output_grid: Side ``G`` of the ``G×G`` token grid. ``None`` (default)
+        output_grid: Side ``G`` of the ``GxG`` token grid. ``None`` (default)
             lets UniverSat infer the natural patch grid; tokens are mean-pooled.
         input_res: Override the physical resolution (m/px), single-sensor only;
             ``None`` uses the registry value per modality.
@@ -192,7 +192,7 @@ class UniverSatBenchModel(BenchModel):
     # Output embedding dimension of the released Base model.
     embed_dim: ClassVar[int] = 768
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,

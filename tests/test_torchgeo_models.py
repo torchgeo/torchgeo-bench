@@ -273,7 +273,7 @@ def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
     """SAR bands (sensor s1/sar) with no wavelength get DOFA's own 3.75um
     placeholder (github.com/zhu-xlab/DOFA waves.json key "2") instead of
     raising, since radar backscatter has no optical wavelength to declare."""
-    bands = _s2_multispectral_bands()[:3] + [_sar_band("vh"), _sar_band("vv")]
+    bands = [*_s2_multispectral_bands()[:3], _sar_band("vh"), _sar_band("vv")]
     wavelengths = _resolve_dofa_wavelengths(bands, None)
     assert wavelengths[-2:] == [_DOFA_SAR_WAVELENGTH_UM, _DOFA_SAR_WAVELENGTH_UM]
     assert wavelengths[:3] == [b.wavelength_um for b in bands[:3]]
@@ -294,7 +294,7 @@ def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
         lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
     )
 
-    bands = _s2_multispectral_bands() + [_sar_band("vh"), _sar_band("vv")]
+    bands = [*_s2_multispectral_bands(), _sar_band("vh"), _sar_band("vv")]
     for normalization in ("bandspec_zscore", "identity"):
         model = TorchGeoDOFABench(
             bands=bands, normalization=normalization, input_unit_check="ignore"
@@ -327,7 +327,7 @@ def test_torchgeo_backbone_skips_unit_mismatch_warning_outside_model_native(
         lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
     )
 
-    bands = _s2_multispectral_bands() + [_sar_band("vh"), _sar_band("vv")]
+    bands = [*_s2_multispectral_bands(), _sar_band("vh"), _sar_band("vv")]
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore")
@@ -463,7 +463,7 @@ def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_resolve_panopticon_chn_ids_sar_and_optical() -> None:
     """SAR channels resolve to Panopticon's negative chn_id codes, not a wavelength."""
-    bands = _s2_multispectral_bands()[:1] + [_sar_band("vv"), _sar_band("vh")]
+    bands = [*_s2_multispectral_bands()[:1], _sar_band("vv"), _sar_band("vh")]
     ids = _resolve_panopticon_chn_ids(bands)
     assert ids[0] == pytest.approx(bands[0].wavelength_um * 1000.0)
     assert ids[1:] == [-1.0, -2.0]

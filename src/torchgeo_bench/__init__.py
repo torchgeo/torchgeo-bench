@@ -8,7 +8,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("torchgeo-bench")
-except PackageNotFoundError:  # editable / pre-install fallback
+except PackageNotFoundError:  # allow-except: source-only imports before package installation
     __version__ = "0.5.0"
 
 __author__ = "torchgeo-bench contributors"

@@ -115,10 +115,7 @@ def _load_csv_rows(label: str) -> list[dict]:
             if v is None or v == "":
                 row[k] = None
             elif k in NUMERIC:
-                try:
-                    row[k] = float(v)
-                except ValueError:
-                    row[k] = None
+                row[k] = float(v)
             elif k in BOOL:
                 row[k] = v.lower() in ("true", "1")
             else:

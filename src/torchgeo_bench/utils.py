@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -9,6 +10,23 @@ from rich.progress import track
 from torch.utils.data import DataLoader
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class FeatureSplit[T]:
+    """Features and labels for one dataset split."""
+
+    features: T
+    labels: T
+
+
+@dataclass
+class FeatureSplits[T]:
+    """Training, validation, and test features."""
+
+    train: FeatureSplit[T]
+    val: FeatureSplit[T]
+    test: FeatureSplit[T]
 
 
 def resolve_device(requested_device: str | torch.device) -> torch.device:
@@ -25,8 +43,7 @@ def extract_features(
     dataloader: DataLoader,
     device: str | torch.device,
     transforms: Callable[[torch.Tensor], torch.Tensor] | None = None,
-    verbose: bool = True,
-    description: str = "Extracting",
+    description: str | None = "Extracting",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract feature embeddings and labels from a dataloader.
 
@@ -35,8 +52,7 @@ def extract_features(
         dataloader: DataLoader yielding dicts with ``"image"`` and ``"label"`` keys.
         device: Device to run inference on.
         transforms: Optional transform applied to images before the model.
-        verbose: Whether to display a progress bar.
-        description: Progress bar label.
+        description: Progress bar label, or None to disable progress.
 
     Returns:
         Tuple of (features, labels) as NumPy arrays.
@@ -45,7 +61,9 @@ def extract_features(
     y_all = []
 
     iterator = (
-        track(dataloader, total=len(dataloader), description=description) if verbose else dataloader
+        track(dataloader, total=len(dataloader), description=description)
+        if description is not None
+        else dataloader
     )
 
     for batch in iterator:

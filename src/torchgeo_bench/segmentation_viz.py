@@ -2,11 +2,32 @@
 
 import logging
 import os
+from dataclasses import dataclass
 
 import numpy as np
 import torch
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SegmentationSamples:
+    """Images, ground truth, and predictions for the same samples."""
+
+    images: torch.Tensor
+    targets: torch.Tensor
+    predictions: torch.Tensor
+
+
+@dataclass
+class SegmentationVizSpec:
+    """Class labels and image channels used in segmentation plots."""
+
+    num_classes: int
+    rgb_indices: list[int]
+    ignore_index: int = 255
+    class_names: list[str] | None = None
+
 
 # Fixed palette: tab20 (20 colours) concatenated with tab20b (20 more) for up to 40 classes.
 # Index 0 is black (background / class 0). 255 (ignore) is rendered as white.
@@ -126,13 +147,7 @@ def _make_header_row(
     col_width: int, num_cols: int, labels: list[str], height: int = 24
 ) -> np.ndarray:
     """Return a (height, num_cols*col_width, 3) uint8 header banner with centered column labels."""
-    try:
-        from PIL import Image, ImageDraw
-    except ImportError as e:
-        raise ImportError(
-            "Pillow is required for segmentation visualization. "
-            "Install it with: pip install torchgeo-bench[viz]"
-        ) from e
+    from PIL import Image, ImageDraw
 
     header_pil = Image.new("RGB", (num_cols * col_width, height), color=(40, 40, 40))
     draw = ImageDraw.Draw(header_pil)
@@ -147,30 +162,13 @@ def _make_header_row(
 
 
 def render_sample_grid(
-    images: torch.Tensor,
-    gt_masks: torch.Tensor,
-    pred_masks: torch.Tensor,
-    num_classes: int,
-    rgb_indices: list[int],
+    samples: SegmentationSamples,
+    spec: SegmentationVizSpec,
     n_samples: int = 8,
-    ignore_index: int = 255,
 ) -> np.ndarray:
-    """Build a visualization grid for up to n_samples test samples.
-
-    Each row shows: [RGB image | GT mask | Pred mask | Error map]
-
-    Args:
-        images: (N, C, H, W) float tensor, normalized (will be min-max stretched).
-        gt_masks: (N, H, W) int64 tensor.
-        pred_masks: (N, H, W) int64 tensor.
-        num_classes: Number of segmentation classes.
-        rgb_indices: Channel indices [R, G, B] into the C dimension.
-        n_samples: Maximum number of samples to visualise.
-        ignore_index: Label value treated as ignore.
-
-    Returns:
-        (H_grid, W_grid, 3) uint8 numpy array.
-    """
+    """Render RGB images, ground truth, predictions, and errors in a sample grid."""
+    images, gt_masks, pred_masks = samples.images, samples.targets, samples.predictions
+    num_classes, rgb_indices, ignore_index = spec.num_classes, spec.rgb_indices, spec.ignore_index
     n = min(n_samples, len(images))
     # Deterministic sample selection: evenly spaced across the test set
     indices = np.linspace(0, len(images) - 1, n, dtype=int)
@@ -221,17 +219,11 @@ def render_confusion_matrix(
     Returns:
         (H_img, W_img, 3) uint8 heatmap rendered with matplotlib Blues colormap.
     """
-    try:
-        import matplotlib
+    import matplotlib
 
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        from matplotlib.backends.backend_agg import FigureCanvasAgg
-    except ImportError as e:
-        raise ImportError(
-            "matplotlib is required for segmentation visualization. "
-            "Install it with: pip install torchgeo-bench[viz]"
-        ) from e
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
 
     # Flatten and mask out ignored pixels
     p = preds.reshape(-1).numpy()
@@ -289,60 +281,27 @@ def render_confusion_matrix(
 
 
 def save_segmentation_viz(
-    out_dir: str,
-    model_name: str,
+    dest: str,
     dataset_name: str,
-    images: torch.Tensor,
-    gt_masks: torch.Tensor,
-    pred_masks: torch.Tensor,
-    num_classes: int,
-    rgb_indices: list[int],
-    ignore_index: int = 255,
+    samples: SegmentationSamples,
+    spec: SegmentationVizSpec,
     n_samples: int = 8,
-    class_names: list[str] | None = None,
 ) -> None:
-    """Save a sample grid PNG and a confusion matrix PNG.
+    """Save sample and confusion-matrix PNGs in the model's output directory."""
+    from PIL import Image
 
-    Files are written to ``{out_dir}/{model_name}/``:
-      - ``{dataset_name}_samples.png``
-      - ``{dataset_name}_confusion.png``
-
-    Args:
-        out_dir: Root visualization output directory.
-        model_name: Model name (used as sub-directory).
-        dataset_name: Dataset name (used in filenames).
-        images: (N, C, H, W) float tensor.
-        gt_masks: (N, H, W) int64 ground truth.
-        pred_masks: (N, H, W) int64 predictions.
-        num_classes: Number of segmentation classes.
-        rgb_indices: Channel indices [R, G, B] for image rendering.
-        ignore_index: Label value to exclude from metrics/confusion.
-        n_samples: Number of sample rows in the grid image.
-        class_names: Optional class name strings for confusion matrix axis labels.
-    """
-    try:
-        from PIL import Image
-    except ImportError as e:
-        raise ImportError(
-            "Pillow is required for segmentation visualization. "
-            "Install it with: pip install torchgeo-bench[viz]"
-        ) from e
-    dest = os.path.join(out_dir, model_name)
     os.makedirs(dest, exist_ok=True)
-
-    # Sample grid
-    grid = render_sample_grid(
-        images, gt_masks, pred_masks, num_classes, rgb_indices, n_samples, ignore_index
-    )
+    grid = render_sample_grid(samples, spec, n_samples)
     grid_path = os.path.join(dest, f"{dataset_name}_samples.png")
     Image.fromarray(grid).save(grid_path)
-    logger.info(f"Saved sample grid → {grid_path}")
+    logger.info("Saved sample grid to %s", grid_path)
 
-    # Confusion matrix
-    cm_arr = render_confusion_matrix(pred_masks, gt_masks, num_classes, ignore_index, class_names)
+    cm_arr = render_confusion_matrix(
+        samples.predictions, samples.targets, spec.num_classes, spec.ignore_index, spec.class_names
+    )
     cm_path = os.path.join(dest, f"{dataset_name}_confusion.png")
     Image.fromarray(cm_arr).save(cm_path)
-    logger.info(f"Saved confusion matrix → {cm_path}")
+    logger.info("Saved confusion matrix to %s", cm_path)
 
 
 def collect_viz_inputs(test_loader: "object") -> tuple[torch.Tensor, torch.Tensor]:

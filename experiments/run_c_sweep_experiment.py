@@ -25,7 +25,7 @@ from tqdm import tqdm
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
-from torchgeo_bench.utils import extract_features
+from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -94,15 +94,13 @@ def instantiate_model(model_cfg: dict, bands: list[BandSpec]) -> torch.nn.Module
 def run_c_sweep(
     model_name: str,
     dataset_name: str,
-    x_train: np.ndarray,
-    y_train: np.ndarray,
-    x_val: np.ndarray,
-    y_val: np.ndarray,
-    x_test: np.ndarray,
-    y_test: np.ndarray,
+    splits: FeatureSplits[np.ndarray],
     device: torch.device,
 ) -> list[dict]:
     """Train ``LogisticRegression`` for each ``C`` and return per-C metrics."""
+    x_train, y_train = splits.train.features, splits.train.labels
+    x_val, y_val = splits.val.features, splits.val.labels
+    x_test, y_test = splits.test.features, splits.test.labels
     rows = []
     x_train_t = torch.from_numpy(x_train)
     y_train_t = torch.from_numpy(y_train).long()
@@ -133,9 +131,9 @@ def run_c_sweep(
                 "val_acc": float(accuracy_score(y_val, val_preds)),
                 "test_acc": float(accuracy_score(y_test, test_preds)),
                 "feature_dim": int(x_train.shape[1]),
-                "n_train": int(len(x_train)),
-                "n_val": int(len(x_val)),
-                "n_test": int(len(x_test)),
+                "n_train": len(x_train),
+                "n_val": len(x_val),
+                "n_test": len(x_test),
             }
         )
 
@@ -184,9 +182,9 @@ def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[di
         model.to(device).eval()
 
         logger.info("  Extracting features...")
-        x_train, y_train = extract_features(model, train_loader, device, verbose=False)
-        x_val, y_val = extract_features(model, val_loader, device, verbose=False)
-        x_test, y_test = extract_features(model, test_loader, device, verbose=False)
+        x_train, y_train = extract_features(model, train_loader, device, description=None)
+        x_val, y_val = extract_features(model, val_loader, device, description=None)
+        x_test, y_test = extract_features(model, test_loader, device, description=None)
         logger.info(
             "  Features: train=%s, val=%s, test=%s",
             x_train.shape,
@@ -200,12 +198,11 @@ def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[di
         rows = run_c_sweep(
             model_name,
             dataset_name,
-            x_train,
-            y_train,
-            x_val,
-            y_val,
-            x_test,
-            y_test,
+            FeatureSplits(
+                FeatureSplit(x_train, y_train),
+                FeatureSplit(x_val, y_val),
+                FeatureSplit(x_test, y_test),
+            ),
             device,
         )
         all_rows.extend(rows)
@@ -236,7 +233,6 @@ def main() -> int:
         logger.info("Resume: loaded %d existing rows from %s", len(all_rows), OUTPUT)
 
     torch.manual_seed(SEED)
-    np.random.seed(SEED)
     logger.info("Running C sweep on %d datasets -> %s", len(DATASETS), OUTPUT)
 
     for dataset_name in DATASETS:

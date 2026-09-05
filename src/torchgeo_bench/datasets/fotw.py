@@ -1,5 +1,7 @@
 """Fields of the World (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v2 import _V2Dataset
 
@@ -16,11 +18,11 @@ class FieldsOfTheWorld(_V2Dataset):
     task = "segmentation"
     num_classes = 4
     multilabel = False
-    rgb_bands = ["red", "green", "blue"]
-    split_sizes = {"train": 4000, "val": 1000, "test": 2000}
+    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 4000, "val": 1000, "test": 2000}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         # Sentinel-2 centre wavelengths (B04/B03/B02/B08).
         BandSpec("s2", "red", "red", mean=937.509, std=807.662, min=0, max=17499, wavelength_um=0.665),
         BandSpec("s2", "green", "green", mean=923.717, std=677.861, min=0, max=17653, wavelength_um=0.56),

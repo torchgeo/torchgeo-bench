@@ -1,5 +1,7 @@
 """CloudSEN12 (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v2 import _V2Dataset
 
@@ -11,11 +13,11 @@ class CloudSEN12(_V2Dataset):
     task = "segmentation"
     num_classes = 4
     multilabel = False
-    rgb_bands = ["b04", "b03", "b02"]
-    split_sizes = {"train": 4000, "val": 535, "test": 975}
+    rgb_bands: ClassVar[list[str]] = ["b04", "b03", "b02"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 4000, "val": 535, "test": 975}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("s2", "b01", "B01", mean=1973.24, std=2704.21, min=0, max=26044, wavelength_um=0.443),
         BandSpec("s2", "b02", "B02", mean=2011.85, std=2650.55, min=0, max=25520, wavelength_um=0.49),
         BandSpec("s2", "b03", "B03", mean=2148.43, std=2500.88, min=0, max=22800, wavelength_um=0.56),

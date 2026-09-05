@@ -17,8 +17,10 @@ One invocation handles one model config, matching ``seg_corruption_pipeline``;
 import logging
 import os
 import warnings
+from dataclasses import dataclass
 from datetime import UTC
 
+import pandas as pd
 import torch
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
@@ -26,6 +28,7 @@ from torch import nn
 from torchgeo_bench.config import instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.model_profile import (
+    ProfileTiming,
     _count_gflops,
     _count_params,
     lenient_grad_hooks,
@@ -60,24 +63,10 @@ def _load_completed(path: str) -> frozenset[tuple]:
     """Return the ``(name, band_config, task, head_type)`` keys already in *path*."""
     if not os.path.exists(path):
         return frozenset()
-    try:
-        import pandas as pd
-
-        df = pd.read_csv(path)
-        return frozenset(
-            zip(
-                df["name"],
-                df["band_config"],
-                df["task"],
-                df["head_type"].fillna(""),
-                strict=False,
-            )
-        )
-    except Exception:
-        # A malformed/partial CSV must not abort the sweep; re-measuring is
-        # cheap and append_rows_atomic heals schema drift.
-        logger.warning("Could not read %s for resume; measuring everything.", path)
-        return frozenset()
+    df = pd.read_csv(path)
+    return frozenset(
+        zip(df["name"], df["band_config"], df["task"], df["head_type"].fillna(""), strict=True)
+    )
 
 
 def _is_terramind(cfg_model: DictConfig) -> bool:
@@ -163,7 +152,7 @@ def _build_model(
             )
     try:
         return instantiate(cfg_model, bands=band_specs, normalization=normalization)
-    except Exception as exc:
+    except Exception as exc:  # allow-except: Skip only recognized input-band mismatches.
         cause = _is_band_incompatibility(exc)
         if cause is None:
             raise
@@ -181,9 +170,7 @@ def _measure_backbone(
     n_channels: int,
     image_size: int,
     device: torch.device,
-    batch_size: int,
-    n_warmup: int,
-    n_measure: int,
+    timing: ProfileTiming,
 ) -> tuple[dict[str, float | None], int]:
     """Run ``measure_profile`` on a synthetic batch, halving on CUDA OOM.
 
@@ -191,14 +178,15 @@ def _measure_backbone(
     fell back to a smaller batch stays interpretable (GFLOPs is per-sample
     either way; throughput/memory/energy are not).
     """
+    batch_size = timing.batch_size
     while True:
         try:
             x = torch.randn(batch_size, n_channels, image_size, image_size, device=device)
             with lenient_grad_hooks():
                 return measure_profile(
-                    model, x, device, n_warmup=n_warmup, n_measure=n_measure
+                    model, x, device, n_warmup=timing.n_warmup, n_measure=timing.n_measure
                 ), batch_size
-        except torch.cuda.OutOfMemoryError:
+        except torch.cuda.OutOfMemoryError:  # allow-except: Retry with a smaller timing batch.
             if batch_size <= 1:
                 raise
             batch_size //= 2
@@ -208,8 +196,7 @@ def _measure_backbone(
 
 def _probe_gflops(
     model: nn.Module,
-    n_channels: int,
-    image_size: int,
+    input_shape: tuple[int, int, int],
     device: torch.device,
     head: str,
     n_classes: int,
@@ -221,7 +208,7 @@ def _probe_gflops(
     from a real forward pass, and the probe can only be constructed after it.
     """
     with torch.inference_mode():
-        feats = model(torch.randn(1, n_channels, image_size, image_size, device=device))
+        feats = model(torch.randn(1, *input_shape, device=device))
     feature_dim = int(feats.shape[1])
 
     if head == "mlp":
@@ -358,20 +345,21 @@ def classification_row(
             n_channels,
             image_size,
             device,
-            int(cfg.timing_batch_size),
-            int(cfg.n_warmup),
-            int(cfg.n_measure),
+            ProfileTiming(
+                batch_size=int(cfg.timing_batch_size),
+                n_warmup=int(cfg.n_warmup),
+                n_measure=int(cfg.n_measure),
+            ),
         )
         gflops_backbone = metrics["gflops"]
         gflops_probe, params_probe_m, feature_dim = _probe_gflops(
             model,
-            n_channels,
-            image_size,
+            (n_channels, image_size, image_size),
             device,
             str(cfg.probe_head),
             int(cfg.probe_num_classes),
         )
-    except Exception as exc:
+    except Exception as exc:  # allow-except: Skip only recognized input-band mismatches.
         # Some wrappers only detect incompatible bands during their first forward pass.
         cause = _is_band_incompatibility(exc)
         if cause is None:
@@ -413,51 +401,50 @@ def classification_row(
     return row
 
 
+@dataclass(frozen=True, kw_only=True)
+class SegmentationProfileOptions:
+    """Segmentation configuration for compute-cost measurements."""
+
+    eval_cfg: DictConfig
+    band_configs: set[str]
+    head_types: list[str]
+    num_classes: int
+    layers: list[str]
+
+
 def segmentation_rows(
-    cfg: DictConfig,
+    options: SegmentationProfileOptions,
     model: nn.Module,
     base_meta: dict,
     device: torch.device,
-    seg_eval_cfg: DictConfig,
-    seg_layers: list[str],
     completed: frozenset[tuple],
-) -> tuple[list[dict], int]:
+) -> list[dict]:
     """Measure configured segmentation heads that are not already complete."""
     model_name = base_meta["name"]
     band_config = base_meta["band_config"]
     n_channels = base_meta["n_channels"]
     image_size = base_meta["image_size"]
-    seg_band_configs = set(cfg.seg_band_configs)
-    if band_config not in seg_band_configs or not seg_layers:
-        if band_config in seg_band_configs and not seg_layers:
+    if band_config not in options.band_configs or not options.layers:
+        if band_config in options.band_configs and not options.layers:
             logger.info(
                 "No eval.segmentation.layers for %s — skipping segmentation cells", model_name
             )
-        return [], 0
+        return []
 
     rows: list[dict] = []
-    n_skipped = 0
-    for head_type in list(cfg.seg_head_types):
+    for head_type in options.head_types:
         seg_key = (model_name, band_config, "segmentation", head_type)
         if seg_key in completed:
             logger.info("Skip (%s, %s, %s) — already done", model_name, band_config, head_type)
             continue
         head_cfg = OmegaConf.merge(
-            seg_eval_cfg,
+            options.eval_cfg,
             OmegaConf.create({"segmentation": {"head_type": head_type}}),
         )
         assert isinstance(head_cfg, DictConfig)
-        try:
-            # Probe construction runs a forward pass, so the model must be on-device.
-            probe, _solver = build_seg_probe_and_solver(
-                model, int(cfg.seg_num_classes), head_cfg, device, 1e-3
-            )
-        except (ValueError, RuntimeError) as exc:
-            logger.warning(
-                "Skipping %s/%s seg head=%s: %s", model_name, band_config, head_type, exc
-            )
-            n_skipped += 1
-            continue
+        probe, _solver = build_seg_probe_and_solver(
+            model, options.num_classes, head_cfg, device, 1e-3
+        )
         probe.to(device).eval()
 
         gflops_head = _seg_head_gflops(probe, n_channels, image_size, device)
@@ -468,7 +455,7 @@ def segmentation_rows(
                 image_size,
                 task="segmentation",
                 head_type=head_type,
-                num_classes=int(cfg.seg_num_classes),
+                num_classes=options.num_classes,
                 gflops_head=gflops_head,
                 params_backbone_m=_count_params(model),
                 params_head_m=_count_params(probe.head),
@@ -486,7 +473,7 @@ def segmentation_rows(
         del probe
         _free(device)
 
-    return rows, n_skipped
+    return rows
 
 
 def main(cfg: DictConfig) -> None:
@@ -515,7 +502,13 @@ def main(cfg: DictConfig) -> None:
     OmegaConf.set_struct(seg_eval_cfg, False)
     if "eval" in cfg.model and cfg.model.eval is not None:
         seg_eval_cfg.merge_with(cfg.model.eval)
-    seg_layers = list(seg_eval_cfg.segmentation.get("layers", []))
+    seg_options = SegmentationProfileOptions(
+        eval_cfg=seg_eval_cfg,
+        band_configs=set(cfg.seg_band_configs),
+        head_types=list(cfg.seg_head_types),
+        num_classes=int(cfg.seg_num_classes),
+        layers=list(seg_eval_cfg.segmentation.get("layers", [])),
+    )
 
     rows: list[dict] = []
     n_skipped = 0
@@ -557,11 +550,7 @@ def main(cfg: DictConfig) -> None:
                 continue
             rows.append(row)
 
-        seg_rows, skipped_heads = segmentation_rows(
-            cfg, model, base_meta, device, seg_eval_cfg, seg_layers, completed
-        )
-        rows.extend(seg_rows)
-        n_skipped += skipped_heads
+        rows.extend(segmentation_rows(seg_options, model, base_meta, device, completed))
 
         del model
         _free(device)

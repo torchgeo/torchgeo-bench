@@ -23,7 +23,7 @@ INTERPOLATIONS = ["bilinear", "bicubic", "nearest"]
 
 
 def build_jobs() -> list[Job]:
-    """Build the full norm × size × interpolation grid (skipping non-bilinear@null)."""
+    """Build the full normalization/size/interpolation grid (skipping non-bilinear@null)."""
     jobs: list[Job] = []
     for norm in NORMALIZATIONS:
         for size in IMAGE_SIZES:

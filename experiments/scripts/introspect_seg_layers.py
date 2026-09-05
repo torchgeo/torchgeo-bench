@@ -68,7 +68,7 @@ def feature_hw(feat, backbone) -> tuple[int, int] | None:
         return None
     try:
         processed = SegmentationProbe._process_feature(_Stub(backbone), feat)
-    except ValueError:
+    except ValueError:  # allow-except: report tensors that the segmentation probe cannot reshape
         # The probe itself refuses this tensor; record it as unusable so the
         # model is reported rather than silently tapped somewhere else.
         return None

@@ -78,7 +78,10 @@ def test_split_sizes(dataset_name):
         for split in ("train", "val", "test"):
             ds = bench.get_dataset(split, bands=tuple(bench.rgb_bands))
             actual[split] = len(ds)
-    except (FileNotFoundError, DatasetNotFoundError) as exc:
+    except (
+        FileNotFoundError,
+        DatasetNotFoundError,
+    ) as exc:  # allow-except: real-data tests are optional
         pytest.skip(f"{dataset_name}: data not found on disk ({exc})")
 
     assert actual == expected, (

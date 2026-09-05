@@ -48,7 +48,7 @@ def test_output_stats_values():
 
 
 def test_single_pixel_image():
-    """1×1 spatial images produce finite statistics with zero population std."""
+    """Single-pixel spatial images produce finite statistics with zero population std."""
     model = ImageStatsBench(bands=_bands(2))
     x = torch.tensor([[[[5.0]], [[9.0]]]])  # (1, 2, 1, 1)
     feats = model(x)

@@ -381,7 +381,7 @@ class OlmoEarthBenchModel(BenchModel):
         normalize: If True, L2-normalize output embeddings.
         sar_log_scale: If True, convert SAR values to dB via
             ``10·log10(max(v, 1e-6))`` before feeding OlmoEarth's S1
-            normalizer, which was trained on σ⁰ dB values.
+            normalizer, which was trained on std⁰ dB values.
         landsat_scale_factor: Optional multiplier applied to Landsat
             values *after* the standard uint8→DN conversion.  Use to
             compensate for mis-matched scales between GeoBench's uint8
@@ -395,7 +395,7 @@ class OlmoEarthBenchModel(BenchModel):
               per-modality ``Normalizer`` (correct when the input matches the
               pretraining scale, e.g. S2/SAR).
             * ``False`` — normalize each band with its own ``BandSpec``
-              mean/std via the same ``±std_multiplier·σ`` no-clip mapping
+              mean/std via the same ``±std_multiplier·std`` no-clip mapping
               OlmoEarth saw in pretraining (dataset-specific stats).  Required
               when the input scale can't match the pretrained normalizer (e.g.
               GeoBench's uint8 Landsat, whose pretrained stats assume real DN);
@@ -409,12 +409,12 @@ class OlmoEarthBenchModel(BenchModel):
             keys before modality resolution, e.g. ``{"landsat": "aerial"}`` to
             route Landsat RGB+NIR through the aerial/S2 path.
         min_image_size: If set, upsample inputs smaller than this value
-            to ``min_image_size × min_image_size`` via bilinear interpolation.
+            to ``min_image_size x min_image_size`` via bilinear interpolation.
             Useful for datasets with small native images (e.g. m-so2sat at
             32 px) where the patch grid would otherwise be too sparse.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -510,7 +510,7 @@ class OlmoEarthBenchModel(BenchModel):
         means: list[float],
         stds: list[float],
     ) -> torch.Tensor:
-        """Per-band ``±std_multiplier·σ`` no-clip normalization from dataset stats.
+        """Per-band ``±std_multiplier·std`` no-clip normalization from dataset stats.
 
         Maps each band's ``[mean - m·std, mean + m·std]`` to ``[0, 1]`` (no
         clipping), matching OlmoEarth's pretraining scheme / helios'

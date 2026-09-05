@@ -75,11 +75,7 @@ def hash_dataset(dataset: str) -> pd.DataFrame:
             img = sample["image"]
             label = sample.get("label")
             label_val = int(label) if label is not None and np.ndim(label) == 0 else None
-            try:
-                ph = _phash_image(img)
-            except Exception as exc:
-                logger.warning("[%s/%s] hash failed for %d: %s", dataset, split, i, exc)
-                continue
+            ph = _phash_image(img)
             rows.append(
                 {
                     "dataset": dataset,
@@ -105,12 +101,7 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    frames = []
-    for d in args.datasets:
-        try:
-            frames.append(hash_dataset(d))
-        except Exception:
-            logger.exception("dataset %s failed", d)
+    frames = [hash_dataset(d) for d in args.datasets]
     if not frames:
         raise SystemExit("nothing hashed")
     df = pd.concat(frames, ignore_index=True)

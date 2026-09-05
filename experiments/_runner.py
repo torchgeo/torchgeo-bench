@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Queue
 
 logger = logging.getLogger(__name__)
 
@@ -119,21 +119,15 @@ def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResul
 
 def _worker(
     gpu: int,
-    job_queue: "Queue[tuple[int, Job]]",
+    job_queue: "Queue[tuple[int, Job] | None]",
     total: int,
     output: str,
-    results: list[_JobResult],
-    lock: threading.Lock,
+    results: "Queue[_JobResult]",
 ) -> None:
     """Pull jobs off the queue and run them on the assigned GPU until empty."""
-    while True:
-        try:
-            idx, job = job_queue.get_nowait()
-        except Empty:
-            return
-        result = _run_one(job, gpu, idx, total, output)
-        with lock:
-            results.append(result)
+    while (item := job_queue.get()) is not None:
+        idx, job = item
+        results.put(_run_one(job, gpu, idx, total, output))
 
 
 def summarize_results(results: list[_JobResult], total: int, elapsed: float, output: str) -> int:
@@ -211,19 +205,20 @@ def run_jobs(
         logger.info("Dry run complete: %d jobs across %d devices", total, len(devices))
         return 0
 
-    job_queue: Queue[tuple[int, Job]] = Queue()
+    job_queue: Queue[tuple[int, Job] | None] = Queue()
     for i, job in enumerate(jobs, start=1):
         job_queue.put((i, job))
 
-    results: list[_JobResult] = []
-    lock = threading.Lock()
+    for _ in devices:
+        job_queue.put(None)
+    results: Queue[_JobResult] = Queue()
 
     start_time = time.time()
     threads: list[threading.Thread] = []
     for gpu in devices:
         t = threading.Thread(
             target=_worker,
-            args=(gpu, job_queue, total, output, results, lock),
+            args=(gpu, job_queue, total, output, results),
             daemon=True,
         )
         t.start()
@@ -233,7 +228,9 @@ def run_jobs(
         t.join()
 
     elapsed = time.time() - start_time
-    return summarize_results(results, total, elapsed, output)
+    return summarize_results(
+        [results.get_nowait() for _ in range(results.qsize())], total, elapsed, output
+    )
 
 
 __all__ = [

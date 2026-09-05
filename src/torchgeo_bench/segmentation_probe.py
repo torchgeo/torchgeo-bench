@@ -171,11 +171,12 @@ class SegmentationProbe(nn.Module):
             ``dpt`` heads (default 256).
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- Public constructor options.
         self,
         backbone: nn.Module,
         layer_names: list[str],
         num_classes: int,
+        *,
         freeze_backbone: bool = True,
         head_type: str = "linear",
         hidden_dim: int | None = None,
@@ -266,7 +267,7 @@ class SegmentationProbe(nn.Module):
     def _hook_fn(self, name: str):
         """Return a forward hook that captures the output of the named layer."""
 
-        def hook(module, input, output):  # noqa: ARG001
+        def hook(module, _input, output):  # noqa: ARG001
             self._features[name] = output
 
         return hook
@@ -402,7 +403,7 @@ class SegmentationProbe(nn.Module):
 
         layer_tensors = [torch.cat(batches) for batches in batches_per_layer]
         masks_tensor = torch.cat(all_masks)
-        logger.info(f"Cached features for {masks_tensor.shape[0]} samples.")
+        logger.info("Cached features for %s samples.", masks_tensor.shape[0])
         return CachedFeaturesDataset(layer_tensors, masks_tensor)
 
     # ------------------------------------------------------------------

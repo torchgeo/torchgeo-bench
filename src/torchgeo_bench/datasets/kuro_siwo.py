@@ -1,5 +1,7 @@
 """Kuro Siwo (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 import torch
 
 from .base import BandSpec
@@ -23,17 +25,20 @@ class KuroSiwo(_V2Dataset):
     """
 
     band_order_strategy = "by_sensor"
-    upstream_kwargs = {"return_stacked_image": False, "time_step": ["post"]}
+    upstream_kwargs: ClassVar[dict[str, object]] = {
+        "return_stacked_image": False,
+        "time_step": ["post"],
+    }
 
     name = "kuro_siwo"
     task = "segmentation"
     num_classes = 4
     multilabel = False
-    rgb_bands = ["vv", "vh"]
-    split_sizes = {"train": 4000, "val": 1000, "test": 2000}
+    rgb_bands: ClassVar[list[str]] = ["vv", "vh"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 4000, "val": 1000, "test": 2000}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("sar", "vv", "vv", mean=0.1347, std=1.0677, min=0, max=2550.89),
         BandSpec("sar", "vh", "vh", mean=0.0273, std=0.1723, min=0, max=530.453),
         BandSpec("dem", "dem", "dem", mean=146.235, std=465.777, min=-32768, max=1690.83),
@@ -49,10 +54,9 @@ class KuroSiwo(_V2Dataset):
         the channel dimension. Per-modality keys are removed from the sample
         once merged.
         """
-        modalities: list[torch.Tensor] = []
-        for key in ("image_post", "image_dem"):
-            if key in sample:
-                modalities.append(sample.pop(key))
+        modalities: list[torch.Tensor] = [
+            sample.pop(key) for key in ("image_post", "image_dem") if key in sample
+        ]
         if modalities:
             sample["image"] = (
                 modalities[0] if len(modalities) == 1 else torch.cat(modalities, dim=0)

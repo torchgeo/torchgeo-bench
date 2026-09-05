@@ -48,7 +48,7 @@ class RCF(nn.Module):
     weights: Tensor
     biases: Tensor
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         in_channels: int = 4,
         features: int = 16,
@@ -256,7 +256,7 @@ class RCFBench(BenchModel):
       same per-channel z-score this :class:`RCFBench` will use at inference.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         features: int = 512,

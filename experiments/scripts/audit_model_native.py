@@ -68,7 +68,10 @@ def main() -> None:
             sample = torch.rand(2, len(bands), 32, 32) * 3000
             model.normalize_inputs(sample)
             entry["model_native"] = "supported"
-        except (ValueError, InstantiationException) as exc:
+        except (
+            ValueError,
+            InstantiationException,
+        ) as exc:  # allow-except: classify known unsupported normalization
             # Hydra wraps construction errors, so unwrap before deciding.  Only
             # the "model cannot state its pretraining pipeline" case is a
             # classification; anything else is a real bug and must surface.

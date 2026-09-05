@@ -39,9 +39,10 @@ import glob
 import json
 import logging
 import os
+import pickle
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -49,6 +50,7 @@ import numpy as np
 
 from .datasets import get_bench_dataset_class, list_datasets
 from .datasets._metadata import unpickle_metadata
+from .datasets.loading import download_command
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +175,12 @@ def _v1_origin(path: str) -> tuple[float | None, float | None, str]:
     try:
         with h5py.File(path, "r") as f:
             meta = unpickle_metadata(f.attrs["pickle"])
-    except Exception as exc:  # Surfaced via the failure-rate gate.
+    except (
+        KeyError,
+        ValueError,
+        EOFError,
+        pickle.UnpicklingError,
+    ) as exc:  # allow-except: count invalid metadata.
         return None, None, f"ERR {type(exc).__name__}: {exc}"
 
     for key, entry in meta.items():
@@ -248,17 +255,11 @@ def _extract_v1(name: str, files: list[str], workers: int) -> dict | None:
 # --------------------------------------------------------------------------
 # Continent attribution
 # --------------------------------------------------------------------------
-def _natural_earth_countries() -> str | None:
+def _natural_earth_countries() -> str:
     """Locate the Natural Earth admin-0 shapefile, downloading if needed."""
     import cartopy.io.shapereader as shpreader
 
-    try:
-        return shpreader.natural_earth(
-            resolution="110m", category="cultural", name="admin_0_countries"
-        )
-    except Exception as exc:  # Continents are optional enrichment.
-        logger.warning("natural_earth lookup failed, skipping continents: %s", exc)
-        return None
+    return shpreader.natural_earth(resolution="110m", category="cultural", name="admin_0_countries")
 
 
 def _attribute_continents(lon: np.ndarray, lat: np.ndarray) -> Counter:
@@ -266,9 +267,6 @@ def _attribute_continents(lon: np.ndarray, lat: np.ndarray) -> Counter:
     import geopandas as gpd
 
     shp = _natural_earth_countries()
-    if shp is None:
-        return Counter()
-
     world = gpd.read_file(shp)[["CONTINENT", "geometry"]]
     pts = gpd.GeoDataFrame(geometry=gpd.points_from_xy(lon, lat), crs="EPSG:4326")
     joined = gpd.sjoin(pts, world, how="left", predicate="within")
@@ -286,10 +284,7 @@ def _dataset_dir(name: str) -> Path | None:
     Goes through the dataset's own ``data_root()`` so the environment
     overrides (``GEOBENCH_V2_ROOT``) are honoured.
     """
-    try:
-        cls = get_bench_dataset_class(name)
-    except KeyError:
-        return None
+    cls = get_bench_dataset_class(name)
     root = cls.data_root()
     # V1/V2 roots are the *parent* holding per-dataset subdirectories; the
     # torchgeo wrappers point straight at their own directory.
@@ -353,8 +348,10 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
             ``min(32, os.cpu_count())``.
 
     Returns:
-        A :class:`GeoRecord`; check :attr:`GeoRecord.status` before using the
-        coordinates, since a dataset may be absent or genuinely ungeolocated.
+        A :class:`GeoRecord` with extracted coordinates or a reason they are unavailable.
+
+    Raises:
+        FileNotFoundError: If dataset imagery is missing.
     """
     workers = workers or min(32, os.cpu_count() or 8)
 
@@ -364,22 +361,14 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
     if name in GEO_ALIAS:
         target = GEO_ALIAS[name]
         record = extract_geography(target, workers=workers)
-        if record.status != "extracted":
-            return GeoRecord(
-                name=name,
-                status=record.status,
-                reason=record.reason,
-                alias_of=target,
-            )
-        return GeoRecord(
-            **{**record.to_json(), "name": name, "alias_of": target}  # type: ignore[arg-type]
-        )
+        return replace(record, name=name, alias_of=target)
 
+    command = (
+        "torchgeo-bench download geobench_v1" if name.startswith("m-") else download_command(name)
+    )
     directory = _dataset_dir(name)
     if directory is None:
-        return GeoRecord(
-            name=name, status="not_downloaded", reason=f"no data directory for {name!r}"
-        )
+        raise FileNotFoundError(f"No imagery for {name!r}. Run `{command}`.")
 
     tortillas = sorted(glob.glob(str(directory / "*.tortilla")))
     hdf5s = sorted(glob.glob(str(directory / "*.hdf5")))
@@ -397,11 +386,7 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
                 name=name, status="no_geo", reason="no sample carries a usable transform/crs"
             )
     else:
-        return GeoRecord(
-            name=name,
-            status="not_downloaded",
-            reason=f"no .tortilla or .hdf5 files under {directory}",
-        )
+        raise FileNotFoundError(f"No .tortilla or .hdf5 files under {directory}. Run `{command}`.")
 
     if len(data["lon"]) == 0:
         return GeoRecord(name=name, status="no_geo", reason="all coordinates were non-finite")
@@ -436,20 +421,19 @@ def build_index(store_dir: Path | None = None) -> dict:
         for path in sorted(directory.glob("*.json"))
         if path.name != INDEX_NAME
     ]
-    entries = []
-    for record in records:
-        entries.append(
-            {
-                "name": record.name,
-                "status": record.status,
-                "version": record.version,
-                "n": record.n,
-                "reason": record.reason,
-                "alias_of": record.alias_of,
-                "bbox": record.bbox,
-                "continents": record.continents,
-            }
-        )
+    entries = [
+        {
+            "name": record.name,
+            "status": record.status,
+            "version": record.version,
+            "n": record.n,
+            "reason": record.reason,
+            "alias_of": record.alias_of,
+            "bbox": record.bbox,
+            "continents": record.continents,
+        }
+        for record in records
+    ]
 
     overall: dict[str, float] = {}
     for record in records:

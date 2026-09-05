@@ -10,7 +10,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.main import main, run_dataset
-from torchgeo_bench.resume import _resume_config_hash
+from torchgeo_bench.resume import ResumeState, _resume_config_hash
 
 from .test_main_fast import _chainable_model_mock, _compose_cfg
 
@@ -138,7 +138,7 @@ def test_dataset_eval_merge_preserves_interpolation_context(
     )
     monkeypatch.setattr("torchgeo_bench.main.run_segmentation", capture_eval)
 
-    run_dataset(cfg, "burn_scars", (-2, -1, 2), [0.01, 0.1], "test", set(), {})
+    run_dataset(cfg, "burn_scars", "test", ResumeState(set(), {}))
 
     assert captured[0].segmentation.lr == 0.002
     assert captured[0].segmentation.epochs == 3

@@ -3,7 +3,7 @@ WebDataset tar shards.
 
 V1 ships ~22k tiny ``id_*.hdf5`` files per dataset, which makes the dataloader
 NFS-bound (one ``open()`` round-trip per sample).  Repacking into tar shards
-of ~1000 samples each cuts file-opens by 1000x and yields 5–10x dataloader
+of ~1000 samples each cuts file-opens by 1000x and yields 5-10x dataloader
 throughput on the same data.
 
 Usage::
@@ -49,7 +49,10 @@ class _StubUnpickler(pickle.Unpickler):
 def _safe_unpickle(b: bytes) -> dict:
     try:
         return pickle.loads(b)
-    except (ModuleNotFoundError, AttributeError):
+    except (
+        ModuleNotFoundError,
+        AttributeError,
+    ):  # allow-except: decode legacy GeoBench pickle classes
         return _StubUnpickler(io.BytesIO(b)).load()
 
 

@@ -304,8 +304,6 @@ def test_forestnet_landsat_imputes_missing_bands() -> None:
     ]
     model = OlmoEarthBenchModel(bands=landsat_bands, model_size="nano", normalization="identity")
     g = model._sensor_groups[0]
-    # pan<-green(3), coastal<-blue(2), cirrus/tirs1/tirs2<-swir2(7); each
-    # source channel (3, 2, 7) is one of the present bands.
     assert g["impute_ops"] == [(3, 0), (2, 1), (7, 8), (7, 9), (7, 10)]
     assert all(src in set(g["dst_indices"]) for src, _ in g["impute_ops"])
     model.eval()
@@ -318,7 +316,7 @@ def test_forestnet_landsat_imputes_missing_bands() -> None:
 @requires_olmoearth
 def test_landsat_dataset_stats_normalization() -> None:
     """norm_from_pretrained=False normalizes each band with its BandSpec stats
-    (helios-style ±2σ no-clip), bypassing the DN rescale + pretrained
+    (helios-style ±2std no-clip), bypassing the DN rescale + pretrained
     Normalizer — required for GeoBench's uint8 Landsat scale."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 

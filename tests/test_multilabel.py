@@ -8,10 +8,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+from omegaconf import OmegaConf
 
 import torchgeo_bench.knn as knn
 from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.linear import LogisticRegression
+from torchgeo_bench.utils import FeatureSplit, FeatureSplits
 
 
 @pytest.fixture
@@ -217,7 +219,7 @@ class TestBootstrapMAP:
         y_true = np.eye(5, dtype=np.float32)
         y_scores = np.eye(5, dtype=np.float32)
 
-        mean, lo, hi = bootstrap_map(y_true, y_scores, n_boot=50, seed=0)
+        mean, _lo, _hi = bootstrap_map(y_true, y_scores, n_boot=50, seed=0)
         assert mean == pytest.approx(1.0)
 
 
@@ -311,7 +313,7 @@ class TestKNNGPUPath:
         monkeypatch.setattr(builtins, "__import__", fake_import)
         d = singlelabel_data
         clf = KNNClassifier(n_neighbors=5, device="cuda")
-        with pytest.raises(ImportError, match='request device="cpu"'):
+        with pytest.raises(ImportError, match="blocked for test"):
             clf.fit(d["x_train"], d["y_train"])
 
     def test_explicit_gpu_with_cpu_faiss_raises_actionable_error(
@@ -320,7 +322,7 @@ class TestKNNGPUPath:
         monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
         d = singlelabel_data
         clf = KNNClassifier(n_neighbors=5, device="cuda")
-        with pytest.raises(RuntimeError, match="eval.knn_device=cpu"):
+        with pytest.raises(RuntimeError, match=r"eval\.knn_device=cpu"):
             clf.fit(d["x_train"], d["y_train"])
 
 
@@ -357,12 +359,21 @@ class TestUnifiedEvaluateKNN:
 
         d = singlelabel_data
         score, lo, hi, cal, _ = evaluate_knn(
-            d["x_train"],
-            d["y_train"],
-            d["x_test"],
-            d["y_test"],
-            seed=42,
-            n_bootstrap=50,
+            FeatureSplit(d["x_train"], d["y_train"]),
+            FeatureSplit(d["x_test"], d["y_test"]),
+            OmegaConf.create(
+                {
+                    "seed": 42,
+                    "device": "cpu",
+                    "verbose": False,
+                    "eval": {
+                        "bootstrap": 50,
+                        "merge_val": False,
+                        "calibration": {"temp_scale": True},
+                    },
+                }
+            ),
+            device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert set(cal) == {"ece", "rms_ce", "mce"}
@@ -374,12 +385,21 @@ class TestUnifiedEvaluateKNN:
 
         d = multilabel_data
         score, lo, hi, cal, _ = evaluate_knn(
-            d["x_train"],
-            d["y_train"],
-            d["x_test"],
-            d["y_test"],
-            seed=42,
-            n_bootstrap=50,
+            FeatureSplit(d["x_train"], d["y_train"]),
+            FeatureSplit(d["x_test"], d["y_test"]),
+            OmegaConf.create(
+                {
+                    "seed": 42,
+                    "device": "cpu",
+                    "verbose": False,
+                    "eval": {
+                        "bootstrap": 50,
+                        "merge_val": False,
+                        "calibration": {"temp_scale": True},
+                    },
+                }
+            ),
+            device="cpu",
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert set(cal) == {"ece", "rms_ce", "mce"}
@@ -391,17 +411,24 @@ class TestUnifiedEvaluateLogistic:
 
         d = singlelabel_data
         score, lo, hi, best_c, cal, cal_ts = evaluate_logistic(
-            d["x_train"],
-            d["y_train"],
-            d["x_test"][:15],
-            d["y_test"][:15],  # use as val
-            d["x_test"][15:],
-            d["y_test"][15:],
+            FeatureSplits(
+                FeatureSplit(d["x_train"], d["y_train"]),
+                FeatureSplit(d["x_test"][:15], d["y_test"][:15]),
+                FeatureSplit(d["x_test"][15:], d["y_test"][15:]),
+            ),
             c_values=[0.1, 1.0],
-            seed=42,
-            n_bootstrap=50,
-            merge_val=False,
-            device="cpu",
+            cfg=OmegaConf.create(
+                {
+                    "seed": 42,
+                    "device": "cpu",
+                    "verbose": False,
+                    "eval": {
+                        "bootstrap": 50,
+                        "merge_val": False,
+                        "calibration": {"temp_scale": True},
+                    },
+                }
+            ),
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert best_c in [0.1, 1.0]
@@ -415,18 +442,24 @@ class TestUnifiedEvaluateLogistic:
 
         d = multilabel_data
         score, lo, hi, best_c, cal, cal_ts = evaluate_logistic(
-            d["x_train"],
-            d["y_train"],
-            d["x_val"],
-            d["y_val"],
-            d["x_test"],
-            d["y_test"],
+            FeatureSplits(
+                FeatureSplit(d["x_train"], d["y_train"]),
+                FeatureSplit(d["x_val"], d["y_val"]),
+                FeatureSplit(d["x_test"], d["y_test"]),
+            ),
             c_values=[0.01, 0.1, 1.0],
-            seed=42,
-            n_bootstrap=50,
-            merge_val=True,
-            device="cpu",
-            verbose=True,
+            cfg=OmegaConf.create(
+                {
+                    "seed": 42,
+                    "device": "cpu",
+                    "verbose": True,
+                    "eval": {
+                        "bootstrap": 50,
+                        "merge_val": True,
+                        "calibration": {"temp_scale": True},
+                    },
+                }
+            ),
         )
         assert 0 <= lo <= score <= hi <= 1.0
         assert best_c in [0.01, 0.1, 1.0]

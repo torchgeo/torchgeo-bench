@@ -88,6 +88,7 @@ class KNNClassifier:
         n_neighbors: int = 5,
         device: str = "cpu",
         metric: Literal["l2", "ip", "cosine"] = "l2",
+        *,
         use_fp16: bool = False,
     ) -> None:
         if isinstance(n_neighbors, bool) or not isinstance(n_neighbors, int) or n_neighbors < 1:
@@ -152,7 +153,7 @@ class KNNClassifier:
         """Vectorized per-row bincount: shape (n_test, n_classes)."""
         assert self._y is not None
         assert self._n_classes is not None
-        n_test, k = indices.shape
+        n_test, _k = indices.shape
         labels = self._y[indices].astype(np.int64)  # (n_test, k)
         offsets = (np.arange(n_test) * self._n_classes)[:, None]
         flat = (labels + offsets).ravel()
@@ -179,14 +180,7 @@ class KNNClassifier:
     # ---- GPU path (faissknn delegate) -------------------------------------
 
     def _fit_gpu(self, X: np.ndarray, y: np.ndarray) -> None:
-        try:
-            from faissknn import FaissKNNClassifier, FaissKNNMultilabelClassifier
-        except ImportError as exc:  # pragma: no cover — covered by env, not unit tests
-            raise ImportError(
-                f"KNNClassifier(device={self.device!r}): faissknn is not installed. "
-                "GPU KNN requires Linux x86_64, where it installs automatically; "
-                'otherwise request device="cpu".'
-            ) from exc
+        from faissknn import FaissKNNClassifier, FaissKNNMultilabelClassifier
 
         if not gpu_faiss_available():
             raise RuntimeError(

@@ -67,15 +67,10 @@ def _to_rgb(image: torch.Tensor, rgb_idx: list[int]) -> np.ndarray:
 def render_gallery(
     dataset: str,
     split: str,
-    issues_csv: Path,
+    flagged: pd.DataFrame,
     out_path: Path,
-    top_k: int = 50,
     cols: int = 10,
 ) -> None:
-    df = pd.read_csv(issues_csv)
-    if "is_issue" not in df.columns:
-        raise SystemExit(f"{issues_csv}: missing is_issue column")
-    flagged = df[df["is_issue"]].sort_values("issue_score", ascending=False).head(top_k)
     if flagged.empty:
         logger.warning("[%s/%s] no flagged samples", dataset, split)
         return
@@ -157,10 +152,11 @@ def main() -> None:
 
     for dataset, split, csv_path in pairs:
         out = args.out_dir / f"{dataset}_{split}.png"
-        try:
-            render_gallery(dataset, split, csv_path, out, args.top_k, args.cols)
-        except Exception:
-            logger.exception("[%s/%s] failed", dataset, split)
+        frame = pd.read_csv(csv_path)
+        flagged = (
+            frame[frame["is_issue"]].sort_values("issue_score", ascending=False).head(args.top_k)
+        )
+        render_gallery(dataset, split, flagged, out, args.cols)
 
 
 if __name__ == "__main__":

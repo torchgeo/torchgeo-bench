@@ -62,7 +62,6 @@ class ViTBackbone(nn.Module):
 
     def forward(self, x):
         x = self.patch_embed(x)  # (B, 16, H/16, W/16)
-        B, C, H, W = x.shape
         x = x.flatten(2).transpose(1, 2)  # (B, H*W, C) = (B, L, C)
         x = self.blocks(x)
         return x
@@ -93,7 +92,7 @@ def dummy_data():
     return {"image": images, "mask": masks}
 
 
-def make_probe(backbone, layers, head_type="linear", freeze=True, hidden_dim=None):
+def make_probe(backbone, layers, head_type="linear", *, freeze=True, hidden_dim=None):
     return SegmentationProbe(
         backbone=backbone,
         layer_names=layers,
@@ -104,7 +103,7 @@ def make_probe(backbone, layers, head_type="linear", freeze=True, hidden_dim=Non
     )
 
 
-def make_loader(images, masks, as_dict=False, mask_4d=False):
+def make_loader(images, masks, *, as_dict=False, mask_4d=False):
     if mask_4d:
         masks = masks.unsqueeze(1)
     if as_dict:
@@ -156,7 +155,7 @@ def test_build_seg_probe_requires_spatial_layers(mock_backbone):
             }
         }
     )
-    with pytest.raises(ValueError, match="requires eval.segmentation.layers"):
+    with pytest.raises(ValueError, match=r"requires eval\.segmentation\.layers"):
         build_seg_probe_and_solver(
             mock_backbone,
             num_classes=NUM_CLASSES,
@@ -812,12 +811,11 @@ def test_solver_fit_cached_builds_missing_validation_gpu_cache(mock_backbone, du
     gpu_train = GPUTensorCache.from_cached(train_cache, device="cpu")
 
     val_miou = solver.fit_cached(
-        train_cache,
+        gpu_train,
         val_cache=val_cache,
         batch_size=2,
         epochs=1,
         verbose=False,
-        gpu_train=gpu_train,
     )
 
     assert isinstance(val_miou, float)

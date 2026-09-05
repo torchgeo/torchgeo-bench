@@ -20,6 +20,7 @@ import logging
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass
 from statistics import median
 from typing import Literal
 
@@ -30,6 +31,19 @@ from torch import nn
 from torch.utils.hooks import RemovableHandle
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, kw_only=True)
+class ProfileTiming:
+    """Batch size and iteration counts for a timing measurement."""
+
+    batch_size: int
+    n_warmup: int
+    n_measure: int
+
+
+class FlopCountUnavailableError(NotImplementedError):
+    """The FLOP counter cannot track this model's gradient functions."""
 
 
 @contextlib.contextmanager
@@ -63,7 +77,9 @@ def lenient_grad_hooks() -> Iterator[None]:
     ) -> RemovableHandle:
         try:
             return original(tensors, fn, mode=mode)
-        except AssertionError:
+        except AssertionError as exc:  # allow-except: Skip grad_fn bookkeeping, retaining FLOPs.
+            if "Expected gradient function" not in str(exc):
+                raise
             return RemovableHandle(OrderedDict())
 
     autograd_graph.register_multi_grad_hook = safe
@@ -131,36 +147,38 @@ def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
 
     try:
         return _measure_no_autograd(torch.inference_mode)
-    except AttributeError as exc:
+    except AttributeError as exc:  # allow-except: Retry FLOP counting without inference tensors.
         # 'NoneType' object has no attribute 'next_functions' — only
         # the dispatch-vs-inference-tensor mismatch.
         if "next_functions" not in str(exc):
             raise
         logger.info(
-            f"FlopCounterMode inference_mode rejected by {type(model).__name__}: "
-            f"{exc}; retrying under no_grad."
+            "FlopCounterMode inference_mode rejected by %s: %s; retrying under no_grad.",
+            type(model).__name__,
+            exc,
         )
     try:
         return _measure_no_autograd(torch.no_grad)
-    except AssertionError as exc:
+    except AssertionError as exc:  # allow-except: Handle the FLOP counter grad_fn assertion.
         # 'Expected gradient function to be set' — the module_tracker
         # needs activations to have grad_fn; only enable_grad provides that.
         if "Expected gradient function" not in str(exc):
             raise
         logger.info(
-            f"FlopCounterMode no_grad rejected by {type(model).__name__}: "
-            f"{exc}; retrying under enable_grad with requires_grad input."
+            "FlopCounterMode no_grad rejected by %s: %s; retrying with requires_grad input.",
+            type(model).__name__,
+            exc,
         )
     try:
         return _measure_with_autograd()
-    except AssertionError as exc:
+    except AssertionError as exc:  # allow-except: Handle the FLOP counter grad_fn assertion.
         # The lenient patch neutralises every module_tracker assertion we
         # know of, so reaching here means the assertion no longer comes from
         # module_tracker; raise a typed signal the caller can record as
         # gflops=None.
         if "Expected gradient function" not in str(exc):
             raise
-        raise NotImplementedError(
+        raise FlopCountUnavailableError(
             f"{type(model).__name__} is incompatible with "
             f"torch.utils.flop_counter.FlopCounterMode: all three execution "
             f"contexts (inference_mode, no_grad, enable_grad+requires_grad) "
@@ -220,11 +238,10 @@ def measure_profile(
     latency_p50 = median(per_batch_ms)
     peak_gb = torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None
     reserved_gb = torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None
-    # Only the typed NotImplementedError from _count_gflops is tolerated.
     try:
         gflops: float | None = _count_gflops(model, sample_batch)
-    except NotImplementedError as exc:
-        logger.warning(f"[profile] {exc}")
+    except FlopCountUnavailableError as exc:  # allow-except: Timing remains valid without FLOPs.
+        logger.warning("[profile] %s", exc)
         gflops = None
     params_m = _count_params(model)
 
@@ -241,10 +258,7 @@ def measure_profile(
 def measure_cpu_throughput(
     model: nn.Module,
     sample: torch.Tensor,
-    *,
-    batch_size: int,
-    n_warmup: int,
-    n_measure: int,
+    timing: ProfileTiming,
     time_budget_s: float,
 ) -> dict[str, float | None]:
     """Wall-clock-budgeted CPU pass; returns ``*_cpu`` throughput and latency.
@@ -264,22 +278,23 @@ def measure_cpu_throughput(
     # device as the restoration target since model.to() is a no-op anyway.
     first_param = next(iter(model.parameters()), None)
     orig_dev = first_param.device if first_param is not None else sample.device
-    cpu_sample = sample[:batch_size].detach().to(cpu_dev)
+    cpu_sample = sample[: timing.batch_size].detach().to(cpu_dev)
     model.to(cpu_dev)
     try:
         t0 = time.perf_counter()
         with torch.inference_mode():
-            for _ in range(n_warmup):
+            for _ in range(timing.n_warmup):
                 model(cpu_sample)
                 if time.perf_counter() - t0 > time_budget_s:
                     logger.warning(
-                        f"[profile] CPU warmup exceeded {time_budget_s}s budget on "
-                        f"{type(model).__name__}; skipping CPU throughput."
+                        "[profile] CPU warmup exceeded %ss budget on %s; skipping CPU throughput.",
+                        time_budget_s,
+                        type(model).__name__,
                     )
                     return none_result
             per_batch_ms: list[float] = []
             t_loop = time.perf_counter()
-            for _ in range(n_measure):
+            for _ in range(timing.n_measure):
                 tb = time.perf_counter()
                 model(cpu_sample)
                 per_batch_ms.append((time.perf_counter() - tb) * 1000.0)
@@ -289,7 +304,7 @@ def measure_cpu_throughput(
         if not per_batch_ms:
             return none_result
         return {
-            "throughput_samples_per_sec_cpu": (batch_size * len(per_batch_ms)) / elapsed,
+            "throughput_samples_per_sec_cpu": (timing.batch_size * len(per_batch_ms)) / elapsed,
             "latency_ms_per_batch_p50_cpu": median(per_batch_ms),
         }
     finally:

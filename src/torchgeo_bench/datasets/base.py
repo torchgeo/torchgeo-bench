@@ -17,7 +17,7 @@ type checking.
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from torchgeo_bench.bands import BandSpec
 
@@ -53,9 +53,9 @@ class BenchDataset(ABC):
     name: str
     task: Literal["classification", "segmentation"]
     num_classes: int
-    bands: list[BandSpec]
-    rgb_bands: list[str]
-    split_sizes: dict[str, int]
+    bands: ClassVar[list[BandSpec]]
+    rgb_bands: ClassVar[list[str]]
+    split_sizes: ClassVar[dict[str, int]]
     multilabel: bool = False
     supports_partitions: bool = False
 

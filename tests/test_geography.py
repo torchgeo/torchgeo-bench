@@ -29,6 +29,7 @@ from torchgeo_bench.geography import (
     GeoRecord,
     _v1_origin,
     build_index,
+    extract_geography,
     list_geography,
     missing_datasets,
     write_record,
@@ -57,6 +58,21 @@ def test_v1_origin_reads_hdf5_metadata(tmp_path: Path, storage: str) -> None:
         file.attrs["pickle"] = repr(payload) if storage == "string" else np.void(payload)
 
     assert _v1_origin(str(path)) == (456000.0, 1230000.0, "EPSG:32615")
+
+
+def test_v1_origin_requires_sample_file(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        _v1_origin(str(tmp_path / "missing.hdf5"))
+
+
+@pytest.mark.parametrize("directory_exists", [False, True])
+def test_extract_geography_requires_imagery(tmp_path: Path, monkeypatch, directory_exists) -> None:
+    monkeypatch.chdir(tmp_path)
+    if directory_exists:
+        (tmp_path / "data/classification_v1.0/m-eurosat").mkdir(parents=True)
+
+    with pytest.raises(FileNotFoundError, match="`torchgeo-bench download geobench_v1`"):
+        extract_geography("m-eurosat")
 
 
 def test_build_index_weights_continents_by_sample_count(tmp_path: Path) -> None:

@@ -23,7 +23,7 @@ from torchgeo_bench.flops_pipeline import (
     _probe_gflops,
     _seg_head_gflops,
 )
-from torchgeo_bench.model_profile import _count_gflops, lenient_grad_hooks
+from torchgeo_bench.model_profile import ProfileTiming, _count_gflops, lenient_grad_hooks
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 CPU = torch.device("cpu")
@@ -173,8 +173,8 @@ def test_probe_scales_with_feature_dim_not_classes():
     narrow = _WidthModel(1024).eval()
     wide = _WidthModel(2048).eval()
 
-    g_n, p_n, d_n = _probe_gflops(narrow, 3, 32, CPU, "linear", 10)
-    g_w, p_w, d_w = _probe_gflops(wide, 3, 32, CPU, "linear", 10)
+    g_n, p_n, d_n = _probe_gflops(narrow, (3, 32, 32), CPU, "linear", 10)
+    g_w, p_w, d_w = _probe_gflops(wide, (3, 32, 32), CPU, "linear", 10)
 
     assert (d_n, d_w) == (1024, 2048)
     assert g_w == pytest.approx(2 * g_n, rel=0.01)
@@ -187,8 +187,8 @@ def test_mlp_probe_scales_as_feature_dim_squared():
     narrow = _WidthModel(512).eval()
     wide = _WidthModel(1024).eval()
 
-    g_n, _, _ = _probe_gflops(narrow, 3, 32, CPU, "mlp", 10)
-    g_w, _, _ = _probe_gflops(wide, 3, 32, CPU, "mlp", 10)
+    g_n, _, _ = _probe_gflops(narrow, (3, 32, 32), CPU, "mlp", 10)
+    g_w, _, _ = _probe_gflops(wide, (3, 32, 32), CPU, "mlp", 10)
 
     # The D x D projection dominates the D x n_classes classifier, so doubling
     # D roughly quadruples the probe.
@@ -366,11 +366,11 @@ def test_load_completed_reads_cell_keys(tmp_path):
     assert ("resnet50", "s2", "segmentation", "dpt") not in completed
 
 
-def test_load_completed_tolerates_malformed_csv(tmp_path):
-    """A partial/garbled CSV must not abort the sweep."""
+def test_load_completed_rejects_malformed_csv(tmp_path: Path) -> None:
     path = tmp_path / "broken.csv"
     path.write_text("this,is not\na valid;;csv\n")
-    assert _load_completed(str(path)) == frozenset()
+    with pytest.raises(KeyError, match="name"):
+        _load_completed(str(path))
 
 
 # ---------------------------------------------------------------------------
@@ -382,10 +382,9 @@ def _wrap(exc: BaseException, depth: int = 2) -> BaseException:
     """Nest *exc* in `depth` layers of wrapper exceptions."""
     out: BaseException = exc
     for i in range(depth):
-        try:
-            raise RuntimeError(f"instantiation failed (layer {i})") from out
-        except RuntimeError as wrapper:
-            out = wrapper
+        wrapper = RuntimeError(f"instantiation failed (layer {i})")
+        wrapper.__cause__ = out
+        out = wrapper
     return out
 
 
@@ -604,7 +603,7 @@ def test_main_writes_ordered_measurement_rows(flops_run: FlopsRun) -> None:
 
 
 @pytest.mark.parametrize("all_complete", [False, True])
-def test_main_skips_completed_cells(flops_run: FlopsRun, all_complete: bool) -> None:
+def test_main_skips_completed_cells(flops_run: FlopsRun, *, all_complete: bool) -> None:
     cfg, rows, events = flops_run
     cfg.resume = True
     completed = [("rgb", "classification", ""), ("s2", "segmentation", "fpn")]
@@ -658,17 +657,18 @@ def test_main_skips_unavailable_model(flops_run: FlopsRun, monkeypatch: pytest.M
 @pytest.mark.parametrize("stage", ["_measure_backbone", "_probe_gflops"])
 @pytest.mark.parametrize("band_mismatch", [False, True])
 def test_main_classification_failure_handling(
-    flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch, stage: str, band_mismatch: bool
+    flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch, stage: str, *, band_mismatch: bool
 ) -> None:
     cfg, rows, events = flops_run
     measure = getattr(flops_pipeline, stage)
 
-    def fail_rgb(model: nn.Module, channels: int, *args: object) -> object:
+    def fail_rgb(model: nn.Module, shape: int | tuple[int, int, int], *args: object) -> object:
+        channels = shape if isinstance(shape, int) else shape[0]
         if channels == 3:
             if band_mismatch:
                 raise ValueError("Missing required model band 'nir'")
             raise RuntimeError("bad forward")
-        return measure(model, channels, *args)
+        return measure(model, shape, *args)
 
     monkeypatch.setattr(flops_pipeline, stage, fail_rgb)
     if not band_mismatch:
@@ -687,7 +687,7 @@ def test_main_classification_failure_handling(
     assert events.count("head:fpn") == 1
 
 
-def test_main_segmentation_failure_keeps_other_heads(
+def test_main_segmentation_failure_propagates(
     flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cfg, rows, _events = flops_run
@@ -702,12 +702,13 @@ def test_main_segmentation_failure_keeps_other_heads(
         return build(model, classes, head_cfg, *args)
 
     monkeypatch.setattr(flops_pipeline, "build_seg_probe_and_solver", fail_fpn)
-    flops_pipeline.main(cfg)
-    assert written_keys(rows) == [("rgb", "classification", ""), ("rgb", "segmentation", "dpt")]
+    with pytest.raises(ValueError, match="unsupported head"):
+        flops_pipeline.main(cfg)
+    assert rows == []
 
 
 @pytest.mark.parametrize("empty_layers", [False, True])
-def test_main_skips_excluded_segmentation(flops_run: FlopsRun, empty_layers: bool) -> None:
+def test_main_skips_excluded_segmentation(flops_run: FlopsRun, *, empty_layers: bool) -> None:
     cfg, rows, events = flops_run
     if empty_layers:
         cfg.model.eval.segmentation.layers = []
@@ -772,3 +773,50 @@ def test_vit_gflops_ordering_and_tokens():
 
     assert _count_gflops(large, x) > _count_gflops(base, x)
     assert _n_tokens(base, 224) == 196
+
+
+def test_measure_backbone_retries_cuda_oom(monkeypatch: pytest.MonkeyPatch) -> None:
+    batches: list[int] = []
+    cache_clears: list[None] = []
+
+    def profile(
+        _model: nn.Module,
+        sample: torch.Tensor,
+        _device: torch.device,
+        n_warmup: int,
+        n_measure: int,
+    ) -> dict[str, float | None]:
+        assert (n_warmup, n_measure) == (1, 2)
+        batches.append(sample.shape[0])
+        if sample.shape[0] > 2:
+            raise torch.cuda.OutOfMemoryError("synthetic OOM")
+        return {"gflops": 1.0}
+
+    monkeypatch.setattr(flops_pipeline, "measure_profile", profile)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: cache_clears.append(None))
+    metrics, batch_size = flops_pipeline._measure_backbone(
+        nn.Identity(),
+        3,
+        8,
+        CPU,
+        ProfileTiming(batch_size=8, n_warmup=1, n_measure=2),
+    )
+    assert batches == [8, 4, 2]
+    assert len(cache_clears) == 2
+    assert batch_size == 2
+    assert metrics == {"gflops": 1.0}
+
+
+def test_measure_backbone_propagates_oom_at_batch_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    def profile(*_args: object, **_kwargs: object) -> dict[str, float | None]:
+        raise torch.cuda.OutOfMemoryError("synthetic OOM")
+
+    monkeypatch.setattr(flops_pipeline, "measure_profile", profile)
+    with pytest.raises(torch.cuda.OutOfMemoryError, match="synthetic OOM"):
+        flops_pipeline._measure_backbone(
+            nn.Identity(),
+            3,
+            8,
+            CPU,
+            ProfileTiming(batch_size=1, n_warmup=1, n_measure=2),
+        )

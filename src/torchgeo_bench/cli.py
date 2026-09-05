@@ -126,7 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _setup_logging(verbose: bool = False) -> None:
+def _setup_logging(*, verbose: bool = False) -> None:
     import logging
 
     from rich.logging import RichHandler
@@ -193,9 +193,9 @@ def _compose(args: argparse.Namespace, *, config_name: str, default_model: str |
             config_name=config_name,
             default_model=default_model,
         )
-    except OmegaConfBaseException as err:
+    except OmegaConfBaseException as err:  # allow-except: show a concise CLI configuration error
         raise SystemExit(f"error: bad config override: {err}") from err
-    except ValueError as err:
+    except ValueError as err:  # allow-except: show a concise CLI configuration error
         raise SystemExit(f"error: {err}") from err
 
 
@@ -215,7 +215,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
         try:
             print(model_config_path(args.model_help).read_text(), end="")
-        except ValueError as err:
+        except ValueError as err:  # allow-except: report an unknown model to the CLI user
             raise SystemExit(f"error: {err}") from err
         return
     cfg = _compose(args, config_name="config", default_model="rcf")
@@ -224,7 +224,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
         print(OmegaConf.to_yaml(cfg), end="")
         return
-    _setup_logging(bool(cfg.verbose))
+    _setup_logging(verbose=bool(cfg.verbose))
     from torchgeo_bench.main import main
 
     main(cfg)

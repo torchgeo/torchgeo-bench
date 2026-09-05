@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from torchgeo_bench.datasets.base import BandSpec
 
-from ._band_mapping import map_to_model_bands, select_src_bands
+from ._band_mapping import BandMappingPolicy, map_to_model_bands, select_src_bands
 from ._input_units import InputUnit, convert_unit, detect_input_unit
 from ._normalization import NormalizationStrategy
 from ._pooling import VALID_MODES, pool_tokens
@@ -20,14 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 def _build_backbone(name: str, **kwargs: Any) -> nn.Module:
-    try:
-        import terratorch.models.backbones  # noqa: F401 — populate registry
-        from terratorch.registry import BACKBONE_REGISTRY
-    except ImportError as e:
-        raise ImportError(
-            "terratorch is required for this wrapper; install with "
-            "`pip install torchgeo-bench[terratorch]`."
-        ) from e
+    import terratorch.models.backbones  # noqa: F401 - populate registry
+    from terratorch.registry import BACKBONE_REGISTRY
+
     return BACKBONE_REGISTRY.build(name, **kwargs)
 
 
@@ -171,7 +166,10 @@ class TerraTorchPrithviBench(_TerraTorchBench):
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
         mapped, _ = map_to_model_bands(
-            images, self.bands, self.model_bands, preferred_sensors=("s2",)
+            images,
+            self.bands,
+            self.model_bands,
+            policy=BandMappingPolicy(preferred_sensors=("s2",)),
         )
         return mapped
 
@@ -218,7 +216,7 @@ class TerraTorchClayBench(_TerraTorchBench):
     # digital numbers, not 0-1 reflectance.
     expected_input_unit = InputUnit.S2_DN
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -261,7 +259,10 @@ class TerraTorchClayBench(_TerraTorchBench):
 
     def _prepare_input(self, images: torch.Tensor) -> torch.Tensor:
         mapped, _ = map_to_model_bands(
-            images, self.bands, self.model_bands, preferred_sensors=("s2",)
+            images,
+            self.bands,
+            self.model_bands,
+            policy=BandMappingPolicy(preferred_sensors=("s2",)),
         )
         return mapped
 

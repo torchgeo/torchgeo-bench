@@ -91,6 +91,15 @@ def list_datasets() -> list[str]:
     return sorted(_REGISTRY_SPEC)
 
 
+def download_command(name: str) -> str:
+    """Return the command that downloads one registered dataset."""
+    if name.startswith("m-"):
+        return f"torchgeo-bench download geobench_v1 --datasets {name}"
+    if name in {"eurosat", "eurosat-spatial", "resisc45"}:
+        return f"torchgeo-bench download {name.removesuffix('-spatial')}"
+    return f"torchgeo-bench download geobench_v2 --datasets {name}"
+
+
 class _ResizeTransform:
     """Sample-level transform that resizes ``image`` (and ``mask``)."""
 
@@ -163,10 +172,11 @@ def _make_loader(
     )
 
 
-def get_datasets(
+def get_datasets(  # noqa: PLR0913 - public dataset loading options.
     dataset_name: str = "m-forestnet",
     partition_name: str = "default",
     batch_size: int = 32,
+    *,
     return_val: bool = False,
     num_workers: int = 8,
     image_size: int | None = None,
@@ -203,7 +213,10 @@ def get_datasets(
 
     Raises:
         KeyError: If ``dataset_name`` is not registered.
+        FileNotFoundError: If a required dataset file is missing.
     """
+    from torchgeo.datasets import DatasetNotFoundError
+
     cls = get_bench_dataset_class(dataset_name)
     bench = cls()
 
@@ -235,9 +248,17 @@ def get_datasets(
         # Only multi-temporal wrappers accept this; others would not know what
         # to do with a time axis, so passing it to them is a config error.
         common["time_steps"] = time_steps
-    train_ds = bench.get_dataset("train", partition=train_partition, **common)
-    val_ds = bench.get_dataset("val", partition="default", **common)
-    test_ds = bench.get_dataset("test", partition="default", **common)
+    try:
+        train_ds = bench.get_dataset("train", partition=train_partition, **common)
+        val_ds = bench.get_dataset("val", partition="default", **common)
+        test_ds = bench.get_dataset("test", partition="default", **common)
+    except (
+        FileNotFoundError,
+        DatasetNotFoundError,
+    ) as error:  # allow-except: add download command.
+        raise FileNotFoundError(
+            f"Required files for {dataset_name!r} are missing. Run `{download_command(dataset_name)}`."
+        ) from error
 
     train_loader = _make_loader(
         train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers

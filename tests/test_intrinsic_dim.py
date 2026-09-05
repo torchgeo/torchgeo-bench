@@ -240,7 +240,7 @@ class TestLoadEstimator:
 
         with (
             mock.patch.object(builtins, "__import__", side_effect=_mock),
-            pytest.raises(ImportError, match="torchid is required"),
+            pytest.raises(ImportError, match="mocked"),
         ):
             _load_estimator("TwoNN")
 
@@ -314,7 +314,6 @@ class TestRealTorchid:
     @pytest.fixture(autouse=True)
     def _seed(self) -> None:
         torch.manual_seed(0)
-        np.random.seed(0)
 
     @staticmethod
     def _swiss_roll(n: int) -> np.ndarray:

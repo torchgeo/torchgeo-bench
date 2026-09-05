@@ -1,6 +1,7 @@
 """Map dataset BandSpec lists onto pretrained-model band slots."""
 
 import logging
+from dataclasses import dataclass
 from typing import cast
 
 import torch
@@ -180,21 +181,28 @@ def select_src_bands(
 DEFAULT_BAND_FALLBACKS: dict[str, str] = {"coastal": "blue"}
 
 
+@dataclass(frozen=True, kw_only=True)
+class BandMappingPolicy:
+    """Choose source sensors and how to handle missing model bands."""
+
+    allow_missing: bool = False
+    preferred_sensors: tuple[str, ...] = ()
+    band_fallbacks: dict[str, str] | None = None
+
+
 def map_to_model_bands(
     images: torch.Tensor,
     src_bands: list[BandSpec],
     target_band_names: list[str],
     *,
-    allow_missing: bool = False,
-    preferred_sensors: tuple[str, ...] = (),
-    band_fallbacks: dict[str, str] | None = None,
+    policy: BandMappingPolicy = BandMappingPolicy(),
 ) -> tuple[torch.Tensor, list[bool]]:
     """Rearrange ``images`` from src band order to ``target_band_names``, zero-filling gaps.
 
     A target band missing from ``src_bands`` first tries
-    ``band_fallbacks`` (default :data:`DEFAULT_BAND_FALLBACKS`) -- copying a
+    ``policy.band_fallbacks`` (default :data:`DEFAULT_BAND_FALLBACKS`) -- copying a
     spectrally-nearest neighbor's real data -- before falling through to
-    zero-fill (``allow_missing=True``) or raising. Pass ``band_fallbacks={}``
+    zero-fill (``policy.allow_missing=True``) or raising. Set ``policy.band_fallbacks={}``
     to disable.
 
     Returns ``(mapped, missing)`` where ``missing[i]`` is True iff slot
@@ -206,8 +214,8 @@ def map_to_model_bands(
             f"map_to_model_bands: images has {images.shape[1]} channels but "
             f"src_bands has {len(src_bands)} entries."
         )
-    src_index = resolve_src_indices(src_bands, preferred_sensors=preferred_sensors)
-    fallbacks = DEFAULT_BAND_FALLBACKS if band_fallbacks is None else band_fallbacks
+    src_index = resolve_src_indices(src_bands, preferred_sensors=policy.preferred_sensors)
+    fallbacks = DEFAULT_BAND_FALLBACKS if policy.band_fallbacks is None else policy.band_fallbacks
 
     B, _, H, W = images.shape
     out = torch.zeros(B, len(target_band_names), H, W, device=images.device, dtype=images.dtype)
@@ -226,11 +234,11 @@ def map_to_model_bands(
                 )
                 idx = fallback_idx
         if idx is None:
-            if not allow_missing:
+            if not policy.allow_missing:
                 available = [canonical_band_name(b.name) for b in src_bands]
                 raise ValueError(
                     f"Missing required model band {name!r}. Available canonical bands: "
-                    f"{available}. Pass allow_missing=True only for an explicit zero-fill ablation."
+                    f"{available}. Set policy.allow_missing=True only for an explicit zero-fill ablation."
                 )
             missing.append(True)
             continue

@@ -100,8 +100,10 @@ def test_profile_resume_complete_skips(tmp_path: Path):
     )
 
     seed_rows = [_resume_row(cfg, method="knn5", metric_name="accuracy")]
-    for name in _profile_metric_names(cfg.eval.profile):
-        seed_rows.append(_resume_row(cfg, method="profile", metric_name=name))
+    seed_rows.extend(
+        _resume_row(cfg, method="profile", metric_name=name)
+        for name in _profile_metric_names(cfg.eval.profile)
+    )
     pd.DataFrame(seed_rows).to_csv(out, index=False)
 
     with (
