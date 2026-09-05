@@ -306,7 +306,7 @@ def _build_record(name: str, data: dict, continents: Counter) -> GeoRecord:
 
     xi = np.floor((lon + 180.0) / BIN_RES).astype(int)
     yi = np.floor((lat + 90.0) / BIN_RES).astype(int)
-    counts = Counter(zip(xi.tolist(), yi.tolist()))
+    counts = Counter(zip(xi.tolist(), yi.tolist(), strict=True))
     bins = [[int(x), int(y), int(c)] for (x, y), c in sorted(counts.items())]
 
     # Deterministic subsample so re-runs are byte-identical.

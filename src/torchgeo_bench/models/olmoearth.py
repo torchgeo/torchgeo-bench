@@ -237,7 +237,7 @@ _PASSTHROUGH_SENSORS: frozenset[str] = frozenset({"sar", "s1"})
 _DATASET_STATS_SENSORS: frozenset[str] = frozenset({"landsat"})
 
 
-def _build_sensor_group(sensor: str, indexed_bands: list[tuple[int, BandSpec]]) -> dict[str, Any]:
+def build_sensor_group(sensor: str, indexed_bands: list[tuple[int, BandSpec]]) -> dict[str, Any]:
     """Resolve the channel layout and normalization metadata for one sensor."""
     if sensor not in _MODALITY_INFO:
         supported = sorted(set(_MODALITY_INFO))
@@ -305,7 +305,7 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict[str, Any]]:
     grouped: dict[str, list[tuple[int, BandSpec]]] = defaultdict(list)
     for i, band in enumerate(bands):
         grouped[band.sensor.lower()].append((i, band))
-    result = [_build_sensor_group(sensor, group) for sensor, group in grouped.items()]
+    result = [build_sensor_group(sensor, group) for sensor, group in grouped.items()]
     fields: dict[str, str] = {}
     for group in result:
         field = group["sample_field"]
@@ -554,7 +554,7 @@ class OlmoEarthBenchModel(BenchModel):
             B, H, W, self.time_steps, num_band_sets, dtype=torch.float32, device=device
         )
 
-    def _normalize_sensor_group(self, images: torch.Tensor, group: dict[str, Any]) -> np.ndarray:
+    def normalize_sensor_group(self, images: torch.Tensor, group: dict[str, Any]) -> np.ndarray:
         """Normalize and impute one sensor's channels in the OlmoEarth layout."""
         g_images = images[:, group["src_indices"]]  # (B, Csensor, H, W)
 
@@ -625,7 +625,7 @@ class OlmoEarthBenchModel(BenchModel):
 
         sample_kwargs: dict = {}
         for group in self._sensor_groups:
-            g_nhwtc = self._normalize_sensor_group(images, group)
+            g_nhwtc = self.normalize_sensor_group(images, group)
 
             field = group["sample_field"]
             mask = self._build_mask(B, H, W, group["num_band_sets"], device)

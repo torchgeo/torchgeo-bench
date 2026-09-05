@@ -357,7 +357,7 @@ class TerraTorchTerraMindBench(_TerraTorchBench):
         n = len(self.bands)
         mean = torch.zeros(1, n, 1, 1)
         std = torch.ones(1, n, 1, 1)
-        for name, ds_idx in zip(self.model_bands, self._band_indices):
+        for name, ds_idx in zip(self.model_bands, self._band_indices, strict=True):
             pos = order.index(name)
             mean[0, ds_idx] = v1_pretraining_mean[key][pos]
             std[0, ds_idx] = v1_pretraining_std[key][pos]

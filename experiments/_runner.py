@@ -136,7 +136,7 @@ def _worker(
             results.append(result)
 
 
-def _summarize_results(results: list[_JobResult], total: int, elapsed: float, output: str) -> int:
+def summarize_results(results: list[_JobResult], total: int, elapsed: float, output: str) -> int:
     """Log job timings and failures, returning the run exit code."""
     passed = sum(1 for r in results if r.returncode == 0)
     failed = total - passed
@@ -233,7 +233,7 @@ def run_jobs(
         t.join()
 
     elapsed = time.time() - start_time
-    return _summarize_results(results, total, elapsed, output)
+    return summarize_results(results, total, elapsed, output)
 
 
 __all__ = [

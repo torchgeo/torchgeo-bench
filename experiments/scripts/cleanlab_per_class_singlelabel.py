@@ -27,7 +27,7 @@ import pandas as pd
 logger = logging.getLogger("perclass-sl")
 
 
-def _class_metrics(
+def class_metrics(
     y: np.ndarray,
     probs: np.ndarray,
     classes: np.ndarray,
@@ -107,7 +107,7 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
     is_issue = np.zeros(len(y), dtype=bool)
     is_issue[issues_idx] = True
 
-    df = _class_metrics(y, probs, classes, pred, quality, is_issue)
+    df = class_metrics(y, probs, classes, pred, quality, is_issue)
 
     stem = npz_path.stem
     dataset, rest = stem.split("__", 1)

@@ -96,7 +96,7 @@ class LogisticRegression:
             TypeError: If X or y is not a torch.Tensor.
             ValueError: If shapes are invalid or data is empty.
         """
-        self._validate_training_shapes(X, y)
+        self.validate_training_shapes(X, y)
 
         X_tensor = X.to(self.device, dtype=torch.float32, non_blocking=True).contiguous()
 
@@ -134,15 +134,15 @@ class LogisticRegression:
             reg = 0.5 * (1.0 / self.C) / float(n_samples)
 
         if self.solver == "lbfgs":
-            self._fit_lbfgs(model, X_tensor, y_tensor, criterion, reg)
+            self.fit_lbfgs(model, X_tensor, y_tensor, criterion, reg)
         else:
-            self._fit_adam(model, X_tensor, y_tensor, criterion, reg)
+            self.fit_adam(model, X_tensor, y_tensor, criterion, reg)
 
         model.eval()
         self._fitted = True
         return self
 
-    def _validate_training_shapes(self, X: Tensor, y: Tensor) -> None:
+    def validate_training_shapes(self, X: Tensor, y: Tensor) -> None:
         """Check tensor types and dimensions before moving data to the device."""
         if not torch.is_tensor(X):
             raise TypeError("X must be a torch.Tensor")
@@ -158,7 +158,7 @@ class LogisticRegression:
         elif y.ndim != 1:
             raise ValueError(f"y must be 1D (n_samples,); got shape {tuple(y.shape)}")
 
-    def _fit_lbfgs(
+    def fit_lbfgs(
         self,
         model: torch.nn.Linear,
         X: Tensor,
@@ -191,7 +191,7 @@ class LogisticRegression:
         state = optimizer.state[first_param]
         self.n_iter_ = int(state.get("n_iter", self.max_iter))
 
-    def _fit_adam(
+    def fit_adam(
         self,
         model: torch.nn.Linear,
         X: Tensor,

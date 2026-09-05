@@ -34,7 +34,7 @@ class LinearHead(nn.Module):
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
         """Upsample and sum per-layer logits."""
         total_logits: torch.Tensor | int = 0
-        for idx, (feat, head) in enumerate(zip(features, self.heads)):
+        for idx, (feat, head) in enumerate(zip(features, self.heads, strict=True)):
             logits = head(feat)
             if logits.shape[-2:] != (input_h, input_w):
                 logits = F.interpolate(
@@ -143,7 +143,7 @@ class ConvBlockHead(nn.Module):
 
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
         """Project, upsample, concat, and classify features."""
-        proj_feats = [proj(f) for f, proj in zip(features, self.projectors)]
+        proj_feats = [proj(f) for f, proj in zip(features, self.projectors, strict=True)]
 
         target_h, target_w = 0, 0
         for f in proj_feats:
@@ -213,7 +213,10 @@ class FPNHead(nn.Module):
             input_h: Target output height (input image height).
             input_w: Target output width (input image width).
         """
-        laterals = [lat(norm(f)) for f, norm, lat in zip(features, self.input_norms, self.laterals)]
+        laterals = [
+            lat(norm(f))
+            for f, norm, lat in zip(features, self.input_norms, self.laterals, strict=True)
+        ]
 
         # Top-down merging: from coarsest (0) to finest (-1)
         for i in range(len(laterals) - 1):
@@ -222,7 +225,7 @@ class FPNHead(nn.Module):
                 laterals[i], size=target_size, mode="bilinear", align_corners=False
             )
 
-        fpn_outs = [conv(p) for p, conv in zip(laterals, self.fpn_convs)]
+        fpn_outs = [conv(p) for p, conv in zip(laterals, self.fpn_convs, strict=True)]
 
         finest_size = fpn_outs[-1].shape[-2:]
         aligned = []
@@ -367,14 +370,17 @@ class DPTHead(nn.Module):
             input_w: Target output width.
         """
         # Reassemble stand-in: normalise → 1×1 project to hidden_dim.
-        projected = [conv(norm(f)) for norm, conv, f in zip(self.input_norms, self.convs, features)]
+        projected = [
+            conv(norm(f))
+            for norm, conv, f in zip(self.input_norms, self.convs, features, strict=True)
+        ]
 
         # Top-down cascade, coarsest (0) → finest (3). The running fused state is
         # the primary input and the next feature map enters as the skip, matching
         # ``DPTFeatureFusionStage``. Each layer upsamples 2×, so the cascade
         # supplies all the upsampling (14×14 → 224×224 for a patch16 ViT).
         out = self.ref[0](projected[0])
-        for layer, feat in zip(self.ref[1:], projected[1:]):
+        for layer, feat in zip(self.ref[1:], projected[1:], strict=True):
             out = layer(out, feat)
 
         out = self.out_conv(out)

@@ -583,9 +583,11 @@ def test_dpt_head_upsamples_purely_through_fusion_cascade():
     features = [torch.randn(1, 32, 14, 14) for _ in range(4)]
 
     # Intercept the cascade output before out_conv / the final resize.
-    projected = [conv(norm(f)) for norm, conv, f in zip(head.input_norms, head.convs, features)]
+    projected = [
+        conv(norm(f)) for norm, conv, f in zip(head.input_norms, head.convs, features, strict=True)
+    ]
     fused = head.ref[0](projected[0])
-    for layer, feat in zip(head.ref[1:], projected[1:]):
+    for layer, feat in zip(head.ref[1:], projected[1:], strict=True):
         fused = layer(fused, feat)
     assert fused.shape[-2:] == (224, 224)
 

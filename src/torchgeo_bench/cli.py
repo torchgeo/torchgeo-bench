@@ -139,7 +139,7 @@ def _setup_logging(verbose: bool = False) -> None:
     )
 
 
-def _input_overrides(args: argparse.Namespace) -> list[str]:
+def input_overrides(args: argparse.Namespace) -> list[str]:
     """Translate dataset input flags into config overrides."""
     overrides = []
     if getattr(args, "partition", None) is not None:
@@ -172,7 +172,7 @@ def _flag_overrides(args: argparse.Namespace) -> list[str]:
         overrides.append("resume=true")
     if getattr(args, "seed", None) is not None:
         overrides.append(f"seed={args.seed}")
-    overrides.extend(_input_overrides(args))
+    overrides.extend(input_overrides(args))
     if getattr(args, "skip_linear", False):
         overrides.append("eval.skip_linear=true")
     if getattr(args, "bootstrap", None) is not None:

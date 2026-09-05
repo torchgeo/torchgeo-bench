@@ -42,7 +42,7 @@ def _validation_curve(log_path: Path, expected_epochs: int) -> tuple[int, float,
     return best_epoch, best_value, matches[-1][1]
 
 
-def _write_summary(combined: pd.DataFrame, output: Path) -> None:
+def write_summary(combined: pd.DataFrame, output: Path) -> None:
     """Write bootstrap summaries and the best variant per model."""
     summary = (
         combined.groupby("variant")
@@ -168,7 +168,7 @@ def main() -> None:
         combined.to_csv(temporary, index=False)
         temporary.replace(args.output)
 
-    _write_summary(combined, args.output)
+    write_summary(combined, args.output)
 
 
 if __name__ == "__main__":

@@ -169,7 +169,7 @@ class LinearProbeDivergedError(RuntimeError):
     """
 
 
-def _select_logistic_c(
+def select_logistic_c(
     x_train: torch.Tensor,
     y_train: torch.Tensor,
     x_val: torch.Tensor,
@@ -234,7 +234,7 @@ def _select_logistic_c(
     return best_c
 
 
-def _calibrate_logistic(
+def calibrate_logistic(
     model: LogisticRegression,
     x_val: torch.Tensor,
     y_val: np.ndarray,
@@ -294,7 +294,7 @@ def evaluate_logistic(
         y_train_tensor = torch.from_numpy(y_train).long()
         label_tag = "LogReg"
 
-    best_c = _select_logistic_c(
+    best_c = select_logistic_c(
         x_train_tensor, y_train_tensor, x_val_tensor, y_val, c_values, seed, device, verbose
     )
 
@@ -340,7 +340,7 @@ def evaluate_logistic(
         "temperature": None,
     }
     if temp_scale and not merge_val:
-        calibration_ts = _calibrate_logistic(
+        calibration_ts = calibrate_logistic(
             final_model, x_val_tensor, y_val, x_test_tensor, y_test, calibration_n_bins, multi_label
         )
     elif temp_scale and merge_val:
@@ -401,7 +401,7 @@ def _resolve_segmentation_runtime_config(
     return epochs, batch_size, float(lr), use_cache, cache_dtypes[cache_dtype_name]
 
 
-def _estimate_intrinsic_dimensions(
+def estimate_intrinsic_dimensions(
     X: np.ndarray,
     estimators: Sequence[str],
     split_name: str,
@@ -475,7 +475,7 @@ def evaluate_intrinsic_dim(
                 f"[intrinsic-dim] split={split_name} X{X.shape} "
                 f"estimators={list(estimators)} device={device}"
             )
-        dims = _estimate_intrinsic_dimensions(
+        dims = estimate_intrinsic_dimensions(
             X, estimators, split_name, device, max_samples, seed, common_meta, only_metrics
         )
         for est_name, dim in dims.items():
@@ -731,7 +731,7 @@ def _merge_completed_metrics(
         base.setdefault(metric_name, set()).update(keys)
 
 
-def _run_segmentation(
+def run_segmentation(
     cfg: DictConfig,
     eval_cfg: DictConfig,
     model: BenchModel,
@@ -811,7 +811,7 @@ def _run_segmentation(
     return all_rows
 
 
-def _run_classification(
+def run_classification(
     cfg: DictConfig,
     plan: DatasetRunPlan,
     model: BenchModel,
@@ -964,7 +964,7 @@ def _run_classification(
     return all_rows, id_out_rows, profile_out_rows
 
 
-def _instantiate_dataset_model(
+def instantiate_dataset_model(
     cfg: DictConfig,
     model_cfg: DictConfig,
     bench: BenchDataset,
@@ -1005,7 +1005,7 @@ def _instantiate_dataset_model(
     return model
 
 
-def _dataset_metadata(
+def dataset_metadata(
     cfg: DictConfig,
     ds_name: str,
     ds_cls: type[BenchDataset],
@@ -1043,7 +1043,7 @@ def _dataset_metadata(
     }
 
 
-def _run_dataset(
+def run_dataset(
     cfg: DictConfig,
     ds_name: str,
     c_range: Sequence[float],
@@ -1062,7 +1062,7 @@ def _run_dataset(
         return None
 
     model_cfg = resolve_model_config(cfg.model, ds_name)
-    common_meta = _dataset_metadata(cfg, ds_name, ds_cls, model_cfg, c_range, config_hash)
+    common_meta = dataset_metadata(cfg, ds_name, ds_cls, model_cfg, c_range, config_hash)
     config_tuple = tuple(
         _canonical_key_cell(common_meta[key])
         for key in (
@@ -1115,11 +1115,11 @@ def _run_dataset(
         return None
 
     bench = ds_cls()
-    model = _instantiate_dataset_model(
+    model = instantiate_dataset_model(
         cfg, model_cfg, bench, train_dataset, torch.device(cfg.device)
     )
     if ds_cls.task == "segmentation":
-        rows = _run_segmentation(
+        rows = run_segmentation(
             cfg,
             eval_cfg,
             model,
@@ -1131,7 +1131,7 @@ def _run_dataset(
             common_meta,
         )
         return rows, [], []
-    return _run_classification(
+    return run_classification(
         cfg,
         plan,
         model,
@@ -1146,7 +1146,7 @@ def _run_dataset(
     )
 
 
-def _load_completed_outputs(
+def load_completed_outputs(
     cfg: DictConfig,
     output_path: str,
     profile_output_path: str,
@@ -1201,7 +1201,7 @@ def main(cfg: DictConfig) -> None:
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
 
-    completed_runs, completed_metrics = _load_completed_outputs(
+    completed_runs, completed_metrics = load_completed_outputs(
         cfg, output_path, profile_output_path, intrinsic_dim_output_path
     )
     config_hash = _resume_config_hash(cfg)
@@ -1209,7 +1209,7 @@ def main(cfg: DictConfig) -> None:
     dataset_progress.start()
     try:
         for ds_name in dataset_progress.track(dataset_names, description="Datasets"):
-            rows = _run_dataset(
+            rows = run_dataset(
                 cfg,
                 ds_name,
                 (c_start, c_stop, c_num),

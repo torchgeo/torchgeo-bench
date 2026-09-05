@@ -343,7 +343,7 @@ def _flops_row(
     return row
 
 
-def _classification_row(
+def classification_row(
     cfg: DictConfig, model: nn.Module, base_meta: dict, device: torch.device
 ) -> dict | None:
     """Measure classification cost, skipping incompatible input bands."""
@@ -412,7 +412,7 @@ def _classification_row(
     return row
 
 
-def _segmentation_rows(
+def segmentation_rows(
     cfg: DictConfig,
     model: nn.Module,
     base_meta: dict,
@@ -547,7 +547,7 @@ def main(cfg: DictConfig) -> None:
         if cls_key in completed:
             logger.info("Skip (%s, %s, classification) — already done", model_name, band_config)
         else:
-            row = _classification_row(cfg, model, base_meta, device)
+            row = classification_row(cfg, model, base_meta, device)
             if row is None:
                 n_skipped += 1
                 del model
@@ -555,10 +555,10 @@ def main(cfg: DictConfig) -> None:
                 continue
             rows.append(row)
 
-        segmentation_rows, skipped_heads = _segmentation_rows(
+        seg_rows, skipped_heads = segmentation_rows(
             cfg, model, base_meta, device, seg_eval_cfg, seg_layers, completed
         )
-        rows.extend(segmentation_rows)
+        rows.extend(seg_rows)
         n_skipped += skipped_heads
 
         del model

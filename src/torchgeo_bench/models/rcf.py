@@ -114,7 +114,7 @@ class RCF(nn.Module):
             ).tolist()
             xs = torch.randint(0, width - kernel_size, (num_patches,), generator=generator).tolist()
 
-            for i, (di, y, x) in enumerate(zip(idxs, ys, xs)):
+            for i, (di, y, x) in enumerate(zip(idxs, ys, xs, strict=True)):
                 img = dataset[di]["image"]
                 patches[i] = img[:, y : y + kernel_size, x : x + kernel_size]
 

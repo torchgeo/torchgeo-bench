@@ -112,7 +112,7 @@ def repack(dataset_dir: Path, out_dir: Path, shard_size: int = 1000) -> int:
     return written
 
 
-def _index_shards(shard_paths: list[Path]) -> dict[str, dict[str, tuple[Path, int, int]]]:
+def index_shards(shard_paths: list[Path]) -> dict[str, dict[str, tuple[Path, int, int]]]:
     """Index tar members by suffix so sample IDs may contain dots."""
     import tarfile
 
@@ -143,7 +143,7 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
         raise FileNotFoundError(f"No shards in {out_dir}")
 
     logger.info("Validating %d samples against %d shards...", len(targets), len(shard_paths))
-    index = _index_shards(shard_paths)
+    index = index_shards(shard_paths)
 
     def _read(ref: tuple[Path, int, int]) -> bytes:
         path, offset, size = ref

@@ -93,7 +93,7 @@ def parse_bands(value: object) -> str | list[str]:
     return [b.strip() for b in s.split(",") if b.strip()]
 
 
-def _parse_args() -> argparse.Namespace:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, help="Dataset name (e.g. m-eurosat).")
     parser.add_argument(
@@ -129,7 +129,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _fit_probe(
+def fit_probe(
     x_train: np.ndarray,
     y_train: np.ndarray,
     x_val: np.ndarray,
@@ -160,7 +160,7 @@ def _fit_probe(
     return clf
 
 
-def _band_specs(bench: BenchDataset, bands: str | list[str] | None) -> list[BandSpec]:
+def band_specs(bench: BenchDataset, bands: str | list[str] | None) -> list[BandSpec]:
     """Resolve dataset band statistics in the requested order."""
     if bands == "rgb":
         names = tuple(bench.rgb_bands)
@@ -172,7 +172,7 @@ def _band_specs(bench: BenchDataset, bands: str | list[str] | None) -> list[Band
 
 
 def main() -> None:
-    args = _parse_args()
+    args = parse_args()
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
@@ -244,7 +244,7 @@ def main() -> None:
         pin_memory=train_loader_shuffled.pin_memory,
     )
 
-    bands_list = _band_specs(ds_cls(), bands_value)
+    bands_list = band_specs(ds_cls(), bands_value)
 
     model = instantiate(
         model_cfg,
@@ -273,7 +273,7 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    clf = _fit_probe(x_train, y_train, x_val, y_val, best_c, args.seed, args.device, is_multilabel)
+    clf = fit_probe(x_train, y_train, x_val, y_val, best_c, args.seed, args.device, is_multilabel)
 
     classes = (
         np.arange(y_train.shape[1], dtype=np.int64)

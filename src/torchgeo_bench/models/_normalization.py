@@ -110,10 +110,10 @@ def build_normalizer(
 
         return _f
 
-    return _build_model_native_normalizer(bands, expected_input_unit, pretrain_mean, pretrain_std)
+    return build_model_native_normalizer(bands, expected_input_unit, pretrain_mean, pretrain_std)
 
 
-def _build_model_native_normalizer(
+def build_model_native_normalizer(
     bands: list[BandSpec],
     expected_input_unit: InputUnit | None,
     pretrain_mean: list[float] | None,

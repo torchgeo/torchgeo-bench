@@ -62,7 +62,7 @@ def extract_features(
 
         with torch.no_grad(), torch.inference_mode():
             features = model(images)
-            features = _pooled_features(features)
+            features = pooled_features(features)
 
         x_all.append(features)
         y_all.append(labels)
@@ -73,7 +73,7 @@ def extract_features(
     return x_all, y_all
 
 
-def _pooled_features(features: torch.Tensor | dict[str, torch.Tensor]) -> np.ndarray:
+def pooled_features(features: torch.Tensor | dict[str, torch.Tensor]) -> np.ndarray:
     """Convert supported model outputs to pooled NumPy features."""
     if isinstance(features, torch.Tensor):
         features = features.cpu().numpy()

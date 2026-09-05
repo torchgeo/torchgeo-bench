@@ -572,7 +572,7 @@ def flops_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FlopsRun:
     return cfg, rows, events
 
 
-def _written_keys(rows: list[dict[str, object]]) -> list[tuple[object, object, object]]:
+def written_keys(rows: list[dict[str, object]]) -> list[tuple[object, object, object]]:
     return [(row["band_config"], row["task"], row["head_type"]) for row in rows]
 
 
@@ -580,7 +580,7 @@ def test_main_writes_ordered_measurement_rows(flops_run: FlopsRun) -> None:
     cfg, rows, _events = flops_run
     flops_pipeline.main(cfg)
 
-    assert _written_keys(rows) == [
+    assert written_keys(rows) == [
         (band, task, head)
         for band in ("rgb", "s2")
         for task, head in (("classification", ""), ("segmentation", "fpn"), ("segmentation", "dpt"))
@@ -628,7 +628,7 @@ def test_main_skips_completed_cells(flops_run: FlopsRun, all_complete: bool) -> 
         assert rows == []
         assert events == ["model:3", "model:12"]
     else:
-        assert _written_keys(rows) == [
+        assert written_keys(rows) == [
             ("rgb", "segmentation", "fpn"),
             ("rgb", "segmentation", "dpt"),
             ("s2", "classification", ""),
@@ -647,7 +647,7 @@ def test_main_skips_unavailable_model(flops_run: FlopsRun, monkeypatch: pytest.M
     )
     flops_pipeline.main(cfg)
 
-    assert _written_keys(rows) == [
+    assert written_keys(rows) == [
         ("s2", "classification", ""),
         ("s2", "segmentation", "fpn"),
         ("s2", "segmentation", "dpt"),
@@ -679,7 +679,7 @@ def test_main_classification_failure_handling(
         return
 
     flops_pipeline.main(cfg)
-    assert _written_keys(rows) == [
+    assert written_keys(rows) == [
         ("s2", "classification", ""),
         ("s2", "segmentation", "fpn"),
         ("s2", "segmentation", "dpt"),
@@ -703,7 +703,7 @@ def test_main_segmentation_failure_keeps_other_heads(
 
     monkeypatch.setattr(flops_pipeline, "build_seg_probe_and_solver", fail_fpn)
     flops_pipeline.main(cfg)
-    assert _written_keys(rows) == [("rgb", "classification", ""), ("rgb", "segmentation", "dpt")]
+    assert written_keys(rows) == [("rgb", "classification", ""), ("rgb", "segmentation", "dpt")]
 
 
 @pytest.mark.parametrize("empty_layers", [False, True])
@@ -715,7 +715,7 @@ def test_main_skips_excluded_segmentation(flops_run: FlopsRun, empty_layers: boo
         cfg.seg_band_configs = []
     flops_pipeline.main(cfg)
 
-    assert _written_keys(rows) == [("rgb", "classification", ""), ("s2", "classification", "")]
+    assert written_keys(rows) == [("rgb", "classification", ""), ("s2", "classification", "")]
     assert "head:fpn" not in events
 
 

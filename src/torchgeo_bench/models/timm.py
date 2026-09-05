@@ -89,7 +89,7 @@ class TimmPatchBenchModel(BenchModel):
         input_normalization: str = "bands_zscore",
         **_kwargs: object,
     ) -> None:
-        self._set_pretrain_stats(bands, model_name)
+        self.set_pretrain_stats(bands, model_name)
 
         super().__init__(bands=bands, **_kwargs)
 
@@ -144,9 +144,9 @@ class TimmPatchBenchModel(BenchModel):
             )
             self.auto_resize = False
 
-        self._register_rgb_normalization(default_cfg)
+        self.register_rgb_normalization(default_cfg)
 
-    def _set_pretrain_stats(self, bands: list[BandSpec], model_name: str) -> None:
+    def set_pretrain_stats(self, bands: list[BandSpec], model_name: str) -> None:
         """Set RGB statistics before BenchModel creates its normalizer."""
         if len(bands) == 3:
             cfg = timm.get_pretrained_cfg(model_name)
@@ -160,7 +160,7 @@ class TimmPatchBenchModel(BenchModel):
                 self.pretrain_mean = list(cfg.mean)
                 self.pretrain_std = list(cfg.std)
 
-    def _register_rgb_normalization(self, default_cfg: dict[str, Any]) -> None:
+    def register_rgb_normalization(self, default_cfg: dict[str, Any]) -> None:
         """Register fixed RGB statistics and dataset ranges as buffers."""
         if self.input_normalization in ("imagenet", "timm_default"):
             if self.num_channels != 3:

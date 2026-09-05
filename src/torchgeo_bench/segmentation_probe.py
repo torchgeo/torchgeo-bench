@@ -194,7 +194,7 @@ class SegmentationProbe(nn.Module):
         self._features: dict[str, torch.Tensor] = {}
         self.hooks: list[Any] = []
 
-        self._register_hooks()
+        self.register_hooks()
 
         if self.freeze_backbone:
             for param in self.backbone.parameters():
@@ -219,7 +219,9 @@ class SegmentationProbe(nn.Module):
                     (1, channels, height, width),
                     device=self._backbone_device(),
                 )
-                for channels, (height, width) in zip(self.channels_list, self.feature_hw_list)
+                for channels, (height, width) in zip(
+                    self.channels_list, self.feature_hw_list, strict=True
+                )
             ]
             with torch.no_grad():
                 _ = self.head(dry_run_features, *self.dry_run_input_hw)
@@ -233,7 +235,7 @@ class SegmentationProbe(nn.Module):
     # Hook / dry-run helpers
     # ------------------------------------------------------------------
 
-    def _register_hooks(self) -> None:
+    def register_hooks(self) -> None:
         """Register feature hooks and reject missing or duplicate layer names."""
         duplicate_layers = {name for name in self.layer_names if self.layer_names.count(name) > 1}
         if duplicate_layers:
@@ -307,7 +309,7 @@ class SegmentationProbe(nn.Module):
         if feat.ndim == 2:
             return feat.view(feat.shape[0], feat.shape[1], 1, 1)
         if feat.ndim == 3:
-            return self._reshape_tokens(feat)
+            return self.reshape_tokens(feat)
         # 4D tensor: NCHW (standard) or NHWC (Swin-family).
         # Detect NHWC: spatial dims are square (H==W) and channel dim (last) is
         # larger than the spatial dims — the opposite of typical NCHW feature maps.
@@ -318,7 +320,7 @@ class SegmentationProbe(nn.Module):
                 return feat.permute(0, 3, 1, 2).contiguous()
         return feat
 
-    def _reshape_tokens(self, feat: torch.Tensor) -> torch.Tensor:
+    def reshape_tokens(self, feat: torch.Tensor) -> torch.Tensor:
         """Reshape token features into a spatial grid, accounting for prefix tokens."""
         bsz, d1, d2 = feat.shape
         n_prefix = _resolve_num_prefix_tokens(self.backbone)
