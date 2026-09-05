@@ -1,12 +1,12 @@
 """WebDataset-backed loader for the GeoBench V1 sharded layout.
 
 Drops the per-sample HDF5 file-open from ``__getitem__`` (one NFS round-trip
-per sample) by reading from ~22 tar shards instead.  Format is produced by
-``experiments/scripts/repack_geobench_v1.py`` and mirrored on the Hub at
-``isaaccorley/geobenchv1-webdataset`` (downloaded by
-:func:`ensure_sharded_root`).
+per sample) by reading from ~22 tar shards instead. The data-only format is
+produced by ``experiments/scripts/repack_geobench_v1.py``.
+:func:`ensure_sharded_root` can fetch the collection from the Hub mirror;
+legacy snapshots must have their metadata regenerated before loading.
 
-Each shard contains ``<sid>.bands.npz`` and ``<sid>.meta.pkl`` files for
+Each shard contains ``<sid>.bands.npz`` and ``<sid>.meta.json`` files for
 ~1000 samples.  Indexing happens once in ``__init__``: every sample's byte
 range inside its shard is recorded as ``(shard_path, offset, size)`` so
 ``__getitem__`` does a plain ``open()`` + ``seek()`` + ``read()`` and
@@ -31,7 +31,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from ._metadata import unpickle_metadata
+from ._metadata import decode_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class GeoBenchv1Sharded(Dataset):
         self.sample_ids: list[str] = partition_data[split]
         self.transform = transform
 
-        # Index every member: sid -> {"bands.npz": (path, offset, size), "meta.pkl": ...}
+        # Index every member: sid -> {"bands.npz": (path, offset, size), "meta.json": ...}
         shard_paths = sorted(self.dataset_dir.glob("shard_*.tar"))
         if not shard_paths:
             raise FileNotFoundError(f"No shard_*.tar in {self.dataset_dir}")
@@ -116,7 +116,7 @@ class GeoBenchv1Sharded(Dataset):
         for path in shard_paths:
             with tarfile.open(path, "r") as t:
                 for m in t.getmembers():
-                    for ext in ("bands.npz", "meta.pkl"):
+                    for ext in ("bands.npz", "meta.json"):
                         suffix = "." + ext
                         if m.name.endswith(suffix):
                             base = m.name[: -len(suffix)]
@@ -140,7 +140,14 @@ class GeoBenchv1Sharded(Dataset):
             return f.read(size)
 
     def _load_meta(self, sample_id: str) -> dict:
-        return unpickle_metadata(self._read(self._index[sample_id]["meta.pkl"]))
+        parts = self._index[sample_id]
+        if "meta.json" not in parts:
+            raise ValueError(
+                f"Sample {sample_id!r} requires data-only '.meta.json' metadata. "
+                "Legacy '.meta.pkl' metadata is not supported; regenerate the shards "
+                "from JSON metadata supplied by the dataset publisher or another trusted source."
+            )
+        return decode_metadata(self._read(parts["meta.json"]))
 
     def __len__(self) -> int:
         return len(self.sample_ids)
@@ -148,8 +155,9 @@ class GeoBenchv1Sharded(Dataset):
     def __getitem__(self, index: int) -> dict:
         sid = self.sample_ids[index]
         parts = self._index[sid]
-        bands_dict = dict(np.load(io.BytesIO(self._read(parts["bands.npz"]))))
-        meta = unpickle_metadata(self._read(parts["meta.pkl"]))
+        meta = self._load_meta(sid)
+        with np.load(io.BytesIO(self._read(parts["bands.npz"])), allow_pickle=False) as archive:
+            bands_dict = {name: archive[name] for name in archive.files}
 
         bands_data = []
         available = list(bands_dict)

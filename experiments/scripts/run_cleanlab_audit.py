@@ -15,6 +15,9 @@ are out-of-sample and unbiased.
 
 Multi-label datasets (e.g. m-bigearthnet, benv2, treesatai) use
 ``cleanlab.multilabel_classification.filter.find_label_issues`` if available.
+
+Only labels, probabilities, and classes are loaded. Model names come from
+filenames, so unused legacy object metadata is never deserialized.
 """
 
 import argparse
@@ -29,8 +32,8 @@ logger = logging.getLogger("cleanlab_audit")
 
 
 def _load_npz(path: Path) -> dict:
-    z = np.load(path, allow_pickle=True)
-    return {k: z[k] for k in z.files}
+    with np.load(path, allow_pickle=False) as z:
+        return {key: z[key] for key in ("labels", "probs", "classes")}
 
 
 def _is_multilabel(labels: np.ndarray) -> bool:
@@ -168,9 +171,7 @@ def main() -> None:
                 {
                     "dataset": dataset,
                     "split": split,
-                    "model": str(data.get("meta", np.array([None, None]))[1])
-                    if "meta" in data
-                    else "",
+                    "model": npz_path.stem.split("__", 1)[1].removesuffix(f"_{split}"),
                     "multilabel": multilabel,
                     "n": n,
                     "n_flagged": n_flag,

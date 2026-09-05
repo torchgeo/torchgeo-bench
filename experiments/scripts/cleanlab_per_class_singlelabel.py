@@ -88,10 +88,10 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
     from cleanlab.filter import find_label_issues
     from cleanlab.rank import get_label_quality_scores
 
-    z = np.load(npz_path, allow_pickle=True)
-    labels = z["labels"]
-    probs = z["probs"].astype(np.float32)
-    classes = z["classes"]
+    with np.load(npz_path, allow_pickle=False) as z:
+        labels = z["labels"]
+        probs = z["probs"].astype(np.float32)
+        classes = z["classes"]
     if labels.ndim != 1:
         raise SystemExit(f"{npz_path}: not single-label (labels ndim={labels.ndim})")
 
