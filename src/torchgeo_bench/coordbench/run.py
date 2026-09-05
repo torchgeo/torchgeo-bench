@@ -1,7 +1,7 @@
 """Runner for the CoordBench location-encoder track.
 
 Driven from ``torchgeo-bench run mode=coord``: instantiate a coordinate encoder
-from the Hydra ``model`` config, embed each benchmark's points once, then probe
+from the ``model`` config, embed each benchmark's points once, then probe
 with KNN and/or a ridge linear head under random and/or spatial-block
 cross-validation. One CSV row per (benchmark, task, method, split) is appended
 to ``coord.output`` via the shared atomic writer, with resume support.
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf
-from rich.progress import track
+from tqdm.auto import tqdm
 
 from torchgeo_bench.config import instantiate
 from torchgeo_bench.coordbench.datasets import CoordBenchmark, load_benchmarks
@@ -25,6 +25,7 @@ from torchgeo_bench.coordbench.probe import (
     linear_probe_score,
     spatial_fold_ids,
 )
+from torchgeo_bench.results import append_rows_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class CoordResult:
 
 
 def _instantiate_encoder(model_cfg: DictConfig, device: str) -> tuple[LocationEncoder, str]:
-    """Build a :class:`LocationEncoder` from a Hydra model config.
+    """Build a :class:`LocationEncoder` from a model config.
 
     Returns the encoder and the ``name`` recorded in result rows. ``name`` is a
     display field, not a constructor argument, so it is stripped before
@@ -151,8 +152,6 @@ def _score_one(
 
 def run_coordbench(cfg: DictConfig) -> None:
     """Run the CoordBench location-encoder benchmark for the configured model."""
-    from torchgeo_bench.main import append_rows_atomic  # lazy: avoids import cycle
-
     coord = cfg.coord
     device = str(cfg.device)
     seed = int(cfg.seed)
@@ -177,7 +176,7 @@ def run_coordbench(cfg: DictConfig) -> None:
     benchmarks = load_benchmarks(coord.names)
     logger.info("CoordBench: %d benchmarks selected", len(benchmarks))
 
-    for bench in track(benchmarks, description="CoordBench"):
+    for bench in tqdm(benchmarks, desc="CoordBench"):
         rows = _evaluate_benchmark(
             bench,
             encoder,
@@ -193,8 +192,7 @@ def run_coordbench(cfg: DictConfig) -> None:
             model_target=model_target,
             completed=completed if cfg.resume else None,
         )
-        if rows:
-            append_rows_atomic(output_path, rows)
+        append_rows_atomic(output_path, rows)
 
     logger.info("CoordBench complete. Results appended to %s", output_path)
 

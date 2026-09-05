@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from torchgeo_bench.datasets.resisc45 import RESISC45, _compose, _make_band_select
+from torchgeo_bench.datasets.resisc45 import RESISC45, _make_band_select
 
 
 class _FakeRESISC45:
@@ -118,17 +118,9 @@ class TestTransformComposition:
             return sample
 
         ds = patched.get_dataset("train", bands=None, transform=_mark)
+        assert ds.kwargs["transforms"] is _mark
         ds[0]
         assert calls == [1]
-
-    def test_compose_returns_none_when_empty(self):
-        assert _compose(None, None) is None
-
-    def test_compose_returns_the_single_stage_unwrapped(self):
-        def _f(sample: dict) -> dict:
-            return sample
-
-        assert _compose(None, _f, None) is _f
 
     def test_band_select_identity_is_none(self):
         assert _make_band_select([0, 1, 2], 3) is None

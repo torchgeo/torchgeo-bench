@@ -15,60 +15,14 @@ dataloader overhead. Reports:
 All metrics work without extras.
 """
 
-import contextlib
 import logging
 import time
-from collections.abc import Iterator
 from statistics import median
 
 import torch
-import torch.autograd.graph as autograd_graph
-import torch.utils.module_tracker as module_tracker
 from torch import nn
 
 logger = logging.getLogger(__name__)
-
-
-@contextlib.contextmanager
-def lenient_grad_hooks() -> Iterator[None]:
-    """Let ``module_tracker`` skip its bookkeeping for grad-less tensors.
-
-    ``FlopCounterMode`` counts at the ``TorchDispatchMode`` layer, which
-    never needs ``grad_fn``; only ``module_tracker``'s *per-module
-    attribution* does.  Its forward-pre-hook calls
-    ``register_multi_grad_hook`` on the module inputs, which asserts that
-    every input tensor has a ``grad_fn``.  Models that break the autograd
-    chain inside their forward — ``torchgeo.models.Panopticon`` does, via
-    ``self.conv3d(x.unsqueeze(1))`` in its patch-embed — trip that
-    assertion *before any counting happens*, so all three execution
-    contexts in :func:`_count_gflops` fail identically.
-
-    Swallowing the assertion loses module-level breakdown for those
-    modules, not FLOPs: the dispatch-layer totals are unaffected.
-
-    ``module_tracker`` binds the symbol at import time
-    (``from torch.autograd.graph import register_multi_grad_hook``), so
-    both the source module and that binding have to be patched.
-    """
-    original = autograd_graph.register_multi_grad_hook
-
-    class _NoopHandle:
-        def remove(self) -> None:
-            pass
-
-    def safe(tensors, fn, *args, **kwargs):  # type: ignore[no-untyped-def]
-        try:
-            return original(tensors, fn, *args, **kwargs)
-        except AssertionError:
-            return _NoopHandle()
-
-    autograd_graph.register_multi_grad_hook = safe
-    module_tracker.register_multi_grad_hook = safe
-    try:
-        yield
-    finally:
-        autograd_graph.register_multi_grad_hook = original
-        module_tracker.register_multi_grad_hook = original
 
 
 def _count_params(model: nn.Module) -> float:
@@ -76,95 +30,19 @@ def _count_params(model: nn.Module) -> float:
     return total / 1e6
 
 
-def _count_gflops(model: nn.Module, sample: torch.Tensor) -> float:
-    """Run one forward pass under torch's FlopCounterMode for a single sample.
-
-    Uses ``torch.utils.flop_counter`` (stdlib torch since 2.0).  The
-    counter's ``module_tracker`` wants to call
-    ``register_multi_grad_hook`` on the activations, which requires every
-    intermediate tensor to have a ``grad_fn`` (i.e. autograd must be
-    enabled).  Three different contexts have to be tried in order from
-    cheapest to most permissive:
-
-    1. ``torch.inference_mode``: cheapest.  Works for most timm /
-       torchgeo backbones because their forwards don't trigger the
-       module-tracker code paths that need grad_fn.
-    2. ``torch.no_grad``: keeps the version counter that
-       ``inference_mode`` disables.  Catches forwards that rely on
-       ``inference_tensor`` returning a regular tensor.
-    3. ``torch.enable_grad`` with ``requires_grad=True`` on the input:
-       only path that gives every activation a grad_fn.  Required by
-       ``torchgeo.models.Panopticon``, which inside ``MultiheadAttention``
-       triggers ``register_multi_grad_hook`` on a non-leaf tensor and
-       raises ``AssertionError: Expected gradient function to be set``
-       otherwise.  More expensive (autograd graph is built and then
-       discarded) but still a single forward pass.
-
-    Each fallback only triggers on the *specific* exception that earlier
-    fallback can't handle, so genuine bugs in the counter surface
-    instead of being papered over.
-
-    The whole ladder runs inside :func:`lenient_grad_hooks`, which makes
-    ``module_tracker``'s grad_fn assertion non-fatal.  Models that used to
-    exhaust all three tiers (Panopticon) now resolve early; models that
-    already worked are unaffected bit-for-bit, since the patch only
-    intercepts an error path they never take.
-    """
+def _count_gflops(model: nn.Module, sample: torch.Tensor | list[torch.Tensor]) -> float:
+    """Count one frozen forward pass without changing the model's parameters."""
     from torch.utils.flop_counter import FlopCounterMode
 
-    base = sample[:1]
-
-    def _measure_no_autograd(ctx_factory) -> float:
-        with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, ctx_factory():
-            model(base)
-        return float(counter.get_total_flops()) / 1e9
-
-    def _measure_with_autograd() -> float:
-        inp = base.detach().clone().requires_grad_(True)
-        with lenient_grad_hooks(), FlopCounterMode(display=False) as counter, torch.enable_grad():
-            model(inp)
-        return float(counter.get_total_flops()) / 1e9
-
-    try:
-        return _measure_no_autograd(torch.inference_mode)
-    except AttributeError as exc:
-        # 'NoneType' object has no attribute 'next_functions' — only
-        # the dispatch-vs-inference-tensor mismatch.
-        if "next_functions" not in str(exc):
-            raise
-        logger.info(
-            f"FlopCounterMode inference_mode rejected by {type(model).__name__}: "
-            f"{exc}; retrying under no_grad."
-        )
-    try:
-        return _measure_no_autograd(torch.no_grad)
-    except AssertionError as exc:
-        # 'Expected gradient function to be set' — the module_tracker
-        # needs activations to have grad_fn; only enable_grad provides that.
-        if "Expected gradient function" not in str(exc):
-            raise
-        logger.info(
-            f"FlopCounterMode no_grad rejected by {type(model).__name__}: "
-            f"{exc}; retrying under enable_grad with requires_grad input."
-        )
-    try:
-        return _measure_with_autograd()
-    except AssertionError as exc:
-        # The lenient patch neutralises every module_tracker assertion we
-        # know of, so reaching here means the assertion no longer comes from
-        # module_tracker; raise a typed signal the caller can record as
-        # gflops=None.
-        if "Expected gradient function" not in str(exc):
-            raise
-        raise NotImplementedError(
-            f"{type(model).__name__} is incompatible with "
-            f"torch.utils.flop_counter.FlopCounterMode: all three execution "
-            f"contexts (inference_mode, no_grad, enable_grad+requires_grad) "
-            f"fail with an AssertionError that lenient_grad_hooks() does not "
-            f"intercept, so it does not originate from module_tracker's "
-            f"grad_fn bookkeeping.  GFLOPs cannot be measured for this model "
-            f"with the current tooling."
-        ) from exc
+    inputs = (
+        sample[:1].detach()
+        if isinstance(sample, torch.Tensor)
+        else [feature[:1].detach() for feature in sample]
+    )
+    parameters = {name: parameter.detach() for name, parameter in model.named_parameters()}
+    with torch.no_grad(), FlopCounterMode(display=False) as counter:
+        torch.func.functional_call(model, parameters, (inputs,))
+    return float(counter.get_total_flops()) / 1e9
 
 
 def measure_profile(
@@ -187,8 +65,7 @@ def measure_profile(
 
     Returns:
         Mapping of metric name to value; entries may be ``None`` when the
-        underlying probe is unavailable (e.g. CPU device → no GPU-memory
-        metrics, or a model the FLOP counter can't trace → no ``gflops``).
+        underlying probe is unavailable (e.g. CPU device → no GPU-memory metrics).
     """
     model.eval()
     batch_size = sample_batch.shape[0]
@@ -216,12 +93,7 @@ def measure_profile(
     latency_p50 = median(per_batch_ms)
     peak_gb = torch.cuda.max_memory_allocated(device) / 1024**3 if is_cuda else None
     reserved_gb = torch.cuda.memory_reserved(device) / 1024**3 if is_cuda else None
-    # Only the typed NotImplementedError from _count_gflops is tolerated.
-    try:
-        gflops: float | None = _count_gflops(model, sample_batch)
-    except NotImplementedError as exc:
-        logger.warning(f"[profile] {exc}")
-        gflops = None
+    gflops = _count_gflops(model, sample_batch)
     params_m = _count_params(model)
 
     return {

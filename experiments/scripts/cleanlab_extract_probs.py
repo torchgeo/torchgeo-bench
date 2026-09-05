@@ -2,7 +2,7 @@
 """Extract linear-probe probabilities for cleanlab dataset auditing.
 
 For one classification dataset, look up the top-1 linear-probe model from
-``results/all_results.csv``, rebuild that exact (model, dataset, bands,
+``results/models/``, rebuild that exact (model, dataset, bands,
 normalization, image_size, partition) combo, fit a logistic regression at
 the recorded ``best_c`` (merging train+val), and save predicted
 probabilities for the train and test splits.
@@ -26,46 +26,39 @@ This script is invoked once per dataset (typically as a SLURM array task).
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets  # noqa: E402
-from torchgeo_bench.linear import LogisticRegression  # noqa: E402
-from torchgeo_bench.main import embed_split  # noqa: E402
+from torchgeo_bench.config import compose_config, instantiate, list_model_configs, model_config_path
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.linear import LogisticRegression
+from torchgeo_bench.main import embed_split, resolve_model_config
+from torchgeo_bench.results import DEFAULT_RESULTS_DIR, load_results
 
 logger = logging.getLogger("cleanlab_extract")
 
 
-CONF_ROOT = REPO_ROOT / "src" / "torchgeo_bench" / "conf" / "model"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def build_name_to_config_map() -> dict[str, Path]:
-    """Map ``name:`` field in each model yaml to its file path."""
-    out: dict[str, Path] = {}
-    for yaml_path in CONF_ROOT.rglob("*.yaml"):
-        cfg = OmegaConf.load(yaml_path)
-        name = cfg.get("name") if isinstance(cfg, dict) or hasattr(cfg, "get") else None
-        if name is not None:
-            out[str(name)] = yaml_path
+def build_name_to_config_map() -> dict[str, str]:
+    """Map recorded model names to packaged model config identifiers."""
+    out: dict[str, str] = {}
+    for config_name in list_model_configs():
+        cfg = OmegaConf.load(model_config_path(config_name))
+        out[str(cfg.name)] = config_name
     return out
 
 
 VALID_NORMS = {"bandspec_zscore", "model_native", "minmax", "minmax_zscore", "identity"}
 
 
-def lookup_top1(results_csv: Path, dataset: str) -> pd.Series:
+def lookup_top1(results_path: Path, dataset: str) -> pd.Series:
     """Return the top-1 ``method=linear`` row for ``dataset``.
 
     Filters out rows whose ``normalization`` is no longer accepted by the
@@ -73,15 +66,16 @@ def lookup_top1(results_csv: Path, dataset: str) -> pd.Series:
     earlier runs). Without this filter, lookups can pick a stale top-1 that
     can no longer be re-instantiated.
     """
-    df = pd.read_csv(results_csv)
-    sub = df[
-        (df["dataset"] == dataset)
-        & (df["method"] == "linear")
-        & (df["normalization"].isin(VALID_NORMS))
-    ]
-    if sub.empty:
-        raise SystemExit(f"No linear-probe rows for dataset {dataset!r} in {results_csv}")
-    return sub.sort_values("metric_value", ascending=False).iloc[0]
+    df = load_results(results_path) if results_path.is_dir() else pd.read_csv(results_path)
+    if not df.empty:
+        df = df[
+            (df["dataset"] == dataset)
+            & (df["method"] == "linear")
+            & (df["normalization"].isin(VALID_NORMS))
+        ]
+    if df.empty:
+        raise SystemExit(f"No linear-probe rows for dataset {dataset!r} in {results_path}")
+    return df.sort_values("metric_value", ascending=False).iloc[0]
 
 
 def parse_bands(value: object) -> str | list[str]:
@@ -98,8 +92,8 @@ def main() -> None:
     parser.add_argument(
         "--results",
         type=Path,
-        default=REPO_ROOT / "results" / "all_results.csv",
-        help="Input results CSV used to pick the top-1 model.",
+        default=REPO_ROOT / DEFAULT_RESULTS_DIR,
+        help="Results directory or CSV used to pick the top-1 model.",
     )
     parser.add_argument(
         "--out",
@@ -166,8 +160,9 @@ def main() -> None:
 
     name_map = build_name_to_config_map()
     if model_name not in name_map:
-        raise SystemExit(f"No yaml found with name={model_name!r}; checked {CONF_ROOT}")
-    model_cfg = OmegaConf.load(name_map[model_name])
+        raise SystemExit(f"No packaged model config found with name={model_name!r}")
+    cfg = compose_config([f"model={name_map[model_name]}", f"seed={args.seed}"])
+    model_cfg = resolve_model_config(cfg.model, args.dataset)
 
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
@@ -211,7 +206,6 @@ def main() -> None:
         model_cfg,
         bands=bands_list,
         normalization=normalization,
-        _convert_="object",
     )
     model.to(device).eval()
 

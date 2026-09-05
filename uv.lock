@@ -4036,7 +4036,6 @@ dependencies = [
     { name = "omegaconf" },
     { name = "pandas" },
     { name = "pyarrow" },
-    { name = "rich" },
     { name = "safetensors" },
     { name = "scikit-learn" },
     { name = "timm" },
@@ -4044,6 +4043,7 @@ dependencies = [
     { name = "torchgeo" },
     { name = "torchmetrics" },
     { name = "torchvision" },
+    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -4142,7 +4142,6 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.6" },
-    { name = "rich", specifier = ">=13" },
     { name = "rshf", marker = "extra == 'coordbench'", specifier = ">=0.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.0.270" },
     { name = "safetensors", specifier = ">=0.4" },
@@ -4166,6 +4165,7 @@ requires-dist = [
     { name = "torchid", marker = "python_full_version >= '3.13' and extra == 'id'", specifier = ">=0.3" },
     { name = "torchmetrics", specifier = ">=1.4" },
     { name = "torchvision", specifier = ">=0.15" },
+    { name = "tqdm", specifier = ">=4.66" },
     { name = "transformers", marker = "extra == 'sam3'", specifier = ">=4.50" },
 ]
 provides-extras = ["all", "cleanlab", "coordbench", "dev", "docs", "id", "olmoearth", "sam3", "terratorch", "viz"]

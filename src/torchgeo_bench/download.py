@@ -18,8 +18,8 @@ import zipfile
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
-from rich.progress import track
 from torchgeo.datasets import RESISC45, EuroSAT
+from tqdm.auto import tqdm
 
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
 
@@ -35,7 +35,7 @@ DEFAULT_V2_DATASETS: tuple[str, ...] = tuple(list_v2_datasets())
 def _decompress_zip_with_progress(zip_path: Path, extract_to: Path) -> None:
     """Extract ``zip_path`` into ``extract_to`` with a progress bar; delete the zip."""
     with zipfile.ZipFile(zip_path, "r") as zf:
-        for name in track(zf.namelist(), description=f"Extracting {zip_path.name}"):
+        for name in tqdm(zf.namelist(), desc=f"Extracting {zip_path.name}"):
             zf.extract(name, extract_to)
     zip_path.unlink()
     logger.info("Removed zip file: %s", zip_path)
