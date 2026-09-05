@@ -133,13 +133,13 @@ def download_geobench_v2(output_dir: Path, datasets: list[str] | None = None) ->
 
 
 def download_eurosat(output_dir: Path) -> None:
-    """Download EuroSAT images and both random and spatial splits into ``output_dir/eurosat``."""
+    """Download EuroSAT imagery and both standard/spatial split definitions."""
     target = Path(output_dir) / "eurosat"
     target.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading torchgeo EuroSAT -> %s", target)
-    for dataset in (EuroSAT, EuroSATSpatial):
+    for dataset_cls in (EuroSAT, EuroSATSpatial):
         for split in ("train", "val", "test"):
-            dataset(root=str(target), split=split, download=True)
+            dataset_cls(root=str(target), split=split, download=True)
     logger.info("EuroSAT download complete.")
 
 

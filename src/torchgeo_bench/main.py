@@ -287,12 +287,19 @@ def calibrate_logistic(
     x_val, y_val = torch.from_numpy(val.features), val.labels
     x_test, y_test = torch.from_numpy(test.features), test.labels
     multi_label = y_val.ndim == 2
+    class_labels = None if multi_label else model.classes_
     val_logits = model.decision_function(x_val)
     test_logits = model.decision_function(x_test)
-    temperature = fit_temperature(val_logits, y_val, multi_label=multi_label)
+    temperature = fit_temperature(
+        val_logits, y_val, multi_label=multi_label, class_labels=class_labels
+    )
     test_scores_ts = apply_temperature(test_logits, temperature, multi_label=multi_label)
     cal_ts = compute_calibration_metrics(
-        y_test, test_scores_ts, multi_label=multi_label, n_bins=n_bins
+        y_test,
+        test_scores_ts,
+        multi_label=multi_label,
+        n_bins=n_bins,
+        class_labels=class_labels,
     )
     return {
         "ece_ts": cal_ts["ece"],
@@ -368,8 +375,13 @@ def evaluate_logistic(
         test_scores = final_model.predict_proba(x_test_tensor)
         metric, lo, hi = bootstrap_accuracy(y_test, test_preds, n_boot=n_bootstrap, seed=seed)
 
+    class_labels = None if multi_label else final_model.classes_
     calibration = compute_calibration_metrics(
-        y_test, test_scores, multi_label=multi_label, n_bins=calibration_n_bins
+        y_test,
+        test_scores,
+        multi_label=multi_label,
+        n_bins=calibration_n_bins,
+        class_labels=class_labels,
     )
 
     calibration_ts: dict[str, float | None] = {
@@ -738,7 +750,7 @@ def run_segmentation(
     loaders: LoaderSplits,
     common_meta: ResultMetadata,
 ) -> Iterator[list[dict]]:
-    """Yield the completed probe measurement before optionally saving predictions."""
+    """Yield the completed probe measurement after any requested visualizations."""
     train_loader, val_loader, test_loader = loaders.train, loaders.val, loaders.test
     train_dataset = train_loader.dataset
     assert isinstance(train_dataset, Sized)
@@ -760,22 +772,20 @@ def run_segmentation(
         "n_val": len(val_loader.dataset),
         "n_test": len(test_loader.dataset),
     }
-    yield [
-        EvaluationResult(
-            **segmentation_meta,
-            method=f"seg-{eval_cfg.segmentation.head_type}",
-            metric_name="mIoU",
-            metric_value=metrics.get("mIoU", float("nan")),
-            ci_lower=metrics.get("ci_lower", float("nan")),
-            ci_upper=metrics.get("ci_upper", float("nan")),
-            best_lr=best_lr,
-            best_batch_size=best_bs,
-            fw_iou=metrics.get("fw_IoU"),
-            precision=metrics.get("precision"),
-            recall=metrics.get("recall"),
-            f1=metrics.get("f1"),
-        ).to_row()
-    ]
+    row = EvaluationResult(
+        **segmentation_meta,
+        method=f"seg-{eval_cfg.segmentation.head_type}",
+        metric_name="mIoU",
+        metric_value=metrics.get("mIoU", float("nan")),
+        ci_lower=metrics.get("ci_lower", float("nan")),
+        ci_upper=metrics.get("ci_upper", float("nan")),
+        best_lr=best_lr,
+        best_batch_size=best_bs,
+        fw_iou=metrics.get("fw_IoU"),
+        precision=metrics.get("precision"),
+        recall=metrics.get("recall"),
+        f1=metrics.get("f1"),
+    ).to_row()
     if save_viz and preds is not None:
         from torchgeo_bench.segmentation_viz import (
             SegmentationSamples,
@@ -799,6 +809,8 @@ def run_segmentation(
             ),
             n_samples=n_viz,
         )
+    # A saved row makes resume skip this dataset, including requested plots.
+    yield [row]
 
 
 def run_classification(

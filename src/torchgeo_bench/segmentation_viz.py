@@ -169,6 +169,8 @@ def render_sample_grid(
     """Render RGB images, ground truth, predictions, and errors in a sample grid."""
     images, gt_masks, pred_masks = samples.images, samples.targets, samples.predictions
     num_classes, rgb_indices, ignore_index = spec.num_classes, spec.rgb_indices, spec.ignore_index
+    if not 1 <= len(rgb_indices) <= 3:
+        raise ValueError("rgb_indices must select one, two, or three display channels.")
     n = min(n_samples, len(images))
     # Deterministic sample selection: evenly spaced across the test set
     indices = np.linspace(0, len(images) - 1, n, dtype=int)
@@ -182,6 +184,7 @@ def render_sample_grid(
 
         # RGB image: pick channels, transpose to (H, W, 3)
         ri = [min(c, img.shape[0] - 1) for c in rgb_indices]
+        ri.extend([ri[-1]] * (3 - len(ri)))
         rgb = img[ri, :, :].transpose(1, 2, 0)  # (H, W, 3)
         rgb_u8 = _denorm_image(rgb)
 

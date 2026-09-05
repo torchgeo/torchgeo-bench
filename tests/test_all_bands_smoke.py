@@ -7,43 +7,38 @@ Runs ``torchgeo-bench run model=timm/resnet18 dataset.bands=all`` on a small
 Marked ``slow`` because it shells out and runs feature extraction on real data.
 """
 
-import shutil
-import subprocess
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from .test_cli_program import run_cli
+from .test_integration import require_dataset_data
+
 
 @pytest.mark.slow
-def test_all_bands_e2e(geobench_root, tmp_path: Path):
+def test_all_bands_e2e(tmp_path: Path):
     """Run torchgeo-bench end-to-end with ``dataset.bands=all`` and check the CSV."""
-    del geobench_root  # only used to gate skipping
-    cli = shutil.which("torchgeo-bench")
-    if cli is None:
-        pytest.skip("torchgeo-bench CLI not on PATH")
+    require_dataset_data("m-eurosat")
 
     output = tmp_path / "results.csv"
     cmd = [
-        cli,
         "run",
         "model=timm/resnet18",
+        "model.pretrained=false",
+        "model.seed=0",
         "dataset.names=[m-eurosat]",
         "dataset.bands=all",
         "dataset.partition=0.01x_train",
+        "dataset.image_size=32",
         "dataset.batch_size=16",
+        "dataset.num_workers=0",
         "eval.bootstrap=10",
         "eval.c_range=[-2,2,3]",
         "device=cpu",
         f"output={output}",
     ]
-    completed = subprocess.run(
-        cmd,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=900,
-    )
+    completed = run_cli(*cmd, cwd=Path.cwd(), timeout=600)
     assert completed.returncode == 0, (
         f"torchgeo-bench exited {completed.returncode}\n"
         f"stdout:\n{completed.stdout}\n"

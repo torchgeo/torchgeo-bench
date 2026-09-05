@@ -2,6 +2,8 @@
 
 import numpy as np
 import pytest
+import torch
+from torchmetrics.classification import MulticlassCalibrationError
 
 from torchgeo_bench.calibration import (
     apply_temperature,
@@ -31,6 +33,65 @@ def test_worst_calibration_singlelabel():
     out = compute_calibration_metrics(y_true, y_proba, multi_label=False)
     assert out["ece"] == pytest.approx(1.0, abs=1e-4)
     assert out["mce"] == pytest.approx(1.0, abs=1e-4)
+
+
+@pytest.mark.parametrize("n_classes", [2, 5])
+def test_singlelabel_calibration_matches_multiclass_reference(n_classes: int) -> None:
+    rng = np.random.default_rng(8)
+    targets = rng.integers(n_classes, size=100)
+    probabilities = rng.dirichlet(np.ones(n_classes), size=100).astype(np.float32)
+    actual = compute_calibration_metrics(targets, probabilities, multi_label=False)
+    tensor = torch.from_numpy(probabilities)
+    tensor = tensor / tensor.sum(dim=1, keepdim=True)
+    for key, norm in (("ece", "l1"), ("rms_ce", "l2"), ("mce", "max")):
+        reference = MulticlassCalibrationError(n_classes, n_bins=15, norm=norm)(
+            tensor, torch.from_numpy(targets)
+        )
+        assert actual[key] == pytest.approx(reference.item())
+
+
+def test_calibration_respects_probability_column_labels() -> None:
+    probabilities = np.array([[0.9, 0.1], [0.2, 0.8], [0.7, 0.3]], dtype=np.float32)
+    expected = compute_calibration_metrics(np.array([0, 1, 0]), probabilities, multi_label=False)
+    actual = compute_calibration_metrics(
+        np.array([7, 2, 7]),
+        probabilities,
+        multi_label=False,
+        class_labels=np.array([7, 2]),
+    )
+    assert actual == pytest.approx(expected)
+
+
+def test_calibration_handles_a_single_trained_class_and_an_unseen_target() -> None:
+    actual = compute_calibration_metrics(
+        np.array([2, 7]),
+        np.ones((2, 1), dtype=np.float32),
+        multi_label=False,
+        class_labels=np.array([2]),
+    )
+    assert actual == pytest.approx({"ece": 0.5, "rms_ce": 0.5, "mce": 0.5})
+
+
+def test_temperature_respects_logit_column_labels() -> None:
+    logits = np.array([[1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, -1.0]])
+    expected = fit_temperature(logits, np.array([0, 1, 0, 1]), multi_label=False)
+    actual = fit_temperature(
+        logits,
+        np.array([7, 2, 7, 2]),
+        multi_label=False,
+        class_labels=np.array([7, 2]),
+    )
+    assert actual == pytest.approx(expected)
+
+
+def test_temperature_rejects_unseen_validation_classes() -> None:
+    with pytest.raises(ValueError, match="validation classes present in training"):
+        fit_temperature(
+            np.array([[1.0, -1.0]]),
+            np.array([9]),
+            multi_label=False,
+            class_labels=np.array([2, 7]),
+        )
 
 
 def test_multilabel_shapes_and_range():
