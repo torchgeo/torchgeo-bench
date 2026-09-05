@@ -1,6 +1,6 @@
 # R04 - Choose a human-readable coding style and enforcement gate
 
-Status: proposed; no option has been accepted. This file changes no runtime behavior.
+Status: option A is implemented in the draft; discussion remains open.
 Decision issue: https://github.com/torchgeo/torchgeo-bench/issues/310
 
 Adopt explicit conventions and narrow mechanical checks while reviewing code for readability.
@@ -19,6 +19,17 @@ Discuss the two options in the linked issue. We will collect feedback before cho
 ## Proposed contract
 
 Use explicit functions and concrete names. Keep construction and data flow visible. Duplication is acceptable until a helper improves real call sites. Comments explain constraints or rationale; docstrings specify shapes, units, and behavior.
+
+Keep comments to one sentence explaining a non-obvious constraint or reason.
+Do not narrate the code or add background paragraphs above a function.
+Docstrings default to one sentence; add only needed shapes, units, argument constraints, or exceptions.
+Types and obvious parameter names do not need repeating in prose.
+Put extended rationale and examples in documentation.
+
+The gate rejects comment blocks longer than one line, except the standard copyright/license header.
+Docstrings may contain at most 80 words and 10 nonblank lines, including Google-style fields.
+Ruff's `W505` also caps docstring and standalone-comment lines at 88 characters; wrapping alone cannot evade the block limits.
+These are ceilings, not targets, and the checks do not replace review for useful content.
 
 Option A formatting:
 
