@@ -107,9 +107,6 @@ selection semantics.
        lr_scheduler: cosine
        cache_features: true
        cache_dtype: float16
-       save_viz: false
-       viz_dir: viz
-       n_viz_samples: 8
 
 .. seealso::
 

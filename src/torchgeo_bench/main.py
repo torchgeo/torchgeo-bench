@@ -648,7 +648,7 @@ def evaluate_segmentation(
     eval_cfg: DictConfig,
     cfg: DictConfig,
     num_classes: int,
-) -> "tuple[torchgeo_bench.segmentation_task.SegMetrics, int, float | None, int | None, torch.Tensor | None]":
+) -> "tuple[torchgeo_bench.segmentation_task.SegMetrics, int, float | None, int | None]":
     """Evaluate segmentation performance using a frozen-backbone segmentation probe.
 
     Trains a lightweight segmentation head on top of the frozen backbone and
@@ -656,8 +656,7 @@ def evaluate_segmentation(
     for faster training across epochs.
 
     Returns:
-        Tuple of (metrics, feature_dim, lr, batch_size, preds); ``preds`` is
-        None unless ``collect_preds``.
+        Tuple of (metrics, feature_dim, lr, batch_size).
     """
     train_loader, val_loader, test_loader = loaders.train, loaders.val, loaders.test
     device, seed, verbose = torch.device(cfg.device), cfg.seed, cfg.verbose
@@ -667,7 +666,6 @@ def evaluate_segmentation(
         raise ValueError("Segmentation evaluation config missing for the model.")
 
     seg_cfg = eval_cfg.segmentation
-    collect_preds = bool(seg_cfg.get("save_viz", False))
     epochs, probe_batch_size, lr, use_cache, cache_dtype = _resolve_segmentation_runtime_config(
         seg_cfg
     )
@@ -689,14 +687,12 @@ def evaluate_segmentation(
         eval_result = solver.evaluate_cached(
             test_cache,
             batch_size=probe_batch_size,
-            collect_preds=collect_preds,
             collect_confusions=collect_confusions,
         )
     else:
         solver.fit(train_loader=train_loader, val_loader=val_loader, epochs=epochs, verbose=verbose)
         eval_result = solver.evaluate(
             test_loader,
-            collect_preds=collect_preds,
             collect_confusions=collect_confusions,
         )
     actual_batch_size = (
@@ -705,23 +701,16 @@ def evaluate_segmentation(
         else int(train_loader.batch_size or 1)
     )
 
-    if isinstance(eval_result, dict):
-        metrics, preds, confusion_matrices = eval_result, None, None
-    elif len(eval_result) == 3:
-        metrics, preds, confusion_matrices = eval_result
-    elif collect_preds:
-        metrics, preds = eval_result
-        confusion_matrices = None
-    else:
+    if isinstance(eval_result, tuple):
         metrics, confusion_matrices = eval_result
-        preds = None
-    if confusion_matrices is not None:
         metrics["ci_lower"], metrics["ci_upper"] = bootstrap_miou(
             confusion_matrices,
             n_boot=int(eval_cfg.bootstrap),
             seed=seed,
         )
-    return metrics, sum(probe.channels_list), lr, actual_batch_size, preds
+    else:
+        metrics = eval_result
+    return metrics, sum(probe.channels_list), lr, actual_batch_size
 
 
 def _resolve_output_path(
@@ -750,17 +739,14 @@ def run_segmentation(
     loaders: LoaderSplits,
     common_meta: ResultMetadata,
 ) -> Iterator[list[dict]]:
-    """Yield the completed probe measurement after any requested visualizations."""
+    """Yield the completed segmentation probe measurement."""
     train_loader, val_loader, test_loader = loaders.train, loaders.val, loaders.test
     train_dataset = train_loader.dataset
     assert isinstance(train_dataset, Sized)
-    bench = get_bench_dataset_class(str(common_meta["dataset"]))()
-    num_classes = bench.num_classes
-    seg_cfg_merged = eval_cfg.segmentation
-    save_viz = seg_cfg_merged.get("save_viz", False)
+    num_classes = common_meta["num_classes"]
     assert isinstance(val_loader.dataset, Sized)
     assert isinstance(test_loader.dataset, Sized)
-    metrics, feat_dim, best_lr, best_bs, preds = evaluate_segmentation(
+    metrics, feat_dim, best_lr, best_bs = evaluate_segmentation(
         model, loaders, eval_cfg, cfg, num_classes
     )
 
@@ -786,30 +772,6 @@ def run_segmentation(
         recall=metrics.get("recall"),
         f1=metrics.get("f1"),
     ).to_row()
-    if save_viz and preds is not None:
-        from torchgeo_bench.segmentation_viz import (
-            SegmentationSamples,
-            SegmentationVizSpec,
-            collect_viz_inputs,
-            save_segmentation_viz,
-        )
-
-        rgb_indices = bench.rgb_indices or [0, 1, 2]
-        test_imgs_t, test_gts_t = collect_viz_inputs(test_loader)
-        ignore_idx = seg_cfg_merged.get("ignore_index", 255)
-        n_viz = seg_cfg_merged.get("n_viz_samples", 8)
-        viz_dir = seg_cfg_merged.get("viz_dir", "viz")
-        _class_names = list(getattr(train_dataset, "classes", None) or []) or None
-        save_segmentation_viz(
-            dest=os.path.join(viz_dir, str(common_meta["name"])),
-            dataset_name=str(common_meta["dataset"]),
-            samples=SegmentationSamples(test_imgs_t, test_gts_t, preds),
-            spec=SegmentationVizSpec(
-                num_classes, rgb_indices, ignore_index=ignore_idx, class_names=_class_names
-            ),
-            n_samples=n_viz,
-        )
-    # A saved row makes resume skip this dataset, including requested plots.
     yield [row]
 
 
