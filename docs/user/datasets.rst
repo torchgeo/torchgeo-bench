@@ -70,7 +70,11 @@ under ``data/classification_v1.0``, download the full bundle with
 V1 metadata format
 ^^^^^^^^^^^^^^^^^^
 
-V1 readers require data-only JSON metadata. HDF5 samples store it as a UTF-8 JSON string in the ``metadata_json`` attribute; tar shards pair ``<sample_id>.bands.npz`` with ``<sample_id>.meta.json``. The JSON object must contain a numeric ``label`` (or a numeric list for multilabel data) and a non-empty ``bands_order`` list of source-band names.
+The published V1 datasets store metadata in HDF5 ``pickle`` attributes or ``<sample_id>.meta.pkl`` shard members. The readers accept these records only when their SHA-256 matches the expected checksum for that dataset and sample ID in the manifest bundled with ``torchgeo-bench``. The two pinned layouts contain identical metadata bytes and share these checksums. The readers unpickle the same in-memory bytes that were verified, without reopening the file. Unknown samples and checksum mismatches are errors; there is no opt-out or automatic approval of downloaded metadata.
+
+The manifest comes from inspected, pinned reference releases, not from a checksum file accompanying the dataset. Its source revisions and archive hashes are recorded in ``torchgeo_bench/datasets/_v1_checksums/sources.json``. These checks authenticate the metadata records only, not the image arrays or partition files.
+
+For custom data, V1 readers also accept data-only JSON metadata. HDF5 samples store it as a UTF-8 JSON string in the ``metadata_json`` attribute; tar shards pair ``<sample_id>.bands.npz`` with ``<sample_id>.meta.json``. JSON takes precedence when both formats are present. The JSON object must contain a numeric ``label`` (or a numeric list for multilabel data) and a non-empty ``bands_order`` list of source-band names.
 
 .. code-block:: json
 
@@ -87,9 +91,9 @@ Per-band ``transform`` and ``crs`` entries are optional. Geographic extraction a
 
 .. warning::
 
-   Legacy ``pickle`` HDF5 attributes and ``.meta.pkl`` shard members are not loaded. Existing V1 artifacts must have their metadata regenerated from a trusted source or replaced by data-only versions from the dataset publisher. There is no automatic pickle conversion or compatibility fallback. Existing image arrays and partition JSON files do not need to change, but a legacy download alone is not usable by these readers.
+   Checksums do not make arbitrary pickle safe. A new release or differently serialized metadata needs independently reviewed reference checksums before it can be loaded as pickle. Do not generate approval hashes from an untrusted download; provide JSON metadata instead.
 
-``experiments/scripts/repack_geobench_v1.py`` repacks HDF5 files that already contain ``metadata_json`` into the JSON-based shard format. Its ``--validate`` mode compares band arrays and JSON metadata without loading pickled data.
+``experiments/scripts/repack_geobench_v1.py`` accepts JSON or checksum-approved HDF5 metadata and always writes JSON-based shards. Its ``--validate`` mode compares band arrays and normalized metadata using the same verification rules.
 
 Supported V1 datasets
 ^^^^^^^^^^^^^^^^^^^^^

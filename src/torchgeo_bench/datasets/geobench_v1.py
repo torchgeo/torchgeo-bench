@@ -3,7 +3,7 @@
 Lightweight HDF5 reader that does not depend on the upstream ``geobench``
 package. Loads samples directly from ``classification_v1.0/<dataset>/``
 HDF5 files using the partition JSON files distributed alongside them.
-Each sample must carry data-only JSON in its ``metadata_json`` attribute.
+Samples carry JSON metadata or pickle metadata matching the bundled release checksums.
 """
 
 import json
@@ -21,9 +21,6 @@ from .base import BenchDataset
 
 V1_ROOT = Path("data/classification_v1.0")
 V1_SHARDED_ROOT = Path("data/classification_v1.0_wds")
-
-# Public mirror used by the single-dataset download command.
-V1_HF_REPO_ID = "isaaccorley/geobenchv1-webdataset"
 
 
 class GeoBenchv1(Dataset):
@@ -82,10 +79,10 @@ class GeoBenchv1(Dataset):
             self.band_names = list(bands)
 
     def _load_sample_metadata(self, sample_id: str) -> dict:
-        """Load data-only JSON metadata from HDF5 attributes."""
+        """Load JSON or checksum-approved metadata from HDF5 attributes."""
         sample_path = self.dataset_dir / f"{sample_id}.hdf5"
         with h5py.File(sample_path, "r") as f:
-            return read_hdf5_metadata(f.attrs)
+            return read_hdf5_metadata(f.attrs, dataset_name=self.dataset_name, sample_id=sample_id)
 
     def __len__(self) -> int:
         return len(self.sample_ids)
@@ -160,7 +157,6 @@ class _V1Dataset(BenchDataset):
            exist locally (5-7x faster on NFS, fork-safe at high ``num_workers``).
         2. **Per-sample HDF5** at :data:`V1_ROOT` if the legacy distribution
            layout is present.
-
         Missing data must be downloaded with ``torchgeo-bench download`` first.
         """
         v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split  # type: ignore[assignment]

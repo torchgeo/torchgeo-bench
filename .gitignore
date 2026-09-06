@@ -133,6 +133,8 @@ data/
 !conf/**/*.json
 !**/band_stats.json
 !**/normalizer.json
+!src/torchgeo_bench/datasets/_v1_checksums/sources.json
+!tests/fixtures/v1_metadata/samples.json
 !docs/_static/_results_snapshots/*.json
 !docs/_static/_dataset_geography/*.json
 

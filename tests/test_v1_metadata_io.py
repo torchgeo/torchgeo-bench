@@ -1,4 +1,4 @@
-"""Exercise data-only metadata through the V1 readers and repacker."""
+"""Exercise JSON and checksum-gated metadata through the V1 readers and repacker."""
 
 import io
 import json
@@ -162,6 +162,14 @@ def test_v1_wrapper_loads_data_only_metadata(tmp_path, monkeypatch, sharded) -> 
     assert dataset[0]["label"].item() == 1
 
 
+def test_repack_validation_does_not_require_partition_files(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    _write_hdf5(source, json.dumps(_metadata()))
+    assert repack(source, output) == 1
+    validate(source, output)
+
+
 @pytest.mark.parametrize("encoding", ["bytes", "repr", "void", "expression"])
 def test_metadata_decoder_rejects_executable_representations(encoding) -> None:
     with pytest.raises((TypeError, ValueError)):
@@ -187,7 +195,7 @@ def test_metadata_decoder_rejects_invalid_fields(metadata) -> None:
 
 @pytest.mark.parametrize("attribute", ["pickle", "metadata_json"])
 @pytest.mark.parametrize("encoding", ["repr", "void", "expression"])
-def test_hdf5_consumers_reject_non_json_metadata(tmp_path, attribute, encoding) -> None:
+def test_hdf5_consumers_reject_unapproved_metadata(tmp_path, attribute, encoding) -> None:
     source = tmp_path / "source"
     _write_partition(source, [SID])
     path = _write_hdf5(source, _payload(encoding), attribute=attribute)
@@ -216,7 +224,7 @@ def test_sharded_reader_rejects_executable_metadata(tmp_path, suffix, encoding, 
 
 
 @pytest.mark.parametrize("legacy_source", [False, True])
-def test_repack_validation_rejects_legacy_metadata(tmp_path, legacy_source) -> None:
+def test_repack_validation_rejects_unapproved_metadata(tmp_path, legacy_source) -> None:
     source = tmp_path / "source"
     output = tmp_path / "output"
     metadata = json.dumps(_metadata())

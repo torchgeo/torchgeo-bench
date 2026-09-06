@@ -1,0 +1,898 @@
+{
+  "audit": {
+    "checksum_binding": [
+      "dataset_name",
+      "sample_id"
+    ],
+    "constructor_constraints": {
+      "affine.Affine": "NEWOBJ with exactly six finite numeric components",
+      "datetime.date": "REDUCE with one four-byte valid Gregorian year/month/day value",
+      "geobench.dataset": "Sentinel1/Sentinel2/SpectralBand/Landsat8: NEWOBJ with empty tuple; BUILD dict has only name, alt_names, spatial_resolution, wavelength",
+      "numpy.core.multiarray._reconstruct": "REDUCE (numpy.ndarray, (0,), b'b'); BUILD (1, (43,), validated int64 dtype, False, 344 bytes of binary labels)",
+      "numpy.core.multiarray.scalar": "REDUCE with validated float64 dtype and eight finite numeric bytes",
+      "numpy.dtype": "REDUCE ('f8' or 'i8', False, True); BUILD (3, '<', None, None, None, -1, -1, 0); no object/structured/metadata dtype",
+      "rasterio.crs.CRS": "NEWOBJ with empty tuple; BUILD is bounded WKT containing only inspected PROJCS/GEOGCS coordinate-system keywords, names and numeric parameters"
+    },
+    "datasets": {
+      "m-bigearthnet": {
+        "hdf5": {
+          "distinct_raw_sha256_count": 17997,
+          "identical_bytes_reuses": 41,
+          "max_bytes": 2448,
+          "min_bytes": 2447,
+          "record_count": 22000,
+          "symbolically_parsed_records": 21959
+        },
+        "identical_canonical_metadata_by_sample": 22000,
+        "identical_raw_bytes_by_sample": 22000,
+        "metadata_only_archive_sha256": "eac10399451d3de1f2d34e02bd7e528abb990a7751ba9ad5f181fedd98f13e96",
+        "metadata_only_archives_byte_identical": true,
+        "partition_counts": {
+          "hdf5": {
+            "m-bigearthnet/0.01x_train_partition.json": {
+              "test": 1000,
+              "train": 200,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.02x_train_partition.json": {
+              "test": 1000,
+              "train": 400,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.05x_train_partition.json": {
+              "test": 1000,
+              "train": 1000,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.10x_train_partition.json": {
+              "test": 1000,
+              "train": 2000,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.20x_train_partition.json": {
+              "test": 1000,
+              "train": 4000,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.50x_train_partition.json": {
+              "test": 1000,
+              "train": 10000,
+              "valid": 1000
+            },
+            "m-bigearthnet/1.00x_train_partition.json": {
+              "test": 1000,
+              "train": 20000,
+              "valid": 1000
+            },
+            "m-bigearthnet/default_partition.json": {
+              "test": 1000,
+              "train": 20000,
+              "valid": 1000
+            }
+          },
+          "sharded": {
+            "m-bigearthnet/0.01x_train_partition.json": {
+              "test": 1000,
+              "train": 200,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.02x_train_partition.json": {
+              "test": 1000,
+              "train": 400,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.05x_train_partition.json": {
+              "test": 1000,
+              "train": 1000,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.10x_train_partition.json": {
+              "test": 1000,
+              "train": 2000,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.20x_train_partition.json": {
+              "test": 1000,
+              "train": 4000,
+              "valid": 1000
+            },
+            "m-bigearthnet/0.50x_train_partition.json": {
+              "test": 1000,
+              "train": 10000,
+              "valid": 1000
+            },
+            "m-bigearthnet/1.00x_train_partition.json": {
+              "test": 1000,
+              "train": 20000,
+              "valid": 1000
+            },
+            "m-bigearthnet/default_partition.json": {
+              "test": 1000,
+              "train": 20000,
+              "valid": 1000
+            }
+          }
+        },
+        "sample_checksum_count": 22000,
+        "sharded": {
+          "distinct_raw_sha256_count": 17997,
+          "identical_bytes_reuses": 41,
+          "max_bytes": 2448,
+          "min_bytes": 2447,
+          "record_count": 22000,
+          "symbolically_parsed_records": 21959
+        }
+      },
+      "m-brick-kiln": {
+        "hdf5": {
+          "distinct_raw_sha256_count": 17061,
+          "identical_bytes_reuses": 0,
+          "max_bytes": 1583,
+          "min_bytes": 1583,
+          "record_count": 17061,
+          "symbolically_parsed_records": 17061
+        },
+        "identical_canonical_metadata_by_sample": 17061,
+        "identical_raw_bytes_by_sample": 17061,
+        "metadata_only_archive_sha256": "c69808ca58ac05dbd5ca087291cbb7443bc817eca56f8f843e4862c7aa0ff2ff",
+        "metadata_only_archives_byte_identical": true,
+        "partition_counts": {
+          "hdf5": {
+            "m-brick-kiln/0.01x_train_partition.json": {
+              "test": 999,
+              "train": 150,
+              "valid": 999
+            },
+            "m-brick-kiln/0.02x_train_partition.json": {
+              "test": 999,
+              "train": 301,
+              "valid": 999
+            },
+            "m-brick-kiln/0.05x_train_partition.json": {
+              "test": 999,
+              "train": 753,
+              "valid": 999
+            },
+            "m-brick-kiln/0.10x_train_partition.json": {
+              "test": 999,
+              "train": 1506,
+              "valid": 999
+            },
+            "m-brick-kiln/0.20x_train_partition.json": {
+              "test": 999,
+              "train": 3012,
+              "valid": 999
+            },
+            "m-brick-kiln/0.50x_train_partition.json": {
+              "test": 999,
+              "train": 7531,
+              "valid": 999
+            },
+            "m-brick-kiln/1.00x_train_partition.json": {
+              "test": 999,
+              "train": 15063,
+              "valid": 999
+            },
+            "m-brick-kiln/default_partition.json": {
+              "test": 999,
+              "train": 15063,
+              "valid": 999
+            }
+          },
+          "sharded": {
+            "m-brick-kiln/0.01x_train_partition.json": {
+              "test": 999,
+              "train": 150,
+              "valid": 999
+            },
+            "m-brick-kiln/0.02x_train_partition.json": {
+              "test": 999,
+              "train": 301,
+              "valid": 999
+            },
+            "m-brick-kiln/0.05x_train_partition.json": {
+              "test": 999,
+              "train": 753,
+              "valid": 999
+            },
+            "m-brick-kiln/0.10x_train_partition.json": {
+              "test": 999,
+              "train": 1506,
+              "valid": 999
+            },
+            "m-brick-kiln/0.20x_train_partition.json": {
+              "test": 999,
+              "train": 3012,
+              "valid": 999
+            },
+            "m-brick-kiln/0.50x_train_partition.json": {
+              "test": 999,
+              "train": 7531,
+              "valid": 999
+            },
+            "m-brick-kiln/1.00x_train_partition.json": {
+              "test": 999,
+              "train": 15063,
+              "valid": 999
+            },
+            "m-brick-kiln/default_partition.json": {
+              "test": 999,
+              "train": 15063,
+              "valid": 999
+            }
+          }
+        },
+        "sample_checksum_count": 17061,
+        "sharded": {
+          "distinct_raw_sha256_count": 17061,
+          "identical_bytes_reuses": 0,
+          "max_bytes": 1583,
+          "min_bytes": 1583,
+          "record_count": 17061,
+          "symbolically_parsed_records": 17061
+        }
+      },
+      "m-eurosat": {
+        "hdf5": {
+          "distinct_raw_sha256_count": 30,
+          "identical_bytes_reuses": 3970,
+          "max_bytes": 2056,
+          "min_bytes": 2055,
+          "record_count": 4000,
+          "symbolically_parsed_records": 30
+        },
+        "identical_canonical_metadata_by_sample": 4000,
+        "identical_raw_bytes_by_sample": 4000,
+        "metadata_only_archive_sha256": "2770134d83ee5461aa25d377983de78db7f021a2ab951bea71dc28f098b9828a",
+        "metadata_only_archives_byte_identical": true,
+        "partition_counts": {
+          "hdf5": {
+            "m-eurosat/0.01x_train_partition.json": {
+              "test": 1000,
+              "train": 20,
+              "valid": 1000
+            },
+            "m-eurosat/0.02x_train_partition.json": {
+              "test": 1000,
+              "train": 40,
+              "valid": 1000
+            },
+            "m-eurosat/0.05x_train_partition.json": {
+              "test": 1000,
+              "train": 100,
+              "valid": 1000
+            },
+            "m-eurosat/0.10x_train_partition.json": {
+              "test": 1000,
+              "train": 200,
+              "valid": 1000
+            },
+            "m-eurosat/0.20x_train_partition.json": {
+              "test": 1000,
+              "train": 400,
+              "valid": 1000
+            },
+            "m-eurosat/0.50x_train_partition.json": {
+              "test": 1000,
+              "train": 1000,
+              "valid": 1000
+            },
+            "m-eurosat/1.00x_train_partition.json": {
+              "test": 1000,
+              "train": 2000,
+              "valid": 1000
+            },
+            "m-eurosat/default_partition.json": {
+              "test": 1000,
+              "train": 2000,
+              "valid": 1000
+            }
+          },
+          "sharded": {
+            "m-eurosat/0.01x_train_partition.json": {
+              "test": 1000,
+              "train": 20,
+              "valid": 1000
+            },
+            "m-eurosat/0.02x_train_partition.json": {
+              "test": 1000,
+              "train": 40,
+              "valid": 1000
+            },
+            "m-eurosat/0.05x_train_partition.json": {
+              "test": 1000,
+              "train": 100,
+              "valid": 1000
+            },
+            "m-eurosat/0.10x_train_partition.json": {
+              "test": 1000,
+              "train": 200,
+              "valid": 1000
+            },
+            "m-eurosat/0.20x_train_partition.json": {
+              "test": 1000,
+              "train": 400,
+              "valid": 1000
+            },
+            "m-eurosat/0.50x_train_partition.json": {
+              "test": 1000,
+              "train": 1000,
+              "valid": 1000
+            },
+            "m-eurosat/1.00x_train_partition.json": {
+              "test": 1000,
+              "train": 2000,
+              "valid": 1000
+            },
+            "m-eurosat/default_partition.json": {
+              "test": 1000,
+              "train": 2000,
+              "valid": 1000
+            }
+          }
+        },
+        "sample_checksum_count": 4000,
+        "sharded": {
+          "distinct_raw_sha256_count": 30,
+          "identical_bytes_reuses": 3970,
+          "max_bytes": 2056,
+          "min_bytes": 2055,
+          "record_count": 4000,
+          "symbolically_parsed_records": 30
+        }
+      },
+      "m-forestnet": {
+        "hdf5": {
+          "distinct_raw_sha256_count": 8446,
+          "identical_bytes_reuses": 0,
+          "max_bytes": 169322,
+          "min_bytes": 1255,
+          "record_count": 8446,
+          "symbolically_parsed_records": 8446
+        },
+        "identical_canonical_metadata_by_sample": 8446,
+        "identical_raw_bytes_by_sample": 8446,
+        "metadata_only_archive_sha256": "77b19d3ba1e9912fb309a8766ed0b044da5ba6e7bd3443551bd36365272d0be3",
+        "metadata_only_archives_byte_identical": true,
+        "partition_counts": {
+          "hdf5": {
+            "m-forestnet/0.01x_train_partition.json": {
+              "test": 993,
+              "train": 64,
+              "valid": 989
+            },
+            "m-forestnet/0.02x_train_partition.json": {
+              "test": 993,
+              "train": 129,
+              "valid": 989
+            },
+            "m-forestnet/0.05x_train_partition.json": {
+              "test": 993,
+              "train": 323,
+              "valid": 989
+            },
+            "m-forestnet/0.10x_train_partition.json": {
+              "test": 993,
+              "train": 646,
+              "valid": 989
+            },
+            "m-forestnet/0.20x_train_partition.json": {
+              "test": 993,
+              "train": 1292,
+              "valid": 989
+            },
+            "m-forestnet/0.50x_train_partition.json": {
+              "test": 993,
+              "train": 3232,
+              "valid": 989
+            },
+            "m-forestnet/1.00x_train_partition.json": {
+              "test": 993,
+              "train": 6464,
+              "valid": 989
+            },
+            "m-forestnet/default_partition.json": {
+              "test": 993,
+              "train": 6464,
+              "valid": 989
+            }
+          },
+          "sharded": {
+            "m-forestnet/0.01x_train_partition.json": {
+              "test": 993,
+              "train": 64,
+              "valid": 989
+            },
+            "m-forestnet/0.02x_train_partition.json": {
+              "test": 993,
+              "train": 129,
+              "valid": 989
+            },
+            "m-forestnet/0.05x_train_partition.json": {
+              "test": 993,
+              "train": 323,
+              "valid": 989
+            },
+            "m-forestnet/0.10x_train_partition.json": {
+              "test": 993,
+              "train": 646,
+              "valid": 989
+            },
+            "m-forestnet/0.20x_train_partition.json": {
+              "test": 993,
+              "train": 1292,
+              "valid": 989
+            },
+            "m-forestnet/0.50x_train_partition.json": {
+              "test": 993,
+              "train": 3232,
+              "valid": 989
+            },
+            "m-forestnet/1.00x_train_partition.json": {
+              "test": 993,
+              "train": 6464,
+              "valid": 989
+            },
+            "m-forestnet/default_partition.json": {
+              "test": 993,
+              "train": 6464,
+              "valid": 989
+            }
+          }
+        },
+        "sample_checksum_count": 8446,
+        "sharded": {
+          "distinct_raw_sha256_count": 8446,
+          "identical_bytes_reuses": 0,
+          "max_bytes": 169322,
+          "min_bytes": 1255,
+          "record_count": 8446,
+          "symbolically_parsed_records": 8446
+        }
+      },
+      "m-pv4ger": {
+        "hdf5": {
+          "distinct_raw_sha256_count": 13812,
+          "identical_bytes_reuses": 0,
+          "max_bytes": 527,
+          "min_bytes": 527,
+          "record_count": 13812,
+          "symbolically_parsed_records": 13812
+        },
+        "identical_canonical_metadata_by_sample": 13812,
+        "identical_raw_bytes_by_sample": 13812,
+        "metadata_only_archive_sha256": "57bd1f8755d8e5b6e3c1f7c65c11117f99cf580600bf30e7bd76c6cc3e264395",
+        "metadata_only_archives_byte_identical": true,
+        "partition_counts": {
+          "hdf5": {
+            "m-pv4ger/0.01x_train_partition.json": {
+              "test": 999,
+              "train": 118,
+              "valid": 999
+            },
+            "m-pv4ger/0.02x_train_partition.json": {
+              "test": 999,
+              "train": 236,
+              "valid": 999
+            },
+            "m-pv4ger/0.05x_train_partition.json": {
+              "test": 999,
+              "train": 590,
+              "valid": 999
+            },
+            "m-pv4ger/0.10x_train_partition.json": {
+              "test": 999,
+              "train": 1181,
+              "valid": 999
+            },
+            "m-pv4ger/0.20x_train_partition.json": {
+              "test": 999,
+              "train": 2362,
+              "valid": 999
+            },
+            "m-pv4ger/0.50x_train_partition.json": {
+              "test": 999,
+              "train": 5907,
+              "valid": 999
+            },
+            "m-pv4ger/1.00x_train_partition.json": {
+              "test": 999,
+              "train": 11814,
+              "valid": 999
+            },
+            "m-pv4ger/default_partition.json": {
+              "test": 999,
+              "train": 11814,
+              "valid": 999
+            }
+          },
+          "sharded": {
+            "m-pv4ger/0.01x_train_partition.json": {
+              "test": 999,
+              "train": 118,
+              "valid": 999
+            },
+            "m-pv4ger/0.02x_train_partition.json": {
+              "test": 999,
+              "train": 236,
+              "valid": 999
+            },
+            "m-pv4ger/0.05x_train_partition.json": {
+              "test": 999,
+              "train": 590,
+              "valid": 999
+            },
+            "m-pv4ger/0.10x_train_partition.json": {
+              "test": 999,
+              "train": 1181,
+              "valid": 999
+            },
+            "m-pv4ger/0.20x_train_partition.json": {
+              "test": 999,
+              "train": 2362,
+              "valid": 999
+            },
+            "m-pv4ger/0.50x_train_partition.json": {
+              "test": 999,
+              "train": 5907,
+              "valid": 999
+            },
+            "m-pv4ger/1.00x_train_partition.json": {
+              "test": 999,
+              "train": 11814,
+              "valid": 999
+            },
+            "m-pv4ger/default_partition.json": {
+              "test": 999,
+              "train": 11814,
+              "valid": 999
+            }
+          }
+        },
+        "sample_checksum_count": 13812,
+        "sharded": {
+          "distinct_raw_sha256_count": 13812,
+          "identical_bytes_reuses": 0,
+          "max_bytes": 527,
+          "min_bytes": 527,
+          "record_count": 13812,
+          "symbolically_parsed_records": 13812
+        }
+      },
+      "m-so2sat": {
+        "hdf5": {
+          "distinct_raw_sha256_count": 17,
+          "identical_bytes_reuses": 21947,
+          "max_bytes": 1649,
+          "min_bytes": 1649,
+          "record_count": 21964,
+          "symbolically_parsed_records": 17
+        },
+        "identical_canonical_metadata_by_sample": 21964,
+        "identical_raw_bytes_by_sample": 21964,
+        "metadata_only_archive_sha256": "aef46958dd9d8c058740debea048dc423787395dbf1119efc03ceaded3f231ee",
+        "metadata_only_archives_byte_identical": true,
+        "partition_counts": {
+          "hdf5": {
+            "m-so2sat/0.01x_train_partition.json": {
+              "test": 986,
+              "train": 199,
+              "valid": 986
+            },
+            "m-so2sat/0.02x_train_partition.json": {
+              "test": 986,
+              "train": 399,
+              "valid": 986
+            },
+            "m-so2sat/0.05x_train_partition.json": {
+              "test": 986,
+              "train": 999,
+              "valid": 986
+            },
+            "m-so2sat/0.10x_train_partition.json": {
+              "test": 986,
+              "train": 1999,
+              "valid": 986
+            },
+            "m-so2sat/0.20x_train_partition.json": {
+              "test": 986,
+              "train": 3998,
+              "valid": 986
+            },
+            "m-so2sat/0.50x_train_partition.json": {
+              "test": 986,
+              "train": 9996,
+              "valid": 986
+            },
+            "m-so2sat/1.00x_train_partition.json": {
+              "test": 986,
+              "train": 19992,
+              "valid": 986
+            },
+            "m-so2sat/default_partition.json": {
+              "test": 986,
+              "train": 19992,
+              "valid": 986
+            }
+          },
+          "sharded": {
+            "m-so2sat/0.01x_train_partition.json": {
+              "test": 986,
+              "train": 199,
+              "valid": 986
+            },
+            "m-so2sat/0.02x_train_partition.json": {
+              "test": 986,
+              "train": 399,
+              "valid": 986
+            },
+            "m-so2sat/0.05x_train_partition.json": {
+              "test": 986,
+              "train": 999,
+              "valid": 986
+            },
+            "m-so2sat/0.10x_train_partition.json": {
+              "test": 986,
+              "train": 1999,
+              "valid": 986
+            },
+            "m-so2sat/0.20x_train_partition.json": {
+              "test": 986,
+              "train": 3998,
+              "valid": 986
+            },
+            "m-so2sat/0.50x_train_partition.json": {
+              "test": 986,
+              "train": 9996,
+              "valid": 986
+            },
+            "m-so2sat/1.00x_train_partition.json": {
+              "test": 986,
+              "train": 19992,
+              "valid": 986
+            },
+            "m-so2sat/default_partition.json": {
+              "test": 986,
+              "train": 19992,
+              "valid": 986
+            }
+          }
+        },
+        "sample_checksum_count": 21964,
+        "sharded": {
+          "distinct_raw_sha256_count": 17,
+          "identical_bytes_reuses": 21947,
+          "max_bytes": 1649,
+          "min_bytes": 1649,
+          "record_count": 21964,
+          "symbolically_parsed_records": 17
+        }
+      }
+    },
+    "manifest_schema": "{sample_id: sha256}",
+    "max_metadata_bytes": 169322,
+    "method": "SHA256-verify pinned ZIP/tar sources; decode only primitive HDF5 bytes literals; symbolically inspect pickletools opcodes, memo references, globals, exact constructor arguments and BUILD state without importing or executing any serialized target. Exact duplicate bytes reuse a same-dataset symbolic audit; hashes remain bound to dataset and sample ID. Before publishing one digest per sample, assert that both pinned layouts have identical approved sample IDs, hashes and metadata-only archive bytes. No task_specs.pkl pickle is approved.",
+    "observed_constructor_operations": [
+      "NEWOBJ affine.Affine",
+      "NEWOBJ geobench.dataset.Landsat8",
+      "NEWOBJ geobench.dataset.Sentinel1",
+      "NEWOBJ geobench.dataset.Sentinel2",
+      "NEWOBJ geobench.dataset.SpectralBand",
+      "NEWOBJ rasterio.crs.CRS",
+      "REDUCE datetime.date",
+      "REDUCE numpy.core.multiarray._reconstruct",
+      "REDUCE numpy.core.multiarray.scalar",
+      "REDUCE numpy.dtype"
+    ],
+    "observed_globals": [
+      "affine.Affine",
+      "datetime.date",
+      "geobench.dataset.Landsat8",
+      "geobench.dataset.Sentinel1",
+      "geobench.dataset.Sentinel2",
+      "geobench.dataset.SpectralBand",
+      "numpy.core.multiarray._reconstruct",
+      "numpy.core.multiarray.scalar",
+      "numpy.dtype",
+      "numpy.ndarray",
+      "rasterio.crs.CRS"
+    ],
+    "pinned_layout_metadata_byte_identical": true,
+    "protocols": [
+      4
+    ],
+    "sample_checksum_count": 87283,
+    "scope": "Every HDF5 attrs['pickle'] and sharded .meta.pkl sample in the six classification datasets"
+  },
+  "datasets": [
+    "m-bigearthnet",
+    "m-brick-kiln",
+    "m-eurosat",
+    "m-forestnet",
+    "m-pv4ger",
+    "m-so2sat"
+  ],
+  "hdf5": {
+    "files": {
+      "classification_v1.0/m-bigearthnet.zip": "a72d3b7a60ec8fec67b5c4143d18ad7e10858d9633621b1f5db82e955d77f658",
+      "classification_v1.0/m-brick-kiln.zip": "53cacc65013b74c6fb9c447486830111ed4a2a83dbb7c27c579fe417b309e265",
+      "classification_v1.0/m-eurosat.zip": "ea1d66258e7a789b24e9f7cfdf7498f3c12129f7725e4710a73547db72329804",
+      "classification_v1.0/m-forestnet.zip": "7ae883180a5e64b0e30849419fc04f13cbef840f5dcc7dbddf63ac02027e7994",
+      "classification_v1.0/m-pv4ger.zip": "b7f2ebb77e543b3bb7c38f498180976b64d72d541ec712c853e39e5d33e01dca",
+      "classification_v1.0/m-so2sat.zip": "ec4d7cefeea4a326afe3c0f10333a565377d9b0004bcb780949d384e7eaf0704"
+    },
+    "repo_id": "recursix/geo-bench-1.0",
+    "revision": "1e5754337032f097396db62cc15a5ff88f4618e8"
+  },
+  "sharded": {
+    "files": {
+      "m-bigearthnet/0.01x_train_partition.json": "1c3504372e8383beb77e1aa18ca6f3fceb1c989e951c7dafb501b52513ca205f",
+      "m-bigearthnet/0.02x_train_partition.json": "33132bb2de6cb24b614710722cec5ac35c0321052a8d37736a5ab646d51b144c",
+      "m-bigearthnet/0.05x_train_partition.json": "e744e66b94a9c2c34c02e7ae6a0e0cf6aa402c83b1c59045440d380c4297f352",
+      "m-bigearthnet/0.10x_train_partition.json": "b954ac1df55697637aeedac903e1af39ac161857f30344ebd030d2832d292b64",
+      "m-bigearthnet/0.20x_train_partition.json": "8847c9b03550cde1d6cf76d19c74f672ed871c752b66aabb3ee217d9be33998b",
+      "m-bigearthnet/0.50x_train_partition.json": "bcb1f75f113f0c4a730c394343627418974387a1ae5a9ab03e3a82297fee8a85",
+      "m-bigearthnet/1.00x_train_partition.json": "30a8502944e552d24d6286d75b91fc567a7b87a399f5cd7bde894eb92df2d6cc",
+      "m-bigearthnet/LICENSE": "52aa39b7c72a3712b1e1ab0b2d6b9d790f443f985407672b9df8edab9eb64712",
+      "m-bigearthnet/README": "9399c325274973512f5e471637e2a55c90bb3eecbd26d9c130abf337d2abb868",
+      "m-bigearthnet/band_stats.json": "785cbf59eda69f2ef5e2bfddda3a740e3bd7ebfc2b550a97c15a7a2d6d3168f7",
+      "m-bigearthnet/default_partition.json": "06c254f020107ae07a31be23cd5b28bfef3a691c754cf2eb8558255fa7573724",
+      "m-bigearthnet/label_stats.json": "b4b473faeb217b902c240a46ebd88aab0b90e19ad5b327cd7649e94eca70ab07",
+      "m-bigearthnet/shard_00000.tar": "010fef296cc17896d87e12486899fc1515409a64152038807c5855d91c75509c",
+      "m-bigearthnet/shard_00001.tar": "a750555c029af112ca0f4a0811b1ac1a2d5d08973f81dc3333875beb0566b3d5",
+      "m-bigearthnet/shard_00002.tar": "c8d0fe92222d380880702498f4f0d01986d1c2c78c3952453bebc75cb21c1a55",
+      "m-bigearthnet/shard_00003.tar": "26ad96eae30c07960c73c6be1b8bac7baeff6a179976205788fdf783a092825b",
+      "m-bigearthnet/shard_00004.tar": "577ad82faa3767bb62f28fbacadb7477283f93f755b694faba2b5c60019e9665",
+      "m-bigearthnet/shard_00005.tar": "d1bbbc6b37426dc8a81464f6786333dca97271969a57688eec55b5d68e4a3411",
+      "m-bigearthnet/shard_00006.tar": "ef90e5bbfdc551b5a4b2656784efd028a4ff9356bb1caaa3fa77d2b8a00f1494",
+      "m-bigearthnet/shard_00007.tar": "f1591185ea7f34662886c5bfe91080d1ea74e906ab65dc6e320f4abdc6ec12e7",
+      "m-bigearthnet/shard_00008.tar": "360323916d33d4b1b4fc7fbf3db374a16bbc9d4a0f7b21395e526c704585f530",
+      "m-bigearthnet/shard_00009.tar": "33914cf50084576316d23b7882494cfd41eddebd5fe984836ee5d4cc6a608f91",
+      "m-bigearthnet/shard_00010.tar": "db374dbd603ec058f0e848618008e80aed73e1251bfeca45a0abeaa24f73efab",
+      "m-bigearthnet/shard_00011.tar": "2f9ff508faae9859c46a4b2fcb2f9121e7c9154faf2684ce29f290f3e872a31d",
+      "m-bigearthnet/shard_00012.tar": "419004a8473cdaf02ad34c4bab97f7f176c567f14e0c9ae8efcc6ef61fe8c571",
+      "m-bigearthnet/shard_00013.tar": "7db82b8c6176262f8362777f1bf37ee886a7bfaa0e7c8a654ea54359e90e5b4a",
+      "m-bigearthnet/shard_00014.tar": "0eaaa9a6a7cd3bf8ef48cf1b0ee4526574d29a4688625d495e055f57da76a083",
+      "m-bigearthnet/shard_00015.tar": "0b4573ab1cb9f36d5d58df77e70c35079428ccc1c58e76c115268235c52eef61",
+      "m-bigearthnet/shard_00016.tar": "600186b32f3b69bdbe2c1c85c877628af6c44b179b9fa5d132bd52378cfb15ed",
+      "m-bigearthnet/shard_00017.tar": "5556febb0becca6641d44fa15c6f565d047fa5706705962d1bb55cf3463b1530",
+      "m-bigearthnet/shard_00018.tar": "33a68555964b6309e4978a61deefa1fcfaeca2bfcc8c745fa46829c5d5b79754",
+      "m-bigearthnet/shard_00019.tar": "374d159bc20140f19399763d4a599fc211997d51575cd5ee4d083dd14657df8a",
+      "m-bigearthnet/shard_00020.tar": "a16b5322b8bedbf9843565bbdc25f9985f41551b0124f246202bcb13ff4cb62d",
+      "m-bigearthnet/shard_00021.tar": "0cc6d0ffbc00ea768dc8b3c7a8466733bd51b31bca27569a2a68f6ba21768a41",
+      "m-bigearthnet/task_specs.pkl": "a3340324e4b9fcf22f613f1a04c1941ffd30d0185a15e58837e092b8376c1efb",
+      "m-brick-kiln/0.01x_train_partition.json": "ccbb439dfbf6b052e2cc1fcc5fecc35a3588816ca2537dc3e97522a712433705",
+      "m-brick-kiln/0.02x_train_partition.json": "d3314eeadc399741e213f65c7f38aa075758399614853fbc93483ff333521dba",
+      "m-brick-kiln/0.05x_train_partition.json": "13b4b57e776ea294cdd780a1feee48cd4920ff1a9c4073f36b95df8544e7cadf",
+      "m-brick-kiln/0.10x_train_partition.json": "61a5a56153f9f0cfb35432f194afad006efaeac2fa9a38d26adc3f6900535570",
+      "m-brick-kiln/0.20x_train_partition.json": "c776ba324b58db67a7af39ba539e238fe488ec59d43632ee20c98eee389ede91",
+      "m-brick-kiln/0.50x_train_partition.json": "8a141908e980ca5449f5c0dace31e068b4b2463406231fbe737dcb4d8708b16e",
+      "m-brick-kiln/1.00x_train_partition.json": "3531108e5bba3a8a1aeba7289b639eb3b6728d6debff744d2312ce8710f4e591",
+      "m-brick-kiln/LICENSE": "29bd5edafe4f2ca05505b279969718cc697928e5fad35e372e24bf280b55b21e",
+      "m-brick-kiln/README": "94a98a9b9f3bdea4dbae117f91a766589e1b1df77745bf17e15a22ac967f229b",
+      "m-brick-kiln/band_stats.json": "bd36bd168c87579b0656e700a44275fef714d98ce07a9fcce2acf8c10d7507ab",
+      "m-brick-kiln/default_partition.json": "f09f5afd36cd57f4cd78e444a6a3169e0c8489c6fbfcf32cda9e96fa41082c0e",
+      "m-brick-kiln/label_map.json": "524744f03c195a98b2d11660e3d4049fd8a47df0e9a99b13d492d109c46b6ae4",
+      "m-brick-kiln/shard_00000.tar": "74d63a911fd041d9a5112c01559e65234bdf6ffa1bd0234336e7382f1b323521",
+      "m-brick-kiln/shard_00001.tar": "ee07240910d9bce88e68f07f0b35a0a958465c50a5b5481bee0c09f0a416c3db",
+      "m-brick-kiln/shard_00002.tar": "ab18ca6da75ea508a36548ae60e4198aac99724705ca78b1e5e6431cc640c765",
+      "m-brick-kiln/shard_00003.tar": "4e7bc7b7be082ef3f0b5182353428dad535feac41f52a9bd06e9cfe6c2f3df1e",
+      "m-brick-kiln/shard_00004.tar": "720f88fd3eb3f0c3c43fedb1985d226d7134d89317b05b6f13fcb66a3e07a658",
+      "m-brick-kiln/shard_00005.tar": "6c8e0a1c6fd73353f365b10c5175fd4f691e28700799cb05c08e89b5e76fedd5",
+      "m-brick-kiln/shard_00006.tar": "fdf9f816954ee7ea596787dff663c3e73cf4065054990de27d188e3146b15764",
+      "m-brick-kiln/shard_00007.tar": "e4add35f89c990a1bb595aa59df6400f2903e22e69885dae98804ae836ae0b2d",
+      "m-brick-kiln/shard_00008.tar": "ead5d05fcb11d2046d55f19be5e480badad2e25e0a928398cb9c7b9b71612aef",
+      "m-brick-kiln/shard_00009.tar": "78d77096e39f41a35d353aabcbe0813e83010a71c0f847973faad1eb6d946fe2",
+      "m-brick-kiln/shard_00010.tar": "352971abc1e369faa302c7c258f5fab84d2c8af5bd2e43e31adf3649825ecb0e",
+      "m-brick-kiln/shard_00011.tar": "9aa79ff90bd53698624f1505a89071cfa480fa834785eaba4ab24432b7bdddb7",
+      "m-brick-kiln/shard_00012.tar": "9c83ad4748d223109293a4274e292054fc12a655552f7fadc2e164b4c273fb43",
+      "m-brick-kiln/shard_00013.tar": "4784bd6717b9043695685f654cc4105a27a1bc708c55161f19f4108a9b55a80a",
+      "m-brick-kiln/shard_00014.tar": "f23359f2e3e0d05931a3656c410daf0ce527444cd69b681f0fee7ce839976537",
+      "m-brick-kiln/shard_00015.tar": "46135b64e49de4bc5d024f2d352f766a2b0a88753b0b6fc0ea176e15a30f06e5",
+      "m-brick-kiln/shard_00016.tar": "d43610b873e63fc70855026b90adf0ceac14a6534d2ceff85fc95ba13baedda0",
+      "m-brick-kiln/shard_00017.tar": "6d7be2c039c1050141042334a9f5c5036887f7a74c3ccc7b6c0481881d3ad433",
+      "m-brick-kiln/task_specs.pkl": "b56b98d931cd5edc29f3d31e76d63143b4ede0db5500be3ce449fdde96e93771",
+      "m-eurosat/0.01x_train_partition.json": "23144ae68e0c8a165b594ab6dcb5a1de429934084abd2106cae8c418fa1fff4d",
+      "m-eurosat/0.02x_train_partition.json": "95afb464ec5b4fbb542802e87eff1f45f1e642c916b9592500ecc8fe0fd0288a",
+      "m-eurosat/0.05x_train_partition.json": "78561020fc64c23ef3d283ff2fa23bee26c08294a9fa6412a703ebead86b2fbd",
+      "m-eurosat/0.10x_train_partition.json": "08347e84b11144bee1dae5a9605ef7f68777152acf003aa9a83377a5d02c3c2d",
+      "m-eurosat/0.20x_train_partition.json": "635f44f33bfb4439df40e5f680bee3eb8e3b4305f0e6e91bbdcff35ce10ff0d5",
+      "m-eurosat/0.50x_train_partition.json": "ca829c0509432fb24ae425dce95e9d4222f654c4d38c20e93815fc12646c3041",
+      "m-eurosat/1.00x_train_partition.json": "e1b68b74fdfcffbcbf35c7bc5ceb4ca94cd8bf0b31775f69feb628d3c2afa3ab",
+      "m-eurosat/LICENSE": "52411be07fc1dfde69d55283d644e2f10bc2afc0e7d5529ad775702aa2499136",
+      "m-eurosat/README": "060dfb3a6402a0a9deb05443ba9da65e148ce98aa0bdf425587578948354a0fe",
+      "m-eurosat/band_stats.json": "bff7beea55b7e9498881309b7c315816a035dffa258de6be0fda0a7af775709d",
+      "m-eurosat/default_partition.json": "2a27f538ec717f0744e0d4e5bcbbeb92fdd7d9a4a4c223c09285c314847a1475",
+      "m-eurosat/shard_00000.tar": "c7617b6be3b37bd496da5567e11f2a2053d9ba32749353acddbc03661b157db7",
+      "m-eurosat/shard_00001.tar": "c6c2db00072a41e674835355debf173d67953e80a7180eb691f36b46be32e9d9",
+      "m-eurosat/shard_00002.tar": "4d40ea06228891d0e1099f00e6cc3daa46426ced5020372d612a7a6b9a9398d6",
+      "m-eurosat/shard_00003.tar": "ca8f8fed44e6e4fca16eb2324a300a0ea5aa8036e2c4478be5abe5943503f3e6",
+      "m-eurosat/task_specs.pkl": "739502688693a3ba23f0f73744407eab79690560396bf5b91e46d75ba939f011",
+      "m-forestnet/0.01x_train_partition.json": "e94bface0a59a61fd02ff9a214046de87c70747191100797299eee06866068c3",
+      "m-forestnet/0.02x_train_partition.json": "0dd630dcfe24d5c210195beed1fc47eb0b9e7a3c4d4c3b8aee7e976119471ec0",
+      "m-forestnet/0.05x_train_partition.json": "434077cc46521ef5d12dbd0e74d17170a1612705bcdbf11c65c99f44b5919730",
+      "m-forestnet/0.10x_train_partition.json": "2afd0d4bda9948157f0ffad875fa5789f9e599aa79f29313fc0b4d561b17e80a",
+      "m-forestnet/0.20x_train_partition.json": "3b30d5608f7b50ffd7862e50cdefde7042d6cfe6829e8af9768e33d7fca8c451",
+      "m-forestnet/0.50x_train_partition.json": "0999faa698f1d574b174ef8f7d3369e93b6123e30b205cd95861b5bb37e1d264",
+      "m-forestnet/1.00x_train_partition.json": "e6c9a539e3b3b94389173cb3c8a2970279d6c19967b948a5ce8fbd7c7d50235b",
+      "m-forestnet/LICENSE": "c907cefc66783cfd5a431d0897b1b006a688916492382151a130b45ec183b4c3",
+      "m-forestnet/README": "50a4586dacb4f1db7d6f735aea7cefe2745ed2428ec99cb1522249a7f257ae1e",
+      "m-forestnet/band_stats.json": "898be9ff2f4ef01ccda61eb9548920e50e5e7a95a773a750e98c8c8d4225cf6c",
+      "m-forestnet/default_partition.json": "2af0707aa8af0c89e97de84d12b6ede0bee7e18a1cddd7d5f5e6f13339578ae6",
+      "m-forestnet/label_map.json": "b0011d51175ff4710b5d26d3eb072acf23acb7f5406466ad6efac30df7d98ce5",
+      "m-forestnet/shard_00000.tar": "76b148c78559dcc3c767d1160789642f70f1773b066b857bd712afa600c6be53",
+      "m-forestnet/shard_00001.tar": "80c80343748a5862509a7ac02cf212b819e5cbee6338d73ecc1a9e1513af1eb5",
+      "m-forestnet/shard_00002.tar": "cf78174c8f7441d4d81c6f951619b01767fb0327cb9ff84966541327392f6566",
+      "m-forestnet/shard_00003.tar": "959592b6794d6683632f0eb32540d442898988aaa5d08b63cc53e12769f8ee77",
+      "m-forestnet/shard_00004.tar": "76e2a1c5cda51a2293dce27e87688cfde8f8f9d9ff38fac3be73dbd3cb29d6dc",
+      "m-forestnet/shard_00005.tar": "65c879efd18000d522a7e45e24c9de5d820962d306938f91511e71c5aac4152b",
+      "m-forestnet/shard_00006.tar": "727e53fad615ac4cb805ba5a090c0c0a6b9c8c8a4f031fb871fdf2bb150eafbf",
+      "m-forestnet/shard_00007.tar": "1d15b75e359ed66c82e3b0b01a630987b1b7bb5bae97dbe201e923caa350f331",
+      "m-forestnet/shard_00008.tar": "e866e955ef5af5c051c44c8d9c74fa3e2ca47017f237cc6387f05c98ed1436e1",
+      "m-forestnet/task_specs.pkl": "937b684b0f64370e1cc327a231849dc6ebee5ac4815179658461c3219d949d19",
+      "m-pv4ger/0.01x_train_partition.json": "ccfe3403caffb79ef4dc5c5530e29aebaa9f9f688f0d4219af14e8358ba50c5e",
+      "m-pv4ger/0.02x_train_partition.json": "137135e74320b3b9de29aa3cfda0380cf60883eee370d5b005725186140b38f2",
+      "m-pv4ger/0.05x_train_partition.json": "8dcf8917e98a5551aa93dfda56dcd5c2c52dda34853222c5f6c5f9283dc3f621",
+      "m-pv4ger/0.10x_train_partition.json": "da02422e1672e12abd03a34ec52ca2036b65c15f7429148a0de876b20decbbe5",
+      "m-pv4ger/0.20x_train_partition.json": "ca0c5ad9785db994ce4f66eaf66bf85e99f44eea4d3f5e29aac4588674d2e2b2",
+      "m-pv4ger/0.50x_train_partition.json": "43161b1526315beece8d3977b76fd25e8431d8723af62791bba456848c5e6e13",
+      "m-pv4ger/1.00x_train_partition.json": "cc806ba29110dc3fdcc18a355c94b52354f6986b44337cd584207dcacaed24b7",
+      "m-pv4ger/LICENSE": "f758fa6fd89352e7b40bfa4ca3bcd829ebb224fbd402be30e8759b4cc0c4eef3",
+      "m-pv4ger/README": "04bc2f40c73e9f5cd7b0e9d4b16271d28ad5d830b8a8369c43093f44f750735b",
+      "m-pv4ger/band_stats.json": "4b22aac224478dcc81f7a30b9c335de52949bc80bbb5efa3bacc78b9e3fc8ce1",
+      "m-pv4ger/default_partition.json": "9f29e27c2ba15d8f54e004fea0f3edb4fa6459c956deb524ddb2afb4c6c448ca",
+      "m-pv4ger/label_map.json": "3390521affab09cedc8cd0d555a1551ecdd29030eb7662322ab0a4ce0f967e23",
+      "m-pv4ger/shard_00000.tar": "d2150019495c2cc2b5aba0fab721aacde26bb18f2e1df03803f4b8152c829a08",
+      "m-pv4ger/shard_00001.tar": "af91385174b323ac545cd7714bdd92568a423135519c3bf17798d9a4e9cd927b",
+      "m-pv4ger/shard_00002.tar": "fcb8b7b8c177e1851bd70aa496deb287082f6d30658fd18f1f2b2afb9ce44f6e",
+      "m-pv4ger/shard_00003.tar": "b92fe5376d8fc381e5edaa06b958cf5b8577a46231fafb5c62b83bffd7d65935",
+      "m-pv4ger/shard_00004.tar": "f3475cd705ec3032955a7beabb889376d7d450aa9d096189324f70f9135c08be",
+      "m-pv4ger/shard_00005.tar": "e5655786a4f29f0a127cd6c092fa8fc38a1c5037e000536911adb60e165b99cc",
+      "m-pv4ger/shard_00006.tar": "8f424c600dec8de18ba894d8d180f3d49a4c4e19d357e0dfb5632cca1bf2be5a",
+      "m-pv4ger/shard_00007.tar": "47dc88c1f1b067cdf9c9f106b94b9ade0992ef4448e20bbb255d5d128e4726df",
+      "m-pv4ger/shard_00008.tar": "50decfaf1a074cde166427b05d33963eba648059762087648676e94eeb74bc3e",
+      "m-pv4ger/shard_00009.tar": "436c86efeca032e365d95817c62f952b9d5bce7e94e1bb8e298bee933f3b0549",
+      "m-pv4ger/shard_00010.tar": "15bc65d8978bda7978294532ff0cac9f13fa73a43bd8f93d6415ee5de51a631b",
+      "m-pv4ger/shard_00011.tar": "bbb48a85f410b9295ec351dc3707f35f8f5c331a9cd7f27f9d8f1e91b3631ec9",
+      "m-pv4ger/shard_00012.tar": "f955e5bf39bff30e542c043bc791d946f319f25c6fc2476b60efe15b9d777f0a",
+      "m-pv4ger/shard_00013.tar": "37a2587b2e323e9b7a5c405bc2cdb2d214a91fe1085012d7e7b20b8771df8428",
+      "m-pv4ger/task_specs.pkl": "1e6737f751394ddf8febcd57c17adf69a20e42e01cf013d4add4888080ed9c81",
+      "m-so2sat/0.01x_train_partition.json": "65d4bcf3ee4f0b9a4ef766f2511343c946555f9113ffb2748b7b18f0bd87445b",
+      "m-so2sat/0.02x_train_partition.json": "ea80b01021e7361cca9819ee0d467f934f89e4af1b5166c0335bb8e28a1672fb",
+      "m-so2sat/0.05x_train_partition.json": "38d9d56c098752e7fb7254ced32178e40cb88ce6cdfa9d63340e5c66113835fd",
+      "m-so2sat/0.10x_train_partition.json": "9b9b57a55ba83dcd69363541ef7c303401c055785d30d3227fe8d7555312d144",
+      "m-so2sat/0.20x_train_partition.json": "e8eedcc39744a94e8ab538c50f1f92d369eae3359e6123f9bd8543331f1b76dc",
+      "m-so2sat/0.50x_train_partition.json": "075468f6774d1e0e4b7284364e918f71f12a68006dc0fdbf54e262107a245867",
+      "m-so2sat/1.00x_train_partition.json": "2f40a7518fef350b07652db9686ddd6dde18502cfcf945ea4b5727fcfd34e343",
+      "m-so2sat/LICENSE": "c907cefc66783cfd5a431d0897b1b006a688916492382151a130b45ec183b4c3",
+      "m-so2sat/README": "cad5aef7bc51a9a06c200487688d07e327640592203bf13fe3ce8c0b71498ecd",
+      "m-so2sat/band_stats.json": "49232e30b89fa7babd59a3b1bb44d861876d7112742ba0580497f623d184ed72",
+      "m-so2sat/default_partition.json": "1acab5652b37ed170764c5a14d7a4edc6db600d311d949edfb109177c679c4fd",
+      "m-so2sat/shard_00000.tar": "fba088e2f5e7855b2c0bdbc59311da99d167c7d38849dd7ec53d89a8d0833991",
+      "m-so2sat/shard_00001.tar": "de186733690564b7dc7c5625d8a091af6554d4b72c4569ba660727cf4be49780",
+      "m-so2sat/shard_00002.tar": "0204345e4c04c0fccec81995cd4a0b0a4a99f3c5409c59abac4de10b1ee57274",
+      "m-so2sat/shard_00003.tar": "7f041ddc906699c5f11e618fabfd7a9f81170ae4d01961b80b648638541a82fb",
+      "m-so2sat/shard_00004.tar": "842a4a9d1e90a2c5b5c1b30a0613184c135f92907e44671a90fe76e901a63f97",
+      "m-so2sat/shard_00005.tar": "34680bf65ba910c73cd8276a868f15fd9fd6fed38372965cac62e871d8209d9a",
+      "m-so2sat/shard_00006.tar": "a5c9e1a798386690ea4606effdb0db8fe2864cde515e114e403f6bc4a0b6c283",
+      "m-so2sat/shard_00007.tar": "76540f3a3b7b98aac97d48460e85a217216b1d3f7cd4c05a47bd864f44fc3302",
+      "m-so2sat/shard_00008.tar": "fd09a98831392d63e507ff188c326d55d67ab62a866014fff9ad2998f554c396",
+      "m-so2sat/shard_00009.tar": "ddf8f13ea2970df627b2fda2566e4d53ce43d3ced63217c444d24bcfde628488",
+      "m-so2sat/shard_00010.tar": "1590487833f61ab17994ed9ca4ae247d158611e956983940f30f13d6ceaa3497",
+      "m-so2sat/shard_00011.tar": "8442f1135c72abb65f13fa42478a438528ecbf32129f9fab0e1d169a92a1f1be",
+      "m-so2sat/shard_00012.tar": "7904b0f2cde8b7aa2e169059191e4e6b35d84cb797025b6e1475717dc520e476",
+      "m-so2sat/shard_00013.tar": "2e57620c4a13b9994ffd5cc73a2ae83f22f943dfaa29f93f031629b9563d4fe5",
+      "m-so2sat/shard_00014.tar": "8947ecc19a7b85f0f3645eb4e15343ee7e496c5afd3433dab39c00fd548187bf",
+      "m-so2sat/shard_00015.tar": "fbc284775417aba9374ab18ad706d6ca287852cab9de10c7fc60c5bbc035f85a",
+      "m-so2sat/shard_00016.tar": "8b6334693574864d8bac2b95aa46d91180836518fd0adcbb89d0371fa908cd68",
+      "m-so2sat/shard_00017.tar": "93e828a43a0abe56a370233736bcc83a90617b5fcbb5d16e5562300b0844da5c",
+      "m-so2sat/shard_00018.tar": "6ddaf045b8e69c985dd537c6b00615f6fc9d2ca64489c6cf13835321eee7c712",
+      "m-so2sat/shard_00019.tar": "956277849cb53060be947c3a45d92173a303f949300dfad8f853345d24ce5bea",
+      "m-so2sat/shard_00020.tar": "03f413b853138810dd9468dcdf90548e30510cd0d9aa41232ac42fd4d70aa239",
+      "m-so2sat/shard_00021.tar": "d2eab8ab5845b06f4642c3fc125a8e212a7f511b4409377f2c002d7a1a27e628",
+      "m-so2sat/task_specs.pkl": "314f54d8ba3358849550b34556a5f5444f8fe89a6e38cc139bd7bae97d8c70b9"
+    },
+    "repo_id": "isaaccorley/geobenchv1-webdataset",
+    "revision": "cb847e5ff87a2c8f00064d631ed7b6a39a084c68"
+  }
+}

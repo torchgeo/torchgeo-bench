@@ -21,12 +21,11 @@ from huggingface_hub import snapshot_download
 from torchgeo.datasets import RESISC45, EuroSAT, EuroSATSpatial
 from tqdm.auto import tqdm
 
+from torchgeo_bench.datasets._metadata import v1_source
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
 
 logger = logging.getLogger(__name__)
 
-GEOBENCH_V1_REPO = "recursix/geo-bench-1.0"
-GEOBENCH_V1_SHARDED_REPO = "isaaccorley/geobenchv1-webdataset"
 GEOBENCH_V2_REPO_PREFIX = "aialliance"
 
 DEFAULT_V2_DATASETS: tuple[str, ...] = tuple(list_v2_datasets())
@@ -58,28 +57,32 @@ def download_geobench_v1(output_dir: Path, datasets: list[str] | None = None) ->
     if datasets is not None:
         if not datasets:
             raise ValueError("datasets must contain at least one GeoBench V1 dataset name")
+        repo_id, revision = v1_source("sharded")
         sharded_root = output_dir / "classification_v1.0_wds"
         sharded_root.mkdir(parents=True, exist_ok=True)
         logger.info(
             "Downloading %d GeoBench v1 dataset(s) from %s -> %s",
             len(datasets),
-            GEOBENCH_V1_SHARDED_REPO,
+            repo_id,
             sharded_root,
         )
         snapshot_download(
-            repo_id=GEOBENCH_V1_SHARDED_REPO,
+            repo_id=repo_id,
             repo_type="dataset",
+            revision=revision,
             local_dir=sharded_root,
             allow_patterns=[f"{name}/*" for name in datasets],
         )
         logger.info("GeoBench v1 subset download complete.")
         return
 
-    logger.info("Downloading GeoBench v1 from %s -> %s", GEOBENCH_V1_REPO, output_dir)
+    repo_id, revision = v1_source("hdf5")
+    logger.info("Downloading GeoBench v1 from %s -> %s", repo_id, output_dir)
 
     snapshot_download(
-        repo_id=GEOBENCH_V1_REPO,
+        repo_id=repo_id,
         repo_type="dataset",
+        revision=revision,
         local_dir=output_dir,
     )
 

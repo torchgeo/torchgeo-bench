@@ -15,11 +15,11 @@ Usage::
 Each output sample is::
 
     <id>.bands.npz   per-band float arrays keyed by their source name
-    <id>.meta.json   data-only metadata from the HDF5 ``metadata_json`` attribute
+    <id>.meta.json   data-only metadata from JSON or checksum-approved pickle
 
 Partition JSON files are copied verbatim into the output dir so the new
-loader can read them without changes. Legacy pickle metadata is not read or
-converted by this script.
+loader can read them without changes. Published pickle metadata is converted
+only after matching the dataset/sample checksum bundled with the library.
 """
 
 import argparse
@@ -33,7 +33,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from torchgeo_bench.datasets._metadata import decode_metadata, read_hdf5_metadata
+from torchgeo_bench.datasets._metadata import (
+    MAX_PICKLE_BYTES,
+    decode_metadata,
+    decode_pickle_metadata,
+    read_hdf5_metadata,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -42,7 +47,9 @@ logger = logging.getLogger(__name__)
 def _read_sample(hdf5_path: Path) -> tuple[dict[str, np.ndarray], dict]:
     """Return band arrays and data-only metadata for one V1 HDF5 sample."""
     with h5py.File(hdf5_path, "r") as f:
-        metadata = read_hdf5_metadata(f.attrs)
+        metadata = read_hdf5_metadata(
+            f.attrs, dataset_name=hdf5_path.parent.name, sample_id=hdf5_path.stem
+        )
         bands = {k: f[k][:] for k in f}
     if any(array.dtype.hasobject for array in bands.values()):
         raise ValueError(f"Band arrays in {hdf5_path} must not contain Python objects.")
@@ -96,7 +103,7 @@ def index_shards(shard_paths: list[Path]) -> dict[str, dict[str, tuple[Path, int
     for path in shard_paths:
         with tarfile.open(path, "r") as t:
             for m in t.getmembers():
-                for ext in ("bands.npz", "meta.json"):
+                for ext in ("bands.npz", "meta.json", "meta.pkl"):
                     suffix = "." + ext
                     if m.name.endswith(suffix):
                         base = m.name[: -len(suffix)]
@@ -123,20 +130,27 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
 
     def _read(ref: tuple[Path, int, int]) -> bytes:
         path, offset, size = ref
-        with open(path, "rb") as f:
-            f.seek(offset)
-            return f.read(size)
+        with open(path, "rb") as stream:
+            stream.seek(offset)
+            return stream.read(size)
 
     found = 0
     for sid in list(targets):
         parts = index.get(sid)
         if not parts:
             continue
-        if "meta.json" not in parts:
-            raise ValueError(f"{sid}: missing '.meta.json' metadata; regenerate the legacy shards.")
         with np.load(io.BytesIO(_read(parts["bands.npz"])), allow_pickle=False) as archive:
             new_bands = {name: archive[name] for name in archive.files}
-        new_meta = decode_metadata(_read(parts["meta.json"]))
+        if "meta.json" in parts:
+            new_meta = decode_metadata(_read(parts["meta.json"]))
+        elif "meta.pkl" in parts:
+            if not 0 < parts["meta.pkl"][2] <= MAX_PICKLE_BYTES:
+                raise ValueError(f"{sid}: pickle metadata size is outside the permitted limit.")
+            new_meta = decode_pickle_metadata(
+                _read(parts["meta.pkl"]), dataset_name=dataset_dir.name, sample_id=sid
+            )
+        else:
+            raise ValueError(f"{sid}: missing metadata.")
 
         # Reference HDF5
         ref_bands, ref_meta = _read_sample(targets[sid])
