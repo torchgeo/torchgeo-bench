@@ -4,9 +4,9 @@ Drops the per-sample HDF5 file-open from ``__getitem__`` (one NFS round-trip
 per sample) by reading from ~22 tar shards instead. The data-only format is
 produced by ``experiments/scripts/repack_geobench_v1.py``.
 :func:`ensure_sharded_root` can fetch the collection from the Hub mirror;
-legacy snapshots must have their metadata regenerated before loading.
+published pickle metadata is accepted only when its bundled checksum matches.
 
-Each shard contains ``<sid>.bands.npz`` and ``<sid>.meta.json`` files for
+Each shard contains ``<sid>.bands.npz`` and ``<sid>.meta.json`` or ``<sid>.meta.pkl`` files for
 ~1000 samples.  Indexing happens once in ``__init__``: every sample's byte
 range inside its shard is recorded as ``(shard_path, offset, size)`` so
 ``__getitem__`` does a plain ``open()`` + ``seek()`` + ``read()`` and
@@ -29,20 +29,18 @@ from typing import Literal
 
 import numpy as np
 import torch
+from huggingface_hub import snapshot_download
 from torch.utils.data import Dataset
 
-from ._metadata import decode_metadata
+from ._metadata import MAX_PICKLE_BYTES, decode_metadata, decode_pickle_metadata, v1_source
 
 logger = logging.getLogger(__name__)
-
-V1_HF_REPO_ID = "isaaccorley/geobenchv1-webdataset"
 
 
 def ensure_sharded_root(
     dataset_name: str,
     sharded_root: Path,
     *,
-    repo_id: str = V1_HF_REPO_ID,
     cache_dir: str | os.PathLike | None = None,
 ) -> Path:
     """Snapshot-download the sharded V1 mirror into ``sharded_root`` if absent.
@@ -55,21 +53,14 @@ def ensure_sharded_root(
     if target.exists() and any(target.glob("shard_*.tar")):
         return target
 
-    try:
-        from huggingface_hub import snapshot_download
-    except ImportError as e:
-        raise RuntimeError(
-            "huggingface_hub is required to auto-download the GeoBench V1 "
-            "WebDataset mirror.  Install via `pip install huggingface_hub`, "
-            "or set GEOBENCH_V1_NO_HF_DOWNLOAD=1 and provide the data manually."
-        ) from e
-
+    repo_id, revision = v1_source("sharded")
     sharded_root = Path(sharded_root)
     sharded_root.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading %s/%s -> %s", repo_id, dataset_name, sharded_root)
     snapshot_download(
         repo_id=repo_id,
         repo_type="dataset",
+        revision=revision,
         local_dir=sharded_root,
         allow_patterns=[f"{dataset_name}/*"],
         cache_dir=cache_dir,
@@ -109,7 +100,7 @@ class GeoBenchv1Sharded(Dataset):
         self.sample_ids: list[str] = partition_data[split]
         self.transform = transform
 
-        # Index every member: sid -> {"bands.npz": (path, offset, size), "meta.json": ...}
+        # Index every member: sid -> {suffix: (path, offset, size)}.
         shard_paths = sorted(self.dataset_dir.glob("shard_*.tar"))
         if not shard_paths:
             raise FileNotFoundError(f"No shard_*.tar in {self.dataset_dir}")
@@ -120,7 +111,7 @@ class GeoBenchv1Sharded(Dataset):
         for path in shard_paths:
             with tarfile.open(path, "r") as t:
                 for m in t.getmembers():
-                    for ext in ("bands.npz", "meta.json"):
+                    for ext in ("bands.npz", "meta.json", "meta.pkl"):
                         suffix = "." + ext
                         if m.name.endswith(suffix):
                             base = m.name[: -len(suffix)]
@@ -145,13 +136,20 @@ class GeoBenchv1Sharded(Dataset):
 
     def _load_meta(self, sample_id: str) -> dict:
         parts = self._index[sample_id]
-        if "meta.json" not in parts:
-            raise ValueError(
-                f"Sample {sample_id!r} requires data-only '.meta.json' metadata. "
-                "Legacy '.meta.pkl' metadata is not supported; regenerate the shards "
-                "from JSON metadata supplied by the dataset publisher or another trusted source."
+        if "meta.json" in parts:
+            return decode_metadata(self._read(parts["meta.json"]))
+        if "meta.pkl" in parts:
+            ref = parts["meta.pkl"]
+            if not 0 < ref[2] <= MAX_PICKLE_BYTES:
+                raise ValueError(
+                    f"GeoBench V1 pickle metadata size is outside the permitted limit: {sample_id}."
+                )
+            return decode_pickle_metadata(
+                self._read(ref),
+                dataset_name=self.dataset_dir.name,
+                sample_id=sample_id,
             )
-        return decode_metadata(self._read(parts["meta.json"]))
+        raise ValueError(f"Sample {sample_id!r} has neither '.meta.json' nor '.meta.pkl' metadata.")
 
     def __len__(self) -> int:
         return len(self.sample_ids)

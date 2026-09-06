@@ -1,11 +1,13 @@
 """Unit tests for dataset download helpers."""
 
+import tarfile
 import zipfile
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
+from torchgeo_bench.datasets._v1_webdataset import ensure_sharded_root
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
 from torchgeo_bench.download import (
     DEFAULT_V2_DATASETS,
@@ -21,8 +23,12 @@ def test_download_geobench_v1_creates_output_and_decompresses(
 ) -> None:
     out = tmp_path / "data"
 
-    def _fake_snapshot_download(*, repo_id: str, repo_type: str, local_dir: Path) -> None:
-        del repo_id, repo_type
+    def _fake_snapshot_download(
+        *, repo_id: str, repo_type: str, revision: str, local_dir: Path
+    ) -> None:
+        assert repo_id == "recursix/geo-bench-1.0"
+        assert repo_type == "dataset"
+        assert revision == "1e5754337032f097396db62cc15a5ff88f4618e8"
         nested = local_dir / "classification_v1.0"
         nested.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(nested / "archive.zip", "w") as archive:
@@ -49,8 +55,34 @@ def test_download_geobench_v1_subset_uses_sharded_mirror(tmp_path: Path) -> None
     download_mock.assert_called_once_with(
         repo_id="isaaccorley/geobenchv1-webdataset",
         repo_type="dataset",
+        revision="cb847e5ff87a2c8f00064d631ed7b6a39a084c68",
         local_dir=out / "classification_v1.0_wds",
         allow_patterns=["m-eurosat/*", "m-forestnet/*"],
+    )
+
+
+def test_v1_auto_download_uses_the_approved_release(tmp_path: Path) -> None:
+    root = tmp_path / "shards"
+
+    def download(**kwargs) -> None:
+        target = kwargs["local_dir"] / "m-eurosat"
+        target.mkdir()
+        with tarfile.open(target / "shard_00000.tar", "w"):
+            pass
+
+    with mock.patch(
+        "torchgeo_bench.datasets._v1_webdataset.snapshot_download", side_effect=download
+    ) as download_mock:
+        assert ensure_sharded_root("m-eurosat", root) == root / "m-eurosat"
+        assert ensure_sharded_root("m-eurosat", root) == root / "m-eurosat"
+
+    download_mock.assert_called_once_with(
+        repo_id="isaaccorley/geobenchv1-webdataset",
+        repo_type="dataset",
+        revision="cb847e5ff87a2c8f00064d631ed7b6a39a084c68",
+        local_dir=root,
+        allow_patterns=["m-eurosat/*"],
+        cache_dir=None,
     )
 
 

@@ -27,9 +27,9 @@ Two coordinate sources are handled:
 * **V2** — ``<root>/<name>/*.tortilla``, whose metadata frame already carries
   ``lon``/``lat`` columns (plus a place label where the source provided one).
   Metadata-only, so this is fast.
-* **V1** — ``<root>/<name>/*.hdf5``, where affine coefficients and CRS strings
-  live in the ``metadata_json`` attribute. The raster origin is reprojected
-  to EPSG:4326.
+* **V1** — ``<root>/<name>/*.hdf5``, where JSON or checksum-approved pickle
+  metadata supplies affine coefficients and CRS strings. The raster origin
+  is reprojected to EPSG:4326.
 
 Extraction is deterministic: re-running against unchanged raw data reproduces
 byte-identical JSON.
@@ -174,7 +174,10 @@ def _v1_origin(path: str) -> tuple[float | None, float | None, str]:
 
     try:
         with h5py.File(path, "r") as f:
-            meta = read_hdf5_metadata(f.attrs)
+            sample_path = Path(path)
+            meta = read_hdf5_metadata(
+                f.attrs, dataset_name=sample_path.parent.name, sample_id=sample_path.stem
+            )
         for entry in meta.values():
             if not isinstance(entry, dict):
                 continue
