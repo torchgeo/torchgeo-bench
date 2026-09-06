@@ -81,6 +81,11 @@ def _resume_config_hash(cfg: DictConfig) -> str:
     assert isinstance(eval_cfg, dict)
     eval_cfg.pop("profile", None)
     eval_cfg.pop("intrinsic_dim", None)
+    # Keep removed defaults only in the hash payload so existing CSV keys remain valid.
+    if "segmentation" in eval_cfg:
+        eval_cfg["segmentation"].setdefault("save_viz", False)
+        eval_cfg["segmentation"].setdefault("viz_dir", "viz")
+        eval_cfg["segmentation"].setdefault("n_viz_samples", 8)
     payload = {
         "version": 1,
         "seed": cfg.seed,

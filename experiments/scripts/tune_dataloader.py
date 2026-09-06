@@ -17,18 +17,19 @@ Designed for the post-WebDataset layout under
 """
 
 import argparse
+import logging
 import time
 from pathlib import Path
 
 import torch
-from hydra import compose, initialize_config_module
-from hydra.utils import instantiate
-from rich.console import Console
-from rich.table import Table
 from torch.utils.data import DataLoader
 
+from torchgeo_bench.config import compose_config, instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
+from torchgeo_bench.utils import resolve_device
+
+logger = logging.getLogger(__name__)
 
 
 def _build_dataset(name: str, bands: str, root: Path):
@@ -52,13 +53,11 @@ def _build_dataset(name: str, bands: str, root: Path):
 
 
 def _build_model(model_cfg: str, bands_list):
-    with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-        cfg = compose(config_name="config", overrides=[f"model={model_cfg}"])
+    cfg = compose_config([f"model={model_cfg}"])
     return instantiate(
         cfg.model,
         bands=bands_list,
         normalization="bandspec_zscore",
-        _convert_="object",
     )
 
 
@@ -103,7 +102,8 @@ def main() -> None:
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
 
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    device = resolve_device(args.device)
     bs_list = [int(x) for x in args.batch_sizes.split(",")]
     nw_list = [int(x) for x in args.num_workers.split(",")]
 
@@ -119,15 +119,8 @@ def main() -> None:
     bands_list = bench_cls.select_band_specs(sel)
     model = _build_model(args.model, bands_list).to(device).eval()
 
-    console = Console()
-    console.rule(f"Tuning [bold]{args.model}[/] × {args.dataset}/{args.bands} on {device}")
-
-    table = Table(show_header=True, header_style="bold cyan")
-    table.add_column("bs", justify="right")
-    table.add_column("nw", justify="right")
-    table.add_column("samples/sec", justify="right")
-    table.add_column("peak GB", justify="right")
-    table.add_column("wall", justify="right")
+    logger.info("Tuning %s on %s/%s (%s)", args.model, args.dataset, args.bands, device)
+    logger.info("%6s %6s %12s %10s %10s", "bs", "nw", "samples/sec", "peak GB", "wall (s)")
 
     results = []
     for bs in bs_list:
@@ -135,19 +128,21 @@ def main() -> None:
             try:
                 sps, peak, dt = _bench(model, dataset, bs, nw, device, args.max_batches)
                 results.append((sps, bs, nw, peak, dt))
-                table.add_row(str(bs), str(nw), f"{sps:.1f}", f"{peak:.2f}", f"{dt:.2f}s")
-            except Exception as e:
-                table.add_row(
-                    str(bs), str(nw), "[red]FAIL[/]", "", f"{type(e).__name__}: {str(e)[:40]}"
-                )
+                logger.info("%6d %6d %12.1f %10.2f %10.2f", bs, nw, sps, peak, dt)
+            except torch.cuda.OutOfMemoryError as exc:
+                torch.cuda.empty_cache()
+                logger.warning("batch_size=%d num_workers=%d: %s", bs, nw, exc)
 
-    console.print(table)
-    if results:
-        best = max(results, key=lambda r: r[0])
-        console.print(
-            f"\n[bold green]BEST:[/] batch_size={best[1]} num_workers={best[2]} "
-            f"→ [bold]{best[0]:.1f}[/] samples/sec ({best[3]:.2f} GB peak)"
-        )
+    if not results:
+        raise RuntimeError("No dataloader configuration completed successfully.")
+    best = max(results, key=lambda r: r[0])
+    logger.info(
+        "Best: batch_size=%d num_workers=%d, %.1f samples/sec (%.2f GB peak)",
+        best[1],
+        best[2],
+        best[0],
+        best[3],
+    )
 
 
 if __name__ == "__main__":

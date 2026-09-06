@@ -41,11 +41,33 @@ def _make_loader(n: int = 8, c: int = 3, h: int = 4, multi_label: bool = False) 
     return DataLoader(dataset, batch_size=4)
 
 
-def test_basic_extraction():
+@pytest.mark.parametrize("verbose", [False, True])
+def test_basic_extraction(verbose: bool, capsys: pytest.CaptureFixture[str]) -> None:
     loader = _make_loader()
     model = _IdentityModel()
-    X, y = extract_features(model, loader, device="cpu", verbose=False)
-    assert X.shape[0] == 8
+    X, y = extract_features(
+        model, loader, device="cpu", verbose=verbose, description="Extracting (train)"
+    )
+    expected_images = torch.stack([sample["image"] for sample in loader.dataset])
+    expected_labels = torch.stack([sample["label"] for sample in loader.dataset])
+    np.testing.assert_array_equal(X, expected_images.flatten(1).numpy())
+    np.testing.assert_array_equal(y, expected_labels.numpy())
+    assert ("Extracting (train)" in capsys.readouterr().err) == verbose
+
+
+def test_extraction_uses_inference_mode_and_restores_grad_state() -> None:
+    class _InferenceModel(torch.nn.Module):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            assert torch.is_inference_mode_enabled()
+            assert not torch.is_grad_enabled()
+            return x.flatten(1)
+
+    with torch.enable_grad():
+        X, y = extract_features(_InferenceModel(), _make_loader(), device="cpu", verbose=False)
+        assert torch.is_grad_enabled()
+        assert not torch.is_inference_mode_enabled()
+
+    assert X.shape == (8, 48)
     assert y.shape == (8,)
 
 

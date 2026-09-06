@@ -1,8 +1,17 @@
+from unittest import mock
+
 import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
+from torchmetrics.functional.classification import (
+    multiclass_confusion_matrix,
+    multiclass_f1_score,
+    multiclass_jaccard_index,
+    multiclass_precision,
+    multiclass_recall,
+)
 
 from torchgeo_bench.results import bootstrap_miou
 from torchgeo_bench.segmentation_probe import (
@@ -276,6 +285,99 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
+@pytest.mark.parametrize("collect_confusions", [False, True])
+@pytest.mark.parametrize(
+    ("as_dict", "mask_4d", "ignore_index"), [(False, False, 255), (True, True, -1)]
+)
+def test_solver_evaluation_parity(
+    collect_confusions: bool,
+    as_dict: bool,
+    mask_4d: bool,
+    ignore_index: int,
+) -> None:
+    """Both paths reset metrics and preserve optional outputs in sample order."""
+    predictions = torch.tensor(
+        [
+            [[0, 1, 2], [2, 1, 0]],
+            [[2, 2, 1], [0, 0, 1]],
+            [[1, 0, 1], [2, 2, 0]],
+            [[0, 2, 2], [1, 1, 0]],
+            [[2, 1, 0], [0, 2, 1]],
+        ]
+    )
+    masks = torch.tensor(
+        [
+            [[0, 1, 2], [1, 255, 0]],
+            [[2, 0, 1], [0, 1, 255]],
+            [[255, 0, 1], [2, 0, 0]],
+            [[2, 2, 1], [1, 0, 0]],
+            [[255, 255, 255], [255, 255, 255]],
+        ]
+    )
+    masks[masks == 255] = ignore_index
+    images = nn.functional.one_hot(predictions, num_classes=3).permute(0, 3, 1, 2).float()
+    backbone = nn.Sequential(nn.Conv2d(3, 3, 1, bias=False))
+    probe = SegmentationProbe(backbone, ["0"], num_classes=3)
+    for module in probe.modules():
+        if isinstance(module, nn.Conv2d):
+            nn.init.dirac_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+    solver = SegmentationSolver(probe, num_classes=3, device="cpu", ignore_index=ignore_index)
+    loader = make_loader(images, masks, as_dict=as_dict, mask_4d=mask_4d)
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+
+    solver.evaluate(make_loader(images, predictions))
+    probe.train()
+    raw_result = solver.evaluate(loader, collect_confusions=collect_confusions)
+    assert not probe.training
+    assert not probe.backbone.training
+
+    with mock.patch.object(
+        backbone,
+        "forward",
+        side_effect=AssertionError("Cached evaluation must bypass the backbone"),
+    ):
+        solver.evaluate_cached(
+            CachedFeaturesDataset(cache.layer_tensors, predictions), batch_size=3
+        )
+        probe.train()
+        cached_result = solver.evaluate_cached(
+            cache, batch_size=3, collect_confusions=collect_confusions
+        )
+    assert not probe.training
+    assert not probe.backbone.training
+
+    metric_args = {"num_classes": 3, "ignore_index": ignore_index}
+    expected_metrics = {
+        "mIoU": multiclass_jaccard_index(predictions, masks, average="macro", **metric_args).item(),
+        "fw_IoU": multiclass_jaccard_index(
+            predictions, masks, average="weighted", **metric_args
+        ).item(),
+        "precision": multiclass_precision(
+            predictions, masks, average="macro", **metric_args
+        ).item(),
+        "recall": multiclass_recall(predictions, masks, average="macro", **metric_args).item(),
+        "f1": multiclass_f1_score(predictions, masks, average="macro", **metric_args).item(),
+    }
+    if collect_confusions:
+        expected_confusions = torch.stack(
+            [
+                multiclass_confusion_matrix(pred, mask, **metric_args)
+                for pred, mask in zip(predictions, masks)
+            ]
+        )
+    for result in (raw_result, cached_result):
+        if collect_confusions:
+            assert isinstance(result, tuple)
+            metrics, confusions = result
+            torch.testing.assert_close(confusions, expected_confusions)
+        else:
+            metrics = result
+        assert isinstance(metrics, dict)
+        assert metrics == pytest.approx(expected_metrics)
+
+
 def test_probe_fpn_head(mock_backbone, dummy_data):
     """FPN head forward pass produces correct output shape and has expected attributes."""
     from torchgeo_bench.models.segmentation_heads import FPNHead
@@ -431,16 +533,51 @@ def test_probe_dry_run_uses_backbone_num_channels():
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
 
-def test_solver_no_lr_scheduler(mock_backbone, dummy_data):
-    """lr_scheduler='none' runs without a scheduler and completes training."""
-    images, masks = dummy_data["image"], dummy_data["mask"]
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize(
+    ("lr_scheduler", "expected_lrs"),
+    [("none", [1e-3, 1e-3, 1e-3]), ("cosine", [1e-3, 0.0005005, 1e-6])],
+)
+def test_solver_training_schedule_and_frozen_backbone(
+    cached: bool, lr_scheduler: str, expected_lrs: list[float]
+) -> None:
+    """Both training paths step the scheduler per epoch and only update the head."""
+    rng = torch.Generator().manual_seed(3)
+    images = torch.randn(2, 3, 8, 8, generator=rng)
+    masks = torch.randint(0, NUM_CLASSES, (2, 8, 8), generator=rng)
+    masks[0, :2, :2] = 255
     loader = make_loader(images, masks)
-    probe = make_probe(mock_backbone, ["layer1"])
+    backbone = nn.Sequential(nn.Conv2d(3, 4, 1), nn.BatchNorm2d(4))
+    probe = make_probe(backbone, ["1"])
     solver = SegmentationSolver(
-        model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu", lr_scheduler="none"
+        model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu", lr_scheduler=lr_scheduler
     )
-    result = solver.fit(loader, epochs=1, verbose=False)
-    assert result is None  # no val_loader → returns None
+    backbone_before = {name: value.clone() for name, value in backbone.state_dict().items()}
+    head_before = [param.detach().clone() for param in probe.head.parameters()]
+    lrs = []
+
+    def record_lr(_module: nn.Module, _inputs: tuple[object, ...]) -> None:
+        lrs.append(solver.optimizer.param_groups[0]["lr"])
+
+    hook = probe.head.register_forward_pre_hook(record_lr)
+    if cached:
+        cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+        result = solver.fit_cached(cache, batch_size=2, epochs=2, verbose=False)
+    else:
+        result = solver.fit(loader, epochs=2, verbose=False)
+    hook.remove()
+
+    assert result is None
+    assert solver.val_history == []
+    assert [*lrs, solver.optimizer.param_groups[0]["lr"]] == pytest.approx(expected_lrs)
+    assert not backbone.training
+    for name, value in backbone.state_dict().items():
+        torch.testing.assert_close(value, backbone_before[name], rtol=0, atol=0)
+    assert all(param.grad is None for param in backbone.parameters())
+    assert any(
+        not torch.equal(before, after)
+        for before, after in zip(head_before, probe.head.parameters())
+    )
 
 
 def test_solver_dict_batches(mock_backbone, dummy_data):
@@ -775,26 +912,44 @@ def test_gpu_tensor_cache_ordered_batches(mock_backbone, dummy_data):
     cache = _make_cpu_cache(mock_backbone, dummy_data)
     gpu_cache = GPUTensorCache.from_cached(cache, device="cpu")
 
-    total = 0
-    for _feats, masks in gpu_cache.ordered_batches(batch_size=1):
-        total += masks.shape[0]
-    assert total == len(cache)
+    batches = list(gpu_cache.ordered_batches(batch_size=1))
+    torch.testing.assert_close(torch.cat([masks for _, masks in batches]), cache.masks)
+    for layer, expected in enumerate(cache.layer_tensors):
+        actual = torch.cat([features[layer] for features, _ in batches])
+        torch.testing.assert_close(actual, expected.float())
 
 
-def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
-    """fit_cached falls back gracefully to DataLoader path on CPU (no CUDA available in CI)."""
+def test_solver_fit_cached_reuses_device_caches(mock_backbone, dummy_data):
+    """Pre-built caches avoid both backbone calls and repeated device transfers."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
 
     train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
-    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    gpu_train = GPUTensorCache.from_cached(train_cache, device="cpu")
+    gpu_val = GPUTensorCache.from_cached(train_cache, device="cpu")
 
-    # On CPU, use_amp=False so GPUTensorCache path is skipped; DataLoader fallback runs.
-    val_miou = solver.fit_cached(
-        train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
-    )
+    with (
+        mock.patch.object(
+            mock_backbone,
+            "forward",
+            side_effect=AssertionError("Cached training must bypass the backbone"),
+        ),
+        mock.patch.object(
+            GPUTensorCache,
+            "from_cached",
+            side_effect=AssertionError("Pre-built caches must not be transferred again"),
+        ),
+    ):
+        val_miou = solver.fit_cached(
+            train_cache,
+            batch_size=2,
+            epochs=1,
+            verbose=False,
+            gpu_train=gpu_train,
+            gpu_val=gpu_val,
+        )
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0
 

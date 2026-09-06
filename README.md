@@ -60,6 +60,8 @@ To download only the datasets needed for a run:
 torchgeo-bench download geobench_v1 --datasets m-eurosat
 ```
 
+V1 uses the pickle-free [JSON-metadata mirror](https://huggingface.co/datasets/calebrob6/geobenchv1-webdataset) under `data/classification_v1.0_wds/`, with a pinned revision and archive SHA-256 verification. Re-download existing pickle-based V1 caches; the readers no longer unpickle metadata.
+
 V2 (classification + segmentation) and torchgeo's EuroSAT downloader work the
 same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download eurosat`). See the [documentation](https://torchgeo.org/torchgeo-bench/user/datasets.html)
 for all options.
@@ -82,12 +84,7 @@ fall back to CPU:
 torchgeo-bench run dataset.names=[m-eurosat] device=cpu
 ```
 
-Results are appended to `results/models/<model name>.csv`, which **ship pre-populated
-with reference results** — to start from a clean slate, write to your own file
-with `output=results/my_run.csv`. Re-run with `resume=true` to skip
-already-completed rows. One-time profile/intrinsic-dim measurements go to their
-own `results/profiles/` and `results/intrinsic_dim/` files instead, so routine
-metrics reruns don't touch them.
+Results are appended to `results/models/<model name>.csv`, which **ship pre-populated with reference results** — to start from a clean slate, write to your own file with `output=results/my_run.csv`. Re-run with `resume=true` to skip already-completed rows. Each evaluation is saved as soon as it finishes, so a later failure does not discard completed metrics. Without an explicit `output=`, one-time profile/intrinsic-dim measurements go to their own `results/profiles/` and `results/intrinsic_dim/` files instead, so routine metrics reruns don't touch them.
 
 ## CoordBench — location encoders
 

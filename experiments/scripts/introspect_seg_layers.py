@@ -23,15 +23,14 @@ from pathlib import Path
 
 import torch
 import yaml
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 
+from torchgeo_bench.config import CONF_DIR, compose_config, instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 
 logger = logging.getLogger(__name__)
 
-CONF = Path(__file__).resolve().parents[2] / "src" / "torchgeo_bench" / "conf" / "model"
+CONF = CONF_DIR / "model"
 
 CANDIDATE = re.compile(r"^(.*\b(?:blocks|encoder|layers|stages|features))\.(\d+)$|^(layer)(\d+)$")
 
@@ -43,11 +42,8 @@ SKIP_TARGETS = {"ImageStatsBench", "RCFBench", "SAM3Encoder"}
 
 def band_specs(dataset: str, bands: str):
     """Return the BandSpec list a model would receive for this dataset."""
-    cls = get_bench_dataset_class(dataset)
-    if bands == "rgb":
-        names = set(cls.rgb_bands)
-        return [b for b in cls.bands if b.name in names]
-    return list(cls.bands)
+    bench = get_bench_dataset_class(dataset)()
+    return bench.select_band_specs(tuple(bench.rgb_bands) if bands == "rgb" else None)
 
 
 class _Stub:
@@ -145,8 +141,9 @@ def main() -> None:
             continue
         if only and name not in only:
             continue
-        cfg = OmegaConf.create({k: v for k, v in conf.items() if k != "eval"})
-        model = instantiate(cfg, bands=band_specs(args.dataset, args.bands), _convert_="object")
+        config_name = path.relative_to(CONF).with_suffix("").as_posix()
+        cfg = compose_config([f"model={config_name}"]).model
+        model = instantiate(cfg, bands=band_specs(args.dataset, args.bands))
         model.eval()
         seen = measure(model)
         if not seen:
@@ -154,7 +151,7 @@ def main() -> None:
             # (e.g. OlmoEarth v1's 2352 = 28^2 x 3 grouped tokens).  Record it
             # as a real incompatibility and fail the run at the end.
             results[name] = {
-                "config": str(path.relative_to(CONF).with_suffix("")),
+                "config": config_name,
                 "unusable": "no tap produced a feature map the probe can reshape",
             }
             print(f"{name:38} UNUSABLE (probe cannot reshape its features)", flush=True)
@@ -162,7 +159,7 @@ def main() -> None:
             continue
         picks, strategy = choose(seen)
         results[name] = {
-            "config": str(path.relative_to(CONF).with_suffix("")),
+            "config": config_name,
             "existing": ((conf.get("eval") or {}).get("segmentation") or {}).get("layers"),
             "strategy": strategy,
             "layers": picks,

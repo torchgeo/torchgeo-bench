@@ -11,10 +11,8 @@ from pathlib import Path
 from typing import ClassVar
 
 from torch.utils.data import Dataset
-
-# Referenced through ``globals()[cls._tg_class]`` in ``get_dataset``.
-from torchgeo.datasets import EuroSAT as TGEuroSAT  # noqa: F401
-from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial  # noqa: F401
+from torchgeo.datasets import EuroSAT as TGEuroSAT
+from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial
 
 from .base import BandSpec, BenchDataset
 
@@ -28,9 +26,7 @@ class EuroSAT(BenchDataset):
     download behaviour are managed by torchgeo.
     """
 
-    # Name of the wrapped torchgeo class, resolved from this module's globals
-    # at call time so tests can monkeypatch ``TGEuroSAT``/``TGEuroSATSpatial``.
-    _tg_class: ClassVar[str] = "TGEuroSAT"
+    _tg_class: ClassVar[type[TGEuroSAT]] = TGEuroSAT
 
     name = "eurosat"
     task = "classification"
@@ -80,7 +76,7 @@ class EuroSAT(BenchDataset):
         """Return the wrapped torchgeo dataset (``_tg_class``) for the split."""
         del partition
         band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
-        return globals()[self._tg_class](
+        return self._tg_class(
             root=str(self.data_root()),
             split=split,
             bands=band_codes,
@@ -98,7 +94,7 @@ class EuroSATSpatial(EuroSAT):
     default random split.
     """
 
-    _tg_class = "TGEuroSATSpatial"
+    _tg_class = TGEuroSATSpatial
 
     name = "eurosat-spatial"
     # Longitude-based 60/20/20: same totals as the random split, just

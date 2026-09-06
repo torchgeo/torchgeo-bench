@@ -3,6 +3,8 @@
 Lightweight HDF5 reader that does not depend on the upstream ``geobench``
 package. Loads samples directly from ``classification_v1.0/<dataset>/``
 HDF5 files using the partition JSON files distributed alongside them.
+These custom HDF5 samples must carry JSON metadata. Standard V1 downloads
+use the pickle-free sharded reader instead.
 """
 
 import json
@@ -16,15 +18,11 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from ._metadata import unpickle_metadata
+from ._metadata import read_hdf5_metadata
 from .base import BenchDataset
 
 V1_ROOT = Path("data/classification_v1.0")
 V1_SHARDED_ROOT = Path("data/classification_v1.0_wds")
-
-# Public mirror of the WebDataset-converted V1 collection.  Auto-pulled the
-# first time a dataset is requested if no local copy is present.
-V1_HF_REPO_ID = "isaaccorley/geobenchv1-webdataset"
 
 
 class GeoBenchv1(Dataset):
@@ -80,10 +78,10 @@ class GeoBenchv1(Dataset):
             self.band_names = list(bands)
 
     def _load_sample_metadata(self, sample_id: str) -> dict:
-        """Load pickled metadata from HDF5 attributes."""
+        """Load JSON metadata from HDF5 attributes."""
         sample_path = self.dataset_dir / f"{sample_id}.hdf5"
         with h5py.File(sample_path, "r") as f:
-            return unpickle_metadata(f.attrs["pickle"])
+            return read_hdf5_metadata(f.attrs)
 
     def __len__(self) -> int:
         return len(self.sample_ids)
@@ -157,11 +155,10 @@ class _V1Dataset(BenchDataset):
         1. **Sharded WebDataset** at :data:`V1_SHARDED_ROOT` if shards already
            exist locally (5–7× faster on NFS, fork-safe at high
            ``num_workers``).
-        2. **Per-sample HDF5** at :data:`V1_ROOT` if the legacy distribution
-           layout is present.
-        3. **HuggingFace mirror** :data:`V1_HF_REPO_ID` — auto-downloaded into
+        2. **Custom JSON-metadata HDF5** at :data:`V1_ROOT` if present.
+        3. **Pinned Hugging Face mirror** — auto-downloaded into
            :data:`V1_SHARDED_ROOT` on first use, then served via the sharded
-           backend.  Disabled by ``GEOBENCH_V1_NO_HF_DOWNLOAD=1``.
+           backend. Disabled by ``GEOBENCH_V1_NO_HF_DOWNLOAD=1``.
         """
         v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split  # type: ignore[assignment]
         source_bands = tuple(spec.source_name for spec in self.select_band_specs(bands))
@@ -173,9 +170,9 @@ class _V1Dataset(BenchDataset):
             and not hdf5_dir.exists()
             and os.environ.get("GEOBENCH_V1_NO_HF_DOWNLOAD") != "1"
         ):
-            from ._v1_webdataset import ensure_sharded_root
+            from ._v1_webdataset import download_sharded_root
 
-            ensure_sharded_root(self.name, V1_SHARDED_ROOT)
+            download_sharded_root(V1_SHARDED_ROOT, [self.name])
 
         if sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")):
             from ._v1_webdataset import GeoBenchv1Sharded

@@ -1,26 +1,12 @@
 """torchgeo foundation-model wrappers for torchgeo-bench.
 
 Each wrapper class loads a torchgeo pretrained model and exposes the
-``BenchModel`` interface.  Inputs are raw sensor values; the wrapper's
-``normalize_inputs`` override applies the ``Normalize`` layer attached to
-the pretrained weights.
-
-Caveats
--------
-
-The pretrained weights' ``Normalize`` transform was calibrated for a
-specific input scale (e.g. Sentinel-2 DN / 10000, NAIP uint8 / 255).
-Pairing one of these wrappers with a dataset whose raw values are in a
-different scale will silently misnormalize.  Each wrapper sets
-:attr:`weights_input_unit` documenting the expected scale, and
-:func:`_warn_unit_mismatch` emits a warning when the band statistics
-look incompatible.  See GitHub issue
-`#16 <https://github.com/torchgeo/torchgeo-bench/issues/16>`_ for the
-follow-up on stronger guards.
+``BenchModel`` interface. Inputs are raw sensor values; under ``model_native``,
+the wrapper converts them to the scale declared by ``weights_input_unit``
+before applying the pretrained weights' ``Normalize`` stages. Other
+normalization strategies use the shared ``BenchModel`` implementation.
 """
 
-import logging
-import warnings
 from typing import Any
 
 import torch
@@ -37,8 +23,6 @@ from ._input_units import InputUnit, convert_unit, detect_input_unit, to_reflect
 from ._normalization import NormalizationStrategy
 from ._pooling import pool_tokens
 from .interface import BenchModel
-
-logger = logging.getLogger(__name__)
 
 
 def _resolve_torchgeo_factory(factory_name: str):
@@ -142,69 +126,11 @@ def _extract_normalize_transforms(weights) -> nn.Sequential | None:
     return nn.Sequential(*norms)
 
 
-# Magnitude buckets for `weights_input_unit` plausibility checks.  Keys are
-# rough expected per-band mean ranges in raw units.
-_UNIT_EXPECTED_MEAN: dict[str, tuple[float, float]] = {
-    "uint8_div255": (0.0, 255.0),
-    "reflectance_0_1": (0.0, 2.0),
-    "s2_dn_div10000": (0.0, 10000.0),
-}
-
 _UNIT_EXPECTED_SOURCE: dict[str, InputUnit] = {
     "uint8_div255": InputUnit.UINT8,
     "reflectance_0_1": InputUnit.REFLECTANCE_0_1,
     "s2_dn_div10000": InputUnit.S2_DN,
 }
-
-
-def _warn_unit_mismatch(
-    cls_name: str,
-    weights_input_unit: str | None,
-    bands: list[BandSpec],
-    check: str,
-) -> None:
-    """Emit a warning if the per-band ``mean`` magnitude looks incompatible.
-
-    Args:
-        cls_name: Wrapper class name, used in the warning message.
-        weights_input_unit: Expected input scale tag (key into
-            :data:`_UNIT_EXPECTED_MEAN`).  ``None`` skips the check.
-        bands: The dataset's :class:`BandSpec` list.
-        check: ``"warn"`` (default) emits a UserWarning; ``"error"`` raises;
-            ``"ignore"`` is silent.
-    """
-    if check == "ignore" or weights_input_unit is None:
-        return
-    expected_unit = _UNIT_EXPECTED_SOURCE.get(weights_input_unit)
-    detected_unit = detect_input_unit(bands)
-    if expected_unit is not None and detected_unit != expected_unit:
-        msg = (
-            f"{cls_name}: pretrained weights expect {weights_input_unit!r} inputs "
-            f"({expected_unit.value}), but selected bands look like {detected_unit.value}: "
-            f"{[(b.name, b.mean, b.max) for b in bands[:5]]}"
-            f"{'...' if len(bands) > 5 else ''}. Embeddings may be poorly scaled."
-        )
-        if check == "error":
-            raise RuntimeError(msg)
-        warnings.warn(msg, UserWarning, stacklevel=3)
-        return
-    expected = _UNIT_EXPECTED_MEAN.get(weights_input_unit)
-    if expected is None:
-        return
-    lo, hi = expected
-    bad = [b for b in bands if not (lo <= b.mean <= hi * 1.5)]
-    if not bad:
-        return
-    msg = (
-        f"{cls_name}: pretrained weights expect inputs in unit "
-        f"{weights_input_unit!r} (per-band mean ~ [{lo}, {hi}]), but the "
-        f"selected dataset has bands with mean outside that range: "
-        f"{[(b.name, b.mean) for b in bad[:5]]}{'...' if len(bad) > 5 else ''}. "
-        "Embeddings may be poorly scaled."
-    )
-    if check == "error":
-        raise RuntimeError(msg)
-    warnings.warn(msg, UserWarning, stacklevel=3)
 
 
 class _TorchGeoBackboneBench(BenchModel):
@@ -227,17 +153,11 @@ class _TorchGeoBackboneBench(BenchModel):
         target_size: int | None,
         normalization_input_unit: str | None = None,
         skip_weight_normalize: int = 0,
-        input_unit_check: str = "warn",
         factory_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        # The pretraining scale is already named by weights_input_unit, so
-        # derive expected_input_unit from it rather than making every wrapper
-        # restate it — model_native fails without it.
-        if type(self).expected_input_unit is None and self.weights_input_unit:
-            derived = _UNIT_EXPECTED_SOURCE.get(self.weights_input_unit)
-            if derived is not None:
-                type(self).expected_input_unit = derived
+        if self.expected_input_unit is None and self.weights_input_unit:
+            self.expected_input_unit = _UNIT_EXPECTED_SOURCE.get(self.weights_input_unit)
         super().__init__(bands=bands, **kwargs)
         if normalization_input_unit is not None:
             if normalization_input_unit not in _UNIT_EXPECTED_SOURCE:
@@ -275,15 +195,7 @@ class _TorchGeoBackboneBench(BenchModel):
             )
         else:
             self._weights_normalize = None
-        if input_unit_check not in ("warn", "ignore", "error"):
-            raise ValueError(
-                f"input_unit_check must be one of warn|ignore|error, got {input_unit_check!r}."
-            )
         native = self.normalization is NormalizationStrategy.MODEL_NATIVE
-        if native and normalization_input_unit is None:
-            _warn_unit_mismatch(
-                type(self).__name__, self.weights_input_unit, bands, input_unit_check
-            )
 
         # Pre-compute the unit conversion needed to bring dataset inputs into
         # the scale the weights' Normalize was calibrated for.  No-op when the
@@ -445,7 +357,6 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
         target_size: int | None = 224,
         normalization_input_unit: str | None = None,
         skip_weight_normalize: int = 0,
-        input_unit_check: str = "warn",
         **_kwargs: Any,
     ) -> None:
         super().__init__(
@@ -457,7 +368,6 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
             target_size=target_size,
             normalization_input_unit=normalization_input_unit,
             skip_weight_normalize=skip_weight_normalize,
-            input_unit_check=input_unit_check,
             **_kwargs,
         )
         self.backbone.fc = nn.Identity()
@@ -492,7 +402,6 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
         weights_member: str = "NAIP_RGB_MI_SATLAS",
         auto_resize: bool = True,
         target_size: int | None = 256,
-        input_unit_check: str = "warn",
         **_kwargs: Any,
     ) -> None:
         super().__init__(
@@ -502,7 +411,6 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=target_size,
-            input_unit_check=input_unit_check,
             **_kwargs,
         )
         self.backbone.head = nn.Identity()
@@ -544,7 +452,6 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
         auto_resize: bool = False,
         target_size: int | None = None,
         image_size: int | None = None,
-        input_unit_check: str = "warn",
         pool: str = "cls",
         res: float = 1.0,
         **_kwargs: Any,
@@ -567,7 +474,6 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=image_size,
-            input_unit_check=input_unit_check,
             factory_kwargs={"img_size": image_size, "res": float(res)},
             **_kwargs,
         )
@@ -654,8 +560,7 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
     ``forward_features(x, wavelengths)`` returns ``(B, D)``.
     """
 
-    # No magnitude check — DOFA's pretrained transform is empty in current
-    # torchgeo releases, and dataset units vary widely.
+    # DOFA's pretrained transform is empty in current torchgeo releases.
     weights_input_unit = None
 
     def __init__(
@@ -668,7 +573,6 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
         wavelengths: list[float] | None = None,
         auto_resize: bool = True,
         target_size: int | None = 224,
-        input_unit_check: str = "warn",
         **_kwargs: Any,
     ) -> None:
         super().__init__(
@@ -678,7 +582,6 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=target_size,
-            input_unit_check=input_unit_check,
             **_kwargs,
         )
         self.wavelengths = _resolve_dofa_wavelengths(bands, wavelengths)
@@ -712,7 +615,6 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
         weights_member: str = "SENTINEL2_RESNET50",
         auto_resize: bool = True,
         target_size: int | None = 320,
-        input_unit_check: str = "warn",
         **_kwargs: Any,
     ) -> None:
         super().__init__(
@@ -722,7 +624,6 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=target_size,
-            input_unit_check=input_unit_check,
             **_kwargs,
         )
         # EarthLoc wraps a ResNet50; adapt its first conv for N-channel input.
@@ -928,7 +829,6 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
         weights_member: str = "CROMA_VIT",
         auto_resize: bool = True,
         target_size: int | None = 120,
-        input_unit_check: str = "warn",
         std_multiplier: float = 2.0,
         **_kwargs: Any,
     ) -> None:
@@ -940,7 +840,6 @@ class TorchGeoCromaBench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=target_size,
-            input_unit_check=input_unit_check,
             **_kwargs,
         )
 
@@ -1025,7 +924,6 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
         weights_member: str = "VIT_BASE14",
         auto_resize: bool = True,
         target_size: int | None = 224,
-        input_unit_check: str = "warn",
         **_kwargs: Any,
     ) -> None:
         super().__init__(
@@ -1035,7 +933,6 @@ class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
             weights_member=weights_member,
             auto_resize=auto_resize,
             target_size=target_size,
-            input_unit_check=input_unit_check,
             **_kwargs,
         )
         chn_ids = _resolve_panopticon_chn_ids(bands)

@@ -1,16 +1,18 @@
 """Unit tests for torchgeo wrapper helpers and construction contracts."""
 
-import warnings
 from types import SimpleNamespace
 
 import pytest
 import torch
 import torch.nn as nn
 from torchvision.transforms import Normalize
+from torchvision.transforms.v2 import Normalize as NormalizeV2
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets.base import BandSpec, BenchDataset
 from torchgeo_bench.datasets.m_eurosat import MEurosat
 from torchgeo_bench.datasets.m_so2sat import MSo2Sat
+from torchgeo_bench.datasets.resisc45 import RESISC45
+from torchgeo_bench.models._input_units import InputUnit
 from torchgeo_bench.models.torchgeo_models import (
     _DOFA_SAR_WAVELENGTH_UM,
     TorchGeoCromaBench,
@@ -25,7 +27,6 @@ from torchgeo_bench.models.torchgeo_models import (
     _resolve_panopticon_chn_ids,
     _resolve_torchgeo_factory,
     _resolve_torchgeo_weights,
-    _warn_unit_mismatch,
 )
 
 
@@ -98,19 +99,20 @@ def test_first_conv_adaptation(in_chans: int):
     assert model[0].in_channels == in_chans
 
 
-def test_normalize_transform_extraction():
+@pytest.mark.parametrize("normalize_cls", [Normalize, NormalizeV2])
+def test_normalize_transform_extraction(normalize_cls: type[nn.Module]) -> None:
     class _Weights:
         def transforms(self):
             return nn.Sequential(
                 nn.Identity(),
-                Normalize(mean=[0.1, 0.2, 0.3], std=[0.4, 0.5, 0.6]),
+                normalize_cls(mean=[0.1, 0.2, 0.3], std=[0.4, 0.5, 0.6]),
                 nn.Identity(),
             )
 
     transform = _extract_normalize_transforms(_Weights())
     assert isinstance(transform, nn.Sequential)
     norm = transform[0]
-    assert isinstance(norm, Normalize)
+    assert isinstance(norm, normalize_cls)
     assert tuple(norm.mean) == pytest.approx((0.1, 0.2, 0.3))
     assert tuple(norm.std) == pytest.approx((0.4, 0.5, 0.6))
 
@@ -170,13 +172,11 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
     cls_model = TorchGeoScaleMAEBench(
         bands=bands,
         normalization="identity",
-        input_unit_check="ignore",
         pool="cls",
     )
     mean_model = TorchGeoScaleMAEBench(
         bands=bands,
         normalization="identity",
-        input_unit_check="ignore",
         pool="mean",
     )
     sample = torch.rand(2, 3, 64, 64)
@@ -200,7 +200,6 @@ def test_scalemae_constructs_selected_grid_without_adapting_rgb_projection(monke
     model = TorchGeoScaleMAEBench(
         bands=_rgb_bands(),
         normalization="identity",
-        input_unit_check="ignore",
         image_size=64,
         res=3.5,
     )
@@ -222,9 +221,7 @@ def test_scalemae_uses_bandspec_zscore_instead_of_checkpoint_transform(monkeypat
         Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     )
     install_tiny_scalemae_factory(monkeypatch, transforms=checkpoint_transform)
-    model = TorchGeoScaleMAEBench(
-        bands=_rgb_bands(), normalization="bandspec_zscore", input_unit_check="ignore"
-    )
+    model = TorchGeoScaleMAEBench(bands=_rgb_bands(), normalization="bandspec_zscore")
 
     at_dataset_mean = torch.full((1, 3, 8, 8), 1500.0)
     normalized = model.normalize_inputs(at_dataset_mean)
@@ -254,9 +251,7 @@ def test_torchgeo_resnet_forward_shape(monkeypatch):
         lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
     )
 
-    model = TorchGeoResNetBench(
-        bands=_rgb_bands(), normalization="identity", input_unit_check="ignore"
-    )
+    model = TorchGeoResNetBench(bands=_rgb_bands(), normalization="identity")
     out = model.forward_patch_features(torch.rand(2, 3, 64, 64))
     assert out.ndim == 2
     assert out.shape[0] == 2
@@ -296,41 +291,8 @@ def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
 
     bands = _s2_multispectral_bands() + [_sar_band("vh"), _sar_band("vv")]
     for normalization in ("bandspec_zscore", "identity"):
-        model = TorchGeoDOFABench(
-            bands=bands, normalization=normalization, input_unit_check="ignore"
-        )
+        model = TorchGeoDOFABench(bands=bands, normalization=normalization)
         assert model._dataset_input_unit is None
-
-
-def test_torchgeo_backbone_skips_unit_mismatch_warning_outside_model_native(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Same gap in _warn_unit_mismatch's own detect_input_unit() call: must not run outside model_native."""
-    import torchgeo_bench.models.torchgeo_models as tg_models
-
-    class _TinyResNet(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.conv1 = nn.Conv2d(14, 8, 3, padding=1)
-            self.pool = nn.AdaptiveAvgPool2d(1)
-            self.fc = nn.Identity()
-
-        def forward(self, images: torch.Tensor) -> torch.Tensor:
-            return self.pool(self.conv1(images)).flatten(1)
-
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
-    )
-    monkeypatch.setattr(
-        tg_models,
-        "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
-    )
-
-    bands = _s2_multispectral_bands() + [_sar_band("vh"), _sar_band("vv")]
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore")
 
 
 def test_dofa_wavelengths_still_raises_for_non_sar_missing_wavelength() -> None:
@@ -387,7 +349,6 @@ def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     model = TorchGeoDOFABench(
         bands=_s2_multispectral_bands(),
         normalization="identity",
-        input_unit_check="ignore",
     )
     out = model.forward_patch_features(torch.rand(2, 12, 64, 64))
     assert out.ndim == 2
@@ -423,7 +384,6 @@ def test_torchgeo_croma_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     model = TorchGeoCromaBench(
         bands=_s2_multispectral_bands(),
         normalization="identity",
-        input_unit_check="ignore",
     )
     out = model.forward_patch_features(torch.rand(2, 12, 64, 64))
     assert out.ndim == 2
@@ -453,7 +413,6 @@ def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> N
     model = TorchGeoPanopticonBench(
         bands=_s2_multispectral_bands(),
         normalization="identity",
-        input_unit_check="ignore",
     )
     out = model.forward_patch_features(torch.rand(2, 12, 64, 64))
     assert out.ndim == 2
@@ -491,16 +450,15 @@ def test_torchgeo_panopticon_model_native_raises(monkeypatch: pytest.MonkeyPatch
     )
 
     bands = _s2_multispectral_bands()
-    native = TorchGeoPanopticonBench(
-        bands=bands, normalization="model_native", input_unit_check="ignore"
-    )
+    native = TorchGeoPanopticonBench(bands=bands, normalization="model_native")
 
     with pytest.raises(ValueError, match="model_native normalisation is undefined"):
         native.normalize_inputs(torch.rand(2, len(bands), 32, 32) * 5000)
 
 
+@pytest.mark.parametrize("normalize_cls", [Normalize, NormalizeV2])
 def test_channel_mismatch_preserves_tiled_normalize_chain(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, normalize_cls: type[nn.Module]
 ) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
@@ -518,8 +476,8 @@ def test_channel_mismatch_preserves_tiled_normalize_chain(
         @staticmethod
         def transforms() -> nn.Sequential:
             return nn.Sequential(
-                Normalize(mean=[0.0], std=[2.0]),
-                Normalize(mean=[1.0, 2.0, 3.0], std=[4.0, 5.0, 6.0]),
+                normalize_cls(mean=[0.0], std=[2.0]),
+                normalize_cls(mean=[1.0, 2.0, 3.0], std=[4.0, 5.0, 6.0]),
             )
 
     monkeypatch.setattr(
@@ -546,7 +504,6 @@ def test_channel_mismatch_preserves_tiled_normalize_chain(
     model = TorchGeoResNetBench(
         bands=six_bands,
         normalization="model_native",
-        input_unit_check="ignore",
     )
     normalized = model.normalize_inputs(torch.ones(1, 6, 8, 8))
     expected = torch.tensor([(0.5 - 1.0) / 4.0, (0.5 - 2.0) / 5.0, (0.5 - 3.0) / 6.0]).view(
@@ -588,7 +545,6 @@ def test_resnet_can_convert_to_reflectance_before_skipping_weight_scale(
         normalization="model_native",
         normalization_input_unit="reflectance_0_1",
         skip_weight_normalize=1,
-        input_unit_check="error",
     )
 
     normalized = model.normalize_inputs(torch.full((1, 3, 2, 2), 10000.0))
@@ -596,9 +552,46 @@ def test_resnet_can_convert_to_reflectance_before_skipping_weight_scale(
     assert torch.allclose(normalized[0, :, 0, 0], expected)
 
 
-# ---------------------------------------------------------------------------
-# _warn_unit_mismatch
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("dataset_cls", "value"), [(MEurosat, 5000.0), (MSo2Sat, 0.5), (RESISC45, 127.5)]
+)
+@pytest.mark.parametrize("normalize_cls", [Normalize, NormalizeV2])
+def test_resnet_native_normalization_converts_source_units(
+    monkeypatch: pytest.MonkeyPatch,
+    dataset_cls: type[BenchDataset],
+    value: float,
+    normalize_cls: type[nn.Module],
+) -> None:
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 4, 1)
+            self.fc = nn.Identity()
+
+    transforms = nn.Sequential(
+        normalize_cls(mean=[0.0], std=[10000.0]),
+        normalize_cls(mean=[0.1, 0.2, 0.3], std=[0.5, 0.25, 0.1]),
+    )
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    monkeypatch.setattr(
+        tg_models,
+        "_resolve_torchgeo_weights",
+        lambda *_: SimpleNamespace(transforms=transforms),
+    )
+    dataset = dataset_cls()
+    model = TorchGeoResNetBench(
+        bands=dataset.select_band_specs(tuple(dataset.rgb_bands)), normalization="model_native"
+    )
+
+    normalized = model.normalize_inputs(torch.full((1, 3, 2, 2), value))
+    expected = torch.tensor([(0.5 - 0.1) / 0.5, (0.5 - 0.2) / 0.25, (0.5 - 0.3) / 0.1])
+    torch.testing.assert_close(normalized, expected.view(1, 3, 1, 1).expand_as(normalized))
+    assert model.expected_input_unit is InputUnit.S2_DN
+    assert TorchGeoResNetBench.expected_input_unit is InputUnit.S2_DN
 
 
 def _dn_bands() -> list[BandSpec]:
@@ -614,62 +607,6 @@ def _dn_bands() -> list[BandSpec]:
         )
         for i in range(3)
     ]
-
-
-def _dataset_bands(cls, names: tuple[str, ...]) -> list[BandSpec]:
-    by_name = {b.name: b for b in cls.bands}
-    return [by_name[name] for name in names]
-
-
-def test_warn_unit_mismatch_ignore_mode():
-    # Should produce no warning and no error
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        _warn_unit_mismatch("TestModel", "reflectance_0_1", _dn_bands(), "ignore")
-
-
-def test_warn_unit_mismatch_warn_mode_emits_warning():
-    with pytest.warns(UserWarning, match="look like"):
-        _warn_unit_mismatch("TestModel", "reflectance_0_1", _dn_bands(), "warn")
-
-
-def test_warn_unit_mismatch_error_mode_raises():
-    with pytest.raises(RuntimeError, match="look like"):
-        _warn_unit_mismatch("TestModel", "reflectance_0_1", _dn_bands(), "error")
-
-
-def test_warn_unit_mismatch_none_unit_skips():
-    # weights_input_unit=None → no check at all
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        _warn_unit_mismatch("TestModel", None, _dn_bands(), "warn")
-
-
-def test_warn_unit_mismatch_mean_range_warn():
-    # DN bands paired with s2_dn_div10000 unit → unit matches but mean exceeds hi*1.5
-    dn_high = [
-        BandSpec(
-            sensor="s2", name="b", source_name="B", mean=20000.0, std=1000.0, min=0.0, max=30000.0
-        )
-    ]
-    with pytest.warns(UserWarning, match="mean outside"):
-        _warn_unit_mismatch("TestModel", "s2_dn_div10000", dn_high, "warn")
-
-
-def test_s2_dn_weights_warn_on_reflectance_dataset() -> None:
-    """Reflectance-scale So2Sat must not pass as raw Sentinel-2 DN."""
-    bands = _dataset_bands(MSo2Sat, ("red", "green", "blue"))
-    with pytest.warns(UserWarning, match="look like reflectance_0_1"):
-        _warn_unit_mismatch("Demo", "s2_dn_div10000", bands, "warn")
-
-
-def test_s2_dn_weights_accept_raw_s2_dataset() -> None:
-    """Raw Sentinel-2 DN datasets remain accepted for /10000 torchgeo weights."""
-    bands = _dataset_bands(MEurosat, ("red", "green", "blue"))
-    with warnings.catch_warnings(record=True) as records:
-        warnings.simplefilter("always")
-        _warn_unit_mismatch("Demo", "s2_dn_div10000", bands, "warn")
-    assert records == []
 
 
 # ---------------------------------------------------------------------------
@@ -724,9 +661,7 @@ def test_normalize_inputs_bandspec_zscore_no_unit_conversion(monkeypatch):
     )
 
     bands = _dn_bands()  # mean=1200, max=10000
-    model = TorchGeoResNetBench(
-        bands=bands, normalization="bandspec_zscore", input_unit_check="ignore"
-    )
+    model = TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore")
 
     # A tensor at exactly the band mean should z-score to ≈0
     x = torch.full((1, 3, 8, 8), 1200.0)
@@ -766,15 +701,11 @@ def test_weights_normalize_only_applies_under_model_native(
     bands = _dn_bands()
     sample = torch.full((1, 3, 4, 4), 1000.0)
 
-    native = TorchGeoResNetBench(
-        bands=bands, normalization="model_native", input_unit_check="ignore"
-    ).normalize_inputs(sample)
-    zscore = TorchGeoResNetBench(
-        bands=bands, normalization="bandspec_zscore", input_unit_check="ignore"
-    ).normalize_inputs(sample)
-    identity = TorchGeoResNetBench(
-        bands=bands, normalization="identity", input_unit_check="ignore"
-    ).normalize_inputs(sample)
+    native = TorchGeoResNetBench(bands=bands, normalization="model_native").normalize_inputs(sample)
+    zscore = TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore").normalize_inputs(
+        sample
+    )
+    identity = TorchGeoResNetBench(bands=bands, normalization="identity").normalize_inputs(sample)
 
     # bandspec_zscore standardises with the BandSpec stats (mean 1200, std 400);
     # identity passes raw values through; only model_native uses the weights'
@@ -784,10 +715,9 @@ def test_weights_normalize_only_applies_under_model_native(
     assert torch.allclose(native, torch.full_like(native, 500.0))
 
 
-def test_expected_input_unit_derived_from_weights_unit(monkeypatch):
-    """model_native needs expected_input_unit; wrappers only name weights_input_unit."""
+def test_expected_input_unit_is_derived_per_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Derived units must neither mutate classes nor overwrite declared units."""
     import torchgeo_bench.models.torchgeo_models as tg_models
-    from torchgeo_bench.models._input_units import InputUnit
 
     class _TinySwin(nn.Module):
         def __init__(self) -> None:
@@ -798,15 +728,35 @@ def test_expected_input_unit_derived_from_weights_unit(monkeypatch):
         def forward(self, images: torch.Tensor) -> torch.Tensor:
             return images.mean(dim=(2, 3))
 
+    class _ReflectanceSwin(TorchGeoSwinBench):
+        weights_input_unit = "reflectance_0_1"
+
+    class _DeclaredUnitSwin(TorchGeoSwinBench):
+        expected_input_unit = InputUnit.S2_DN
+
     monkeypatch.setattr(
         tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySwin()
     )
     monkeypatch.setattr(
         tg_models,
         "_resolve_torchgeo_weights",
-        lambda _weights_class, _weights_member: SimpleNamespace(transforms=nn.Identity()),
+        lambda _weights_class, _weights_member: SimpleNamespace(
+            transforms=nn.Sequential(Normalize(mean=[0.0], std=[255.0]))
+        ),
     )
-    # TorchGeoSwinBench declares weights_input_unit="uint8_div255" and no
-    # expected_input_unit; the base class must fill it in.
-    TorchGeoSwinBench(bands=_rgb_bands(), normalization="identity", input_unit_check="ignore")
-    assert TorchGeoSwinBench.expected_input_unit is InputUnit.UINT8
+
+    assert TorchGeoSwinBench.expected_input_unit is None
+    model = TorchGeoSwinBench(bands=_rgb_bands(), normalization="model_native")
+    assert model.expected_input_unit is InputUnit.UINT8
+    assert TorchGeoSwinBench.expected_input_unit is None
+    normalized = model.normalize_inputs(torch.full((1, 3, 2, 2), 5000.0))
+    torch.testing.assert_close(normalized, torch.full_like(normalized, 0.5))
+
+    reflectance = _ReflectanceSwin(bands=_rgb_bands(), normalization="identity")
+    assert reflectance.expected_input_unit is InputUnit.REFLECTANCE_0_1
+    assert _ReflectanceSwin.expected_input_unit is None
+    assert TorchGeoSwinBench.expected_input_unit is None
+
+    declared = _DeclaredUnitSwin(bands=_rgb_bands(), normalization="identity")
+    assert declared.expected_input_unit is InputUnit.S2_DN
+    assert _DeclaredUnitSwin.expected_input_unit is InputUnit.S2_DN

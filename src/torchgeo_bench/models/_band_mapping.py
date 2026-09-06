@@ -4,7 +4,7 @@ import logging
 
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandCompatibilityError, BandSpec
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ def select_src_bands(
             selected.append(name)
     if not indices:
         available = sorted(src_index)
-        raise ValueError(
+        raise BandCompatibilityError(
             f"select_src_bands: none of the target bands {target_band_names} are present. "
             f"Available canonical bands: {available}."
         )
@@ -227,7 +227,7 @@ def map_to_model_bands(
         if idx is None:
             if not allow_missing:
                 available = [canonical_band_name(b.name) for b in src_bands]
-                raise ValueError(
+                raise BandCompatibilityError(
                     f"Missing required model band {name!r}. Available canonical bands: "
                     f"{available}. Pass allow_missing=True only for an explicit zero-fill ablation."
                 )

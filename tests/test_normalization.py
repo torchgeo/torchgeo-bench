@@ -5,7 +5,7 @@ import torch
 
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models._input_units import InputUnit
-from torchgeo_bench.models._normalization import build_normalizer
+from torchgeo_bench.models._normalization import UnsupportedNormalizationError, build_normalizer
 
 
 def _bands(
@@ -111,7 +111,7 @@ def test_model_native_with_pretrain_stats():
 
 def test_model_native_requires_expected_unit():
     bands = _bands([10000.0])
-    with pytest.raises(ValueError, match="expected_input_unit"):
+    with pytest.raises(UnsupportedNormalizationError, match="expected_input_unit"):
         build_normalizer("model_native", bands)
 
 
@@ -140,5 +140,7 @@ def test_model_native_without_pretrain_stats_raises_on_use():
     """
     bands = _bands([10000.0])
     fn = build_normalizer("model_native", bands, expected_input_unit=InputUnit.S2_DN)
-    with pytest.raises(ValueError, match="model_native normalisation is undefined"):
+    with pytest.raises(
+        UnsupportedNormalizationError, match="model_native normalisation is undefined"
+    ):
         fn(torch.tensor([[[[5000.0]]]]))

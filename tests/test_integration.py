@@ -1,148 +1,122 @@
-"""Integration tests for the full torchgeo-bench benchmark pipeline.
+"""CPU-capable program smoke tests using real data under the invocation's data/ directory.
 
-These tests run the actual CLI workflow end-to-end: load a real dataset,
-extract features with a real model, and evaluate with KNN / logistic
-regression.  They are slow (10–60 s each) and require data on disk, so
-they are skipped by default.
-
-Run with::
-
-    pytest -m slow tests/test_integration.py
-    pytest -m slow                           # all slow tests
-    pytest -m slow -k forestnet              # just forestnet tests
-
-Expected values below were measured with seed=0 and are perfectly
-reproducible across runs.  Tolerance is set to ±0.02 to absorb minor
-library-version differences without masking real regressions.
+Run with ``pytest -m slow tests/test_integration.py`` after downloading the datasets.
+Missing datasets skip individually; present but incompatible or incomplete data must fail.
 """
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
-import torch
 
-GEOBENCH_ROOT = Path(os.getenv("GEOBENCH_ROOT", "data/classification_v1.0"))
+from torchgeo_bench.datasets import get_bench_dataset_class
 
-# Re-usable skip conditions
-_skip_no_v1 = pytest.mark.skipif(
-    not GEOBENCH_ROOT.exists(), reason=f"GeoBench V1 data not found at {GEOBENCH_ROOT}"
+from .test_cli_program import run_cli
+
+pytestmark = pytest.mark.slow
+
+
+def require_dataset_data(name: str) -> None:
+    """Skip only when the requested dataset has not been supplied."""
+    if name.startswith("m-"):
+        paths = [
+            Path("data/classification_v1.0") / name,
+            Path("data/classification_v1.0_wds") / name,
+        ]
+    elif name in ("eurosat", "eurosat-spatial"):
+        paths = [Path("data/eurosat")]
+    else:
+        paths = [Path("data/geobenchv2") / name]
+    if not any(path.exists() for path in paths):
+        pytest.skip(f"{name} data not supplied; expected one of {paths}")
+
+
+@pytest.mark.parametrize(
+    ("dataset", "bands", "partition"),
+    [
+        ("m-eurosat", "rgb", "0.01x_train"),
+        ("so2sat", "rgb", "default"),
+        ("eurosat", "all", "default"),
+    ],
+    ids=["v1-m-eurosat", "v2-so2sat", "eurosat"],
 )
-_skip_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_real_classification_program(
+    tmp_path: Path, dataset: str, bands: str, partition: str
+) -> None:
+    require_dataset_data(dataset)
+    output = tmp_path / "classification.csv"
+    arguments = [
+        "run",
+        "model=rcf",
+        "model.features=32",
+        f"dataset.names=[{dataset}]",
+        f"dataset.bands={bands}",
+        f"dataset.partition={partition}",
+        "dataset.image_size=32",
+        "dataset.batch_size=64",
+        "dataset.num_workers=0",
+        "device=cpu",
+        "eval.bootstrap=5",
+        "eval.c_range=[-2,2,3]",
+        f"output={output}",
+    ]
+    result = run_cli(*arguments, cwd=Path.cwd(), timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.is_file(), result.stdout + result.stderr
+    rows = pd.read_csv(output)
+    assert set(rows["method"]) == {"knn5", "linear"}
+    assert (rows["dataset"] == dataset).all()
+    assert (rows["bands"] == bands).all()
+    assert (rows["num_classes"] == get_bench_dataset_class(dataset).num_classes).all()
+    assert (rows["feature_dim"] == 32).all()
+    assert (rows[["n_train", "n_val", "n_test"]] > 0).all().all()
+    assert np.isfinite(rows[["metric_value", "ci_lower", "ci_upper"]]).all().all()
+    assert rows["metric_value"].between(0, 1).all()
+    assert (rows["ci_lower"] <= rows["ci_upper"]).all()
 
-# Tolerance for metric comparisons (absorbs minor library version diffs)
-_TOL = 0.02
-
-
-def _run_bench(*overrides: str, timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run ``python -m torchgeo_bench`` with the given config overrides."""
-    cmd = [sys.executable, "-m", "torchgeo_bench", *overrides]
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=str(Path(__file__).resolve().parent.parent),
-    )
-
-
-@pytest.mark.slow
-@_skip_no_v1
-@_skip_no_cuda
-class TestForestnetResNet18Pipeline:
-    """End-to-end benchmark on m-forestnet with timm resnet18 (1% partition)."""
-
-    @pytest.fixture(autouse=True)
-    def _output_csv(self, tmp_path):
-        self.output = str(tmp_path / "integration_results.csv")
-
-    def _run(self, *extra: str) -> subprocess.CompletedProcess:
-        return _run_bench(
-            "model=timm/resnet18",
-            "dataset.names=[m-forestnet]",
-            "dataset.partition=0.01x_train",
-            f"output={self.output}",
-            "eval.bootstrap=10",
-            "device=cuda:0",
-            *extra,
-        )
-
-    # Expected (seed=0, 1% partition): knn5=0.3112, linear=0.4622
-
-    def test_knn_and_linear(self):
-        """Full run: KNN + linear probe with tight performance check."""
-        result = self._run()
-        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
-
-        df = pd.read_csv(self.output)
-        assert set(df["method"]).issuperset({"knn5", "linear"})
-        assert (df["dataset"] == "m-forestnet").all()
-        assert (df["name"] == "resnet18").all()
-
-        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
-        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
-        assert knn == pytest.approx(0.311, abs=_TOL), f"KNN={knn}"
-        assert linear == pytest.approx(0.462, abs=_TOL), f"Linear={linear}"
+    before = output.read_bytes()
+    resumed = run_cli(*arguments, "resume=true", cwd=Path.cwd(), timeout=120)
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert output.read_bytes() == before
 
 
-@pytest.mark.slow
-@_skip_no_v1
-@_skip_no_cuda
-class TestEurosatResNet18Pipeline:
-    """End-to-end benchmark on m-eurosat with timm resnet18 (1% partition)."""
+@pytest.mark.parametrize("cached", [True, False], ids=["cached", "uncached"])
+def test_real_segmentation_program(tmp_path: Path, cached: bool) -> None:
+    require_dataset_data("caffe")
+    output = tmp_path / "segmentation.csv"
+    arguments = [
+        "run",
+        "model=timm/resnet18",
+        "model.pretrained=false",
+        "model.seed=0",
+        "dataset.names=[caffe]",
+        "dataset.image_size=32",
+        "dataset.batch_size=32",
+        "dataset.num_workers=0",
+        "device=cpu",
+        "eval.bootstrap=5",
+        "eval.segmentation.head_type=linear",
+        "eval.segmentation.epochs=1",
+        "eval.segmentation.batch_size=16",
+        f"eval.segmentation.cache_features={str(cached).lower()}",
+        f"output={output}",
+    ]
+    result = run_cli(*arguments, cwd=Path.cwd(), timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.is_file(), result.stdout + result.stderr
+    rows = pd.read_csv(output)
+    assert len(rows) == 1
+    row = rows.iloc[0]
+    assert row["dataset"] == "caffe"
+    assert row["method"] == "seg-linear"
+    assert row["metric_name"] == "mIoU"
+    assert 0 <= row["metric_value"] <= 1
+    assert np.isfinite(row[["metric_value", "ci_lower", "ci_upper"]].astype(float)).all()
+    assert row["ci_lower"] <= row["ci_upper"]
+    assert row["best_batch_size"] == (16 if cached else 32)
 
-    @pytest.fixture(autouse=True)
-    def _output_csv(self, tmp_path):
-        self.output = str(tmp_path / "eurosat_results.csv")
-
-    # Expected (seed=0, 1% partition): knn5=0.279, linear=0.910
-
-    def test_full_run(self):
-        """Full pipeline on m-eurosat with tight performance check."""
-        result = _run_bench(
-            "model=timm/resnet18",
-            "dataset.names=[m-eurosat]",
-            "dataset.partition=0.01x_train",
-            f"output={self.output}",
-            "eval.bootstrap=10",
-            "device=cuda:0",
-        )
-        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
-
-        df = pd.read_csv(self.output)
-        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
-        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
-        assert knn == pytest.approx(0.279, abs=_TOL), f"KNN={knn}"
-        assert linear == pytest.approx(0.910, abs=_TOL), f"Linear={linear}"
-
-
-@pytest.mark.slow
-@_skip_no_v1
-@_skip_no_cuda
-class TestMultiDatasetRun:
-    """Running on multiple datasets in a single invocation."""
-
-    @pytest.fixture(autouse=True)
-    def _output_csv(self, tmp_path):
-        self.output = str(tmp_path / "multi_ds_results.csv")
-
-    def test_two_datasets(self):
-        """Run on m-eurosat + m-forestnet together."""
-        result = _run_bench(
-            "model=rcf",
-            "dataset.names=[m-eurosat,m-forestnet]",
-            "dataset.partition=0.01x_train",
-            f"output={self.output}",
-            "eval.bootstrap=10",
-            "eval.skip_linear=true",
-            "device=cuda:0",
-        )
-        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
-
-        df = pd.read_csv(self.output)
-        datasets = set(df["dataset"])
-        assert datasets == {"m-eurosat", "m-forestnet"}, f"Got datasets: {datasets}"
-        assert len(df) == 2  # 1 knn row per dataset
+    before = output.read_bytes()
+    resumed = run_cli(*arguments, "resume=true", cwd=Path.cwd(), timeout=120)
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert output.read_bytes() == before

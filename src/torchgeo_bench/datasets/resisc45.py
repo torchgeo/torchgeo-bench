@@ -15,13 +15,11 @@ happen in the wrapper.  See :meth:`RESISC45.get_dataset`.
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar
 
 import torch
 from torch.utils.data import Dataset
-
-# Referenced through ``globals()[cls._tg_class]`` in ``get_dataset``.
-from torchgeo.datasets import RESISC45 as TGRESISC45  # noqa: F401
+from torchgeo.datasets import RESISC45 as TGRESISC45
+from torchvision.transforms import Compose
 
 from .base import BandSpec, BenchDataset
 
@@ -43,10 +41,6 @@ class RESISC45(BenchDataset):
     models (OlmoEarth, UniverSat, ...) treat it as ordinary RGB aerial
     imagery instead of rejecting or silently mis-routing it.
     """
-
-    # Name of the wrapped torchgeo class, resolved from this module's globals
-    # at call time so tests can monkeypatch ``TGRESISC45``.
-    _tg_class: ClassVar[str] = "TGRESISC45"
 
     name = "resisc45"
     task = "classification"
@@ -100,10 +94,12 @@ class RESISC45(BenchDataset):
         specs = self.select_band_specs(bands)
         indices = [self.bands.index(spec) for spec in specs]
         select = _make_band_select(indices, len(self.bands))
-        return globals()[self._tg_class](
+        if select is not None:
+            transform = select if transform is None else Compose([select, transform])
+        return TGRESISC45(
             root=str(self.data_root()),
             split=split,
-            transforms=_compose(select, transform),
+            transforms=transform,
         )
 
 
@@ -122,19 +118,3 @@ def _make_band_select(indices: list[int], n_bands: int) -> Callable[[dict], dict
         return sample
 
     return _select
-
-
-def _compose(*transforms: Callable | None) -> Callable[[dict], dict] | None:
-    """Chain the non-``None`` transforms left to right; ``None`` if all are empty."""
-    stages = [t for t in transforms if t is not None]
-    if not stages:
-        return None
-    if len(stages) == 1:
-        return stages[0]
-
-    def _chained(sample: dict) -> dict:
-        for stage in stages:
-            sample = stage(sample)
-        return sample
-
-    return _chained

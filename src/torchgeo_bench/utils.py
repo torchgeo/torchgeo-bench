@@ -4,8 +4,8 @@ import logging
 
 import numpy as np
 import torch
-from rich.progress import track
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +43,7 @@ def extract_features(
     x_all = []
     y_all = []
 
-    iterator = (
-        track(dataloader, total=len(dataloader), description=description) if verbose else dataloader
-    )
-
-    for batch in iterator:
+    for batch in tqdm(dataloader, desc=description, disable=not verbose):
         images = batch["image"].to(device)
         if "label" not in batch:
             raise KeyError(
@@ -60,7 +56,7 @@ def extract_features(
         if transforms is not None:
             images = transforms(images)
 
-        with torch.no_grad(), torch.inference_mode():
+        with torch.inference_mode():
             features = model(images)
             if isinstance(features, torch.Tensor):
                 features = features.cpu().numpy()
