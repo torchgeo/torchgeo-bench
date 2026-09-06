@@ -1,10 +1,4 @@
-"""Repack a GeoBench V1 classification dataset from per-sample HDF5 files into
-WebDataset tar shards.
-
-V1 ships ~22k tiny ``id_*.hdf5`` files per dataset, which makes the dataloader
-NFS-bound (one ``open()`` round-trip per sample).  Repacking into tar shards
-of ~1000 samples each cuts file-opens by 1000x and yields 5–10x dataloader
-throughput on the same data.
+"""Repack custom GeoBench V1 HDF5 files with JSON metadata into tar shards.
 
 Usage::
 
@@ -15,11 +9,10 @@ Usage::
 Each output sample is::
 
     <id>.bands.npz   per-band float arrays keyed by their source name
-    <id>.meta.json   data-only metadata from JSON or checksum-approved pickle
+    <id>.meta.json   data-only metadata from the HDF5 ``metadata_json`` attribute
 
 Partition JSON files are copied verbatim into the output dir so the new
-loader can read them without changes. Published pickle metadata is converted
-only after matching the dataset/sample checksum bundled with the library.
+loader can read them without changes. Pickle metadata is not read or converted.
 """
 
 import argparse
@@ -33,12 +26,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from torchgeo_bench.datasets._metadata import (
-    MAX_PICKLE_BYTES,
-    decode_metadata,
-    decode_pickle_metadata,
-    read_hdf5_metadata,
-)
+from torchgeo_bench.datasets._metadata import decode_metadata, read_hdf5_metadata
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -47,9 +35,7 @@ logger = logging.getLogger(__name__)
 def _read_sample(hdf5_path: Path) -> tuple[dict[str, np.ndarray], dict]:
     """Return band arrays and data-only metadata for one V1 HDF5 sample."""
     with h5py.File(hdf5_path, "r") as f:
-        metadata = read_hdf5_metadata(
-            f.attrs, dataset_name=hdf5_path.parent.name, sample_id=hdf5_path.stem
-        )
+        metadata = read_hdf5_metadata(f.attrs)
         bands = {k: f[k][:] for k in f}
     if any(array.dtype.hasobject for array in bands.values()):
         raise ValueError(f"Band arrays in {hdf5_path} must not contain Python objects.")
@@ -116,7 +102,7 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
     for path in shard_paths:
         with tarfile.open(path, "r") as archive:
             for member in archive:
-                for ext in ("bands.npz", "meta.json", "meta.pkl"):
+                for ext in ("bands.npz", "meta.json"):
                     suffix = "." + ext
                     if member.name.endswith(suffix):
                         sample_id = member.name[: -len(suffix)]
@@ -140,16 +126,9 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
             continue
         with np.load(io.BytesIO(_read(parts["bands.npz"])), allow_pickle=False) as archive:
             new_bands = {name: archive[name] for name in archive.files}
-        if "meta.json" in parts:
-            new_meta = decode_metadata(_read(parts["meta.json"]))
-        elif "meta.pkl" in parts:
-            if not 0 < parts["meta.pkl"][2] <= MAX_PICKLE_BYTES:
-                raise ValueError(f"{sid}: pickle metadata size is outside the permitted limit.")
-            new_meta = decode_pickle_metadata(
-                _read(parts["meta.pkl"]), dataset_name=dataset_dir.name, sample_id=sid
-            )
-        else:
-            raise ValueError(f"{sid}: missing metadata.")
+        if "meta.json" not in parts:
+            raise ValueError(f"{sid}: missing '.meta.json' metadata; pickle is not supported.")
+        new_meta = decode_metadata(_read(parts["meta.json"]))
 
         # Reference HDF5
         ref_bands, ref_meta = _read_sample(targets[sid])

@@ -27,9 +27,9 @@ Two coordinate sources are handled:
 * **V2** — ``<root>/<name>/*.tortilla``, whose metadata frame already carries
   ``lon``/``lat`` columns (plus a place label where the source provided one).
   Metadata-only, so this is fast.
-* **V1** — ``<root>/<name>/*.hdf5``, where JSON or checksum-approved pickle
-  metadata supplies affine coefficients and CRS strings. The raster origin
-  is reprojected to EPSG:4326.
+* **V1** — JSON metadata in the default tar shards or custom HDF5 files
+  supplies affine coefficients and CRS strings. The raster origin is
+  reprojected to EPSG:4326.
 
 Extraction is deterministic: re-running against unchanged raw data reproduces
 byte-identical JSON.
@@ -41,6 +41,7 @@ import glob
 import json
 import logging
 import os
+import tarfile
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -161,42 +162,72 @@ def _extract_v2(paths: list[str]) -> dict | None:
 
 
 # --------------------------------------------------------------------------
-# GeoBench V1 (.hdf5)
+# GeoBench V1 (JSON metadata in tar shards or HDF5)
 # --------------------------------------------------------------------------
-def _v1_origin(path: str) -> tuple[float | None, float | None, str]:
-    """Return the raster origin and CRS for one V1 sample.
+def _metadata_origin(meta: dict) -> tuple[float | None, float | None, str]:
+    """Return the first usable affine origin and CRS from JSON metadata."""
+    for entry in meta.values():
+        if not isinstance(entry, dict):
+            continue
+        transform, crs = entry.get("transform"), entry.get("crs")
+        if transform is None or crs is None:
+            continue
+        if not isinstance(crs, str):
+            raise ValueError("GeoBench JSON metadata CRS must be a string.")
+        if (
+            not isinstance(transform, list)
+            or len(transform) not in (6, 9)
+            or any(not isinstance(value, (int, float)) for value in transform)
+        ):
+            raise ValueError("GeoBench JSON metadata transform must have 6 or 9 coefficients.")
+        return float(transform[2]), float(transform[5]), crs
+    return None, None, "NOGEO"
 
-    Band entries contain six or nine affine coefficients and a CRS string.
-    """
+
+def _v1_origin(path: str) -> tuple[float | None, float | None, str]:
+    """Return the raster origin and CRS for one custom V1 HDF5 sample."""
     import h5py
 
     from .datasets._metadata import read_hdf5_metadata
 
     try:
         with h5py.File(path, "r") as f:
-            sample_path = Path(path)
-            meta = read_hdf5_metadata(
-                f.attrs, dataset_name=sample_path.parent.name, sample_id=sample_path.stem
-            )
-        for entry in meta.values():
-            if not isinstance(entry, dict):
-                continue
-            transform, crs = entry.get("transform"), entry.get("crs")
-            if transform is None or crs is None:
-                continue
-            if not isinstance(crs, str):
-                raise ValueError("GeoBench JSON metadata CRS must be a string.")
-            if (
-                not isinstance(transform, list)
-                or len(transform) not in (6, 9)
-                or any(not isinstance(value, (int, float)) for value in transform)
-            ):
-                raise ValueError("GeoBench JSON metadata transform must have 6 or 9 coefficients.")
-            return float(transform[2]), float(transform[5]), crs
+            meta = read_hdf5_metadata(f.attrs)
+        return _metadata_origin(meta)
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return None, None, f"ERR {type(exc).__name__}: {exc}"
 
-    return None, None, "NOGEO"
+
+def _v1_shard_origins(path: str) -> list[tuple[float | None, float | None, str]]:
+    """Read sample origins from JSON shard members without loading image arrays."""
+    from .datasets._metadata import decode_metadata
+
+    results: dict[str, tuple[float | None, float | None, str]] = {}
+    with tarfile.open(path, "r") as archive:
+        for member in archive:
+            if member.name.endswith(".bands.npz"):
+                sample_id = member.name.removesuffix(".bands.npz")
+                results.setdefault(
+                    sample_id,
+                    (
+                        None,
+                        None,
+                        "ERR ValueError: missing .meta.json metadata; replace legacy V1 data",
+                    ),
+                )
+            elif member.name.endswith(".meta.json"):
+                sample_id = member.name.removesuffix(".meta.json")
+                try:
+                    stream = archive.extractfile(member)
+                    if stream is None:
+                        raise ValueError(f"Not a metadata file: {member.name}")
+                    with stream:
+                        results[sample_id] = _metadata_origin(decode_metadata(stream.read()))
+                except (OSError, KeyError, TypeError, ValueError) as exc:
+                    results[sample_id] = (None, None, f"ERR {type(exc).__name__}: {exc}")
+    if not results:
+        raise ValueError(f"No GeoBench V1 sample metadata in {path}.")
+    return list(results.values())
 
 
 def _extract_v1(name: str, files: list[str], workers: int) -> dict | None:
@@ -204,7 +235,10 @@ def _extract_v1(name: str, files: list[str], workers: int) -> dict | None:
     from pyproj import Transformer
 
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(_v1_origin, files, chunksize=64))
+        if files and files[0].endswith(".tar"):
+            results = [origin for shard in pool.map(_v1_shard_origins, files) for origin in shard]
+        else:
+            results = list(pool.map(_v1_origin, files, chunksize=64))
 
     errors = [r[2] for r in results if r[0] is None and r[2].startswith("ERR")]
     if errors:
@@ -287,13 +321,19 @@ def _attribute_continents(lon: np.ndarray, lat: np.ndarray) -> Counter:
 def _dataset_dir(name: str) -> Path | None:
     """Return the on-disk directory for a dataset, or ``None`` if absent.
 
-    Goes through the dataset's own ``data_root()`` so the environment
-    overrides (``GEOBENCH_V2_ROOT``) are honoured.
+    V1 prefers the same sharded cache as the benchmark; other layouts use
+    the dataset's fixed ``data_root()``.
     """
+    from .datasets.geobench_v1 import V1_SHARDED_ROOT, _V1Dataset
+
     try:
         cls = get_bench_dataset_class(name)
     except KeyError:
         return None
+    if issubclass(cls, _V1Dataset):
+        sharded = V1_SHARDED_ROOT / name
+        if any(sharded.glob("shard_*.tar")):
+            return sharded
     root = cls.data_root()
     # V1/V2 roots are the *parent* holding per-dataset subdirectories; the
     # torchgeo wrappers point straight at their own directory.
@@ -353,7 +393,7 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
 
     Args:
         name: Registered dataset identifier.
-        workers: Processes used for the V1 HDF5 scan. Defaults to
+        workers: Processes used for the V1 metadata scan. Defaults to
             ``min(32, os.cpu_count())``.
 
     Returns:
@@ -386,6 +426,7 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
         )
 
     tortillas = sorted(glob.glob(str(directory / "*.tortilla")))
+    shards = sorted(glob.glob(str(directory / "shard_*.tar")))
     hdf5s = sorted(glob.glob(str(directory / "*.hdf5")))
 
     if tortillas:
@@ -394,8 +435,8 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
             return GeoRecord(
                 name=name, status="no_geo", reason="tortilla metadata has no lon/lat columns"
             )
-    elif hdf5s:
-        data = _extract_v1(name, hdf5s, workers)
+    elif shards or hdf5s:
+        data = _extract_v1(name, shards or hdf5s, workers)
         if data is None:
             return GeoRecord(
                 name=name, status="no_geo", reason="no sample carries a usable transform/crs"
@@ -404,7 +445,7 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
         return GeoRecord(
             name=name,
             status="not_downloaded",
-            reason=f"no .tortilla or .hdf5 files under {directory}",
+            reason=f"no .tortilla, V1 shard, or .hdf5 files under {directory}",
         )
 
     if len(data["lon"]) == 0:

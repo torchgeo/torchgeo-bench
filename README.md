@@ -60,6 +60,8 @@ To download only the datasets needed for a run:
 torchgeo-bench download geobench_v1 --datasets m-eurosat
 ```
 
+V1 uses the pickle-free [JSON-metadata mirror](https://huggingface.co/datasets/calebrob6/geobenchv1-webdataset) under `data/classification_v1.0_wds/`, with a pinned revision and archive SHA-256 verification. Re-download existing pickle-based V1 caches; the readers no longer unpickle metadata.
+
 V2 (classification + segmentation) and torchgeo's EuroSAT downloader work the
 same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download eurosat`). See the [documentation](https://torchgeo.org/torchgeo-bench/user/datasets.html)
 for all options.

@@ -1,6 +1,6 @@
-"""Tests for GeoBenchv1 class.
+"""Tests for the published GeoBench V1 JSON shards.
 
-These tests verify that the GeoBenchv1 dataset can load all available
+These tests verify that the V1 readers can load all available
 GeoBench V1 datasets with different partitions, splits, and normalization
 methods. They access band data via the per-dataset wrapper's
 ``BenchDataset.get_dataset()``, which translates short canonical band names
@@ -8,25 +8,26 @@ methods. They access band data via the per-dataset wrapper's
 ``"04 - Red"`` for us.
 """
 
+from pathlib import Path
+
 import pytest
 import torch
 from torch.utils.data import DataLoader
 
 from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
+from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
 
-# Source names recognized by m-eurosat HDF5 files (used by tests that need to
-# bypass the wrapper and instantiate ``GeoBenchv1`` directly).
+# Source names used when bypassing the wrapper.
 EUROSAT_RGB_SOURCE_BANDS = ("04 - Red", "03 - Green", "02 - Blue")
 
 
 @pytest.mark.slow
 class TestGeoBenchDatasetBasics:
-    """Basic functionality tests for GeoBenchv1."""
+    """Basic functionality tests for the sharded reader."""
 
     def test_dataset_initialization(self, geobench_root):
         """Test that dataset can be initialized."""
-        dataset = GeoBenchv1(
+        dataset = GeoBenchv1Sharded(
             root=geobench_root,
             dataset_name="m-eurosat",
             split="train",
@@ -34,12 +35,11 @@ class TestGeoBenchDatasetBasics:
             bands=EUROSAT_RGB_SOURCE_BANDS,
         )
         assert len(dataset) > 0
-        assert dataset.dataset_name == "m-eurosat"
-        assert dataset.split == "train"
+        assert dataset.dataset_dir.name == "m-eurosat"
 
     def test_get_item(self, geobench_root):
         """Test that __getitem__ returns correct format."""
-        dataset = GeoBenchv1(
+        dataset = GeoBenchv1Sharded(
             root=geobench_root,
             dataset_name="m-eurosat",
             split="train",
@@ -69,6 +69,8 @@ class TestAllDatasets:
     )
     def test_dataset_loads_small_partition(self, geobench_root, dataset_name, small_partition):
         """Each dataset can be loaded with the 0.01x_train partition."""
+        if not (Path(geobench_root) / dataset_name).exists():
+            pytest.skip(f"{dataset_name} data not supplied")
         bench = get_bench_dataset_class(dataset_name)()
         dataset = bench.get_dataset(
             "train",
@@ -169,9 +171,9 @@ class TestErrorHandling:
     """Test error handling for invalid inputs."""
 
     def test_invalid_dataset_name(self, geobench_root):
-        """Invalid dataset name raises FileNotFoundError at GeoBenchv1 init."""
+        """Invalid dataset name raises FileNotFoundError at reader initialization."""
         with pytest.raises(FileNotFoundError):
-            GeoBenchv1(
+            GeoBenchv1Sharded(
                 root=geobench_root,
                 dataset_name="m-nonexistent",
                 split="train",
@@ -182,7 +184,7 @@ class TestErrorHandling:
     def test_invalid_partition(self, geobench_root):
         """Invalid partition raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            GeoBenchv1(
+            GeoBenchv1Sharded(
                 root=geobench_root,
                 dataset_name="m-eurosat",
                 split="train",
@@ -193,7 +195,7 @@ class TestErrorHandling:
     def test_invalid_split(self, geobench_root):
         """Invalid split raises ValueError."""
         with pytest.raises(ValueError, match="Split.*not found"):
-            GeoBenchv1(
+            GeoBenchv1Sharded(
                 root=geobench_root,
                 dataset_name="m-eurosat",
                 split="invalid_split",

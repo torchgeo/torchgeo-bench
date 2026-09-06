@@ -29,7 +29,8 @@ src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
   ├── conf/                # Config YAMLs (packaged inside the source tree)
   └── models/              # Model implementations (interface.py, timm.py, torchgeo_models.py, etc.)
 data/                      # Datasets always live here (relative to CWD)
-  ├── classification_v1.0/ # GeoBench V1
+  ├── classification_v1.0_wds/ # GeoBench V1 JSON-metadata shards
+  ├── classification_v1.0/ # Custom V1 HDF5 with JSON metadata
   ├── geobenchv2/          # GeoBench V2
   └── eurosat/             # torchgeo EuroSAT
 experiments/               # Experiment runners, analysis scripts, SLURM jobs
@@ -129,12 +130,7 @@ The default `addopts` include `-m "not slow"`, so a bare `pytest` runs only the
 fast subset; use `-m slow` (or `-m ""` for everything) to run the integration
 tests, which load real data and run models.
 
-Tests skip gracefully if GeoBench data is missing — they look for it under
-`./data/classification_v1.0`, `./data/geobenchv2`, and `./data/eurosat`.
-Note the V1 *slow* tests need the legacy HDF5 bundle from
-`torchgeo-bench download geobench_v1`; the single-dataset auto-download writes a
-webdataset layout under `./data/classification_v1.0_wds/` that those tests do
-**not** read (they will skip).
+Tests skip gracefully if GeoBench data is missing. V1 slow tests use the JSON shards under `./data/classification_v1.0_wds`; V2 and EuroSAT use `./data/geobenchv2` and `./data/eurosat`. Present legacy pickle caches must be replaced, not skipped or unpickled.
 
 ### Linting and Formatting
 
@@ -147,7 +143,7 @@ ruff format .          # Format code
 ### Downloading Datasets
 
 ```bash
-torchgeo-bench download geobench_v1                       # GeoBench V1 -> data/classification_v1.0/
+torchgeo-bench download geobench_v1                       # GeoBench V1 -> data/classification_v1.0_wds/
 torchgeo-bench download geobench_v2                       # all benchmark V2 datasets -> data/geobenchv2/<name>
 torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # subset
 torchgeo-bench download eurosat                           # torchgeo EuroSAT -> data/eurosat
@@ -364,9 +360,9 @@ Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everythin
 
 ## Common Gotchas
 
-1. **Data lives at `data/`**: Always `data/<canonical-subdir>/` from CWD. No env vars, no overrides.
+1. **Data lives at `data/`**: Always `data/<canonical-subdir>/` from CWD. No env vars, no overrides. V1 uses the pinned `calebrob6/geobenchv1-webdataset` JSON mirror with archive SHA-256 checks. Pickle metadata is not supported.
 2. **No documentation for refactoring**: Don't create docs for internal refactors.
-3. **Tests need data**: Tests skip if `data/classification_v1.0` / `data/geobenchv2` / `data/eurosat` aren't on disk.
+3. **Tests need data**: Tests skip if `data/classification_v1.0_wds` / `data/geobenchv2` / `data/eurosat` aren't on disk.
 4. **Model reinitialization**: Models are reinitialized per-dataset to handle varying input channels.
 5. **V1 vs V2 datasets**: V1 uses `m-` prefix, V2 uses no prefix.
 

@@ -23,8 +23,8 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
      - Default destination
      - Source
    * - ``geobench_v1``
-     - ``data/classification_v1.0/``
-     - Hugging Face ``recursix/geo-bench-1.0``
+     - ``data/classification_v1.0_wds/<name>/``
+     - Hugging Face ``calebrob6/geobenchv1-webdataset``
    * - ``geobench_v2``
      - ``data/geobenchv2/<name>/``
      - Hugging Face ``aialliance/<name>``
@@ -42,7 +42,7 @@ The bundled :doc:`/api/cli` provides one subcommand per family:
 
 .. code-block:: console
 
-   $ torchgeo-bench download geobench_v1                              # full V1 bundle
+   $ torchgeo-bench download geobench_v1                              # all six V1 datasets
    $ torchgeo-bench download geobench_v1 --datasets m-eurosat         # V1 subset
    $ torchgeo-bench download geobench_v2                              # default V2 set
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # V2 subset
@@ -60,22 +60,14 @@ GeoBench V1 — classification
 
 V1 datasets use the ``m-`` prefix on the command line.
 
-The first time a V1 dataset is requested without a local copy under
-``data/classification_v1.0`` or ``data/classification_v1.0_wds``, the
-loader auto-downloads the requested dataset from the public mirror
-``isaaccorley/geobenchv1-webdataset`` on the Hugging Face Hub. Both automatic and explicit V1 downloads use pinned revisions covered by the library's metadata checksums. Set
-``GEOBENCH_V1_NO_HF_DOWNLOAD=1`` to disable the auto-download and force a
-local-only path (``torchgeo-bench download geobench_v1`` still works for
-the per-sample HDF5 layout).
+Automatic and explicit V1 downloads use the pickle-free ``calebrob6/geobenchv1-webdataset`` mirror at a pinned revision. Both write JSON-metadata tar shards under ``data/classification_v1.0_wds/<name>/`` and verify each downloaded archive against the SHA-256 list bundled with the package. These are archive-level integrity checks, not per-sample metadata approvals.
+
+The runner auto-downloads a requested dataset when no local sharded or custom HDF5 copy is present. Set ``GEOBENCH_V1_NO_HF_DOWNLOAD=1`` to disable automatic downloads. Explicit ``torchgeo-bench download geobench_v1`` downloads all six classification datasets; ``--datasets`` selects a subset.
 
 V1 metadata format
 ^^^^^^^^^^^^^^^^^^
 
-The published V1 datasets store metadata in HDF5 ``pickle`` attributes or ``<sample_id>.meta.pkl`` shard members. The readers accept these records only when their SHA-256 matches the expected checksum for that dataset and sample ID in the manifest bundled with ``torchgeo-bench``. The two pinned layouts contain identical metadata bytes and share these checksums. The readers unpickle the same in-memory bytes that were verified, without reopening the file. Unknown samples and checksum mismatches are errors; there is no opt-out or automatic approval of downloaded metadata.
-
-The manifest comes from inspected, pinned reference releases, not from a checksum file accompanying the dataset. Its source revisions and archive hashes are recorded in ``torchgeo_bench/datasets/_v1_checksums/sources.json``. These checks authenticate the metadata records only, not the image arrays or partition files.
-
-For custom data, V1 readers also accept data-only JSON metadata. HDF5 samples store it as a UTF-8 JSON string in the ``metadata_json`` attribute; tar shards pair ``<sample_id>.bands.npz`` with ``<sample_id>.meta.json``. JSON takes precedence when both formats are present. The JSON object must contain a numeric ``label`` (or a numeric list for multilabel data) and a non-empty ``bands_order`` list of source-band names.
+V1 readers use JSON metadata only. Tar shards pair ``<sample_id>.bands.npz`` with ``<sample_id>.meta.json``; image arrays are loaded with ``allow_pickle=False``. Custom HDF5 samples under ``data/classification_v1.0/<name>/`` must store a UTF-8 JSON string in the ``metadata_json`` attribute. The JSON object must contain a numeric ``label`` (or a numeric list for multilabel data) and a non-empty ``bands_order`` list of source-band names.
 
 .. code-block:: json
 
@@ -92,9 +84,9 @@ Per-band ``transform`` and ``crs`` entries are optional. Geographic extraction a
 
 .. warning::
 
-   Checksums do not make arbitrary pickle safe. A new release or differently serialized metadata needs independently reviewed reference checksums before it can be loaded as pickle. Do not generate approval hashes from an untrusted download; provide JSON metadata instead.
+   Existing pickle-based V1 caches are not converted or unpickled. Replace them with ``torchgeo-bench download geobench_v1`` (or ``--datasets m-eurosat`` for a subset). If an archive checksum fails, remove the named corrupt archive and retry the download. Custom datasets must supply JSON metadata.
 
-``experiments/scripts/repack_geobench_v1.py`` accepts JSON or checksum-approved HDF5 metadata and always writes JSON-based shards. Its ``--validate`` mode compares band arrays and normalized metadata using the same verification rules.
+Geography extraction reads the JSON metadata directly from the default shards or custom HDF5 files. ``experiments/scripts/repack_geobench_v1.py`` repacks custom JSON-metadata HDF5 files into JSON-based shards; it does not read or convert pickle metadata.
 
 Supported V1 datasets
 ^^^^^^^^^^^^^^^^^^^^^
