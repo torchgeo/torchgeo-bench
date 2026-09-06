@@ -9,7 +9,7 @@ picked up here automatically -- no edit to this script is needed.
 
 Usage::
 
-    # regenerate the whole store (the V1 HDF5 scan is the slow part)
+    # regenerate the whole store
     python experiments/scripts/extract_dataset_geography.py --all
 
     # regenerate a single dataset without rescanning everything
@@ -65,7 +65,7 @@ def main() -> int:
         "--workers",
         type=int,
         default=min(32, (os.cpu_count() or 8)),
-        help="processes used for the V1 HDF5 scan",
+        help="processes used for the V1 metadata scan",
     )
     args = parser.parse_args()
 

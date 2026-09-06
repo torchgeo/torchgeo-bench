@@ -34,9 +34,7 @@ The Python package lives at **`src/torchgeo_bench/`**. Important pieces:
   declares metadata (name, num_classes, bands, rgb_bands, split_sizes) and
   inherits the family's `get_dataset` boilerplate. `datasets/__init__.py`
   exposes `get_datasets`, `get_bench_dataset_class`, and `list_datasets`.
-- `geobench_v1.py` — `GeoBenchv1` HDF5 reader (no `geobench` dependency); takes
-  exact source band names like `"04 - Red"` (the wrapper translates from short
-  canonical names).
+- `geobench_v1.py` — V1 wrapper base plus a custom JSON-metadata HDF5 reader (no `geobench` dependency). Normal downloads use `_v1_webdataset.py` and the pinned `calebrob6/geobenchv1-webdataset` mirror with archive SHA-256 verification. No V1 metadata is unpickled.
 - `geobench_v2.py` — `GeoBenchv2` adapter that dispatches to
   `geobench_v2.datasets.GeoBench<X>` upstream classes; wrappers opt into
   multi-modality via `band_order_strategy = "by_sensor"`.
@@ -76,7 +74,7 @@ prefix and call the tools directly (`pytest`, `ruff …`, `torchgeo-bench run �
 load real datasets.
 
 Tests skip gracefully if data is missing — they look under `data/` from CWD:
-- V1 → `data/classification_v1.0/`
+- V1 → `data/classification_v1.0_wds/`
 - V2 → `data/geobenchv2/<dataset>/`
 - EuroSAT → `data/eurosat/`
 
@@ -159,10 +157,7 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
   `X | None`). Do NOT import `List`/`Dict`/`Optional`/`Union` from `typing`.
   Do NOT add `from __future__ import annotations` — use `Self`, quoted
   annotations, or explicit imports for forward references.
-- **Datasets always live at `data/<canonical>`.** No env vars, no config
-  overrides. V1 → `data/classification_v1.0/<name>`, V2 →
-  `data/geobenchv2/<name>`, EuroSAT → `data/eurosat/`. Each family base
-  class hard-codes its `data_root()`.
+- **Datasets always live at `data/<canonical>`.** No env vars or config overrides. V1 → `data/classification_v1.0_wds/<name>` (custom JSON-metadata HDF5 can use `data/classification_v1.0/<name>`), V2 → `data/geobenchv2/<name>`, EuroSAT → `data/eurosat/`. Each family uses fixed paths.
 - **No defensive imports for hard deps.** Every package in
   `[project.dependencies]` is guaranteed to be installed. Do **not** wrap
   imports in `try` / `except ImportError` "just in case" — that pattern

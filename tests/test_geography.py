@@ -12,13 +12,11 @@ dataset silently disappearing from the map.
 """
 
 import json
-import pickle
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
-from affine import Affine
 
 from torchgeo_bench.datasets import list_datasets
 from torchgeo_bench.geography import (
@@ -45,17 +43,19 @@ def store() -> dict[str, GeoRecord]:
     return list_geography()
 
 
-@pytest.mark.parametrize("storage", ["string", "opaque"])
+@pytest.mark.parametrize("storage", ["string", "bytes"])
 def test_v1_origin_reads_hdf5_metadata(tmp_path: Path, storage: str) -> None:
     metadata = {
         "label": 0,
         "bands_order": ["B04"],
-        "B04": {"transform": Affine(10, 0, 456000, 0, -10, 1230000), "crs": "EPSG:32615"},
+        "B04": {"transform": [10, 0, 456000, 0, -10, 1230000], "crs": "EPSG:32615"},
     }
-    payload = pickle.dumps(metadata)
+    payload = json.dumps(metadata)
     path = tmp_path / "sample.hdf5"
     with h5py.File(path, "w") as file:
-        file.attrs["pickle"] = repr(payload) if storage == "string" else np.void(payload)
+        file.attrs["metadata_json"] = (
+            payload if storage == "string" else np.bytes_(payload.encode("utf-8"))
+        )
 
     assert _v1_origin(str(path)) == (456000.0, 1230000.0, "EPSG:32615")
 

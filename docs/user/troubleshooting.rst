@@ -85,16 +85,16 @@ both the standard and spatial train/val/test splits. If an older download
 is missing the spatial split files, rerun this command before benchmarking
 ``eurosat-spatial``.
 
-V1 slow tests skip after a per-dataset download
------------------------------------------------
+V1 reports missing JSON metadata
+--------------------------------
 
-The per-dataset command
-``torchgeo-bench download geobench_v1 --datasets m-eurosat`` writes the
-webdataset layout under ``data/classification_v1.0_wds/``. The V1 *slow*
-integration tests instead read the legacy HDF5 layout under
-``data/classification_v1.0/`` and skip if only
-the ``_wds`` data is present.  Fetch the legacy bundle with
-``torchgeo-bench download geobench_v1`` to run them.
+Old V1 downloads contain ``.meta.pkl`` shard members or HDF5 ``pickle`` attributes. These are no longer loaded. Replace the cached data with the pickle-free mirror:
+
+.. code-block:: console
+
+   $ torchgeo-bench download geobench_v1 --datasets m-eurosat
+
+Omit ``--datasets`` to replace the full V1 suite. Downloads and V1 slow tests both use ``data/classification_v1.0_wds/``. Tests skip absent datasets, but present legacy or malformed data fails visibly.
 
 Build / docs warnings
 ---------------------
