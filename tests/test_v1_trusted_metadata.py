@@ -22,7 +22,134 @@ from torchgeo_bench.geography import _v1_origin
 from .test_cli_program import classification_arguments, run_cli
 
 FIXTURES = Path(__file__).parent / "fixtures" / "v1_metadata"
-RECORDS = json.loads((FIXTURES / "samples.json").read_text())
+S2_BANDS = [
+    "01 - Coastal aerosol",
+    "02 - Blue",
+    "03 - Green",
+    "04 - Red",
+    "05 - Vegetation Red Edge",
+    "06 - Vegetation Red Edge",
+    "07 - Vegetation Red Edge",
+    "08 - NIR",
+    "08A - Vegetation Red Edge",
+    "09 - Water vapour",
+    "10 - SWIR - Cirrus",
+    "11 - SWIR",
+    "12 - SWIR",
+]
+EUROSAT_TRANSFORM = (
+    9.986548378452909,
+    0,
+    676723.1812297984,
+    0,
+    -9.980495333332907,
+    5830903.856663333,
+)
+REFERENCES = [
+    (
+        "m-bigearthnet",
+        "id_100699",
+        "m-bigearthnet-0.pkl",
+        [int(index in (8, 12, 27)) for index in range(43)],
+        S2_BANDS[:10] + S2_BANDS[11:],
+        (20, 0, 699960, 0, -20, 5620800),
+        "EPSG:32631",
+    ),
+    (
+        "m-brick-kiln",
+        "examples_0_103",
+        "m-brick-kiln-0.pkl",
+        0,
+        S2_BANDS,
+        (8.983152841191e-05, 0, 88.53346282639944, 0, 8.983152841196551e-05, 26.47981929304796),
+        "EPSG:4326",
+    ),
+    ("m-eurosat", "id_21603", "m-eurosat-0.pkl", 0, S2_BANDS, EUROSAT_TRANSFORM, "EPSG:32631"),
+    ("m-eurosat", "id_22198", "m-eurosat-1.pkl", 1, S2_BANDS, EUROSAT_TRANSFORM, "EPSG:32631"),
+    (
+        "m-forestnet",
+        "-1.6655276613404206_128.1211044868538_2016_01_01",
+        "m-forestnet-0.pkl",
+        3,
+        [
+            f"{band}_2016-01-01"
+            for band in (
+                "04 - Red",
+                "03 - Green",
+                "02 - Blue",
+                "05 - NIR",
+                "06 - SWIR1",
+                "07 - SWIR2",
+            )
+        ],
+        (
+            0.00013480239144588455,
+            0,
+            128.09872728987378,
+            0,
+            -0.00013566292664363958,
+            -1.6430076129066375,
+        ),
+        "EPSG:4326",
+    ),
+    (
+        "m-pv4ger",
+        "5.89550015,51.01899493",
+        "m-pv4ger-0.pkl",
+        0,
+        ["Red", "Green", "Blue"],
+        (
+            1.4250829027728783e-06,
+            0,
+            5.8952721367355565,
+            0,
+            -8.988840608514792e-07,
+            51.01913875144793,
+        ),
+        "EPSG:4326",
+    ),
+    (
+        "m-so2sat",
+        "id_0003",
+        "m-so2sat-0.pkl",
+        1,
+        [
+            "01 - VH.Real",
+            "02 - VH.Imaginary",
+            "03 - VV.Real",
+            "04 - VV.Imaginary",
+            "05 - VH.LEE Filtered",
+            "06 - VV.LEE Filtered",
+            "07 - VH.LEE Filtered.Real",
+            "08 - VV.LEE Filtered.Imaginary",
+            *S2_BANDS[1:9],
+            *S2_BANDS[11:],
+        ],
+        None,
+        None,
+    ),
+]
+RECORDS = [
+    {
+        "dataset_name": dataset,
+        "sample_id": sample_id,
+        "filename": filename,
+        "layout": layout,
+        "metadata": {
+            "label": label,
+            "bands_order": list(bands),
+            **{
+                band: {
+                    "transform": [*transform, 0, 0, 1] if transform is not None else None,
+                    "crs": crs,
+                }
+                for band in bands
+            },
+        },
+    }
+    for dataset, sample_id, filename, label, bands, transform, crs in REFERENCES
+    for layout in ("hdf5", "sharded")
+]
 
 
 @pytest.fixture(params=RECORDS, ids=lambda r: f"{r['dataset_name']}-{r['layout']}-{r['sample_id']}")
