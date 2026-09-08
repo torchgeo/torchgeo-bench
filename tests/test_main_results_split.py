@@ -1,9 +1,6 @@
-"""Fast offline tests for the default (no explicit ``output=``) per-model routing.
+"""Offline tests for per-model result files.
 
-Profile and intrinsic-dim rows are one-time model+hardware measurements, so
-the default routing path (no explicit ``output=``) sends them to their own
-per-model files under ``profile_results_dir`` / ``intrinsic_dim_results_dir``,
-separate from the ``results_dir`` metrics file.
+Keep profiling and intrinsic-dimension results separate unless ``output=`` is explicit.
 """
 
 from collections.abc import Sequence
@@ -24,7 +21,7 @@ from .test_main_fast import _chainable_model_mock, _synthetic_embeddings, _synth
 def _compose_default_routing_cfg(
     tmp_path: Path, overrides: Sequence[str] | None = None
 ) -> DictConfig:
-    """Compose a config with no explicit ``output=``, routed at ``tmp_path``."""
+    """Use separate result directories without setting ``output=``."""
     extra = list(overrides or [])
     return compose_config(
         [
@@ -154,7 +151,6 @@ def test_completed_intrinsic_dim_survives_profile_failure(
 
 
 def test_default_routing_resume_reads_all_three_files(tmp_path: Path):
-    """resume=true must merge completed_metrics across all 3 per-model files."""
     cfg = _compose_default_routing_cfg(
         tmp_path,
         overrides=[
@@ -179,7 +175,6 @@ def test_default_routing_resume_reads_all_three_files(tmp_path: Path):
         "latency_ms_per_batch_p50": 5.0,
     }
 
-    # First run: creates all three files.
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
@@ -199,7 +194,6 @@ def test_default_routing_resume_reads_all_three_files(tmp_path: Path):
     profile_rows_after_first = len(pd.read_csv(profile_path))
     id_rows_after_first = len(pd.read_csv(id_path))
 
-    # Second run with resume=true: nothing should be recomputed/duplicated.
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,

@@ -1,11 +1,6 @@
 """Tests for the published GeoBench V1 JSON shards.
 
-These tests verify that the V1 readers can load all available
-GeoBench V1 datasets with different partitions, splits, and normalization
-methods. They access band data via the per-dataset wrapper's
-``BenchDataset.get_dataset()``, which translates short canonical band names
-(``"red"``, ``"green"``, etc.) to upstream source names like
-``"04 - Red"`` for us.
+Wrappers translate short band names such as ``red`` to source names such as ``04 - Red``.
 """
 
 from pathlib import Path
@@ -23,10 +18,7 @@ EUROSAT_RGB_SOURCE_BANDS = ("04 - Red", "03 - Green", "02 - Blue")
 
 @pytest.mark.slow
 class TestGeoBenchDatasetBasics:
-    """Basic functionality tests for the sharded reader."""
-
     def test_dataset_initialization(self, geobench_root):
-        """Test that dataset can be initialized."""
         dataset = GeoBenchv1Sharded(
             root=geobench_root,
             dataset_name="m-eurosat",
@@ -38,7 +30,6 @@ class TestGeoBenchDatasetBasics:
         assert dataset.dataset_dir.name == "m-eurosat"
 
     def test_get_item(self, geobench_root):
-        """Test that __getitem__ returns correct format."""
         dataset = GeoBenchv1Sharded(
             root=geobench_root,
             dataset_name="m-eurosat",
@@ -61,14 +52,11 @@ class TestGeoBenchDatasetBasics:
 
 @pytest.mark.slow
 class TestAllDatasets:
-    """Test all available datasets with small partition (via the wrapper)."""
-
     @pytest.mark.parametrize(
         "dataset_name",
         ["m-eurosat", "m-forestnet", "m-so2sat", "m-pv4ger", "m-brick-kiln"],
     )
     def test_dataset_loads_small_partition(self, geobench_root, dataset_name, small_partition):
-        """Each dataset can be loaded with the 0.01x_train partition."""
         if not (Path(geobench_root) / dataset_name).exists():
             pytest.skip(f"{dataset_name} data not supplied")
         bench = get_bench_dataset_class(dataset_name)()
@@ -92,10 +80,9 @@ class TestAllDatasets:
 
 @pytest.mark.slow
 class TestRawEmission:
-    """Datasets always emit raw float32 values; normalization moved to BenchModel."""
+    """Datasets emit raw float32 values; normalization belongs to BenchModel."""
 
     def test_raw_pixel_range(self, geobench_root, small_partition):
-        """Per-band values are raw uint16-ish DN, not normalized to [-5, 5] or [0, 1]."""
         bench = get_bench_dataset_class("m-eurosat")()
         dataset = bench.get_dataset(
             "train",
@@ -106,7 +93,7 @@ class TestRawEmission:
         sample = dataset[0]
         img = sample["image"]
         assert img.dtype.is_floating_point
-        # Raw Sentinel-2 reflectance DN values are large.
+        # A maximum above 100 distinguishes raw S2 counts from normalized inputs.
         assert img.max() > 100.0, (
             f"Expected raw S2 magnitudes (max > 100), got max={img.max().item():.2f}; "
             "the dataset may still be normalizing internally."
@@ -115,10 +102,7 @@ class TestRawEmission:
 
 @pytest.mark.slow
 class TestDataLoader:
-    """Test integration with PyTorch DataLoader."""
-
     def test_dataloader_batching(self, geobench_root, small_partition):
-        """Default collate stacks images/labels and keeps sample_ids as a list."""
         bench = get_bench_dataset_class("m-eurosat")()
         dataset = bench.get_dataset(
             "train",
@@ -138,10 +122,7 @@ class TestDataLoader:
 
 @pytest.mark.slow
 class TestBandSelection:
-    """Test different band selections."""
-
     def test_all_bands(self, geobench_root, small_partition):
-        """Loading all available bands through the wrapper."""
         bench = get_bench_dataset_class("m-eurosat")()
         dataset = bench.get_dataset("train", partition=small_partition, bands=None)
         assert dataset[0]["image"].shape[0] > 3
@@ -149,10 +130,7 @@ class TestBandSelection:
 
 @pytest.mark.slow
 class TestPartitions:
-    """Test different partition sizes."""
-
     def test_partition_size_ordering(self, geobench_root):
-        """Larger partitions have more samples."""
         bench = get_bench_dataset_class("m-eurosat")()
         partitions = ["0.01x_train", "0.02x_train", "0.05x_train", "0.10x_train"]
         sizes = [
@@ -168,10 +146,7 @@ class TestPartitions:
 
 @pytest.mark.slow
 class TestErrorHandling:
-    """Test error handling for invalid inputs."""
-
     def test_invalid_dataset_name(self, geobench_root):
-        """Invalid dataset name raises FileNotFoundError at reader initialization."""
         with pytest.raises(FileNotFoundError):
             GeoBenchv1Sharded(
                 root=geobench_root,
@@ -182,7 +157,6 @@ class TestErrorHandling:
             )
 
     def test_invalid_partition(self, geobench_root):
-        """Invalid partition raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
             GeoBenchv1Sharded(
                 root=geobench_root,
@@ -193,7 +167,6 @@ class TestErrorHandling:
             )
 
     def test_invalid_split(self, geobench_root):
-        """Invalid split raises ValueError."""
         with pytest.raises(ValueError, match=r"Split.*not found"):
             GeoBenchv1Sharded(
                 root=geobench_root,
@@ -204,7 +177,6 @@ class TestErrorHandling:
             )
 
     def test_invalid_band_name_via_wrapper(self, geobench_root, small_partition):
-        """Wrapper rejects unknown short band names eagerly with ValueError."""
         bench = get_bench_dataset_class("m-eurosat")()
         with pytest.raises(ValueError, match="unknown band"):
             bench.get_dataset("train", partition=small_partition, bands=("nonexistent_band",))

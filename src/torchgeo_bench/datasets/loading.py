@@ -1,14 +1,6 @@
-"""High-level dataset loading helpers and registry for torchgeo-bench.
+"""Dataset registry, band selection, resizing, and split dataloaders.
 
-This module owns the public ``get_datasets`` API used by
-``torchgeo_bench.main`` and the registry that maps dataset names to their
-:class:`~.base.BenchDataset` subclass.  All band resolution, resize
-transforms and DataLoader construction live here so the per-dataset wrappers
-stay focused on declaring metadata.
-
-Wrapper modules (and torch) import lazily: ``list_datasets`` reads only the
-registry spec below, and ``get_bench_dataset_class`` imports just the one
-module that defines the requested dataset.
+Wrapper modules and torch load only when needed; listing datasets does not import them.
 """
 
 import logging
@@ -27,9 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Dataset name -> (submodule, class name).  Kept as strings so that importing
-# this module stays cheap; ``get_bench_dataset_class`` resolves entries on
-# demand and verifies the class's ``name`` attribute matches its key.
+# Store (submodule, class name) as strings so listing datasets needs no wrapper imports.
 _REGISTRY_SPEC: dict[str, tuple[str, str]] = {
     # V1 classification
     "m-eurosat": ("m_eurosat", "MEurosat"),
@@ -54,7 +44,7 @@ _REGISTRY_SPEC: dict[str, tuple[str, str]] = {
     "pastis": ("pastis", "PASTIS"),
     "spacenet2": ("spacenet2", "SpaceNet2"),
     "spacenet7": ("spacenet7", "SpaceNet7"),
-    # torchgeo template
+    # torchgeo datasets
     "eurosat": ("eurosat", "EuroSAT"),
     "eurosat-spatial": ("eurosat", "EuroSATSpatial"),
     "resisc45": ("resisc45", "RESISC45"),
@@ -198,7 +188,7 @@ def get_datasets(  # noqa: PLR0913 - public dataset loading options.
         num_workers: Number of dataloader worker processes.
         image_size: If set, resize images (and masks, with nearest) to this
             square size at sample time.
-        interpolation: Resize interpolation for images (``"bicubic"``,
+        interpolation: Resize interpolation for images (``"area"``, ``"bicubic"``,
             ``"bilinear"``, ``"nearest"``).
         bands: ``"rgb"`` (use the dataset's ``rgb_bands``), ``"all"`` /
             ``None`` (load all bands), or an explicit iterable of band names.
@@ -245,8 +235,7 @@ def get_datasets(  # noqa: PLR0913 - public dataset loading options.
 
     common: dict = {"bands": bands_tuple, "transform": transform}
     if time_steps is not None:
-        # Only multi-temporal wrappers accept this; others would not know what
-        # to do with a time axis, so passing it to them is a config error.
+        # Only multi-temporal wrappers accept a time axis.
         common["time_steps"] = time_steps
     try:
         train_ds = bench.get_dataset("train", partition=train_partition, **common)

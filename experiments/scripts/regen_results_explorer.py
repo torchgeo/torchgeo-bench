@@ -1,11 +1,8 @@
-"""Regenerate ``docs/_static/results-explorer.html`` from result snapshots.
+"""Save dated result snapshots and refresh the Results Explorer.
 
-Reads ``results/models/*.csv``, ``results/profiles/*.csv``, and
-``results/intrinsic_dim/*.csv``, writes today's snapshot to
-``docs/_static/_results_snapshots/<label>.json``, then re-inlines every
-committed snapshot (newest first) into the explorer HTML and bumps the
-masthead.  Keeps ``knn5`` / ``linear`` / ``profile`` rows; the explorer's
-Compute & efficiency figure joins the latter against the former.
+Embed ``results/{models,profiles,intrinsic_dim}/*.csv`` in the Results Explorer.
+
+Write ``docs/_static/results-explorer.html`` and retain dated snapshots for comparison.
 
 Usage::
 
@@ -24,8 +21,6 @@ logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "results" / "models"
-# Profile/intrinsic_dim rows live in their own per-model files, separate
-# from the knn5/linear/seg metrics files under RESULTS_DIR.
 PROFILE_RESULTS_DIR = ROOT / "results" / "profiles"
 INTRINSIC_DIM_RESULTS_DIR = ROOT / "results" / "intrinsic_dim"
 HTML_PATH = ROOT / "docs" / "_static" / "results-explorer.html"
@@ -91,7 +86,7 @@ BOOL = {"merge_val"}
 
 
 def _iter_result_rows():
-    """Yield rows from every per-model results CSV across all three dirs."""
+    """Read every per-model result file, including saved profile and dimension measurements."""
     paths = sorted(RESULTS_DIR.glob("*.csv"))
     paths += sorted(PROFILE_RESULTS_DIR.glob("*.csv"))
     paths += sorted(INTRINSIC_DIM_RESULTS_DIR.glob("*.csv"))
@@ -126,7 +121,7 @@ def _load_csv_rows(label: str) -> list[dict]:
 
 
 def _snapshot_label_sort_key(label: str) -> tuple:
-    """Sort labels with leading ``YYYY-MM-DD`` chronologically; the rest lex."""
+    """Sort dated labels chronologically and other labels alphabetically."""
     m = re.match(r"(\d{4}-\d{2}-\d{2})", label)
     return (m.group(1) if m else "", label)
 
@@ -151,7 +146,8 @@ def main() -> None:
         label = path.stem
         rows = json.loads(path.read_text())
         for r in rows:
-            r["snapshot"] = label  # normalise even if file omits it
+            # The filename defines the snapshot, even if rows contain an old label.
+            r["snapshot"] = label
         snapshots[label] = rows
 
     ordered_labels = sorted(snapshots, key=_snapshot_label_sort_key, reverse=True)

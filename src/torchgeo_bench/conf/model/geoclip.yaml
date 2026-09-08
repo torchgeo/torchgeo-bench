@@ -1,4 +1,4 @@
-# GeoCLIP location encoder (Equal-Earth + RFF) -> 512-d.
+# Equal-Earth coordinates with random Fourier features; 512-dimensional output.
 # Requires the `coordbench` extra: pip install -e ".[coordbench]"
 _target_: torchgeo_bench.coordbench.models.GeoCLIPLocationEncoder
 repo: MVRL/geoclip-location-encoder

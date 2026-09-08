@@ -1,9 +1,6 @@
-"""Unit tests for the RESISC45 wrapper.
+"""Channel-selection tests for RESISC45, whose upstream loader has no ``bands`` argument.
 
-RESISC45 is the reference example for wrapping a torchgeo dataset whose
-loader has no ``bands`` argument, so these tests focus on the part the
-wrapper owns that :class:`EuroSAT` does not: channel selection.  They run
-without the dataset on disk by monkeypatching the upstream class.
+The upstream class is mocked, so no dataset download is needed.
 """
 
 from pathlib import Path
@@ -15,8 +12,6 @@ from torchgeo_bench.datasets.resisc45 import RESISC45, _make_band_select
 
 
 class _FakeRESISC45:
-    """Stand-in for ``torchgeo.datasets.RESISC45``: 3-channel, values 0/1/2."""
-
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.transforms = kwargs.get("transforms")
@@ -25,8 +20,7 @@ class _FakeRESISC45:
         return 4
 
     def __getitem__(self, index: int) -> dict:
-        # Channel c is filled with the constant c, so a selected sample's
-        # values name the source channel it came from.
+        # Pixel values identify the source channel after selection.
         image = torch.arange(3, dtype=torch.float32).view(3, 1, 1).expand(3, 8, 8).clone()
         sample = {"image": image, "label": torch.tensor(index)}
         return self.transforms(sample) if self.transforms is not None else sample
@@ -68,7 +62,7 @@ class TestMetadata:
 
 class TestBandSelection:
     def test_all_bands_adds_no_transform(self, patched):
-        """The common path must not pay for a per-sample index_select."""
+        """Selecting all bands should avoid a per-sample channel copy."""
         ds = patched.get_dataset("train", bands=None)
         assert ds.kwargs["transforms"] is None
 
@@ -80,7 +74,6 @@ class TestBandSelection:
         ds = patched.get_dataset("train", bands=("blue", "red"))
         image = ds[0]["image"]
         assert image.shape == (2, 8, 8)
-        # blue is source channel 2, red is source channel 0.
         assert torch.equal(image[:, 0, 0], torch.tensor([2.0, 0.0]))
 
     def test_reordering_is_honoured(self, patched):
@@ -103,7 +96,6 @@ class TestBandSelection:
 
 class TestTransformComposition:
     def test_selection_runs_before_the_caller_transform(self, patched):
-        """The resize must see only the channels that survive selection."""
         seen: list[tuple[int, ...]] = []
 
         def _resize(sample: dict) -> dict:

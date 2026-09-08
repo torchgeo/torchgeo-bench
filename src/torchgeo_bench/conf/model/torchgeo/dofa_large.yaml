@@ -1,5 +1,4 @@
-# torchgeo DOFA-Large — MAE pretraining (band-agnostic, RGB wavelengths)
-# Feature dimension: 1024
+# MAE-pretrained DOFA uses a wavelength for each selected band.
 
 _target_: torchgeo_bench.models.TorchGeoDOFABench
 factory: dofa_large_patch16_224
@@ -10,10 +9,6 @@ target_size: 224
 name: tgeo_dofa_large
 eval:
   segmentation:
-    # Isotropic ViT-L (24 blocks, 197=1+14x14 tokens). No spatial pyramid: 4
-    # blocks spread across depth, deepest first. The introspection tool's
-    # auto-pick grabbed patch_embed.weight_generator's internal transformer
-    # (a 1x1 non-spatial tap from DOFA's dynamic weight-generation MLP, not a
-    # real feature map) as a false positive; verified by hand that
-    # blocks.23/17/11/5 all reshape to the same 14x14 grid instead.
+    # Use four encoder depths, deepest first; each has a 14x14 patch grid plus a CLS token.
+    # Do not hook patch_embed.weight_generator's internal transformer: it generates weights, not spatial features.
     layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]

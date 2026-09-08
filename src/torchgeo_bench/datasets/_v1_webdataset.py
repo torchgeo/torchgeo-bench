@@ -1,21 +1,14 @@
-"""WebDataset-backed loader for the GeoBench V1 sharded layout.
+"""Read GeoBench V1 from indexed WebDataset tar shards.
 
-Drops the per-sample HDF5 file-open from ``__getitem__`` (one NFS round-trip
-per sample) by reading from ~22 tar shards instead. The data-only format is
-produced by ``experiments/scripts/repack_geobench_v1.py``.
-:func:`download_sharded_root` fetches the pinned, pickle-free Hub mirror and
-verifies each downloaded tar archive against the bundled SHA-256 list.
+Use indexed tar shards to avoid per-sample HDF5 opens over NFS.
 
-Each shard contains ``<sid>.bands.npz`` and ``<sid>.meta.json`` files for
-~1000 samples.  Indexing happens once in ``__init__``: every sample's byte
-range inside its shard is recorded as ``(shard_path, offset, size)`` so
-``__getitem__`` does a plain ``open()`` + ``seek()`` + ``read()`` and
-avoids the ``tarfile`` state machine entirely.  This is fork-safe (each
-worker opens its own file descriptors) and faster (no per-call tar header
-parsing).
+:func:`download_sharded_root` fetches the pinned JSON mirror and verifies each archive.
 
-Output dict matches :class:`~torchgeo_bench.datasets.geobench_v1.GeoBenchv1`
-exactly.
+Shards hold ``<sid>.bands.npz`` and ``<sid>.meta.json`` pairs for roughly 1000 samples.
+
+Index byte offsets once; each worker opens its own file descriptors for fork-safe reads.
+
+Output matches :class:`~torchgeo_bench.datasets.geobench_v1.GeoBenchv1`.
 """
 
 import hashlib
@@ -126,13 +119,10 @@ class GeoBenchv1Sharded(Dataset):
         self.sample_ids: list[str] = partition_data[split]
         self.transform = transform
 
-        # Index every member: sid -> {suffix: (path, offset, size)}.
         shard_paths = sorted(self.dataset_dir.glob("shard_*.tar"))
         if not shard_paths:
             raise FileNotFoundError(f"No shard_*.tar in {self.dataset_dir}")
-        # Sample IDs may contain dots (m-forestnet uses
-        # ``<lat>_<lon>_<date>.hdf5``), so split on the known suffix instead
-        # of the first ``.``.
+        # Sample IDs can contain dots; strip the suffix instead of splitting on the first dot.
         self._index: dict[str, dict[str, tuple[Path, int, int]]] = {}
         for path in shard_paths:
             with tarfile.open(path, "r") as t:

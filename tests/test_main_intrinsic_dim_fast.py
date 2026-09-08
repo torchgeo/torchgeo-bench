@@ -86,11 +86,7 @@ def test_spectrum_rows_do_not_require_torchid_estimators(tmp_path: Path):
 
 
 def test_degenerate_spectrum_writes_nan_and_keeps_other_splits(caplog) -> None:
-    # A degenerate split (e.g. constant embeddings) used to propagate a
-    # DegenerateSpectrumError straight out of evaluate_intrinsic_dim, which
-    # would abort the whole sweep and lose every row already computed for
-    # other datasets/models. It should instead behave like the existing
-    # per-estimator DegenerateManifoldError handling: warn and write NaN.
+    # A constant split should produce NaNs without discarding valid splits.
     good_X = np.random.default_rng(0).normal(size=(20, 8))
     degenerate_X = np.ones((20, 8))  # zero variance after centering
     common_meta = {
@@ -189,12 +185,7 @@ def test_intrinsic_dim_resume_per_estimator(tmp_path: Path):
 
 
 def test_resume_backfills_spectrum_without_rerunning_completed_estimators(tmp_path: Path):
-    # A run finished under #223, before spectrum rows existed, has both
-    # torchid estimator rows already but neither is expensive to redo here
-    # in the test -- assert compute_intrinsic_dim isn't even called, so a
-    # resumed sweep of many already-finished models doesn't silently redo
-    # the (real-world) expensive TwoNN/MLE/lPCA passes just to backfill 5
-    # cheap spectrum values.
+    # Adding missing spectrum metrics must not rerun expensive dimension estimators.
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,

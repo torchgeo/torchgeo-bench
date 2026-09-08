@@ -31,21 +31,15 @@ def test_v2_data_root_is_fixed() -> None:
     assert _V2Dataset.data_root() == Path("data/geobenchv2")
 
 
-# ---------------------------------------------------------------------------
-# FOTW.canonicalize_sample
-# ---------------------------------------------------------------------------
-
-
 class TestFOTWCanonicalize:
     def test_image_already_present(self):
-        """If 'image' key exists, sample is returned unchanged."""
         ds = FOTW.__new__(FOTW)
         sample = {"image": torch.zeros(3, 8, 8), "label": 0}
         result = ds.canonicalize_sample(sample)
         assert "image" in result
 
     def test_image_b_becomes_image(self):
-        """If only 'image_b' is present it should become 'image'."""
+        """Use the later acquisition for single-image segmentation."""
         ds = FOTW.__new__(FOTW)
         img_b = torch.ones(3, 8, 8)
         sample = {"image_b": img_b, "image_a": torch.zeros(3, 8, 8), "label": 1}
@@ -56,7 +50,6 @@ class TestFOTWCanonicalize:
         assert "image_b" not in result
 
     def test_image_b_only_no_image_a(self):
-        """image_a may be absent; should still work."""
         ds = FOTW.__new__(FOTW)
         img_b = torch.full((3, 4, 4), 5.0)
         sample = {"image_b": img_b, "label": 2}
@@ -74,14 +67,14 @@ class TestSpaceNet2Canonicalize:
         assert int(result["mask"].max()) < SpaceNet2.num_classes
 
     def test_reserved_zero_folds_into_no_building(self):
-        """A stray reserved class 0 clamps to 0 (no-building), never wraps to -1."""
+        """Reserved class 0 must stay no-building, not become -1."""
         ds = SpaceNet2.__new__(SpaceNet2)
         mask = torch.tensor([[0, 1, 2]])
         result = ds.canonicalize_sample({"image": torch.zeros(3, 1, 3), "mask": mask})
         assert torch.equal(result["mask"], torch.tensor([[0, 0, 1]]))
 
     def test_missing_mask_is_noop(self):
-        """No mask key (e.g. inference) leaves the sample untouched."""
+        """Inference samples may have no mask."""
         ds = SpaceNet2.__new__(SpaceNet2)
         sample = {"image": torch.zeros(3, 4, 4)}
         assert ds.canonicalize_sample(sample) == sample
@@ -97,22 +90,17 @@ class TestSpaceNet7Canonicalize:
         assert int(result["mask"].max()) < SpaceNet7.num_classes
 
     def test_reserved_zero_folds_into_no_building(self):
-        """A stray reserved class 0 clamps to 0 (no-building), never wraps to -1."""
+        """Reserved class 0 must stay no-building, not become -1."""
         ds = SpaceNet7.__new__(SpaceNet7)
         mask = torch.tensor([[0, 1, 2]])
         result = ds.canonicalize_sample({"image": torch.zeros(3, 1, 3), "mask": mask})
         assert torch.equal(result["mask"], torch.tensor([[0, 0, 1]]))
 
     def test_missing_mask_is_noop(self):
-        """No mask key (e.g. inference) leaves the sample untouched."""
+        """Inference samples may have no mask."""
         ds = SpaceNet7.__new__(SpaceNet7)
         sample = {"image": torch.zeros(3, 4, 4)}
         assert ds.canonicalize_sample(sample) == sample
-
-
-# ---------------------------------------------------------------------------
-# EuroSAT / EuroSATSpatial metadata
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dataset_cls", [EuroSAT, EuroSATSpatial])
@@ -123,8 +111,6 @@ def test_eurosat_rejects_unknown_split(dataset_cls: type[EuroSAT]) -> None:
 
 class TestEuroSATMeta:
     def test_get_dataset_mocked(self, monkeypatch):
-        """get_dataset calls TGEuroSAT with correct band codes — test without disk."""
-
         captured = {}
 
         class _FakeDS:
@@ -141,7 +127,6 @@ class TestEuroSATMeta:
 
 class TestEuroSATSpatialMeta:
     def test_data_root_shared(self):
-        # Both classes share the same data root
         assert EuroSAT.data_root() == EuroSATSpatial.data_root()
 
     def test_get_dataset_mocked(self, monkeypatch):

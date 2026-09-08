@@ -1,10 +1,8 @@
-"""End-to-end smoke test for the all-bands code path.
+"""Check all-band CSV results with real m-eurosat data.
 
-Runs ``torchgeo-bench run model=timm/resnet18 dataset.bands=all`` on a small
-``m-eurosat`` partition and asserts the resulting CSV records the new
-``bands`` column with the right value, plus both KNN-5 and linear-probe rows.
+Run ResNet-18 with all bands on a small ``m-eurosat`` partition.
 
-Marked ``slow`` because it shells out and runs feature extraction on real data.
+Marked ``slow`` because feature extraction uses real imagery.
 """
 
 from pathlib import Path
@@ -18,7 +16,6 @@ from .test_integration import require_dataset_data
 
 @pytest.mark.slow
 def test_all_bands_e2e(tmp_path: Path):
-    """Run torchgeo-bench end-to-end with ``dataset.bands=all`` and check the CSV."""
     require_dataset_data("m-eurosat")
 
     output = tmp_path / "results.csv"
@@ -63,7 +60,6 @@ def test_all_bands_e2e(tmp_path: Path):
     feature_dims = rows["feature_dim"].unique().tolist()
     assert feature_dims == [512], f"Expected resnet18 feature_dim=512, got {feature_dims}"
 
-    # Sanity-check accuracies are floats in [0, 1].
     metric_values = rows["metric_value"].astype(float)
     assert metric_values.between(0.0, 1.0).all(), (
         f"metric_value out of range: {metric_values.tolist()}"

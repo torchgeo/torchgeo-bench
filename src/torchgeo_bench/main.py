@@ -151,11 +151,11 @@ def evaluate_knn(
     device: str,
     n_neighbors: int = 5,
 ) -> tuple[float, float, float, dict[str, float], int]:
-    """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape.
+    """Evaluate KNN, using the label shape to select single-label or multilabel scoring.
 
-    Returns the primary metric with bootstrap CI, a calibration dict
-    (``ece``/``rms_ce``/``mce``) computed from ``predict_proba``, and the
-    ``n_bins`` actually used (defaults to ``n_neighbors + 1``).
+    Returns:
+        Primary metric and bootstrap bounds, calibration (ECE/RMS-CE/MCE), and bin count.
+        The default bin count is ``n_neighbors + 1``.
     """
     x_train, y_train = train.features, train.labels
     x_test, y_test = test.features, test.labels
@@ -204,13 +204,7 @@ def evaluate_knn(
 
 
 class LinearProbeDivergedError(RuntimeError):
-    """Raised when every candidate C in the sweep produced a non-finite score.
-
-    Distinct from a single bad candidate (handled inline by scoring it -inf so
-    the sweep just moves on) -- this means the features themselves are
-    unusable for this backbone/dataset pairing at every regularization
-    strength tried, so there is no "best_c" to report.
-    """
+    """Raised when no C in the sweep produces a finite validation score."""
 
 
 def select_logistic_c(
@@ -252,7 +246,7 @@ def select_logistic_c(
         if multi_label:
             val_scores = model.predict_proba(x_val)
             if not np.all(np.isfinite(val_scores)):
-                # A divergent candidate must not abort the C sweep.
+                # Reject non-finite scores before average_precision_score raises.
                 val_metric = float("-inf")
             else:
                 val_metric = float(average_precision_score(y_val, val_scores, average="micro"))
@@ -314,12 +308,14 @@ def evaluate_logistic(
     c_values: Sequence[float],
     cfg: DictConfig,
 ) -> tuple[float, float, float, float, dict[str, float], dict[str, float | None]]:
-    """Sweep C values, retrain, and evaluate. Auto-detects single/multi-label from y shape.
+    """Select C on validation data, refit, and score the test split.
 
-    Returns the primary metric with bootstrap CI, the selected ``C``, a
-    calibration dict from raw ``predict_proba`` on the test split, and a
-    second dict with temperature-scaled calibration plus the fitted
-    ``temperature`` (all ``None`` when ``temp_scale=False``).
+    The label shape selects single-label or multilabel scoring.
+
+    Returns:
+        Primary metric and bootstrap bounds, selected ``C``, and raw and scaled calibration.
+        Scaled calibration includes the fitted temperature.
+        Its values are ``None`` when scaling is disabled or ``merge_val`` is true.
     """
     x_train, y_train = splits.train.features, splits.train.labels
     x_val, y_val = splits.val.features, splits.val.labels
@@ -435,12 +431,7 @@ def evaluate_logistic(
 def _resolve_segmentation_runtime_config(
     seg_cfg: DictConfig,
 ) -> tuple[int, int, float, bool, torch.dtype]:
-    """Validate and normalize the segmentation settings used during a run.
-
-    Configuration mistakes should fail before feature extraction or training,
-    rather than being silently coerced or failing after an expensive GPU job
-    has started.
-    """
+    """Validate segmentation settings before feature extraction or training."""
     epochs = seg_cfg.get("epochs", 10)
     batch_size = seg_cfg.get("batch_size", 64)
     lr = seg_cfg.get("lr", 1e-3)
@@ -511,19 +502,13 @@ def evaluate_intrinsic_dim(
     common_meta: ResultMetadata,
     only_metrics: frozenset[str] | None = None,
 ) -> list[dict]:
-    """Compute intrinsic-dimension metrics over selected splits and return CSV rows.
+    """Return intrinsic-dimension and centered feature-spectrum results for selected splits.
 
-    Each (split, estimator) yields one ``id_<estimator>_<split>`` row. Five
-    centered feature-spectrum diagnostics are also emitted per split with a
-    ``spectrum_<metric>_<split>`` name. All rows use
-    ``method="intrinsic_dim"`` so they share the existing side-output and
-    resume path.
+    Each estimator produces an ``id_<estimator>_<split>`` row.
+    The five spectrum diagnostics produce ``spectrum_<metric>_<split>`` rows.
+    All rows use ``method="intrinsic_dim"``.
 
-    ``only_metrics``, when given, restricts computation to metric names not
-    already present on disk -- resuming a run that's missing only the newer
-    spectrum rows shouldn't re-run the far more expensive torchid estimators
-    just to recompute rows that already exist and would be filtered out
-    anyway. ``None`` computes everything (a fresh, non-resumed run).
+    ``only_metrics`` selects unfinished metrics on resume. ``None`` computes everything.
     """
     id_cfg = cfg.eval.intrinsic_dim
     estimators, selected_splits = list(id_cfg.estimators), list(id_cfg.splits)
@@ -593,21 +578,17 @@ def evaluate_profile(
     cfg: DictConfig,
     common_meta: ResultMetadata,
 ) -> list[dict]:
-    """Measure backbone throughput / memory / params and return CSV rows.
+    """Measure backbone throughput, memory, and parameter count as CSV rows.
 
     One row per metric, with ``method="profile"``.
 
-    When ``cpu_throughput_enabled`` is set, *additionally* runs a short
-    CPU measurement (smaller batch / fewer iters) and emits the
-    throughput / latency with a ``_cpu`` suffix.  The
-    CPU pass is wall-clock-budgeted via ``cpu_time_budget_s`` so the
-    heavyweight ViT-L backbones don't burn an hour on the login node.
+    ``cfg.eval.profile.cpu_throughput.enabled`` adds CPU metrics with a ``_cpu`` suffix.
+    Its ``time_budget_s`` setting bounds the extra measurement.
     """
     device = torch.device(cfg.device)
     profile_cfg = cfg.eval.profile
     n_warmup, n_measure = int(profile_cfg.get("n_warmup", 3)), int(profile_cfg.get("n_measure", 20))
     cpu_cfg = profile_cfg.get("cpu_throughput") or {}
-    # A broken loader has nothing to profile; let it raise.
     sample = next(iter(sample_loader))["image"].to(device)
 
     metrics = measure_profile(model, sample, device, n_warmup=n_warmup, n_measure=n_measure)
@@ -629,10 +610,7 @@ def evaluate_profile(
     rows: list[dict] = []
     for name, value in metrics.items():
         if value is None:
-            # value is None only when the underlying probe is structurally
-            # unavailable (e.g. CPU device → no peak_gpu_mem, or the CPU
-            # pass aborted via the wall-clock budget). Logged inside the
-            # measurement helpers; skip the row.
+            # None means the measurement is unavailable or exceeded its time budget.
             continue
         rows.append(
             EvaluationResult(
@@ -649,11 +627,9 @@ def evaluate_segmentation(
     cfg: DictConfig,
     num_classes: int,
 ) -> "tuple[torchgeo_bench.segmentation_task.SegMetrics, int, float | None, int | None]":
-    """Evaluate segmentation performance using a frozen-backbone segmentation probe.
+    """Train a segmentation head on a frozen backbone and evaluate test mIoU.
 
-    Trains a lightweight segmentation head on top of the frozen backbone and
-    evaluates mIoU on the test split. Optionally pre-caches backbone features
-    for faster training across epochs.
+    Backbone features can be cached to avoid recomputing them each epoch.
 
     Returns:
         Tuple of (metrics, feature_dim, lr, batch_size).
@@ -1031,6 +1007,7 @@ def main(cfg: DictConfig) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)
 
+    # Coordinate models use (lon, lat) inputs and ridge/KNN with k-fold validation.
     if str(cfg.get("mode", "image")) == "coord":
         from torchgeo_bench.coordbench.run import run_coordbench
 

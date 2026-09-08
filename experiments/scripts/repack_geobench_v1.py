@@ -11,8 +11,7 @@ Each output sample is::
     <id>.bands.npz   per-band float arrays keyed by their source name
     <id>.meta.json   data-only metadata from the HDF5 ``metadata_json`` attribute
 
-Partition JSON files are copied verbatim into the output dir so the new
-loader can read them without changes. Pickle metadata is not read or converted.
+Keep partition files unchanged to preserve splits. Never read or convert pickle metadata.
 """
 
 import argparse
@@ -69,8 +68,7 @@ def repack(dataset_dir: Path, out_dir: Path, shard_size: int = 1000) -> int:
                 if written % 1000 == 0:
                     logger.info("  packed %d / %d", written, len(sample_paths))
 
-    # Carry partition + metadata files over so the new loader can find them
-    # in the same place.
+    # Preserve dataset splits, statistics, and attribution.
     for sidecar in dataset_dir.iterdir():
         if sidecar.suffix == ".json" or sidecar.name in (
             "LICENSE",
@@ -99,7 +97,7 @@ def index_shards(shard_paths: list[Path]) -> dict[str, dict[str, tuple[Path, int
 
 
 def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
-    """Cross-check the first ``n_samples`` between original HDF5 and shards."""
+    """Compare a reproducible sample of images and metadata in the two layouts."""
     import random
 
     sample_paths = sorted(dataset_dir.glob("*.hdf5"))
@@ -131,7 +129,6 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
             raise ValueError(f"{sid}: missing '.meta.json' metadata; pickle is not supported.")
         new_meta = decode_metadata(_read(parts["meta.json"]))
 
-        # Reference HDF5
         ref_bands, ref_meta = _read_sample(targets[sid])
 
         assert set(new_bands) == set(ref_bands), f"{sid}: band keys differ"

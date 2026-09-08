@@ -50,11 +50,10 @@ it so config composition can resolve ``_target_``.
 
 .. code-block:: python
 
-   # src/torchgeo_bench/models/__init__.py
    from .new_model import NewModel
 
    __all__: list[str] = [
-       # ... existing entries (keep alphabetical) ...
+       # Keep the existing entries in alphabetical order.
        "NewModel",
    ]
 
@@ -62,7 +61,6 @@ it so config composition can resolve ``_target_``.
 
 .. code-block:: yaml
 
-   # src/torchgeo_bench/conf/model/new_model.yaml
    _target_: torchgeo_bench.models.NewModel
    name: new_model
    pretrained: true

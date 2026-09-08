@@ -1,5 +1,4 @@
-# torchgeo DOFA-Base — MAE pretraining (band-agnostic, RGB wavelengths)
-# Feature dimension: 768
+# MAE-pretrained DOFA uses a wavelength for each selected band.
 
 _target_: torchgeo_bench.models.TorchGeoDOFABench
 factory: dofa_base_patch16_224
@@ -10,6 +9,5 @@ target_size: 224
 name: tgeo_dofa_base
 eval:
   segmentation:
-    # ViT-Base (12 blocks, 768ch). Coarse-to-fine: deepest block first.
-    # backbone.* prefix is stripped by SegmentationProbe automatically.
+    # All blocks keep a 14x14 patch grid; use four depths, deepest first. SegmentationProbe strips the backbone.* prefix.
     layers: ["blocks.11", "blocks.8", "blocks.5", "blocks.2"]

@@ -1,4 +1,4 @@
-"""Minimal custom location encoder for the CoordBench runner.
+"""Example location model for CoordBench.
 
 Run from the repository root:
 
@@ -15,7 +15,7 @@ from torchgeo_bench.coordbench import LocationEncoder
 
 
 class FourierLocationEncoder(LocationEncoder):
-    """Encode longitude and latitude with multi-frequency sine/cosine features."""
+    """Represent coordinates using sine and cosine at several spatial scales."""
 
     name = "fourier"
 

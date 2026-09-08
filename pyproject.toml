@@ -46,8 +46,8 @@ dependencies = [
   "numpy>=1.24",
   "omegaconf>=2.3",
   "pandas>=2",
-  "pyarrow>=14",                                                               # read CoordBench parquet tables via pandas
-  "safetensors>=0.4",                                                          # load MIND location-encoder weights
+  "pyarrow>=14",                                                               # Required for CoordBench's Parquet files.
+  "safetensors>=0.4",                                                          # Loads MIND's location-model weights.
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
@@ -66,7 +66,7 @@ optional-dependencies.all = [
   "torchgeo-bench[terratorch]",
 ]
 optional-dependencies.coordbench = [
-  "rshf>=0.2", # pretrained location encoders: SatCLIP/GeoCLIP/Climplicit/SINR
+  "rshf>=0.2", # Required by SatCLIP, GeoCLIP, Climplicit, and SINR.
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
@@ -90,7 +90,7 @@ optional-dependencies.id = [
   "torchid>=0.3; python_version>='3.13'",
 ]
 optional-dependencies.olmoearth = [
-  "olmoearth-pretrain-minimal>=0.0.6", # 0.0.6 adds OlmoEarth v1.2 (ModelID.OLMOEARTH_V1_2_*)
+  "olmoearth-pretrain-minimal>=0.0.6", # OlmoEarth v1.2 weights require this version.
 ]
 optional-dependencies.sam3 = [
   "transformers>=4.50",
@@ -168,7 +168,7 @@ lint.ignore = [
   "D104",   # missing docstring in public package
   "D105",   # missing docstring in magic method
   "D107",   # missing docstring in __init__ (documented in class docstring)
-  "E501",   # line too long (handled by ruff format)
+  "E501",   # Let the formatter handle line length.
   "SIM108", # allow explicit if/else
   "SIM116", # allow explicit branches
   "TRY003", # allow concise messages at the raise site

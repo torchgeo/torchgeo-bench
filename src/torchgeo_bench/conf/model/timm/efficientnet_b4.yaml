@@ -1,7 +1,3 @@
-# EfficientNet-B4 (18M params)
-# Feature dimension: 1792
-# Model: efficientnet_b4
-
 _target_: torchgeo_bench.models.TimmPatchBenchModel
 model_name: efficientnet_b4
 pretrained: true

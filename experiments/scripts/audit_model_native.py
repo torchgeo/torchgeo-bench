@@ -1,9 +1,6 @@
 """Report which model configs support ``dataset.normalization=model_native``.
 
-``model_native`` is only meaningful when a model can state what its pretraining
-pipeline was: pretrain statistics, a weights-bound ``Normalize``, or its own
-normaliser.  Without one of those it used to fall through to a bare unit
-conversion, handing the backbone raw sensor values.
+Check that each model supplies training-time preprocessing, not just unit conversion.
 
 Usage:
     python experiments/scripts/audit_model_native.py --out model_native_audit.json
@@ -34,7 +31,6 @@ def band_specs(dataset: str, bands: str):
 
 
 def main() -> None:
-    """Entry point."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)
@@ -59,7 +55,9 @@ def main() -> None:
             sample = torch.rand(2, len(bands), 32, 32) * 3000
             model.normalize_inputs(sample)
             entry["model_native"] = "supported"
-        except UnsupportedNormalizationError as exc:  # allow-except: record unsupported native normalization
+        except (
+            UnsupportedNormalizationError
+        ) as exc:  # allow-except: record unsupported native normalization
             entry["model_native"] = "unsupported"
             entry["reason"] = str(exc)[:160]
         results[name] = entry

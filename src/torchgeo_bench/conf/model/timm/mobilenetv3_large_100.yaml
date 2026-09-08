@@ -1,7 +1,3 @@
-# MobileNetV3-Large (5M params)
-# Feature dimension: 960
-# Model: mobilenetv3_large_100
-
 _target_: torchgeo_bench.models.TimmPatchBenchModel
 model_name: mobilenetv3_large_100
 pretrained: true

@@ -1,10 +1,8 @@
-"""GeoBench V1 PyTorch :class:`Dataset` and per-wrapper base class.
+"""GeoBench V1 loaders for local HDF5 files and WebDataset shards.
 
-Lightweight HDF5 reader that does not depend on the upstream ``geobench``
-package. Loads samples directly from ``classification_v1.0/<dataset>/``
-HDF5 files using the partition JSON files distributed alongside them.
-These custom HDF5 samples must carry JSON metadata. Standard V1 downloads
-use the pickle-free sharded reader instead.
+HDF5 samples require JSON metadata and partition files, not the upstream ``geobench`` package.
+
+Standard V1 downloads use JSON tar shards instead.
 """
 
 import json
@@ -129,12 +127,7 @@ class GeoBenchv1(Dataset):
 
 
 class _V1Dataset(BenchDataset):
-    """Base class for every GeoBench V1 wrapper.
-
-    Concrete subclasses just declare metadata (``name``, ``num_classes``,
-    ``bands``, ``rgb_bands``, ``split_sizes``, ``multilabel``); ``get_dataset``
-    is fully implemented here and dispatches to :class:`GeoBenchv1`.
-    """
+    """Load GeoBench V1 splits for wrappers that declare dataset metadata."""
 
     supports_partitions = True
 
@@ -152,10 +145,9 @@ class _V1Dataset(BenchDataset):
     ) -> Dataset:
         """Return a torch :class:`Dataset` for the split (raw values).
 
-        Backend resolution order:
+        Loaders are tried in this order:
 
-        1. **Sharded WebDataset** at :data:`V1_SHARDED_ROOT` if shards already
-           exist locally (5-7x faster on NFS, fork-safe at high ``num_workers``).
+        1. **Sharded WebDataset** at :data:`V1_SHARDED_ROOT` if shards exist locally.
         2. **Custom JSON-metadata HDF5** at :data:`V1_ROOT` if present.
 
         Missing data must be downloaded with ``torchgeo-bench download`` first.

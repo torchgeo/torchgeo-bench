@@ -1,5 +1,6 @@
-"""Sweep ``(batch_size, num_workers)`` for one ``(model, dataset, bands)`` combo and
-report samples/sec, peak GPU memory, and the throughput-maximising config.
+"""Compare data-loader batch sizes and worker counts for one model and dataset.
+
+Report samples per second, peak GPU memory, and the fastest successful setting.
 
 Usage::
 
@@ -11,9 +12,7 @@ Usage::
         --batch-sizes 64,128,256,512 \\
         --num-workers 4,8,16,32
 
-Designed for the post-WebDataset layout under
-``data/classification_v1.0_wds/`` so the dataloader is fork-safe at any
-``num_workers``.
+Uses GeoBench V1 tar shards, whose reader lets each worker open its own files.
 """
 
 import argparse
@@ -129,7 +128,9 @@ def main() -> None:
                 sps, peak, dt = _bench(model, loader, device, args.max_batches)
                 results.append((sps, bs, nw, peak, dt))
                 logger.info("%6d %6d %12.1f %10.2f %10.2f", bs, nw, sps, peak, dt)
-            except torch.cuda.OutOfMemoryError as exc:  # allow-except: oversized batches are expected during tuning
+            except (
+                torch.cuda.OutOfMemoryError
+            ) as exc:  # allow-except: oversized batches are expected during tuning
                 torch.cuda.empty_cache()
                 logger.warning("batch_size=%d num_workers=%d: %s", bs, nw, exc)
 

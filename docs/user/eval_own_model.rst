@@ -136,16 +136,14 @@ it as an instance attribute, then use it in ``_forward_patch_features``:
        def __init__(self, bands: list[BandSpec], **kwargs) -> None:
            super().__init__(bands=bands, normalization="bandspec_zscore")
 
-           # The runner reinstantiates this class once per dataset, so these
-           # attributes are always current for the channels being loaded.
-           self.wavelengths = [b.wavelength_um for b in bands]  # None for SAR/DEM
+           # Each model instance receives the bands selected for its dataset.
+           self.wavelengths = [b.wavelength_um for b in bands]  # Missing for radar and elevation bands.
            self.sensors = [b.sensor for b in bands]             # e.g. "s2", "landsat"
            self.band_names = [b.name for b in bands]            # e.g. "red", "nir"
 
-           self.backbone = ...  # your backbone here
+           self.backbone = ...  # Load your model here.
 
        def _forward_patch_features(self, images, _bboxes=None):
-           # Pass the cached metadata alongside the image tensor.
            return self.backbone(images, wavelengths=self.wavelengths)
 
 For a complete example see ``TorchGeoDOFABench`` in
@@ -163,12 +161,11 @@ The only required key is ``_target_``, which must point to your class:
 
 .. code-block:: yaml
 
-   # src/torchgeo_bench/conf/model/new_model.yaml
-   _target_: new_model.NewModel    # dotted import path to your class
+   _target_: new_model.NewModel    # Python import path for your class.
    pretrained: true
-   name: new_model                 # human-readable label in the results CSV
+   name: new_model                 # Name shown in result rows.
 
-   # Add any kwargs your __init__ accepts (except `bands` — see note below).
+   # Add other __init__ options; the runner supplies bands.
    # embed_dim: 768
    # checkpoint: path/to/weights.pt
 

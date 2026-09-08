@@ -25,7 +25,7 @@ _DEFAULT_OUTPUT = _REPO_ROOT / "tests" / "fixtures" / "accuracy_baselines.csv"
 TARGET_DATASETS = {"m-eurosat", "benv2", "so2sat", "m-pv4ger"}
 TARGET_METHODS = {"knn5", "linear"}
 
-# Pinned model names → Hydra config key (relative to conf/model/)
+# Match result model names to their config paths under conf/model/.
 PINNED_CONFIGS: dict[str, str] = {
     "rcf": "rcf",
     "imagestats": "imagestats",
@@ -41,9 +41,7 @@ PINNED_CONFIGS: dict[str, str] = {
     "tgeo_swinv2b_s2rgb_satlas_mi": "torchgeo/swinv2b_s2rgb_satlas_mi",
 }
 
-# Canonical bands string for each pinned model.
-# For models with multiple band configs, select exactly one row per
-# (name, dataset, method) triple for the fixture.
+# Keep one chosen band setting per model so each result has one baseline.
 CANONICAL_BANDS: dict[str, str] = {
     "rcf": "all",
     "imagestats": "all",
@@ -67,17 +65,17 @@ def filter_and_deduplicate(
     pinned_names: set[str],
     target_datasets: set[str] | None = None,
 ) -> pd.DataFrame:
-    """Filter df to pinned models and deduplicate to one canonical bands row each.
+    """Keep selected models and one baseline per dataset, method, and band setting.
 
     Args:
         df: Raw results DataFrame with columns including name, dataset, method,
             metric_name, bands, partition, metric_value, model.
-        canonical_bands: Maps model name to the canonical bands string to keep.
+        canonical_bands: Band setting to retain for each model.
         pinned_names: Set of model names to include.
         target_datasets: Restrict to these datasets; if None, all datasets pass.
 
     Returns:
-        Tidy DataFrame with columns:
+        DataFrame with columns:
         model_config, name, dataset, method, metric_name, bands, partition, expected_value.
     """
     mask = (
@@ -146,7 +144,7 @@ def _diff_summary(old: pd.DataFrame | None, new: pd.DataFrame) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Entry point for the update-baselines script."""
+    """Write accuracy baselines from the selected result files."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

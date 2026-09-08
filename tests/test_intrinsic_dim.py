@@ -1,4 +1,4 @@
-"""Tests for intrinsic-dimension wrapper around torchid."""
+"""Tests for intrinsic dimension and feature-spectrum metrics."""
 
 import logging
 from importlib.util import find_spec
@@ -26,9 +26,6 @@ requires_torchid = pytest.mark.skipif(
 )
 
 
-# ---- pure-python helpers (no torchid required) ---------------------------
-
-
 class TestResolveDevice:
     def test_none_uses_cuda_when_available(self) -> None:
         with mock.patch.object(torch.cuda, "is_available", return_value=True):
@@ -48,7 +45,7 @@ class TestSubsample:
     def test_no_subsample_when_under_cap(self) -> None:
         X = np.arange(20).reshape(10, 2)
         out = _subsample(X, max_samples=100, seed=0)
-        assert out is X  # unchanged ref
+        assert out is X
 
     def test_no_subsample_when_max_is_none(self) -> None:
         X = np.arange(20).reshape(10, 2)
@@ -67,9 +64,6 @@ class TestSubsample:
         np.testing.assert_array_equal(a, b)
 
 
-# ---- compute_intrinsic_dim: argument validation (no torchid needed) ------
-
-
 class TestComputeBasic:
     def test_rejects_non_2d(self) -> None:
         with pytest.raises(ValueError, match="2D"):
@@ -80,9 +74,7 @@ class TestComputeBasic:
         assert out == {}
 
     def test_rejects_invalid_max_samples_same_as_feature_spectrum(self) -> None:
-        # compute_feature_spectrum validates max_samples explicitly; without
-        # the same check here, a bad value (e.g. a negative int) would just
-        # silently misbehave in _subsample instead of failing clearly.
+        # Validate the sample cap even when no estimators are requested.
         with pytest.raises(ValueError, match="max_samples must be an integer"):
             compute_intrinsic_dim(np.zeros((10, 3)), estimators=[], max_samples=-1)
 
@@ -122,8 +114,7 @@ class TestFeatureSpectrum:
         assert metrics["spectral_anisotropy"] == pytest.approx(0.0)
 
     def test_known_low_rank_spectrum(self) -> None:
-        # n - 1 = 17 >= d = 12 here, so effective_dim == d and the ambient
-        # feature dimension is the binding constraint on anisotropy.
+        # Here n - 1 = 17 exceeds d = 12, so anisotropy uses the feature count.
         block = np.zeros((6, 12), dtype=np.float64)
         block[0:2, 0] = [3.0, -3.0]
         block[2:4, 1] = [2.0, -2.0]
@@ -170,21 +161,14 @@ class TestFeatureSpectrum:
             compute_feature_spectrum(X, max_samples=1)
 
     def test_small_split_isotropic_still_maps_to_zero(self) -> None:
-        # n=6 rows in d=64 ambient features: after centering, only n - 1 = 5
-        # singular values are nonzero. Centered standard-basis rows are a
-        # regular simplex -- equidistant, so those 5 singular values are
-        # exactly equal (isotropic). Normalizing by the raw feature dimension
-        # d=64 instead of effective_dim = min(d, n - 1) = 5 would give this an
-        # anisotropy floor well above zero, even though it's isotropic.
+        # After centering, these six basis rows have five equal nonzero singular values.
+        # Using d=64 instead of min(d, n - 1)=5 would falsely report anisotropy.
         X = np.zeros((6, 64))
         X[:, :6] = np.eye(6)
 
         metrics = compute_feature_spectrum(X, max_samples=None)
 
         assert metrics["spectral_anisotropy"] == pytest.approx(0.0, abs=1e-9)
-
-
-# ---- error paths (mocked torchid) ----------------------------------------
 
 
 class TestErrorHandling:
@@ -199,12 +183,7 @@ class TestErrorHandling:
 
     @requires_torchid
     def test_failing_estimator_propagates(self) -> None:
-        """A torchid-internal exception propagates instead of being
-        written as NaN.
-
-        Patches the torchid estimators registry rather than swapping the
-        whole module so ``torchid.primitives`` (used by the
-        zero-distance dedup) keeps working."""
+        """Unexpected estimator failures must propagate, not become NaN results."""
         import torchid.estimators as real_estimators
 
         class _Boom:
@@ -217,9 +196,6 @@ class TestErrorHandling:
             pytest.raises(RuntimeError, match="boom"),
         ):
             compute_intrinsic_dim(X, estimators=["Boom"], device="cpu", max_samples=None)
-
-
-# ---- _load_estimator ---------------------------------------------------------
 
 
 class TestLoadEstimator:
@@ -245,9 +221,6 @@ class TestLoadEstimator:
             _load_estimator("TwoNN")
 
 
-# ---- _drop_zero_distance_rows ------------------------------------------------
-
-
 class TestDropZeroDistanceRows:
     def test_no_duplicates_all_rows_kept(self) -> None:
         torch.manual_seed(0)
@@ -258,7 +231,7 @@ class TestDropZeroDistanceRows:
     def test_exact_duplicates_rows_dropped(self) -> None:
         torch.manual_seed(1)
         X = torch.randn(10, 4)
-        X[3] = X[1].clone()  # inject duplicate
+        X[3] = X[1].clone()
         out = _drop_zero_distance_rows(X)
         assert out.shape[0] < 10
 
@@ -267,7 +240,6 @@ class TestDropZeroDistanceRows:
         X = torch.randn(15, 4)
         X[5] = X[2].clone()
         out = _drop_zero_distance_rows(X)
-        # After dropping, no two rows should share zero d1
         if out.shape[0] >= 2:
             from torchgeo_bench.intrinsic_dim import _two_nearest_distances
 
@@ -283,13 +255,9 @@ class TestDropZeroDistanceRows:
         assert any("dropped" in r.message for r in caplog.records)
 
 
-# ---- DegenerateManifoldError --------------------------------------------------
-
-
 class TestDegenerateManifoldError:
     @requires_torchid
     def test_raised_on_non_finite_dimension(self) -> None:
-        """Mock a torchid estimator that returns NaN to trigger the error."""
         import torchid.estimators as real_estimators
 
         class _NaNEstimator:
@@ -304,9 +272,6 @@ class TestDegenerateManifoldError:
             pytest.raises(DegenerateManifoldError, match="non-finite"),
         ):
             compute_intrinsic_dim(X, estimators=["NaNEst"], device="cpu", max_samples=None)
-
-
-# ---- real torchid integration (requires py>=3.13) ------------------------
 
 
 @requires_torchid
@@ -342,7 +307,7 @@ class TestRealTorchid:
     def test_uniform_cube_lpca_matches_ambient(self) -> None:
         X = self._uniform_cube(1000, d=5)
         out = compute_intrinsic_dim(X, estimators=["lPCA"], device="cpu", max_samples=None)
-        # lPCA on full-rank cube yields ambient dim
+        # A full-rank cube has intrinsic dimension equal to its feature count.
         assert out["lPCA"] == pytest.approx(5.0, abs=0.1)
 
     def test_multiple_estimators_returned(self) -> None:

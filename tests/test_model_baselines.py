@@ -32,7 +32,6 @@ _TOL = 0.02
 
 
 def test_accuracy_check_marker_is_registered() -> None:
-    """Verify accuracy_check marker is listed in pytest --markers output."""
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "--markers"],
         capture_output=True,
@@ -49,7 +48,6 @@ def test_accuracy_check_marker_is_registered() -> None:
     not list(_RESULTS_DIR.glob("*.csv")), reason="no per-model results in results/models"
 )
 def test_update_baselines_script_runs(tmp_path: Path) -> None:
-    """Script runs, exits 0, and outputs a CSV with expected columns."""
     out = tmp_path / "out.csv"
     result = subprocess.run(
         [sys.executable, str(_REPO_ROOT / "scripts" / "update_baselines.py"), "--output", str(out)],
@@ -63,7 +61,7 @@ def test_update_baselines_script_runs(tmp_path: Path) -> None:
     assert _FIXTURE_COLS.issubset(set(df.columns))
 
 
-# Load fixture at module level for parametrisation (empty DF if file absent)
+# Missing baseline CSVs leave no accuracy cases to collect.
 _fixture_df: pd.DataFrame
 if _FIXTURE_PATH.exists():
     _fixture_df = pd.read_csv(_FIXTURE_PATH)
@@ -83,7 +81,6 @@ def _combo_id(combo: dict) -> str:
 @pytest.mark.accuracy_check
 @pytest.mark.parametrize("combo", _COMBOS, ids=[_combo_id(c) for c in _COMBOS])
 def test_accuracy(combo: dict, tmp_path: Path) -> None:
-    """Run bench CLI for one (model_config, dataset, bands) combo and check accuracy."""
     model_config = combo["model_config"]
     dataset = combo["dataset"]
     bands = combo["bands"]

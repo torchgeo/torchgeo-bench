@@ -194,7 +194,7 @@ def test_download_resisc45_creates_target_and_downloads_splits(tmp_path: Path) -
 
 
 def test_download_resisc45_verifies_the_archive_checksum(tmp_path: Path) -> None:
-    """The archive comes from a pinned HF revision; a truncated zip must fail loudly."""
+    """Require checksum verification to reject truncated archives."""
     with mock.patch("torchgeo_bench.download.RESISC45") as resisc_mock:
         download_resisc45(tmp_path)
 

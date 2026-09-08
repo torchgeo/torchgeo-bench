@@ -1,10 +1,7 @@
 """Calibration metrics for classification probes.
 
-Wraps ``torchmetrics`` calibration error so KNN and Linear Probing
-evaluations can report ECE (L1), RMS calibration error (L2), and the
-maximum calibration error (MCE) alongside their primary metric. Also
-provides a single-parameter temperature-scaling baseline (Guo et al.,
-2017) for Linear Probing.
+Report ECE (L1), RMS calibration error (L2), and maximum calibration error (MCE).
+Linear probes also support single-parameter temperature scaling (Guo et al., 2017).
 """
 
 from typing import Literal
@@ -40,7 +37,7 @@ def compute_calibration_metrics(
 
     Returns:
         Dict with keys ``ece`` (L1), ``rms_ce`` (L2), ``mce`` (max).
-        Multi-label values are macro-averaged over labels.
+        Multi-label values are macro-averaged over labels with both positive and negative examples.
     """
     probs = torch.as_tensor(y_proba, dtype=torch.float32)
 
@@ -50,8 +47,6 @@ def compute_calibration_metrics(
         per_class: dict[str, list[float]] = {key: [] for key in _KEYS.values()}
         for c in range(n_classes):
             t_c = targets[:, c]
-            # Skip degenerate columns: a single observed class makes
-            # binning meaningless and torchmetrics emits a warning.
             if t_c.min() == t_c.max():
                 continue
             p_c = probs[:, c].clamp(0.0, 1.0)
@@ -63,8 +58,7 @@ def compute_calibration_metrics(
         }
 
     targets = torch.as_tensor(y_true, dtype=torch.long)
-    # Renormalize defensively; some sklearn estimators return rows that
-    # don't sum to exactly 1 due to fp32 accumulation.
+    # Float32 rounding can leave probability rows slightly off a sum of one.
     probs = probs / probs.sum(dim=1, keepdim=True).clamp_min(1e-12)
     confidence, predictions = probs.max(dim=1)
     if class_labels is not None:
@@ -88,11 +82,10 @@ def fit_temperature(
     max_iter: int = 100,
     class_labels: np.ndarray | None = None,
 ) -> float:
-    """Fit a single temperature ``T`` minimizing NLL on held-out logits.
+    """Fit a single temperature ``T`` by minimizing held-out negative log-likelihood.
 
-    Guo et al. (2017) "On Calibration of Modern Neural Networks". Operates
-    on raw logits; parameterized as ``T = exp(log_T)`` so the optimizer
-    stays in an unconstrained space and ``T`` stays positive.
+    Use ``T = exp(log_T)`` to keep temperature positive with an unconstrained optimizer.
+    This follows Guo et al. (2017), "On Calibration of Modern Neural Networks".
 
     Args:
         logits: Raw scores of shape ``(N, C)``.

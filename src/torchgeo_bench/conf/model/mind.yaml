@@ -1,5 +1,5 @@
 # MIND location encoder (distilled from AlphaEarth/Climplicit/GeoCLIP/SINR).
-# 64-d Matryoshka deploy prefix of the pooled trunk. https://huggingface.co/isaaccorley/MIND
+# Uses the first 64 pooled features from the Matryoshka embedding. https://huggingface.co/isaaccorley/MIND
 _target_: torchgeo_bench.coordbench.models.MINDLocationEncoder
 repo: isaaccorley/MIND
 filename: mind.safetensors

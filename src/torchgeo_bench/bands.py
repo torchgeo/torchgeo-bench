@@ -1,8 +1,6 @@
 """Spectral band metadata shared by datasets and models.
 
-:class:`BandSpec` lives in this dependency-free leaf module (stdlib only) so
-that ``from torchgeo_bench.bands import BandSpec`` — and the re-export in
-:mod:`torchgeo_bench.datasets.base` — never pays for torch/torchgeo imports.
+Importing :class:`BandSpec` here or via ``datasets.base`` does not load torch or torchgeo.
 """
 
 from dataclasses import dataclass

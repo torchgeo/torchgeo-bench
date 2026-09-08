@@ -6,4 +6,4 @@ auto_resize: true
 target_size: 224
 name: tgeo_deo_swin_s2
 
-# Classification only: DEO's final Swin map is spatially pooled by the wrapper.
+# No segmentation layers are configured; the wrapper returns a pooled descriptor.

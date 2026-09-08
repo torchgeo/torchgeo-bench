@@ -1,11 +1,8 @@
-"""Generate the committed per-dataset geographic store.
+"""Write geographic metadata for every registered dataset.
 
-Thin CLI over :mod:`torchgeo_bench.geography`, which owns all the extraction
-logic.  Writes one ``<dataset>.json`` per registered dataset plus an
-``index.json`` under ``docs/_static/_dataset_geography/``.
+Write dataset records and ``index.json`` to ``docs/_static/_dataset_geography/``.
 
-Coverage comes from the dataset registry, so a newly registered dataset is
-picked up here automatically -- no edit to this script is needed.
+Use the registry so newly added datasets appear in the store.
 
 Usage::
 

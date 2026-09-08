@@ -13,7 +13,6 @@ from torchgeo_bench.calibration import (
 
 
 def test_perfect_calibration_singlelabel():
-    """One-hot probabilities matching labels => zero calibration error."""
     rng = np.random.default_rng(0)
     n, c = 200, 4
     y_true = rng.integers(0, c, size=n)
@@ -25,11 +24,11 @@ def test_perfect_calibration_singlelabel():
 
 
 def test_worst_calibration_singlelabel():
-    """High-confidence wrong predictions => ECE near 1."""
+    """Certain but wrong predictions have the largest calibration error."""
     n, c = 200, 4
     y_true = np.zeros(n, dtype=np.int64)
     y_proba = np.zeros((n, c), dtype=np.float32)
-    y_proba[:, 1] = 1.0  # always confidently predict class 1
+    y_proba[:, 1] = 1.0
     out = compute_calibration_metrics(y_true, y_proba, multi_label=False)
     assert out["ece"] == pytest.approx(1.0, abs=1e-4)
     assert out["mce"] == pytest.approx(1.0, abs=1e-4)
@@ -95,7 +94,6 @@ def test_temperature_rejects_unseen_validation_classes() -> None:
 
 
 def test_multilabel_shapes_and_range():
-    """Multi-label path returns the same keys with values in [0, 1]."""
     rng = np.random.default_rng(0)
     n, c = 100, 5
     y_true = rng.integers(0, 2, size=(n, c))
@@ -107,7 +105,6 @@ def test_multilabel_shapes_and_range():
 
 
 def test_multilabel_perfect_calibration():
-    """Hard 0/1 probabilities matching labels => zero per-label error."""
     rng = np.random.default_rng(1)
     n, c = 80, 3
     y_true = rng.integers(0, 2, size=(n, c))
@@ -121,11 +118,11 @@ def test_multilabel_perfect_calibration():
 
 
 def test_temperature_overconfident_singlelabel():
-    """Sharp logits with many wrong predictions => T > 1 (flatten)."""
+    """Increasing temperature should soften overconfident predictions."""
     rng = np.random.default_rng(0)
     n, c = 1000, 4
     y_true = rng.integers(0, c, size=n)
-    # 50% accuracy but logits are very sharp => model is overconfident.
+    # Half the predictions are wrong despite near-certain probabilities.
     pred = y_true.copy()
     flip = rng.choice(n, size=n // 2, replace=False)
     pred[flip] = (y_true[flip] + 1) % c
@@ -136,7 +133,7 @@ def test_temperature_overconfident_singlelabel():
 
 
 def test_temperature_underconfident_singlelabel():
-    """Sharp logits with mostly correct predictions => T < 1 (sharpen)."""
+    """Correct but low-confidence predictions need a temperature below 1."""
     rng = np.random.default_rng(0)
     n, c = 500, 4
     y_true = rng.integers(0, c, size=n)
@@ -147,7 +144,7 @@ def test_temperature_underconfident_singlelabel():
 
 
 def test_temperature_scaling_reduces_ece():
-    """TS applied on overconfident logits should reduce ECE on the same split."""
+    """Fit and evaluate temperature on the same split for this calibration check."""
     rng = np.random.default_rng(0)
     n, c = 1000, 4
     y_true = rng.integers(0, c, size=n)
@@ -167,7 +164,6 @@ def test_temperature_scaling_reduces_ece():
 
 
 def test_temperature_multilabel_runs():
-    """Multi-label TS produces a positive T and valid calibration."""
     rng = np.random.default_rng(0)
     n, c = 200, 5
     y_true = rng.integers(0, 2, size=(n, c))

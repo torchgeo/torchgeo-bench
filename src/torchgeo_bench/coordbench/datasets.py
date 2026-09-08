@@ -21,7 +21,6 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Unified source for every benchmark below.
 # https://huggingface.co/datasets/taylor-geospatial/coordbench
 COORDBENCH_REPO = os.environ.get("COORDBENCH_REPO", "taylor-geospatial/coordbench")
 
@@ -405,7 +404,7 @@ def load_usavars() -> list[CoordBenchmark]:
         lat_a = df[cl["lat"]].to_numpy(np.float64)
         lon_a = df[cl["lon"]].to_numpy(np.float64)
         val_a = df[value_col].to_numpy(np.float64)
-        keep = val_a != USAVARS_NODATA  # drop nodata rows
+        keep = val_a != USAVARS_NODATA
         lat_a, lon_a, val_a = lat_a[keep], lon_a[keep], val_a[keep]
         if label in USAVARS_LOG_LABELS:
             val_a = np.log1p(val_a)
@@ -489,8 +488,7 @@ def load_deepmind() -> list[CoordBenchmark]:
         label = df["label"].to_numpy()
         integral = np.all(np.isfinite(label)) and np.allclose(label, np.round(label))
         is_clf = bool(integral and np.unique(label).size <= 100)
-        # CoordBench always carries a `timestamp` column, all-null when the source has no
-        # per-point time; keep year None in that case rather than an all-NaN array.
+        # Missing source timestamps produce an all-null column; use year=None, not an all-NaN array.
         year = None
         if ts_col is not None:
             yr = pd.to_datetime(df[ts_col], unit="ms").dt.year
@@ -594,7 +592,6 @@ def load_benchmarks(names: str | list[str] = "all") -> list[CoordBenchmark]:
     else:
         selection = list(names)
 
-    # Resolve the selection to (families to load, per-family name filters).
     families_to_load: list[str] = []
     name_filter: dict[str, set[str]] = {}
     for entry in selection:

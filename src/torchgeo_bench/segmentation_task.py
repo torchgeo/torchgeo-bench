@@ -1,4 +1,4 @@
-"""Segmentation Training Task Logic."""
+"""Training and evaluation for segmentation probes."""
 
 import logging
 import math
@@ -31,7 +31,7 @@ SegMetrics = dict[str, float]
 
 
 class SegmentationSolver:
-    """A lightweight trainer for the SegmentationProbe."""
+    """Train and evaluate a segmentation probe."""
 
     def __init__(  # noqa: PLR0913 -- Public constructor options.
         self,
@@ -44,7 +44,7 @@ class SegmentationSolver:
         lr_scheduler: str = "cosine",
         ignore_index: int = 255,
     ) -> None:
-        """Initialize the SegmentationSolver.
+        """Configure the optimizer, loss, and segmentation metrics.
 
         Args:
             model: The SegmentationProbe model to train.
@@ -215,15 +215,12 @@ class SegmentationSolver:
         *,
         verbose: bool = True,
     ) -> float | None:
-        """Train the segmentation head on pre-cached backbone features.
+        """Train the segmentation head on cached backbone features.
 
-        The backbone is **not** called during training — cached features are fed
-        directly to ``self.model.head``, which is the only component that runs
-        a forward/backward pass.
+        Cached features go directly to ``self.model.head``; the backbone is not called.
 
-        The entire feature cache is pre-moved to the GPU as contiguous tensors
-        (:class:`GPUTensorCache`), eliminating per-batch CPU→GPU DMA transfers
-        and ``torch.stack`` calls.
+        Keep the full cache on the training device to avoid per-batch transfers and stacking.
+        Pass a ``GPUTensorCache`` as ``train_cache`` or ``val_cache`` to reuse it across calls.
 
         Args:
             train_cache: Pre-extracted training features from
@@ -296,10 +293,9 @@ class SegmentationSolver:
         *,
         collect_confusions: bool = False,
     ) -> SegMetrics | tuple[SegMetrics, torch.Tensor]:
-        """Evaluate on a CachedFeaturesDataset.
+        """Evaluate segmentation metrics from cached backbone features.
 
-        The cache is moved to GPU as a :class:`GPUTensorCache` for zero
-        per-batch host→device transfers.
+        Transfer the cache once as a :class:`GPUTensorCache` to avoid per-batch copies.
 
         Args:
             cache: Pre-extracted features (output of

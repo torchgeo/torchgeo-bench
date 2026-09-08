@@ -1,5 +1,4 @@
-# torchgeo ScaleMAE-Large — fMoW RGB
-# Feature dimension: 1024
+# fMoW-pretrained Scale-MAE requires exactly three ordered RGB bands.
 
 _target_: torchgeo_bench.models.TorchGeoScaleMAEBench
 factory: scalemae_large_patch16
@@ -53,6 +52,5 @@ dataset_overrides:
 
 eval:
   segmentation:
-    # ViT-Large (24 blocks, 1024ch). Coarse-to-fine: deepest block first.
-    # backbone.* prefix is stripped by SegmentationProbe automatically.
+    # Use four encoder depths, deepest first; SegmentationProbe strips the backbone.* prefix.
     layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]

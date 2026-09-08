@@ -1,7 +1,3 @@
-# ViT-Large Patch16 224
-# Feature dimension: 1024
-# Model: vit_large_patch16_224
-
 _target_: torchgeo_bench.models.TimmPatchBenchModel
 model_name: vit_large_patch16_dinov3.sat493m
 pretrained: true
@@ -12,9 +8,6 @@ auto_resize: true
 use_cls_token: false
 eval:
   segmentation:
-    # Isotropic DINOv3 ViT-Large (24 transformer blocks, 1024ch). No spatial
-    # pyramid: pick 4 blocks spread across depth, deepest first.
-    # auto_resize sends 256px in, giving a 16x16 grid + 5 prefix tokens
-    # (1 CLS + 4 registers) = L=261. SegmentationProbe drops exactly
-    # num_prefix_tokens; it does NOT assume a single CLS token.
+    # Blocks share one spatial grid; use four depths, deepest first.
+    # auto_resize uses 256px: 16x16 patches + 5 prefix tokens (1 CLS, 4 registers), 261 tokens total. SegmentationProbe removes all prefix tokens.
     layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]

@@ -1,8 +1,6 @@
 """Benchmark dataset registry for torchgeo-bench.
 
-Individual dataset classes load lazily (via module ``__getattr__``, mirroring
-:mod:`torchgeo_bench`) so that ``import torchgeo_bench.datasets`` — and
-therefore CLI startup — stays fast.
+Dataset classes load only when requested, keeping imports and CLI startup fast.
 
 Public API
 ----------
@@ -53,7 +51,6 @@ __all__ = [
     "list_datasets",
 ]
 
-# Class name -> defining submodule, resolved on first attribute access.
 _LAZY_CLASSES: dict[str, str] = {
     "BENV2": "benv2",
     "BurnScars": "burn_scars",
@@ -84,7 +81,7 @@ _LAZY_CLASSES: dict[str, str] = {
 def __getattr__(name: str) -> object:
     if name in _LAZY_CLASSES:
         cls = getattr(import_module(f".{_LAZY_CLASSES[name]}", __name__), name)
-        globals()[name] = cls  # cache so subsequent lookups skip __getattr__
+        globals()[name] = cls
         return cls
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

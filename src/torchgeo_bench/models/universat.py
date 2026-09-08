@@ -24,10 +24,7 @@ from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
 
-# Pinned UniverSat revision for reproducible torch.hub loads. The repo has no
-# tags/releases and rewrote its history after the previous pin, orphaning it
-# (torch.hub's fork-of-default-branch check then fails to resolve the ref) --
-# repin to the current main tip if this happens again.
+# Pin model code for reproducible torch.hub loads.
 UNIVERSAT_REPO = "gastruc/UniverSat"
 UNIVERSAT_REF = "d4e8712d29651c34c4fdb9f9d2c0b168dd5c678b"
 
@@ -215,11 +212,8 @@ class UniverSatBenchModel(BenchModel):
         self.do_normalize = normalize
 
         source = f"{repo}:{repo_ref}" if repo_ref else repo
-        # compile=False: the current hub entrypoint defaults to torch.compile
-        # max-autotune, tuned for repeated large-batch training steps. A
-        # single-pass feature-extraction sweep never amortises that warmup
-        # cost, and varying per-dataset input shapes across the sweep can
-        # overflow dynamo's recompile limit.
+        # Single-pass extraction does not amortize torch.compile's max-autotune warmup.
+        # Varying dataset shapes can also exhaust its recompile limit.
         self.model = cast(
             UniverSatEncoder,
             torch.hub.load(source, "from_pretrained", trust_repo=True, compile=False),

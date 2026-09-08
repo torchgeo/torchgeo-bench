@@ -1,10 +1,7 @@
 """Selectable input-normalisation strategies for benchmark models.
 
-Each pretrained backbone was trained against a specific input pipeline, but
-"the right" cross-dataset normalisation is empirical — what works for
-m-eurosat (raw S2 DN) doesn't generalise to m-so2sat (already reflectance)
-or m-pv4ger (uint8 NAIP).  Rather than hard-code one policy, expose a
-strategy enum and let the sweep treat it as another axis.
+Input scales include raw S2 DN (m-eurosat), reflectance (m-so2sat), and uint8 (m-pv4ger).
+Normalization is therefore a configurable benchmark parameter.
 
 Strategies:
 
@@ -92,8 +89,6 @@ def build_normalizer(
 
     if strategy is NormalizationStrategy.MINMAX_ZSCORE:
         lo, span = _bandspec_min_max(bands)
-        # Post-minmax mean_i = (raw_mean_i - min_i) / (max_i - min_i)
-        # Post-minmax std_i  = raw_std_i  / (max_i - min_i)
         n = len(bands)
         pmean = torch.tensor(
             [(b.mean - b.min) / max(b.max - b.min, 1e-8) for b in bands],
@@ -140,7 +135,7 @@ def build_model_native_normalizer(
         convert = lambda x: x  # noqa: E731
 
     if pretrain_mean is None:
-        # Some wrappers install their own normalizer after construction.
+        # Wrappers may replace this normalizer before use.
         def _undefined(_x: torch.Tensor) -> torch.Tensor:
             raise UnsupportedNormalizationError(
                 "model_native normalisation is undefined for this model: it declares "

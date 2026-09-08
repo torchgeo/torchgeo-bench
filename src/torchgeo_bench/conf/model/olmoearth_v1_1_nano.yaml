@@ -1,7 +1,3 @@
-# OlmoEarth-v1.1-Nano (AI2 geospatial foundation model)
-# Feature dimension: 128
-# v1.1 improves accuracy with ~1.7M params (up from 1.4M in v1).
-
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
 model_size: nano
 version: v1_1
@@ -15,8 +11,7 @@ min_image_size: 64
 name: olmoearth_v1_1_nano
 eval:
   segmentation:
-    # Isotropic transformer (4 blocks total, 28x28 grid): no spatial pyramid,
-    # so tap every block, deepest first.
+    # All four encoder blocks share a 28x28 grid at 224px; use each block, deepest first.
     layers:
       - "encoder_model.encoder.blocks.3"
       - "encoder_model.encoder.blocks.2"

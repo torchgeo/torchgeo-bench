@@ -1,25 +1,17 @@
-# Primary configuration for torchgeo-bench.
-# The model group (conf/model/<name>.yaml) is selected by the CLI
-# (model=<name> / --model) and merged in under the `model` key.
+# The CLI selects conf/model/<name>.yaml with model=<name> / --model and merges it under `model`.
 
 seed: 0
 device: cuda:0
-output: null   # explicit CSV path; null writes knn/linear/seg rows to <results_dir>/<model name>.csv
-              # (and profile/intrinsic_dim rows to their own dirs below); non-null routes ALL row types here
+output: null   # null uses per-model CSVs below; a path sends all image-mode row types to one CSV
 results_dir: results/models
-# Profile/intrinsic_dim rows are one-time model+hardware measurements, so by
-# default they land in their own per-model files instead of results_dir,
-# where a routine metrics rerun would rewrite/diff them unnecessarily.
-# Ignored when `output` is set explicitly (see above).
+# Keep profile and intrinsic-dimension measurements separate from routine metrics. Ignored when output is set.
 profile_results_dir: results/profiles
 intrinsic_dim_results_dir: results/intrinsic_dim
 verbose: false
-resume: false  # if true, skip dataset+method combinations already in output CSV
-mode: image    # image (default GeoBench pipeline) | coord (CoordBench location-encoder track)
+resume: false  # skip completed dataset/method/config matches
+mode: image    # image benchmarks | coordinate-only benchmarks
 
-# CoordBench location-encoder track (used only when mode=coord).
-# Point (lon, lat) -> label benchmarks from taylor-geospatial/coordbench, probed
-# with a frozen coordinate encoder (model=sincos|climplicit|sinr|geoclip|satclip).
+# (lon, lat) -> label benchmarks from taylor-geospatial/coordbench, using frozen coordinate encoders when mode=coord.
 coord:
   output: results/coordbench_results.csv
   names: all               # all | comma-separated families (pdfm,satclip,...) or benchmark names
@@ -28,10 +20,8 @@ coord:
   folds: 5
   cell_deg: 10.0           # spatial-block grid-cell size in degrees
   knn_k: 5
-  knn_device: cpu          # faiss device for KNN; cpu avoids needing GPU faiss (encoder+linear still use `device`)
+  knn_device: cpu          # avoids GPU FAISS; the encoder and linear probe still use `device`
 
-# Dataset settings
-# Set names: all  OR a list of dataset identifiers
 # Example override: dataset.names=[m-forestnet,m-eurosat]
 dataset:
   names: all
@@ -40,35 +30,28 @@ dataset:
   num_workers: 4              # set 0 to disable dataloader multiprocessing
   normalization: bandspec_zscore   # bandspec_zscore | model_native | minmax | minmax_zscore | identity
   bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
-  image_size: 224           # e.g., 224; if null, no resizing
-  time_steps: null          # multi-temporal datasets only (pastis): dates per
-                            # sample; null keeps the upstream single-date default
+  image_size: 224           # null disables dataset resizing
+  time_steps: null          # PASTIS dates per sample; null keeps the upstream single-date default
   interpolation: bilinear     # area | bilinear | bicubic | nearest; used if image_size set
 
-# Evaluation settings
 eval:
-  bootstrap: 200          # number of bootstrap resamples
+  bootstrap: 200
   c_range: [-6, 4, 40]      # log10 [start, stop, num_points]; per-model overrides allowed
-  merge_val: true          # merge train+val for final logistic training
-  skip_linear: false       # if true, skip LogisticRegression evaluation
-  knn_k: 5                 # number of neighbours for KNN evaluation
+  merge_val: true          # refit logistic regression on train+val after selecting C
+  skip_linear: false
+  knn_k: 5
   knn_device: null         # null = inherit device, falling back to CPU if FAISS lacks GPU support
 
-  # Calibration metrics (ECE / RMS-CE / MCE) reported per classification row.
-  # KNN probabilities are quantized to (knn_k + 1) levels, so its default
-  # bin count matches that; Linear uses the conventional 15. Temperature
-  # scaling (Guo et al., 2017) is fit on val logits and applied only to
-  # Linear Probing — KNN has no meaningful logit to scale.
+  # Compare predicted confidence with observed accuracy (ECE / RMS-CE / MCE).
+  # KNN probabilities have knn_k + 1 levels, which sets its default bin count; linear probing uses 15 bins.
+  # Temperature scaling (Guo et al., 2017) adjusts linear-probe confidence using held-out validation scores; KNN uses vote fractions.
   calibration:
     n_bins_knn: null       # null = knn_k + 1
     n_bins_linear: 15
     temp_scale: false      # requires merge_val=false so validation remains held out
 
-  # Optional intrinsic dimension (ID) metrics and centered feature-spectrum
-  # diagnostics on extracted embeddings. Computed alongside KNN/linear probing
-  # when enabled. Adds method="intrinsic_dim" rows named
-  # "id_<estimator>_<split>" plus effective rank, participation ratio, PC1/PC10
-  # variance ratios, and spectral anisotropy for each selected split.
+  # Estimate how many independent directions are present in the feature vectors.
+  # Writes id_<estimator>_<split> and feature-spectrum metrics under method="intrinsic_dim".
   intrinsic_dim:
     enabled: false
     estimators: [TwoNN, MLE, lPCA]   # subset of torchid global estimators
@@ -76,31 +59,23 @@ eval:
     max_samples: 10000               # null disables subsampling
     device: null                     # null = auto (cuda if available, else cpu)
 
-  # Compute/efficiency profile metrics: throughput, peak GPU mem,
-  # latency, params, and GMACs (FLOPs via torch.utils.flop_counter).  One
-  # row per metric with method="profile".  All metrics work without extras.
+  # Adds method="profile" rows for throughput, peak GPU memory, latency, parameter count, and GFLOPs (torch.utils.flop_counter).
   profile:
     enabled: false
     n_warmup: 3                      # forward passes discarded before timing
     n_measure: 20                    # timed forward passes
 
-    # Optional CPU pass — adds *_cpu metrics so the explorer can show
-    # deployability ("can I run this on a laptop?").  Big ViT-L
-    # backbones take minutes per batch on CPU, hence the wall-clock
-    # budget; tasks that exceed it write None for the cpu metrics with
-    # a warning and don't block the rest of the sweep.
+    # Optional CPU throughput/latency pass. Check the budget between batches; leave metrics empty if warmup exhausts it.
     cpu_throughput:
       enabled: false
-      batch_size: 8                  # smaller than GPU batch — CPUs choke at 256
+      batch_size: 8                  # smaller batches keep CPU measurements manageable
       n_warmup: 1
       n_measure: 5
-      time_budget_s: 300.0           # hard cap per (model, dataset)
+      time_budget_s: 300.0           # checked after each forward pass, so a slow batch can overrun it
 
   segmentation:
     head_type: "fpn"
-    # How multi-temporal inputs (B, T, C, H, W) are reduced before the decoder:
-    # the backbone encodes each date, then features are pooled over T.  Only
-    # applies to datasets that actually deliver a time axis.
+    # For (B, T, C, H, W) inputs, encode each date and pool features over T before decoding.
     temporal_pool: "mean"   # mean | max
     layers: []                 # must be overridden per model for segmentation datasets
     lr: 1e-3
@@ -110,6 +85,5 @@ eval:
       _target_: torch.nn.CrossEntropyLoss
       ignore_index: 255
     lr_scheduler: "cosine"  # "cosine" (CosineAnnealingLR) or "none"
-    # Feature caching: run frozen backbone once, cache features to RAM for head training
-    cache_features: true        # pre-extract backbone features (large speedup for ViT)
+    cache_features: true        # reuse frozen model features instead of rerunning the model while training the head
     cache_dtype: "float16"      # storage dtype: "float16" (half RAM) or "float32"

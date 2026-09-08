@@ -5,14 +5,11 @@ on:
     tags:
       - "v*"
 
-# Default workflow-level permissions: read-only. Jobs that need more
-# request the specific permission they need (and nothing else).
 permissions:
   contents: read
 
 jobs:
-  # Build job: runs untrusted code (build backends, transitive build deps)
-  # but has no publish credentials. Its only output is the dist/ artifact.
+  # Build dependencies run here, without access to publishing credentials.
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-latest
@@ -26,9 +23,7 @@ jobs:
         with:
           enable-cache: true
       - name: Build distributions
-        # NOTE: no `uv sync --extra dev` — PEP 517 builds use isolated
-        # build envs, and shrinking the host env minimises the surface
-        # area available to a hypothetically-malicious build dep.
+        # uv builds in an isolated environment; avoid installing extra packages on the runner.
         run: uv build
       - name: Upload distributions
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
@@ -38,10 +33,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Publish job: never installs anything from PyPI, never executes any
-  # third-party code beyond actions/download-artifact and the official
-  # pypa/gh-action-pypi-publish action. It is the only job that holds the
-  # OIDC token used to authenticate with PyPI's trusted publisher.
+  # Publish the built artifacts without checking out or installing project code.
   publish:
     name: Publish to PyPI
     needs: build
@@ -50,7 +42,7 @@ jobs:
       name: pypi
       url: https://pypi.org/p/torchgeo-bench
     permissions:
-      id-token: write   # OIDC for PyPI trusted publisher
+      id-token: write   # Authenticate with PyPI without a stored token.
     steps:
       - name: Download distributions
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53  # v6

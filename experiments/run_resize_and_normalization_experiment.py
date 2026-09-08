@@ -1,9 +1,7 @@
 #!/usr/bin/env python
-"""Sweep resnet18 on m-eurosat across image sizes, interpolation, and normalization modes.
+"""Compare ResNet-18 input scaling and resize settings on m-eurosat.
 
-Sweeps the model-side ``input_normalization`` knob (``bands_zscore``,
-``none``, ``imagenet``, ``timm_default``) — the dataset always emits raw
-values, so normalization is configured on the model.
+Each job chooses ``input_normalization``, image size, and interpolation for raw inputs.
 
 Usage:
     python experiments/run_resize_and_normalization_experiment.py
@@ -23,7 +21,7 @@ INTERPOLATIONS = ["bilinear", "bicubic", "nearest"]
 
 
 def build_jobs() -> list[Job]:
-    """Build the full normalization/size/interpolation grid (skipping non-bilinear@null)."""
+    """Build each setting combination, avoiding duplicate runs when resizing is disabled."""
     jobs: list[Job] = []
     for norm in NORMALIZATIONS:
         for size in IMAGE_SIZES:
@@ -49,7 +47,7 @@ def build_jobs() -> list[Job]:
 
 
 def main() -> int:
-    """Entry point."""
+    """Run the input-scaling and resize comparison."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_devices_argument(parser)
     args = parser.parse_args()
