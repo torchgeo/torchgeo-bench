@@ -97,10 +97,10 @@ is probed with **KNN** and a **ridge linear** head under **random** or
 **spatial-block** cross-validation (regression → R², classification → accuracy).
 
 ```bash
-# MIND location encoder on the whole suite, random + spatial CV
+# MIND on the full suite, using random and spatial cross-validation
 torchgeo-bench run mode=coord model=mind coord.split=both
 
-# One family, linear probe only, trivial sin/cos baseline
+# One dataset family with the sine/cosine baseline and a linear probe
 torchgeo-bench run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
 ```
 

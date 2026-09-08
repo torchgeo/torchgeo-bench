@@ -1,14 +1,6 @@
-"""Shared GPU queue dispatcher for non-custom experiment runners.
+"""Run experiment jobs with one worker per GPU.
 
-Each non-custom experiment script builds a list of :class:`Job` instances
-(one per ``torchgeo-bench run …`` invocation it wants to make) and calls
-:func:`run_jobs` to execute them. With a single device the jobs run
-sequentially; with multiple devices they fan out across one worker thread
-per device, each pulling jobs from a shared queue.
-
-This module is invoked as a sibling import from scripts in the same
-directory (``from _runner import …``) — Python prepends the script's
-directory to ``sys.path`` so no path setup is required.
+Scripts supply :class:`Job` objects. Each worker takes the next available job until the queue is empty.
 """
 
 import argparse
@@ -52,10 +44,7 @@ class _JobResult:
 
 
 def add_devices_argument(parser: argparse.ArgumentParser) -> None:
-    """Register a ``--devices`` flag that takes one or more GPU indices.
-
-    Defaults to ``[0]`` (single GPU, sequential execution).
-    """
+    """Add a ``--devices`` option; the default is GPU 0."""
     parser.add_argument(
         "--devices",
         nargs="+",
@@ -70,7 +59,7 @@ def add_devices_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def default_output(script_file: str | Path) -> str:
-    """Derive the standard ``results/<basename>.csv`` path from a script's ``__file__``.
+    """Choose a results CSV name from the experiment script's filename.
 
     Drops the ``run_`` prefix and ``.py`` suffix. For example,
     ``run_cls_token_experiment.py`` becomes ``results/cls_token_experiment.csv``.
@@ -80,7 +69,7 @@ def default_output(script_file: str | Path) -> str:
 
 
 def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResult:
-    """Shell out to ``torchgeo-bench run …`` for a single job."""
+    """Run one benchmark job on the assigned GPU."""
     cmd = [
         "torchgeo-bench",
         "run",
@@ -140,13 +129,11 @@ def run_jobs(
     *,
     output: str,
 ) -> int:
-    """Dispatch ``jobs`` across ``devices`` and return a process exit code.
+    """Run jobs on the selected GPUs and return an exit code.
 
     Args:
         jobs: List of :class:`Job` instances to execute.
-        devices: GPU indices to dispatch across. With one device jobs run
-            sequentially; with multiple devices each device gets a worker
-            thread that pulls from a shared queue.
+        devices: GPU indices, with at most one job running on each GPU.
         output: CSV path passed as ``output=<path>`` to every invocation.
 
     Returns:

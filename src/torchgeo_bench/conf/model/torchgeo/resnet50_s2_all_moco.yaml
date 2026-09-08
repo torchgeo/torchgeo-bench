@@ -1,4 +1,4 @@
-# 13-channel input conv; only sweep with dataset.bands=all (RGB checkpoint is a separate config).
+# Use dataset.bands=all for this 13-channel checkpoint; RGB has a separate config.
 _target_: torchgeo_bench.models.TorchGeoResNetBench
 factory: resnet50
 weights_class: ResNet50_Weights

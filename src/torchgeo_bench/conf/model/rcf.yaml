@@ -1,4 +1,3 @@
-# RCF benchmark model configuration
 _target_: torchgeo_bench.models.RCFBench
 features: 512
 kernel_size: 3

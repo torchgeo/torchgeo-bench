@@ -1,4 +1,4 @@
-"""Import + per-variant load + embedding sanity for the OlmoEarth wrapper."""
+"""Tests for OlmoEarth sensor routing, normalization, and embeddings."""
 
 from importlib.util import find_spec
 from unittest import mock
@@ -48,7 +48,7 @@ def _s2_bands() -> list[BandSpec]:
 
 
 def test_rejects_sensor_groups_that_share_an_olmoearth_sample_field() -> None:
-    """Aerial and S2 data cannot both occupy ``sentinel2_l2a`` without fusion."""
+    """Aerial and S2 inputs share one sample field and must not overwrite each other."""
     from torchgeo_bench.models.olmoearth import _build_sensor_groups
 
     bands = [
@@ -60,14 +60,13 @@ def test_rejects_sensor_groups_that_share_an_olmoearth_sample_field() -> None:
         _build_sensor_groups(bands)
 
 
-# Map variant -> expected embedding dim (from the HF weights configs).
+# Embedding widths from the released Hugging Face model configs.
 EXPECTED_DIM = {"nano": 128, "tiny": 192, "small": 384, "base": 768, "large": 1024}
 
 
 @requires_olmoearth
 @pytest.mark.parametrize("size", ["nano", "tiny"])  # base/large are too heavy for CI
 def test_rgb_forward_pass_shape(size: str) -> None:
-    """All-RGB input must produce a 2-D embedding of the expected width."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     model = OlmoEarthBenchModel(bands=_rgb_bands(), model_size=size, normalization="identity")
@@ -80,7 +79,6 @@ def test_rgb_forward_pass_shape(size: str) -> None:
 
 @requires_olmoearth
 def test_s2_forward_pass_shape() -> None:
-    """12-channel S2 input goes through the multispectral path."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     model = OlmoEarthBenchModel(bands=_s2_bands(), model_size="nano", normalization="identity")
@@ -93,20 +91,10 @@ def test_s2_forward_pass_shape() -> None:
 
 @requires_olmoearth
 def test_reflectance_input_is_rescaled_to_dn() -> None:
-    """Datasets like m-so2sat / so2sat deliver S2 reflectance in [0, ~2.8],
-    not raw DN.  The wrapper must detect this and rescale to DN before
-    OlmoEarth's Normalizer sees the values — otherwise the normalizer's
-    DN-fitted mean/std produce near-zero normalized inputs and embeddings
-    collapse.
-
-    We verify the scale-detection path picks ``REFLECTANCE_0_1`` for
-    so2sat-style band stats and that the forward pass produces non-degenerate
-    embeddings.
-    """
+    """So2Sat's reflectance values (up to about 2.8) need DN conversion to match pretrained statistics and avoid collapsed embeddings."""
     from torchgeo_bench.models._input_units import InputUnit
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
-    # so2sat-style band stats: optical reflectance with max ~2.8
     refl_bands = [
         BandSpec(
             sensor="s2",
@@ -127,15 +115,11 @@ def test_reflectance_input_is_rescaled_to_dn() -> None:
     out = model.forward_patch_features(x)
     assert out.shape == (2, EXPECTED_DIM["nano"])
     assert torch.isfinite(out).all()
-    # Embeddings should have non-trivial variance — collapsed-to-zero
-    # embeddings would have std ~ 0.
     assert out.std() > 1e-4
 
 
 @requires_olmoearth
 def test_rejects_unknown_sensor() -> None:
-    """A BandSpec with a sensor name we have no OlmoEarth layout for must
-    fail loudly."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     weird_bands = [
@@ -155,8 +139,7 @@ def test_rejects_unknown_sensor() -> None:
 
 @requires_olmoearth
 def test_rejects_unknown_band_name() -> None:
-    """A BandSpec name we have no OlmoEarth-position mapping for must fail
-    loudly so we don't quietly zero-fill every channel."""
+    """Unknown band names must not silently turn every input channel into padding."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     weird_bands = [
@@ -177,9 +160,7 @@ def test_rejects_unknown_band_name() -> None:
 
 @requires_olmoearth
 def test_landsat_modality_routing() -> None:
-    """Landsat input picks Modality.LANDSAT, not SENTINEL2_L2A.  The mask
-    should have 2 band-sets, the sample field should be 'landsat'.
-    input_res must auto-detect to 30 m."""
+    """Use Landsat's own modality and 30 m grid, not Sentinel-2's."""
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
@@ -205,7 +186,7 @@ def test_landsat_modality_routing() -> None:
     assert g["num_band_sets"] == 2
     assert model.input_res == 30
     model.eval()
-    x = torch.rand(2, 6, 64, 64) * 200.0  # uint8-ish Landsat
+    x = torch.rand(2, 6, 64, 64) * 200.0  # uint8-scale Landsat
     out = model.forward_patch_features(x)
     assert out.shape == (2, EXPECTED_DIM["nano"])
     assert torch.isfinite(out).all()
@@ -213,10 +194,7 @@ def test_landsat_modality_routing() -> None:
 
 @requires_olmoearth
 def test_aerial_falls_back_to_s2() -> None:
-    """olmoearth-pretrain-minimal's encoder doesn't ship a NAIP branch,
-    so aerial-RGB datasets (m-pv4ger, treesatai aerial) have to route
-    through the S2 modality with non-RGB S2 positions zero-filled.
-    """
+    """The minimal encoder has no NAIP branch, so aerial RGB uses S2 with the other channels zero-filled."""
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
@@ -249,9 +227,7 @@ def test_aerial_falls_back_to_s2() -> None:
 
 @requires_olmoearth
 def test_partial_s2_10band_forward_pass() -> None:
-    """10-band S2 input (m-so2sat-style, no B01/B09) routes through the
-    S2 modality; B01/B09 are imputed from the nearest present band
-    (blue / B8A) — matching helios' m-so2sat imputes — not zero-filled."""
+    """Fill m-so2sat's missing B01/B09 from nearby blue/B8A wavelengths, matching helios rather than zero-filling."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     names = ["b02", "b03", "b04", "b08", "b05", "b06", "b07", "b8a", "b11", "b12"]
@@ -272,7 +248,6 @@ def test_partial_s2_10band_forward_pass() -> None:
     model.eval()
     assert g["channels"] == 12
     assert g["num_band_sets"] == 3
-    # B02..B12 map to positions 0..9; B01/B09 (positions 10/11) are absent.
     assert set(g["dst_indices"]) == set(range(10))
     # B01 coastal (10) <- B02 blue (0); B09 water vapour (11) <- B8A (7).
     assert g["impute_ops"] == [(0, 10), (7, 11)]
@@ -284,9 +259,7 @@ def test_partial_s2_10band_forward_pass() -> None:
 
 @requires_olmoearth
 def test_forestnet_landsat_imputes_missing_bands() -> None:
-    """m-forestnet ships only 6 of 11 Landsat channels.  The 5 missing
-    OlmoEarth positions must be imputed from the most spectrally similar
-    present band (matching helios) rather than left zero-filled."""
+    """Fill m-forestnet's five missing Landsat bands from available spectral neighbors, matching helios."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     names = ("blue", "green", "red", "nir", "swir_1", "swir_2")
@@ -304,8 +277,7 @@ def test_forestnet_landsat_imputes_missing_bands() -> None:
     ]
     model = OlmoEarthBenchModel(bands=landsat_bands, model_size="nano", normalization="identity")
     g = model._sensor_groups[0]
-    # pan<-green(3), coastal<-blue(2), cirrus/tirs1/tirs2<-swir2(7); each
-    # source channel (3, 2, 7) is one of the present bands.
+    # Use green (3) for pan, blue (2) for coastal, and swir2 (7) for cirrus/TIRS.
     assert g["impute_ops"] == [(3, 0), (2, 1), (7, 8), (7, 9), (7, 10)]
     assert all(src in set(g["dst_indices"]) for src, _ in g["impute_ops"])
     model.eval()
@@ -317,9 +289,7 @@ def test_forestnet_landsat_imputes_missing_bands() -> None:
 
 @requires_olmoearth
 def test_landsat_dataset_stats_normalization() -> None:
-    """norm_from_pretrained=False normalizes each band with its BandSpec stats
-    (helios-style ±2σ no-clip), bypassing the DN rescale + pretrained
-    Normalizer — required for GeoBench's uint8 Landsat scale."""
+    """Match helios' unclipped ±2σ dataset scaling for uint8 Landsat instead of rescaling to pretrained DN units."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     names = ("blue", "green", "red", "nir", "swir_1", "swir_2")
@@ -350,13 +320,10 @@ def test_landsat_dataset_stats_normalization() -> None:
 
 @requires_olmoearth
 def test_auto_normalization_default_per_sensor() -> None:
-    """Default norm_from_pretrained='auto' routes Landsat to dataset stats and
-    S2 to the pretrained normalizer, so one shared config is correct for both.
-    Both must produce finite embeddings without an explicit override."""
+    """Auto normalization must use dataset statistics for uint8 Landsat and pretrained statistics for S2 DN."""
     from torchgeo_bench.models._input_units import InputUnit
     from torchgeo_bench.models.olmoearth import _DATASET_STATS_SENSORS, OlmoEarthBenchModel
 
-    # Landsat (uint8) — 'auto' should pick dataset stats.
     ls = [
         BandSpec(
             sensor="landsat", name=n, source_name=n.upper(), mean=80.0, std=20.0, min=0.0, max=255.0
@@ -364,13 +331,12 @@ def test_auto_normalization_default_per_sensor() -> None:
         for n in ("blue", "green", "red", "nir", "swir_1", "swir_2")
     ]
     ls_model = OlmoEarthBenchModel(bands=ls, model_size="nano", normalization="identity")
-    assert ls_model.norm_from_pretrained == "auto"  # default
+    assert ls_model.norm_from_pretrained == "auto"
     assert ls_model._sensor_groups[0]["sensor"] in _DATASET_STATS_SENSORS
     ls_model.eval()
     ls_out = ls_model.forward_patch_features(torch.rand(2, 6, 64, 64) * 200.0)
     assert ls_out.shape == (2, EXPECTED_DIM["nano"]) and torch.isfinite(ls_out).all()
 
-    # S2 (DN) — 'auto' should keep the pretrained normalizer (rescale to DN).
     s2 = [
         BandSpec(
             sensor="s2", name=n, source_name=n.upper(), mean=1500.0, std=600.0, min=0.0, max=10000.0
@@ -382,15 +348,13 @@ def test_auto_normalization_default_per_sensor() -> None:
     s2_model.eval()
     s2_out = s2_model.forward_patch_features(torch.rand(2, 3, 64, 64) * 3000.0)
     assert s2_out.shape == (2, EXPECTED_DIM["nano"]) and torch.isfinite(s2_out).all()
-    # sanity: input-unit detection still runs on the S2 (pretrained) path
     assert s2_model._sensor_groups[0]["input_unit"] == InputUnit.S2_DN
 
 
 @requires_olmoearth
 @pytest.mark.parametrize("size", ["nano", "small"])
 def test_v1_2_variants_forward_pass(size: str) -> None:
-    """OlmoEarth v1.2 (Nano/Tiny/Small/Base) must load and run; Small is the
-    new 384-d size introduced in v1.2."""
+    """Small is available only in v1.2."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     model = OlmoEarthBenchModel(
@@ -405,9 +369,7 @@ def test_v1_2_variants_forward_pass(size: str) -> None:
 
 @requires_olmoearth
 def test_mixed_s2_sar_forward_pass() -> None:
-    """Mixed S2 + SAR input (m-so2sat) routes to two separate modalities:
-    SENTINEL2_L2A and SENTINEL1.  Both sample fields are populated in
-    MaskedOlmoEarthSample simultaneously."""
+    """S2 and SAR must fill separate fields in the same OlmoEarth sample."""
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
@@ -486,9 +448,7 @@ def test_mixed_s2_sar_forward_pass() -> None:
 
 @requires_olmoearth
 def test_s1_sensor_tag_aliases_to_sar_modality() -> None:
-    """so2sat/benv2/treesatai declare SAR bands under sensor="s1" (m-so2sat/
-    kuro_siwo use "sar") -- both must route to the same Sentinel-1 modality
-    rather than "s1" raising "no layout for sensor"."""
+    """Datasets call Sentinel-1 either ``s1`` or ``sar``; both names must select the same modality."""
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
@@ -517,10 +477,7 @@ def test_s1_sensor_tag_aliases_to_sar_modality() -> None:
 
 @requires_olmoearth
 def test_treesatai_vv_vh_ratio_band_routes_to_sar_modality() -> None:
-    """treesatai declares vv, vh, AND a derived vv/vh ratio band under
-    sensor="s1" -- the ratio band has no physical polarization of its own
-    but must still resolve to a known slot instead of raising "can't map
-    BandSpec names"."""
+    """TreeSatAI's VV/VH ratio shares the VH slot; it is not a separate physical polarization."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     bands = [

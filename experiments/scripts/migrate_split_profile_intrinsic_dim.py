@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""One-off migration: split ``profile``/``intrinsic_dim`` rows out of results/models/.
-
-Profile (throughput/latency/params) and intrinsic-dim rows are one-time
-model+hardware measurements, unlike ``knn5``/``linear``/``seg-*`` rows which
-change on every metrics rerun. Historically both lived in the same
-``results/models/<name>.csv`` file, so a routine metrics rerun touched
-(and diffed) the file holding these expensive one-off measurements too.
+"""Move saved profile and intrinsic-dimension measurements into separate files.
 
 This script splits every ``results/models/<name>.csv`` by its ``method``
 column:
@@ -14,8 +8,7 @@ column:
 - ``intrinsic_dim`` rows -> ``results/intrinsic_dim/<name>.csv``
 - everything else stays in ``results/models/<name>.csv``
 
-Row order is preserved (no resorting) and each output side file's rows are
-appended after any rows already there, so this is safe to rerun.
+Preserve row order and append moved rows after existing destination rows.
 
 Usage::
 
@@ -65,7 +58,7 @@ def _append_rows(path: Path, fieldnames: list[str], rows: list[dict]) -> None:
 
 
 def migrate_one(path: Path) -> tuple[int, dict[str, int]]:
-    """Split one models/<name>.csv file. Returns (kept, {method: moved_count})."""
+    """Split one model CSV and return ``(kept, {method: moved_count})``."""
     fieldnames, rows = _read_rows(path)
     kept_rows: list[dict] = []
     side_rows: dict[str, list[dict]] = {m: [] for m in SIDE_METHODS}

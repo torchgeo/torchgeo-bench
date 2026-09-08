@@ -1,9 +1,7 @@
 #!/usr/bin/env python
-"""C-sweep analysis for linear probing.
+"""Compare linear-probe accuracy across values of C.
 
-Extracts features once per (model, dataset), then sweeps the L2
-regularization strength ``C`` of :class:`torchgeo_bench.linear.LogisticRegression`
-and records train/val/test accuracy for each ``C`` value.
+Larger C penalizes large weights less strongly. Features are extracted once per model and dataset, then reused for every fit.
 
 Usage:
     python experiments/run_c_sweep_experiment.py
@@ -80,7 +78,7 @@ C_VALUES = np.sort(np.unique(np.append(np.logspace(-7, 2, 40), 1.0)))
 
 
 def instantiate_model(model_cfg: dict, bands: list[BandSpec]) -> torch.nn.Module:
-    """Instantiate a model from its ``MODEL_CONFIGS`` entry."""
+    """Create a model with the requested configuration and input bands."""
     target = model_cfg["_target_"]
     module_name, class_name = target.rsplit(".", 1)
     module = __import__(module_name, fromlist=[class_name])
@@ -102,7 +100,7 @@ def run_c_sweep(
     y_test: np.ndarray,
     device: torch.device,
 ) -> list[dict]:
-    """Train ``LogisticRegression`` for each ``C`` and return per-C metrics."""
+    """Return train, validation, and test accuracy for each C value."""
     rows = []
     x_train_t = torch.from_numpy(x_train)
     y_train_t = torch.from_numpy(y_train).long()
@@ -143,7 +141,7 @@ def run_c_sweep(
 
 
 def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[dict]) -> list[dict]:
-    """Run the C sweep for one dataset, appending rows in-place to ``all_rows``."""
+    """Evaluate unfinished models for one dataset and append their results to ``all_rows``."""
     bench_cls = get_bench_dataset_class(dataset_name)
     if bench_cls.multilabel:
         logger.warning(
@@ -216,7 +214,7 @@ def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[di
 
 
 def main() -> int:
-    """Entry point."""
+    """Run the C sweep and save its results."""
     parser = argparse.ArgumentParser(description="C-sweep for linear probing")
     add_devices_argument(parser)
     args = parser.parse_args()

@@ -1,4 +1,4 @@
-"""Regression tests for silent-failure audit fixes."""
+"""Regressions for feature shapes, resizing, and input-unit metadata."""
 
 import numpy as np
 import pytest

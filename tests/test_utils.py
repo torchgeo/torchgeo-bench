@@ -9,15 +9,11 @@ from torchgeo_bench.utils import extract_features
 
 
 class _IdentityModel(torch.nn.Module):
-    """Returns input image as features (flattened)."""
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x.flatten(1)
 
 
 class _DictModel(torch.nn.Module):
-    """Returns features as a dict under 'norm' key."""
-
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         return {"norm": x.flatten(1)}
 
@@ -28,10 +24,8 @@ class _GlobalPoolModel(torch.nn.Module):
 
 
 class _1DModel(torch.nn.Module):
-    """Returns 1-D output (single sample)."""
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.flatten(1).squeeze(0)  # (C,) for batch=1
+        return x.flatten(1).squeeze(0)
 
 
 def _make_loader(n: int = 8, c: int = 3, h: int = 4, multi_label: bool = False) -> DataLoader:
@@ -114,8 +108,6 @@ def test_with_transforms():
 
 
 def test_3d_output_mean_pooled():
-    """3-D model output (B, T, C) should be mean-pooled to (B, C)."""
-
     class _SeqModel(torch.nn.Module):
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return x.flatten(2).permute(0, 2, 1)  # (B, HW, C)

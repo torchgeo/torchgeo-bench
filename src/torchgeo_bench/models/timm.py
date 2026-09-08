@@ -15,10 +15,7 @@ logger = logging.getLogger(__name__)
 
 _VALID_INPUT_NORMALIZATIONS = ("bands_zscore", "imagenet", "timm_default", "none")
 
-# Visible-light wavelength windows (micrometres) used to identify the red/
-# green/blue bands by physical wavelength rather than by name -- datasets
-# name their optical bands inconsistently (``"red"`` vs Sentinel-2's native
-# ``"b04"``), but ``BandSpec.wavelength_um`` is populated consistently.
+# Wavelength windows (micrometres) identify RGB bands despite different dataset names such as "red" and "b04".
 _BLUE_UM = (0.45, 0.515)
 _GREEN_UM = (0.515, 0.60)
 _RED_UM = (0.60, 0.70)
@@ -88,23 +85,9 @@ class TimmPatchBenchModel(BenchModel):
         input_normalization: str = "bands_zscore",
         **_kwargs,
     ) -> None:
-        # Populate the BenchModel-level pretrain stats from timm's pretrained
-        # cfg *before* super().__init__ so the ``model_native`` normalisation
-        # strategy has mean/std to work with.  Without this, model_native
-        # raises ``requires expected_input_unit`` because timm wrappers don't
-        # subclass-declare those attrs (unlike terratorch / torchgeo
-        # wrappers that hard-code them).
-        #
-        # Only meaningful when num_channels == 3 — timm cfgs ship RGB stats.
-        # For multispectral inputs we leave the attrs at the class-level
-        # ``None`` defaults so build_normalizer raises a clear error if the
-        # caller asked for model_native (we have no per-channel stats).
+        # Set RGB pretraining statistics before BenchModel builds the model_native normalizer.
+        # Multispectral inputs have no matching timm statistics, so model_native remains unsupported.
         if len(bands) == 3:
-            # timm.get_pretrained_cfg returns None for unknown model names.
-            # A typo should fail loudly at construction, not silently lose
-            # model_native — but only insist on a cfg existing when the
-            # caller is actually 3-band (the multispectral branch below
-            # already has no path to use it).
             cfg = timm.get_pretrained_cfg(model_name)
             if cfg is None:
                 raise RuntimeError(
@@ -142,14 +125,8 @@ class TimmPatchBenchModel(BenchModel):
             global_pool=global_pool,
         )
 
-        # timm's first-conv channel adaptation for in_chans > 3 (see
-        # ``timm.models._manipulate.adapt_input_conv``) doesn't average the
-        # pretrained RGB kernel across the extra channels -- it *tiles*
-        # [R, G, B] across channel indices 0, 1, 2, 3, ... To land the
-        # pretrained R/G/B kernel weights on the physically-matching red/
-        # green/blue bands (rather than whatever order the dataset happens
-        # to declare them, e.g. Sentinel-2's native B02/B03/B04 = blue/
-        # green/red), permute the input channels once at construction.
+        # timm.models._manipulate.adapt_input_conv tiles [R, G, B] weights for extra channels.
+        # Put physical RGB bands first so those weights match their inputs (S2 B02/B03/B04 is blue/green/red).
         self._channel_perm: list[int] | None = None
         if self.pretrained and self.num_channels != 3:
             self._channel_perm = _rgb_first_permutation(self.bands)
@@ -169,11 +146,7 @@ class TimmPatchBenchModel(BenchModel):
             )
             self.auto_resize = False
 
-        # Pre-compute fixed-RGB normalization tensors when applicable.  These
-        # ImageNet-style stats expect inputs in ``[0, 1]``, so we ALSO
-        # pre-compute per-channel min/max from the dataset's BandSpec list to
-        # rescale the raw input before applying mean/std.  Stored as buffers
-        # so they move with ``.to(device)``.
+        # ImageNet/timm statistics expect [0, 1] inputs; raw bands need a per-channel min/max rescale first.
         if self.input_normalization in ("imagenet", "timm_default"):
             if self.num_channels != 3:
                 raise ValueError(
@@ -185,7 +158,7 @@ class TimmPatchBenchModel(BenchModel):
             if self.input_normalization == "imagenet":
                 cfg_mean = (0.485, 0.456, 0.406)
                 cfg_std = (0.229, 0.224, 0.225)
-            else:  # timm_default
+            else:
                 cfg_mean = default_cfg.get("mean")
                 cfg_std = default_cfg.get("std")
                 if cfg_mean is None or cfg_std is None:
@@ -199,9 +172,6 @@ class TimmPatchBenchModel(BenchModel):
             self.register_buffer("_rgb_mean", mean)
             self.register_buffer("_rgb_std", std)
 
-            # Per-channel raw-value range for the [0, 1] rescale step.  Use
-            # ``max - min`` as the divisor (band-min subtracted first); guard
-            # against degenerate zero-range bands.
             spec_min = torch.tensor([b.min for b in self.bands], dtype=torch.float32).view(
                 1, self.num_channels, 1, 1
             )
@@ -219,10 +189,6 @@ class TimmPatchBenchModel(BenchModel):
             return super().normalize_inputs(images)
         if mode == "none":
             return images
-        # imagenet / timm_default — first per-channel min-max rescale to
-        # [0, 1] using BandSpec stats so the ImageNet (or timm-default)
-        # mean/std (which were fitted on [0, 1] inputs) make sense, then
-        # (x - mean) / std.
         band_min = self._band_min.to(dtype=images.dtype)  # type: ignore[attr-defined]
         band_range = self._band_range.to(dtype=images.dtype)  # type: ignore[attr-defined]
         scaled = (images - band_min) / band_range

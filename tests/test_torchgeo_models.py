@@ -1,4 +1,4 @@
-"""Unit tests for torchgeo wrapper helpers and construction contracts."""
+"""Tests for torchgeo model wrappers and preprocessing."""
 
 from types import SimpleNamespace
 
@@ -265,9 +265,7 @@ def _sar_band(name: str) -> BandSpec:
 
 
 def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
-    """SAR bands (sensor s1/sar) with no wavelength get DOFA's own 3.75um
-    placeholder (github.com/zhu-xlab/DOFA waves.json key "2") instead of
-    raising, since radar backscatter has no optical wavelength to declare."""
+    """Use DOFA's SAR placeholder (3.75 µm, waves.json key "2" at github.com/zhu-xlab/DOFA), not a physical optical wavelength."""
     bands = _s2_multispectral_bands()[:3] + [_sar_band("vh"), _sar_band("vv")]
     wavelengths = _resolve_dofa_wavelengths(bands, None)
     assert wavelengths[-2:] == [_DOFA_SAR_WAVELENGTH_UM, _DOFA_SAR_WAVELENGTH_UM]
@@ -277,7 +275,7 @@ def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
 def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mixed-sensor band sets have no single input unit; must not eagerly call detect_input_unit() outside model_native."""
+    """Unit detection is unnecessary outside model_native and can reject mixed-scale sensors."""
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     monkeypatch.setattr(
@@ -296,8 +294,7 @@ def test_torchgeo_backbone_construction_ignores_input_unit_outside_model_native(
 
 
 def test_dofa_wavelengths_still_raises_for_non_sar_missing_wavelength() -> None:
-    """A non-SAR band with no wavelength and no known S2 canonical name is a
-    real data-declaration gap, not something DOFA has a default for."""
+    """Unknown non-SAR bands need declared wavelengths; they have no model-specific placeholder."""
     bad_band = BandSpec(
         sensor="dem", name="elevation", source_name="DEM", mean=0.0, std=1.0, min=0.0, max=1.0
     )
@@ -306,9 +303,7 @@ def test_dofa_wavelengths_still_raises_for_non_sar_missing_wavelength() -> None:
 
 
 def test_dofa_wavelengths_fall_back_to_s2_table_for_landsat_bands() -> None:
-    """m_forestnet.py's Landsat nir/swir_1/swir_2 bands don't set
-    wavelength_um -- must fall back to the true Sentinel-2 centre
-    wavelength by canonical name rather than raising."""
+    """For Landsat bands with no wavelength metadata, use the S2 table as an approximation."""
     from torchgeo_bench.models._band_mapping import S2_WAVELENGTHS_UM
 
     landsat_bands = [
@@ -435,9 +430,7 @@ def test_resolve_panopticon_chn_ids_raises_for_unknown_polarization() -> None:
 
 
 def test_torchgeo_panopticon_model_native_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Panopticon ships no Normalize transform and no fixed pretrain
-    mean/std -- it genuinely has no model_native normalization, so asking
-    for it must raise rather than silently substituting something else."""
+    """Panopticon provides no pretrained normalization statistics, so model_native must fail rather than invent them."""
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     monkeypatch.setattr(
@@ -609,13 +602,8 @@ def _dn_bands() -> list[BandSpec]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# _adapt_first_conv fallback path (NotImplementedError from timm)
-# ---------------------------------------------------------------------------
-
-
 def test_adapt_first_conv_fallback_on_timm_not_implemented(monkeypatch):
-    """When timm.adapt_input_conv raises NotImplementedError, fallback average replication."""
+    """timm cannot adapt every multispectral checkpoint, so the wrapper needs its averaging fallback."""
     from timm.models import _manipulate
 
     monkeypatch.setattr(
@@ -635,13 +623,8 @@ def test_adapt_first_conv_noop_same_channels():
     assert torch.equal(model[0].weight.data, original_weight)
 
 
-# ---------------------------------------------------------------------------
-# normalize_inputs: unit conversion only fires for model_native + weights_norm
-# ---------------------------------------------------------------------------
-
-
 def test_normalize_inputs_bandspec_zscore_no_unit_conversion(monkeypatch):
-    """bandspec_zscore should NOT apply unit conversion — raw DN values z-scored directly."""
+    """Z-score raw sensor values directly; unit conversion would invalidate BandSpec statistics."""
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _TinyResNet(nn.Module):
@@ -660,10 +643,10 @@ def test_normalize_inputs_bandspec_zscore_no_unit_conversion(monkeypatch):
         tg_models, "_resolve_torchgeo_weights", lambda *_: SimpleNamespace(transforms=nn.Identity())
     )
 
-    bands = _dn_bands()  # mean=1200, max=10000
+    bands = _dn_bands()
     model = TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore")
 
-    # A tensor at exactly the band mean should z-score to ≈0
+    # Use the raw band mean so any extra unit conversion breaks the zero z-score.
     x = torch.full((1, 3, 8, 8), 1200.0)
     normed = model.normalize_inputs(x)
     assert torch.allclose(normed, torch.zeros_like(normed), atol=1e-4)
@@ -707,9 +690,7 @@ def test_weights_normalize_only_applies_under_model_native(
     )
     identity = TorchGeoResNetBench(bands=bands, normalization="identity").normalize_inputs(sample)
 
-    # bandspec_zscore standardises with the BandSpec stats (mean 1200, std 400);
-    # identity passes raw values through; only model_native uses the weights'
-    # Normalize (std=2 -> 500.0).  Before the fix all three returned 500.0.
+    # Only model_native should use the checkpoint's /2 scaling.
     assert torch.allclose(zscore, torch.full_like(zscore, (1000.0 - 1200.0) / 400.0))
     assert torch.allclose(identity, sample)
     assert torch.allclose(native, torch.full_like(native, 500.0))

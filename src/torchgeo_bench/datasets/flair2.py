@@ -7,10 +7,7 @@ from .geobench_v2 import _V2Dataset
 class FLAIR2(_V2Dataset):
     """Aerial land-cover segmentation (13 classes).
 
-    French aerial imagery with RGB, NIR, and elevation bands.  The upstream
-    ``GeoBenchFLAIR2`` accepts a flat ``band_order`` list and returns a
-    single stacked ``image`` tensor, so this wrapper does **not** use the
-    multi-modality dict shape.
+    French aerial imagery with RGB, NIR, and elevation bands. Despite mixing sensors, ``GeoBenchFLAIR2`` expects a flat ``band_order`` list and returns one stacked ``image`` tensor.
     """
 
     name = "flair2"

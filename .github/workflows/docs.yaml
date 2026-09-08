@@ -7,8 +7,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Only one concurrent deployment.  Cancel in-progress runs that the new push supersedes,
-# but let any actively-deploying job finish so the live site is never half-updated.
+# Run one deployment at a time without interrupting the one in progress.
 concurrency:
   group: pages
   cancel-in-progress: false

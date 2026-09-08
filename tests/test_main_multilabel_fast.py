@@ -1,4 +1,4 @@
-"""Fast offline tests for multilabel orchestration in ``torchgeo_bench.main``."""
+"""Offline tests for the multilabel runner."""
 
 from pathlib import Path
 from unittest import mock
@@ -21,7 +21,6 @@ def _synthetic_multilabel_loaders(
     channels: int = 3,
     n_classes: int = 8,
 ) -> tuple[_DictTensorDataset, DataLoader, DataLoader, DataLoader]:
-    """Return train dataset + train/val/test loaders with multi-hot labels."""
     rng = torch.Generator().manual_seed(2)
     train_images = torch.rand(n_train, channels, 64, 64, generator=rng) * 3000.0
     val_images = torch.rand(n_val, channels, 64, 64, generator=rng) * 3000.0
@@ -44,7 +43,7 @@ def _synthetic_multilabel_loaders(
 
 
 def _synthetic_multilabel_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
-    """Return deterministic (X, Y) tuples for train/val/test embed calls."""
+    """Embeddings in the order of the train, validation, and test calls."""
     rng = np.random.default_rng(2)
     x_train = rng.standard_normal((12, 10), dtype=np.float32)
     y_train = rng.integers(0, 2, size=(12, 8)).astype(np.float32)
@@ -141,12 +140,7 @@ def test_multilabel_linear_emits_micro_map(tmp_path: Path):
 
 
 def test_diverged_linear_probe_skips_row_not_whole_run(tmp_path: Path):
-    """A LinearProbeDivergedError for one dataset must not crash the benchmark run.
-
-    knn5 for the same dataset -- and any other already-computed rows -- must
-    still land in the output, matching the "skip only this cell, log why"
-    convention used elsewhere (e.g. flops_pipeline's segmentation head skip).
-    """
+    """A diverged linear probe must not discard the KNN result for the same dataset."""
     out = tmp_path / "out.csv"
     cfg = _cfg_for_multilabel(out)
 

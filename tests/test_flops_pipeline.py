@@ -1,8 +1,6 @@
 """Tests for the per-sample compute-cost (GFLOPs) pipeline.
 
-The fast tests build tiny synthetic modules so they run on CPU without
-downloading anything.  Tests that need a real pretrained backbone are marked
-``slow`` (``-m slow`` to include), matching the repo-wide convention.
+Fast tests run on CPU without downloads; use ``-m slow`` for real pretrained backbones.
 """
 
 import math
@@ -46,16 +44,14 @@ class _TinyConvNet(nn.Module):
 
 
 class _GradBreakingNet(nn.Module):
-    """Backbone that detaches intermediate features before a Conv3d."""
+    """Reproduce Panopticon's detached channel-fusion features."""
 
     def __init__(self, in_ch: int = 3) -> None:
         super().__init__()
-        # (B, 1, 1, H, W) -> (B, 4, 1, H, W), squeezed back to (B, 4, H, W).
         self.conv3d = nn.Conv3d(1, 4, kernel_size=(1, 3, 3), padding=(0, 1, 1))
         self.head = nn.Linear(4, 2)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Detach severs the autograd chain the way Panopticon's chn-fusion does.
         broken = x.mean(dim=1, keepdim=True).detach()
         y = self.conv3d(broken.unsqueeze(1)).squeeze(2)
         return self.head(y.mean(dim=(-2, -1)))
@@ -86,14 +82,7 @@ def test_grad_breaking_model_is_measurable():
     assert gflops == pytest.approx((2 * 4 * 32 * 32 * 9 + 2 * 4 * 2) / 1e9)
 
 
-# ---------------------------------------------------------------------------
-# Determinism and scaling
-# ---------------------------------------------------------------------------
-
-
 def test_gflops_independent_of_batch_size():
-    """``_count_gflops`` slices ``sample[:1]``, so GFLOPs is per-sample
-    regardless of the batch handed in."""
     model = _TinyConvNet().eval()
     one = _count_gflops(model, torch.randn(1, 3, 32, 32))
     many = _count_gflops(model, torch.randn(16, 3, 32, 32))
@@ -101,7 +90,7 @@ def test_gflops_independent_of_batch_size():
 
 
 def test_gflops_scales_with_resolution():
-    """Doubling each spatial dim quadruples conv FLOPs."""
+    """Doubling width and height quadruples convolution cost; the fixed-size classifier changes the total slightly."""
     model = _TinyConvNet().eval()
     small = _count_gflops(model, torch.randn(1, 3, 32, 32))
     large = _count_gflops(model, torch.randn(1, 3, 64, 64))
@@ -109,24 +98,15 @@ def test_gflops_scales_with_resolution():
 
 
 def test_channel_count_changes_only_the_stem():
-    """C=3 vs C=12 differ only in stem cost, so the delta is exactly the extra
-    stem MACs — far smaller than the total."""
+    """The first convolution dominates, so 3 to 12 input channels nearly quadruples total cost; the classifier is unchanged."""
     x3, x12 = torch.randn(1, 3, 32, 32), torch.randn(1, 12, 32, 32)
     g3 = _count_gflops(_TinyConvNet(in_ch=3).eval(), x3)
     g12 = _count_gflops(_TinyConvNet(in_ch=12).eval(), x12)
     assert g12 > g3
-    # stem is the only channel-dependent layer: 12/3 = 4x its cost
     assert g12 == pytest.approx(4 * g3, rel=0.05)
 
 
-# ---------------------------------------------------------------------------
-# Probe capacity confound
-# ---------------------------------------------------------------------------
-
-
 class _WidthModel(nn.Module):
-    """Emits a fixed-width embedding, standing in for a pooled backbone."""
-
     def __init__(self, width: int) -> None:
         super().__init__()
         self.width = width
@@ -137,8 +117,7 @@ class _WidthModel(nn.Module):
 
 
 def test_probe_scales_with_feature_dim_not_classes():
-    """A ``pool='both'`` model hands the probe a 2x wider vector; the linear
-    probe's cost and params scale with it."""
+    """Doubling embedding width, as ``pool='both'`` does, should double linear-probe cost."""
     narrow = _WidthModel(1024).eval()
     wide = _WidthModel(2048).eval()
 
@@ -151,27 +130,19 @@ def test_probe_scales_with_feature_dim_not_classes():
 
 
 def test_mlp_probe_scales_as_feature_dim_squared():
-    """``linear.py`` builds ``Linear(D, D, bias=False)`` — the confound is D^2,
-    over the *feature* dim, not the class count."""
+    """The D-by-D projection dominates the class-output layer, so doubling width almost quadruples cost."""
     narrow = _WidthModel(512).eval()
     wide = _WidthModel(1024).eval()
 
     g_n, _, _ = _probe_gflops(narrow, 3, 32, CPU, "mlp", 10)
     g_w, _, _ = _probe_gflops(wide, 3, 32, CPU, "mlp", 10)
 
-    # The D x D projection dominates the D x n_classes classifier, so doubling
-    # D roughly quadruples the probe.
     assert g_w / g_n == pytest.approx(4.0, rel=0.05)
 
 
 def test_unknown_probe_head_is_rejected():
     with pytest.raises(ValueError, match="Unknown probe head"):
         _probe_gflops(_WidthModel(8).eval(), 3, 32, CPU, "typo", 10)
-
-
-# ---------------------------------------------------------------------------
-# n_tokens
-# ---------------------------------------------------------------------------
 
 
 class _PatchModel(nn.Module):
@@ -194,20 +165,12 @@ def test_n_tokens_is_none_for_cnns():
     assert _n_tokens(_TinyConvNet(), 224) is None
 
 
-# ---------------------------------------------------------------------------
-# Segmentation head
-# ---------------------------------------------------------------------------
-
-
 class _TapModel(nn.Module):
-    """Backbone exposing named spatial layers at a chosen tap resolution."""
-
     def __init__(self, in_ch: int = 12, tap_stride: int = 16) -> None:
         super().__init__()
-        # SegmentationProbe._dry_run_channels reads `num_channels` off the
-        # backbone to size its probe tensor (defaulting to 3).
+        # The channel probe uses num_channels to size its input.
         self.num_channels = in_ch
-        # Four isotropic taps — DPTHead requires exactly 4 feature layers.
+        # DPT requires exactly four feature layers.
         self.layer1 = nn.Conv2d(in_ch, 32, kernel_size=tap_stride, stride=tap_stride)
         self.layer2 = nn.Conv2d(32, 32, kernel_size=1)
         self.layer3 = nn.Conv2d(32, 32, kernel_size=1)
@@ -253,9 +216,7 @@ def test_seg_head_gflops_is_positive_and_deterministic(head_type):
 
 
 def test_finer_taps_make_a_more_expensive_head():
-    """Head cost is driven by finest tap resolution — a backbone property —
-    not by class count.  A stride-8 tap is 4x the pixels of a stride-16 one.
-    """
+    """Halving feature stride gives the head four times as many pixels at the same class count."""
     coarse = _TapModel(tap_stride=16).eval()
     fine = _TapModel(tap_stride=8).eval()
 
@@ -267,7 +228,7 @@ def test_finer_taps_make_a_more_expensive_head():
 
 
 def test_num_classes_barely_moves_head_cost():
-    """Sub-2% for 2 -> 15 classes, which is why num_classes is not an axis."""
+    """Class count is not varied in the sweep because it barely changes head cost."""
     model = _TapModel().eval()
     probe2, _ = build_seg_probe_and_solver(model, 2, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
     probe15, _ = build_seg_probe_and_solver(model, 15, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
@@ -276,32 +237,21 @@ def test_num_classes_barely_moves_head_cost():
     assert abs(g15 - g2) / g2 < 0.02
 
 
-# ---------------------------------------------------------------------------
-# Band configs and the TerraMind modality agreement
-# ---------------------------------------------------------------------------
-
-
 def test_band_configs_come_from_cloudsen12_class_attributes():
-    """Band specs are read off class attributes — no instantiation of data,
-    no download."""
+    """Read representative RGB/S2 band metadata without loading data."""
     bench = get_bench_dataset_class("cloudsen12")()
     rgb = bench.select_band_specs(bench.rgb_bands)
     s2 = bench.select_band_specs(None)
 
     assert len(rgb) == 3
     assert len(s2) == 12
-    # cloudsen12's 12 bands are the canonical S2 set: all sensor "s2", unlike
-    # so2sat's 10 S2 + 2 SAR.
+    # CloudSen12 supplies 12 optical S2 bands; So2Sat mixes S2 and SAR.
     assert {b.sensor for b in s2} == {"s2"}
     assert [b.name for b in rgb] == ["b04", "b03", "b02"]
 
 
 def test_terramind_modality_map_matches_shipped_configs():
-    """Assert no cell can pair an RGB modality with a 12-channel tensor.
-
-    This is the one failure mode that yields a plausible-looking wrong number
-    instead of an exception, so it is pinned against the actual config files.
-    """
+    """An RGB modality paired with 12 channels can produce plausible but wrong FLOP counts."""
     from torchgeo_bench.config import compose_config
 
     for config_name, band_config in [
@@ -312,11 +262,6 @@ def test_terramind_modality_map_matches_shipped_configs():
     ]:
         cfg = compose_config([f"model={config_name}"])
         assert str(cfg.model.modality) == _MODALITY_FOR_BAND_CONFIG[band_config]
-
-
-# ---------------------------------------------------------------------------
-# Resume
-# ---------------------------------------------------------------------------
 
 
 def test_load_completed_missing_file(tmp_path):
@@ -345,11 +290,6 @@ def test_load_completed_rejects_invalid_schema(tmp_path):
     path.write_text("this,is not\na valid;;csv\n")
     with pytest.raises(KeyError, match="name"):
         _load_completed(str(path))
-
-
-# ---------------------------------------------------------------------------
-# Band compatibility and genuine failures
-# ---------------------------------------------------------------------------
 
 
 def test_build_model_skips_explicit_band_incompatibility(monkeypatch, caplog):
@@ -400,9 +340,7 @@ def test_missing_bands_raise_typed_incompatibility():
 
 
 def test_channel_count_disagreement_is_a_bug_not_a_band_skip():
-    """map_to_model_bands' own caller assertion — a tensor whose channel count
-    disagrees with its BandSpecs — means the *pipeline* is wrong, not the model.
-    It must propagate rather than be logged as a routine band skip."""
+    """A tensor/BandSpec channel mismatch is a pipeline error, not an unsupported model-band combination."""
     from torchgeo_bench.datasets.base import BandSpec
     from torchgeo_bench.models._band_mapping import map_to_model_bands
 
@@ -478,21 +416,14 @@ def test_forward_pass_only_skips_explicit_band_errors(flops_config, monkeypatch,
 
 
 def test_flops_config_resolves_every_shipped_model_config():
-    """conf/model/rcf.yaml carries ``seed: ${seed}``, which raises
-    InterpolationKeyError unless flops_config defines a top-level ``seed``,
-    so the sweep's own config is checked here instead of in the job."""
+    """rcf.yaml uses ``seed: ${seed}``, so flops_config must define the referenced top-level seed."""
     from omegaconf import OmegaConf
 
     from torchgeo_bench.config import compose_config
 
     cfg = compose_config(["model=rcf"], config_name="flops_config", default_model=None)
-    resolved = OmegaConf.to_container(cfg, resolve=True)  # raises if unresolvable
+    resolved = OmegaConf.to_container(cfg, resolve=True)
     assert resolved["model"]["seed"] == resolved["seed"] == 0
-
-
-# ---------------------------------------------------------------------------
-# Real backbones (slow)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -515,7 +446,7 @@ def test_panopticon_yields_finite_gflops():
 
 @pytest.mark.slow
 def test_vit_gflops_ordering_and_tokens():
-    """Sanity ordering: ViT-L > ViT-B, and n_tokens tracks (size/patch)^2."""
+    """ViT-L costs more than ViT-B, with patch tokens following (image_size / patch_size)^2."""
     from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()

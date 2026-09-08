@@ -1,4 +1,4 @@
-"""Unit tests for :class:`BenchModel` ABC contract."""
+"""Tests for the :class:`BenchModel` interface."""
 
 import pytest
 import torch
@@ -28,17 +28,15 @@ class _Toy(BenchModel):
 
 
 def test_default_zscore_normalization():
-    """Per-channel z-score uses BandSpec.{mean, std}."""
     m = _Toy(bands=_bands(2))
-    x = torch.tensor([[[[12.0]], [[24.0]]]], dtype=torch.float32)  # (1, 2, 1, 1)
+    x = torch.tensor([[[[12.0]], [[24.0]]]], dtype=torch.float32)
     y = m.normalize_inputs(x)
-    # band 0: mean=10, std=2  → (12-10)/2 = 1
-    # band 1: mean=20, std=4  → (24-20)/4 = 1
+    # Both inputs are one standard deviation above their band means.
     assert torch.allclose(y, torch.ones_like(y), atol=1e-6)
 
 
 def test_template_method_calls_normalize(monkeypatch):
-    """`forward_patch_features` always routes through `normalize_inputs`."""
+    """The public forward path must normalize inputs exactly once."""
     m = _Toy(bands=_bands(2))
     calls: list[torch.Tensor] = []
 
@@ -54,7 +52,6 @@ def test_template_method_calls_normalize(monkeypatch):
 
 
 def test_normalize_inputs_buffer_dtype():
-    """Buffers are recast to input dtype so fp16 / bf16 inputs work."""
     m = _Toy(bands=_bands(2))
     x16 = torch.zeros((1, 2, 1, 1), dtype=torch.float16)
     y = m.normalize_inputs(x16)
@@ -62,6 +59,5 @@ def test_normalize_inputs_buffer_dtype():
 
 
 def test_empty_bands_rejected():
-    """Constructing with no bands is a clear configuration error."""
     with pytest.raises(ValueError, match="non-empty"):
         _Toy(bands=[])

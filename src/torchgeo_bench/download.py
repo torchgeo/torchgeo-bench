@@ -1,12 +1,9 @@
-"""Download GeoBench datasets and torchgeo EuroSAT into ``data/``.
+"""Download benchmark datasets into ``data/``.
 
 Targets:
 
-- ``geobench_v1`` — pickle-free GeoBench V1 classification shards from
-  ``calebrob6/geobenchv1-webdataset`` under ``<output>/classification_v1.0_wds/``.
-- ``geobench_v2`` — selected GeoBench V2 datasets from ``aialliance/<name>``
-  HF repos. Defaults to the benchmark-supported datasets; override with
-  ``--datasets``. Each dataset goes to ``<output>/geobenchv2/<name>``.
+- ``geobench_v1`` — pickle-free GeoBench V1 classification shards from ``calebrob6/geobenchv1-webdataset`` under ``<output>/classification_v1.0_wds/``.
+- ``geobench_v2`` — supported GeoBench V2 datasets from ``aialliance/<name>`` on Hugging Face, saved to ``<output>/geobenchv2/<name>``. Select a subset with ``--datasets``.
 - ``eurosat`` — torchgeo's EuroSAT downloader, into ``<output>/eurosat``.
 - ``resisc45`` — torchgeo's NWPU-RESISC45 downloader, into ``<output>/resisc45``.
 """
@@ -97,10 +94,7 @@ def download_eurosat(output_dir: Path) -> None:
 def download_resisc45(output_dir: Path) -> None:
     """Download torchgeo's NWPU-RESISC45 into ``output_dir/resisc45`` for all splits.
 
-    The three splits share one 427MB archive, so only the first call fetches
-    it; the rest just read their split file.  ``checksum=True`` because the
-    archive is served from a pinned Hugging Face revision and a truncated
-    download would otherwise surface as missing classes much later.
+    All three splits reuse one 427 MB archive. Checksum validation catches incomplete downloads before loading samples.
     """
     target = Path(output_dir) / "resisc45"
     target.mkdir(parents=True, exist_ok=True)

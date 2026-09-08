@@ -1,9 +1,6 @@
 """Command-line interface for ``torchgeo-bench``.
 
-Subcommands: ``run`` (benchmark), ``flops`` (compute-cost measurement), and
-``download`` (datasets).  This module imports only the standard library so
-``torchgeo-bench --help`` is instant; torch and friends load only once a
-command actually starts doing work.
+``run`` benchmarks models, ``flops`` measures compute cost, and ``download`` fetches datasets. Dependencies load when a command runs so ``--help`` stays fast.
 """
 
 import argparse
@@ -134,7 +131,6 @@ def _setup_logging(verbose: bool = False) -> None:
 
 
 def _flag_overrides(args: argparse.Namespace) -> list[str]:
-    """Translate convenience flags into config dotlist overrides."""
     overrides = []
     if args.model is not None:
         overrides.append(f"model={args.model}")

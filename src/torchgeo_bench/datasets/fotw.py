@@ -30,7 +30,7 @@ class FieldsOfTheWorld(_V2Dataset):
     # fmt: on
 
     def canonicalize_sample(self, sample: dict) -> dict:
-        """Pick the later acquisition (``image_b``) and surface it as ``image``."""
+        """Use the later acquisition (``image_b``) as ``image``."""
         if "image" not in sample and "image_b" in sample:
             sample["image"] = sample.pop("image_b")
             sample.pop("image_a", None)

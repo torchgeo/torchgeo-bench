@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the representative segmentation benchmark matrix across all GPUs."""
+"""Compare segmentation models, datasets, heads, and input bands across GPUs."""
 
 import argparse
 import csv
@@ -79,8 +79,7 @@ MODELS = [
     ),
 ]
 
-# These inputs violate the pretrained wrapper's normalization contract,
-# independent of probe head or batch size.
+# These models cannot handle the selected input bands; changing heads or batch sizes cannot help.
 UNSUPPORTED_INPUTS = {
     ("torchgeo/scalemae_large_fmow", "caffe", "rgb"),
     ("torchgeo/scalemae_large_fmow", "caffe", "all"),
@@ -90,7 +89,7 @@ UNSUPPORTED_INPUTS = {
 
 
 def build_jobs() -> list[Job]:
-    """Return every supported combination in the representative matrix."""
+    """Create every supported model, dataset, head, and band combination."""
     jobs: list[Job] = []
     for model in MODELS:
         for dataset in DATASETS:
@@ -103,7 +102,7 @@ def build_jobs() -> list[Job]:
 
 
 def _source_hash(root: Path) -> str:
-    """Fingerprint benchmark code and packaged configuration."""
+    """Identify the exact source files used for this sweep."""
     hasher = hashlib.sha256()
     paths = sorted((root / "src/torchgeo_bench").rglob("*.py"))
     paths.extend(sorted((root / "src/torchgeo_bench/conf").rglob("*.yaml")))
@@ -114,7 +113,7 @@ def _source_hash(root: Path) -> str:
 
 
 def sweep_metadata(root: Path, image_size: int, seed: int) -> dict[str, object]:
-    """Return the result-affecting configuration fingerprint."""
+    """Record the source and settings used to decide whether results can be resumed."""
     return {
         "schema_version": 2,
         "source_hash": _source_hash(root),
@@ -144,7 +143,7 @@ class SweepConfig(RunnerConfig):
 
 
 class SweepRunner(BaseGpuRunner):
-    """Dynamically schedule independent benchmark jobs across GPUs."""
+    """Run segmentation comparisons on the selected GPUs."""
 
     config: SweepConfig
     subprocess_env = BaseGpuRunner.subprocess_env | {"TOKENIZERS_PARALLELISM": "false"}
@@ -270,7 +269,7 @@ class SweepRunner(BaseGpuRunner):
 
 
 def ensure_datasets(config: SweepConfig, *, download_missing: bool) -> None:
-    """Download GeoBench V2 datasets whose canonical directories are absent."""
+    """Download missing GeoBench V2 datasets into the expected folders."""
     data_root = config.root / "data/geobenchv2"
     missing = [name for name in DATASETS if not (data_root / name).is_dir()]
     if not missing:

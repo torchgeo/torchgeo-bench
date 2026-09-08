@@ -18,7 +18,7 @@ Docs:
 | **Class** | <!-- e.g. `torchgeo_bench.models.NewModel` --> |
 | **Hydra config** | <!-- e.g. `src/torchgeo_bench/conf/model/new_model.yaml` --> |
 | **Pretraining data** | <!-- e.g. Sentinel-2 global, fMoW, ImageNet, etc. --> |
-| **Sensor coverage** | <!-- e.g. S2 RGB, S2 all-bands, NAIP RGB, multi-sensor --> |
+| **Sensor coverage** | <!-- e.g. Sentinel-2 RGB, Sentinel-2 multispectral, aerial RGB --> |
 | **Weights URL** | <!-- Hugging Face Hub repo, release asset, or equivalent public URL --> |
 | **Paper / project page** | <!-- URL if available, otherwise N/A --> |
 | **Required extra** | <!-- e.g. `newmodel`, or N/A if no new extra is needed --> |
@@ -72,7 +72,7 @@ modality, list it here with the exact error or reason. Otherwise write `None`.
 
 | Skipped dataset | Reason |
 |-----------------|--------|
-| <!-- e.g. kuro_siwo --> | <!-- e.g. SAR + DEM unsupported by this RGB-only model --> |
+| <!-- e.g. kuro_siwo --> | <!-- e.g. Model needs color images; this dataset provides radar and elevation. --> |
 
 ### 4. Commit results
 

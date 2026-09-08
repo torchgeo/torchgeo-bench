@@ -90,8 +90,7 @@ citation for a magic number, a workaround for a specific upstream bug, or a
 count += 1
 
 # GOOD: explains a non-obvious constraint
-# DOFA's hypernetwork requires ints here, not floats -- passing 3.75 silently
-# truncates to 3 with no warning.
+# Rounding avoids the downward bias from truncating positive wavelengths.
 wavelength = int(round(wavelength_um))
 ```
 

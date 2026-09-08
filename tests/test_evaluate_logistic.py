@@ -20,7 +20,7 @@ def _multilabel_data(n_classes: int = 3):
 
 
 class _StubModel:
-    """Stands in for LogisticRegression: NaN val_scores for one C, finite otherwise."""
+    """Simulate divergence only at C=1."""
 
     def __init__(self, C, **kwargs):
         del kwargs
@@ -33,7 +33,6 @@ class _StubModel:
     def predict_proba(self, x):
         n = x.shape[0]
         if self._c == 1.0:
-            # The candidate whose weights "diverged" mid-sweep.
             return np.full((n, self._n_classes), np.nan, dtype=np.float32)
         rng = np.random.default_rng(int(self._c * 1000) % 2**31)
         return rng.uniform(size=(n, self._n_classes)).astype(np.float32)
@@ -43,7 +42,6 @@ class _StubModel:
 
 
 def test_nan_candidate_c_does_not_crash_sweep():
-    """One divergent C in the sweep must be skipped, not raise past the whole run."""
     x_train, y_train, x_val, y_val, x_test, y_test = _multilabel_data()
 
     with mock.patch("torchgeo_bench.main.LogisticRegression", _StubModel):
@@ -68,21 +66,12 @@ def test_nan_candidate_c_does_not_crash_sweep():
 
 
 class _AlwaysDivergesModel(_StubModel):
-    """Every candidate C produces non-finite scores -- no usable C exists at all."""
-
     def predict_proba(self, x):
         return np.full((x.shape[0], self._n_classes), np.nan, dtype=np.float32)
 
 
 def test_total_divergence_raises_named_error_not_bare_assert():
-    """When every C in the sweep diverges, the caller must get a catchable error.
-
-    A bare AssertionError can't be narrowly caught by main.py's per-row handler
-    without also swallowing unrelated bugs, so this must be the dedicated
-    LinearProbeDivergedError -- one (backbone, dataset) pairing failing to
-    converge shouldn't be indistinguishable from a real assertion violation
-    elsewhere in the sweep.
-    """
+    """A dedicated error lets the runner skip failed probes without hiding unrelated assertion failures."""
     x_train, y_train, x_val, y_val, x_test, y_test = _multilabel_data()
 
     with (

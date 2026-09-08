@@ -1,15 +1,6 @@
-"""Derive segmentation-probe layers for each model config by measurement.
+"""Choose segmentation-probe layers from their measured output sizes.
 
-``SegmentationProbe`` taps modules by ``named_modules()`` name and builds a
-multi-scale head from whatever those taps emit.  Choosing taps by name alone is
-unreliable: for a hierarchical CNN the deepest repeated container is the block
-list *inside one stage*, so all four taps come back at the same spatial
-resolution and the "multi-scale" probe is nothing of the sort.
-
-This hooks every candidate module, runs one real forward pass, records the
-feature shape each module actually produces, and picks taps by measured
-resolution — falling back to evenly spaced blocks for isotropic ViTs, which
-genuinely have only one resolution.
+Layer names alone can select several outputs of the same size. Run the model and measure each candidate's output, preferring four different grid sizes and falling back to layers at different depths.
 
 Usage:
     python experiments/scripts/introspect_seg_layers.py --out /tmp/seg_layers.json
@@ -34,9 +25,7 @@ CONF = CONF_DIR / "model"
 
 CANDIDATE = re.compile(r"^(.*\b(?:blocks|encoder|layers|stages|features))\.(\d+)$|^(layer)(\d+)$")
 
-# Not segmentation-probe candidates: location encoders take (lon, lat), the
-# statistical baselines have no backbone, and SAM3 fetches its checkpoint from
-# HuggingFace at construction, which the compute nodes cannot reach.
+# Skip baselines without probe layers and SAM3, which needs a Hugging Face download at construction.
 SKIP_TARGETS = {"ImageStatsBench", "RCFBench", "SAM3Encoder"}
 
 
@@ -47,26 +36,22 @@ def band_specs(dataset: str, bands: str):
 
 
 class _Stub:
-    """Minimal stand-in so SegmentationProbe._process_feature can be reused."""
+    """Provide the backbone needed by the probe's feature reshaping."""
 
     def __init__(self, backbone):
         self.backbone = backbone
 
 
 def feature_hw(feat, backbone) -> tuple[int, int] | None:
-    """Return the (H, W) the probe would see, using the probe's own reshape.
+    """Measure height and width using the probe's own reshaping rules.
 
-    Reimplementing the reshape here would measure something the probe does not
-    actually do, so call its method directly.  A feature it cannot reshape
-    raises there and is reported as an incompatibility rather than skipped.
+    Return ``None`` for non-tensors or unsupported shapes.
     """
     if not isinstance(feat, torch.Tensor):
         return None
     try:
         processed = SegmentationProbe._process_feature(_Stub(backbone), feat)
     except ValueError:
-        # The probe itself refuses this tensor; record it as unusable so the
-        # model is reported rather than silently tapped somewhere else.
         return None
     return int(processed.shape[-2]), int(processed.shape[-1])
 
@@ -104,12 +89,12 @@ def measure(model, size: int = 224) -> dict[str, tuple[int, int]]:
 
 
 def choose(seen: dict[str, tuple[int, int]]) -> tuple[list[str], str]:
-    """Pick four taps, preferring distinct spatial resolutions."""
+    """Choose four layers, preferring different output grid sizes."""
     by_res: dict[tuple[int, int], list[str]] = {}
     for name, hw in seen.items():
         by_res.setdefault(hw, []).append(name)
     if len(by_res) >= 4:
-        # Deepest module at each resolution, coarsest grid first.
+        # Use the last layer at each size, starting with the smallest grid.
         resolutions = sorted(by_res, key=lambda hw: hw[0])[:4]
         return [sorted(by_res[r], key=_order_key)[-1] for r in resolutions], "multi-resolution"
     names = sorted(seen, key=_order_key)
@@ -121,7 +106,6 @@ def choose(seen: dict[str, tuple[int, int]]) -> tuple[list[str], str]:
 
 
 def main() -> None:
-    """Entry point."""
     logging.basicConfig(level=logging.ERROR)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)
@@ -147,9 +131,7 @@ def main() -> None:
         model.eval()
         seen = measure(model)
         if not seen:
-            # Every tap produced a tensor SegmentationProbe refuses to reshape
-            # (e.g. OlmoEarth v1's 2352 = 28^2 x 3 grouped tokens).  Record it
-            # as a real incompatibility and fail the run at the end.
+            # Record the incompatibility and fail after writing the report.
             results[name] = {
                 "config": config_name,
                 "unusable": "no tap produced a feature map the probe can reshape",

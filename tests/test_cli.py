@@ -218,12 +218,7 @@ def test_bad_override_is_not_a_traceback() -> None:
 
 
 def test_double_plus_override_sets_the_real_key():
-    """`++key=value` must override, not create a literal `+key` node.
-
-    Hydra spelled add as `+key` and add-or-override as `++key`; stripping only
-    one `+` left a `+model` section and silently no-op'd the intended override,
-    which the sweep scripts rely on.
-    """
+    """Sweep scripts use ``++key=value`` to add or override; it must not create a literal ``+key``."""
     from torchgeo_bench.config import compose_config
 
     cfg = compose_config(["model=rcf", "++model.pool=cls", "+model.gsd=1.0"])
@@ -233,11 +228,7 @@ def test_double_plus_override_sets_the_real_key():
 
 
 def test_model_names_are_posix_on_every_platform():
-    """Config names are CLI identifiers, so they must not use OS separators.
-
-    On Windows `str(Path)` produced `torchgeo\\scalemae_large_fmow`, which no
-    documented command, config, or sweep script would match.
-    """
+    """Model names are CLI identifiers and must use forward slashes even on Windows."""
     from torchgeo_bench.config import list_model_configs
 
     names = list_model_configs()

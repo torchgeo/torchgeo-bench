@@ -1,8 +1,4 @@
-"""Model interface for torchgeo-bench.
-
-Defines :class:`BenchModel`; see its docstring for the construction and
-sealed-forward contract.
-"""
+"""Model interface for torchgeo-bench."""
 
 from abc import ABC, abstractmethod
 
@@ -39,10 +35,7 @@ class BenchModel(nn.Module, ABC):
     pretrain_mean: list[float] | None = None
     pretrain_std: list[float] | None = None
 
-    #: Set by wrappers whose backbone normalises internally (OlmoEarth runs its
-    #: own per-modality ``Normalizer``).  Their ``normalize_inputs`` is already
-    #: the model-native pipeline, so the strategy normaliser is never used and
-    #: must not be validated against ``expected_input_unit``.
+    #: Wrappers such as OlmoEarth normalize internally, so skip the unused strategy normalizer and its ``expected_input_unit`` validation.
     handles_own_normalization: bool = False
 
     def __init__(
@@ -76,9 +69,7 @@ class BenchModel(nn.Module, ABC):
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         """Subclass hook — receives normalized ``(B, C, H, W)``, returns ``(B, K)``.
 
-        Implementations should call only the backbone; the public
-        :meth:`forward_patch_features` has already applied
-        :meth:`normalize_inputs`.
+        Inputs have already passed through :meth:`normalize_inputs`, so implementations should only call the backbone.
 
         Args:
             images: Normalized input tensor of shape ``(B, C, H, W)``.
@@ -91,10 +82,7 @@ class BenchModel(nn.Module, ABC):
     def forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         """Return a batch of vector embeddings ``(B, K)`` from raw inputs.
 
-        Sealed: applies :meth:`normalize_inputs` then dispatches to
-        :meth:`_forward_patch_features`.  Override
-        :meth:`normalize_inputs` to change the normalization policy and
-        :meth:`_forward_patch_features` to change the backbone forward.
+        Keep this method unchanged in subclasses. Override :meth:`normalize_inputs` to change normalization or :meth:`_forward_patch_features` to change the backbone forward.
         """
         return self._forward_patch_features(self.normalize_inputs(images))
 

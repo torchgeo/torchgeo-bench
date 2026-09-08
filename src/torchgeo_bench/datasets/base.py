@@ -1,17 +1,10 @@
-"""Base classes for torchgeo-bench dataset definitions.
+"""Dataset metadata and split-loading contracts.
 
-Every benchmark dataset is a subclass of :class:`BenchDataset` that declares
-its metadata (bands, number of classes, task type, split sizes) and knows how
-to produce a PyTorch :class:`~torch.utils.data.Dataset` for each split.
+Each :class:`BenchDataset` declares its bands, classes, task, and split sizes, and loads a PyTorch dataset for each split.
 
-Datasets always live under ``data/`` (relative to the current working
-directory). Each family base class (``_V1Dataset``, ``_V2Dataset``) and the
-torchgeo :class:`~torchgeo_bench.datasets.eurosat.EuroSAT` wrapper exposes its
-own :meth:`BenchDataset.data_root` returning the family-specific subdirectory.
+Data roots are fixed under ``data/``, relative to the working directory. Each dataset family provides its own :meth:`BenchDataset.data_root`.
 
-This module is import-cheap: :class:`BandSpec` is re-exported from the
-dependency-free :mod:`torchgeo_bench.bands`, and torch is only imported for
-type checking.
+Torch is imported only for type checking so metadata stays available without loading it.
 """
 
 from __future__ import annotations

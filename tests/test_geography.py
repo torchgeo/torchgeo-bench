@@ -1,15 +1,4 @@
-"""Tests for the committed per-dataset geographic store.
-
-The store (``docs/_static/_dataset_geography/``) is generated from the raw
-imagery by ``experiments/scripts/extract_dataset_geography.py`` and committed,
-so these tests read the artifact rather than the data.  They run anywhere.
-
-The load-bearing one is :func:`test_all_registered_datasets_have_a_record`:
-it is what makes the store extend as datasets are added.  Registering a new
-dataset without generating its geography fails here, forcing a conscious
-decision (extract it, or declare why it has no coordinates) instead of the
-dataset silently disappearing from the map.
-"""
+"""Check committed geography records without loading raw imagery."""
 
 import json
 
@@ -40,18 +29,13 @@ def store() -> dict[str, GeoRecord]:
 
 
 def test_all_registered_datasets_have_a_record(store: dict[str, GeoRecord]) -> None:
-    """Every registered dataset must be accounted for in the store.
-
-    If this fails you have added a dataset without generating its geography.
-    Run ``python experiments/scripts/extract_dataset_geography.py --all``.
-    """
+    """Keep new datasets on the map; generate missing records with ``python experiments/scripts/extract_dataset_geography.py --all``."""
     assert missing_datasets() == set(), (
         f"registered datasets with no geography record: {sorted(missing_datasets())}"
     )
 
 
 def test_no_extra_records(store: dict[str, GeoRecord]) -> None:
-    """The store must not carry records for unregistered datasets."""
     assert set(store) <= set(list_datasets())
 
 
@@ -68,7 +52,7 @@ def test_absent_coordinates_are_explained(store: dict[str, GeoRecord]) -> None:
 
 
 def test_known_no_geo_datasets_are_declared(store: dict[str, GeoRecord]) -> None:
-    """The two verified no-coordinate datasets keep that status."""
+    """Datasets with no source coordinates must retain that status."""
     for name in NO_GEO:
         if name in store:
             assert store[name].status == "no_geo", f"{name} unexpectedly has coordinates"
@@ -106,12 +90,11 @@ def test_extracted_records_are_wellformed(store: dict[str, GeoRecord]) -> None:
 
 
 def test_sampled_points_lie_within_bbox(store: dict[str, GeoRecord]) -> None:
-    """Guards against a subsample/bbox mismatch in the builder."""
     for record in store.values():
         if record.status != "extracted" or record.bbox is None:
             continue
         min_lon, min_lat, max_lon, max_lat = record.bbox
-        # bbox is rounded to 3dp, so allow a hair of slack at the edges.
+        # Bounds are rounded to three decimal places, so allow 0.001 at each edge.
         for lon, lat, *_ in record.points:
             assert min_lon - 0.001 <= lon <= max_lon + 0.001, (
                 f"{record.name}: lon {lon} outside bbox"
@@ -122,7 +105,6 @@ def test_sampled_points_lie_within_bbox(store: dict[str, GeoRecord]) -> None:
 
 
 def test_index_matches_the_records(store: dict[str, GeoRecord]) -> None:
-    """``index.json`` must agree with the per-dataset files it summarises."""
     index_path = STORE_DIR / INDEX_NAME
     assert index_path.exists(), "index.json missing; run the extractor to rebuild it"
 
@@ -140,13 +122,12 @@ def test_index_matches_the_records(store: dict[str, GeoRecord]) -> None:
 
 
 def test_records_roundtrip_through_json(store: dict[str, GeoRecord]) -> None:
-    """Serialisation is lossless, so the store can be read back exactly."""
     for record in store.values():
         assert GeoRecord.from_json(record.to_json()) == record
 
 
 def test_stored_files_are_canonical_json() -> None:
-    """Files are written sorted and compact, so re-runs stay byte-identical."""
+    """Canonical JSON keeps regenerated records byte-identical."""
     for path in sorted(STORE_DIR.glob("*.json")):
         raw = path.read_text()
         assert raw == json.dumps(json.loads(raw), sort_keys=True, separators=(",", ":")), (

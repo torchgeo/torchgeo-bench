@@ -109,7 +109,7 @@ def load_mind(ckpt_path: str, device: str = "cpu") -> ReSIRENLocationEncoder:
     if str(ckpt_path).endswith(".safetensors"):
         from safetensors.torch import load_file
 
-        state = {k: v.float() for k, v in load_file(ckpt_path).items()}  # fp16 -> fp32
+        state = {k: v.float() for k, v in load_file(ckpt_path).items()}
     else:
         state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
         if isinstance(state, dict) and "state_dict" in state:

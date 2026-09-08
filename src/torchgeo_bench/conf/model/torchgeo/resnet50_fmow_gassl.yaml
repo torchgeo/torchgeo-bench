@@ -1,11 +1,8 @@
-# torchgeo ResNet-50 — fMoW RGB GASSL
-# Feature dimension: 2048
-
 _target_: torchgeo_bench.models.TorchGeoResNetBench
 factory: resnet50
 weights_class: ResNet50_Weights
 weights_member: FMOW_RGB_GASSL
-# Convert raw S2 / TCI inputs to [0, 1] ourselves, then retain only ImageNet z-score.
+# Under model_native, convert raw S2 / TCI inputs to [0, 1] once, then apply ImageNet z-score.
 normalization_input_unit: reflectance_0_1
 skip_weight_normalize: 1
 auto_resize: false

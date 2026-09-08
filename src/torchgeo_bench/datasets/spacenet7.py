@@ -7,11 +7,9 @@ from .geobench_v2 import _OffsetMaskV2Dataset
 class SpaceNet7(_OffsetMaskV2Dataset):
     """Planet building footprint segmentation (2 classes).
 
-    RGB imagery from Planet satellites. Upstream ships masks valued ``{1, 2}``;
-    we restore the native ``{0, 1}`` labels — see
-    :meth:`~._OffsetMaskV2Dataset.canonicalize_sample`. Despite upstream's
-    "multi-temporal" framing, the benchmark ships one image and one mask per
-    sample, so this is single-image segmentation rather than change detection.
+    Planet RGB imagery arrives as one image and one mask per sample, so this is single-image segmentation, not change detection.
+
+    Upstream masks use ``{1, 2}``; we restore the native ``{0, 1}`` labels (see :meth:`~._OffsetMaskV2Dataset.canonicalize_sample`).
     """
 
     name = "spacenet7"

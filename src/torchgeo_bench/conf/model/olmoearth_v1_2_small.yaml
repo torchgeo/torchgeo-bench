@@ -1,6 +1,4 @@
-# OlmoEarth-v1.2-Small (AI2 geospatial foundation model)
-# Feature dimension: 384
-# v1.2 introduces the Small size with RoPE position encoding (~35.6M params).
+# v1.2 uses rotary position embeddings (RoPE).
 
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
 model_size: small
@@ -15,7 +13,5 @@ min_image_size: 64
 name: olmoearth_v1_2_small
 eval:
   segmentation:
-    # Isotropic transformer: no spatial pyramid, so tap 4 blocks
-    # spread across depth, deepest first.  Derived by measurement
-    # (experiments/scripts/introspect_seg_layers.py).
+    # Blocks share one spatial grid; use four depths, deepest first (verified with experiments/scripts/introspect_seg_layers.py).
     layers: ["encoder_model.encoder.blocks.11", "encoder_model.encoder.blocks.8", "encoder_model.encoder.blocks.5", "encoder_model.encoder.blocks.2"]

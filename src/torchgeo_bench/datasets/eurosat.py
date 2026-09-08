@@ -1,10 +1,4 @@
-"""EuroSAT (torchgeo) benchmark dataset template.
-
-Demonstrates how to wrap a non-GeoBench :class:`~torch.utils.data.Dataset`
-in a :class:`~torchgeo_bench.datasets.base.BenchDataset`.  The data and
-splits come from :class:`torchgeo.datasets.EuroSAT`; metadata and the
-``BenchDataset`` interface live here.
-"""
+"""EuroSAT and spatially disjoint EuroSAT splits from torchgeo."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -36,7 +30,7 @@ class EuroSAT(BenchDataset):
     split_sizes = {"train": 16200, "val": 5400, "test": 5400}
     supports_partitions = False
 
-    # Band statistics mirror m-eurosat (computed from the same EuroSAT data).
+    # Raw EuroSAT pixel statistics, separate from the GeoBench V1 subset's statistics.
     # fmt: off
     bands = [
         BandSpec("s2", "coastal_aerosol", "B01", mean=1354.41, std=245.718, min=816, max=17720, wavelength_um=0.443),
@@ -59,9 +53,7 @@ class EuroSAT(BenchDataset):
     def data_root(cls) -> Path:
         """Return ``Path("data/eurosat")`` (torchgeo manages its own layout below).
 
-        Shared by :class:`EuroSATSpatial`: both use the same
-        ``EuroSATallBands.zip``, only the split txt files differ, so a shared
-        root avoids a second 2GB download.
+        :class:`EuroSATSpatial` reuses ``EuroSATallBands.zip``; only the split files differ, avoiding a second 2GB download.
         """
         return Path("data/eurosat")
 
@@ -87,16 +79,10 @@ class EuroSAT(BenchDataset):
 class EuroSATSpatial(EuroSAT):
     """EuroSAT with longitude-based 60/20/20 train/val/test splits.
 
-    Uses :class:`torchgeo.datasets.EuroSATSpatial`, which partitions tiles
-    by longitude so train/val/test regions are spatially disjoint. Same
-    27000 images, classes, bands, and stats as :class:`EuroSAT`; only the
-    split assignment differs. Stronger generalization signal than the
-    default random split.
+    :class:`torchgeo.datasets.EuroSATSpatial` partitions tiles into spatially disjoint regions. The 27000 images, classes, bands, and statistics match :class:`EuroSAT`; only split assignments differ.
     """
 
     _tg_class = TGEuroSATSpatial
 
     name = "eurosat-spatial"
-    # Longitude-based 60/20/20: same totals as the random split, just
-    # reassigned across regions.
     split_sizes = {"train": 16200, "val": 5400, "test": 5400}

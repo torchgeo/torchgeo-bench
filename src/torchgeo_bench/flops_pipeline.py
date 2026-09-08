@@ -1,17 +1,8 @@
-"""Per-sample compute cost (GFLOPs) split into backbone / head / probe.
+"""Per-sample compute cost (GFLOPs) for backbones and classification/segmentation heads.
 
-Measures one model config across two fixed band configurations and, where
-the model declares segmentation layers, across the segmentation head types.
-Everything is measured on a **synthetic** tensor: ``_count_gflops`` slices
-``sample[:1]``, so no dataset is involved and no data is downloaded.  Band
-specs come off the dataset *class attributes* of ``cloudsen12``.
+Measure one model config across RGB and Sentinel-2 bands, plus supported segmentation heads. Inputs are synthetic, with band metadata from the ``cloudsen12`` dataset class by default; no data is loaded or downloaded.
 
-The pipeline **imports** the real eval wiring (``build_seg_probe_and_solver``,
-``measure_profile``, ``_count_gflops``) rather than reimplementing it, so the
-graph that gets measured is the graph the eval runs.
-
-One invocation handles one model config, matching ``seg_corruption_pipeline``;
-``slurm/eval_flops.sbatch`` loops the model set.
+Use the benchmark's probe builders and profiling helpers so measurements match evaluation.
 """
 
 import logging
@@ -41,13 +32,7 @@ warnings.filterwarnings("ignore", message="Dataset has no geotransform", categor
 
 logger = logging.getLogger(__name__)
 
-# TerraMind carries the band configuration in the *model config*, not just in
-# the tensor shape: TerraTorchTerraMindBench takes both `bands` and `modality`,
-# and the modality selects which pretrained tokenizer (and which band table and
-# normalization statistics) the input is mapped through.  The `_rgb` and
-# S2L2A configs are therefore one model at two points on the band axis, not two
-# models — they are emitted under the merged name with `band_config` telling
-# them apart.  Each config is only ever measured at its matching band config.
+# TerraMind's modality selects its tokenizer, band table, and normalization. Group RGB/S2L2A configs by model name and distinguish them with band_config.
 _MODALITY_FOR_BAND_CONFIG = {"rgb": "RGB", "s2": "S2L2A"}
 _TERRAMIND_MERGED_NAME = {
     "tt_terramind_v1_base": "tt_terramind_v1_base",
@@ -86,12 +71,7 @@ def _build_model(
 ) -> nn.Module | None:
     """Instantiate the model, skipping only explicitly incompatible band selections."""
     if _is_terramind(cfg_model):
-        # Each TerraMind config declares its own modality and is only ever
-        # measured at the matching band config (enforced by the caller), so
-        # the declared modality is used as-is rather than overridden.  Assert
-        # the agreement here too: pairing S2RGB with 12 channels is the one
-        # failure mode that yields a plausible-looking wrong number instead of
-        # an exception.
+        # A modality/channel mismatch can select the wrong band table without failing during inference.
         declared = str(cfg_model.get("modality", "S2L2A"))
         expected = _MODALITY_FOR_BAND_CONFIG[band_config]
         if declared != expected:
@@ -121,11 +101,9 @@ def _measure_backbone(
     n_warmup: int,
     n_measure: int,
 ) -> tuple[dict[str, float | None], int]:
-    """Run ``measure_profile`` on a synthetic batch, halving on CUDA OOM.
+    """Profile a synthetic batch, halving its size after CUDA runs out of memory.
 
-    Returns the metrics dict and the batch size actually used, so a cell that
-    fell back to a smaller batch stays interpretable (GFLOPs is per-sample
-    either way; throughput/memory/energy are not).
+    Returns the metrics and actual batch size. GFLOPs is per sample; throughput and memory depend on batch size.
     """
     while True:
         try:
@@ -149,11 +127,9 @@ def _probe_gflops(
     head: str,
     n_classes: int,
 ) -> tuple[float, float, int]:
-    """Build the linear/mlp probe the way ``linear.py`` does and count it.
+    """Measure a linear or MLP probe using the backbone's output width.
 
-    ``feature_dim`` is *not* configured anywhere — ``linear.py`` infers it
-    from ``X.shape[1]`` of the extracted features.  So the width has to come
-    from a real forward pass, and the probe can only be constructed after it.
+    Infer ``feature_dim`` from an actual forward pass, as ``linear.py`` does from ``X.shape[1]``.
     """
     with torch.inference_mode():
         feats = model(torch.randn(1, n_channels, image_size, image_size, device=device))
@@ -177,17 +153,9 @@ def _probe_gflops(
 
 
 def _n_tokens(model: nn.Module, image_size: int) -> int | None:
-    """Return the number of *patch* tokens, or None for CNN backbones.
+    """Return the patch-token count, or ``None`` for CNN backbones.
 
-    ``forward_patch_features`` returns an already-pooled ``(B, D)`` vector, so
-    the token count cannot be read off the model's output.  It is instead
-    derived from the patch-embedding grid, which is what actually drives
-    attention cost: ``n_tokens ~ (image_size / patch)^2``.
-
-    Prefix tokens (CLS + registers) are deliberately *excluded* — they are
-    read via ``num_prefix_tokens`` where a module exposes one, so
-    register-token ViTs (DINOv3 reports 5) report the same patch-grid size as
-    a plain ViT at equal patch size.
+    The pooled ``forward_patch_features`` output has shape ``(B, D)`` and does not expose token count. Use the patch grid, ``n_tokens ~ (image_size / patch)^2``, excluding CLS and register tokens.
     """
     patch: tuple[int, int] | None = None
     for module in model.modules():
@@ -201,9 +169,7 @@ def _n_tokens(model: nn.Module, image_size: int) -> int | None:
 
     if patch is None or patch[0] <= 0 or patch[1] <= 0:
         return None
-    # Derived from the size actually measured, not the model's configured
-    # `grid_size`: the two disagree whenever a backbone is run off its native
-    # resolution, and it is the measured grid that drove the FLOPs.
+    # Use measured image_size, not grid_size: non-native resolutions change the attention cost.
     return (image_size // patch[0]) * (image_size // patch[1])
 
 
@@ -213,12 +179,9 @@ def _seg_head_gflops(
     image_size: int,
     device: torch.device,
 ) -> float:
-    """Count the segmentation head alone, mirroring ``SegmentationProbe.forward``.
+    """Count only the segmentation head on features from the real backbone.
 
-    Counting the probe end-to-end would be wrong: ``forward`` wraps the frozen
-    backbone in ``no_grad`` + ``autocast``, which perturbs counts.  So the
-    backbone is run once to populate ``_features``, then only
-    ``head(features, H, W)`` is counted.
+    Run the backbone once to capture its feature shapes, then count ``head(features, H, W)`` separately so backbone operations are excluded.
     """
     x = torch.randn(1, n_channels, image_size, image_size, device=device)
     probe._features.clear()
@@ -248,7 +211,7 @@ def _flops_row(
     head_type: str = "",
     **values: object,
 ) -> dict:
-    """One compute_cost.csv row; metric slots default to None and are filled per task."""
+    """Build a compute_cost.csv row, leaving unmeasured metrics as None."""
     row = {
         **base_meta,
         "task": task,
@@ -285,8 +248,6 @@ def main(cfg: DictConfig) -> None:
     normalization = str(cfg.normalization)
     model_target = str(cfg.model._target_)
     config_name = str(cfg.model.get("name", model_target.split(".")[-1]))
-    # TerraMind's _rgb / non-_rgb configs are the same model at two points on
-    # the band axis, so they report under one merged name.
     model_name = _TERRAMIND_MERGED_NAME.get(config_name, config_name)
 
     ds_cls = get_bench_dataset_class(str(cfg.band_source))
@@ -298,10 +259,7 @@ def main(cfg: DictConfig) -> None:
 
     completed = _load_completed(output_path) if bool(cfg.resume) else frozenset()
 
-    # Merge the model's eval block over the base eval config (models only
-    # override `layers` / `head_type`). Struct mode comes off first: model
-    # configs carry eval keys this pipeline ignores (e.g. `c_range`), which
-    # would otherwise raise ConfigKeyError on merge.
+    # Model eval blocks may include unrelated keys such as c_range; allow them during the merge.
     seg_eval_cfg = OmegaConf.create(OmegaConf.to_container(cfg.eval, resolve=True))
     OmegaConf.set_struct(seg_eval_cfg, False)
     if "eval" in cfg.model and cfg.model.eval is not None:
@@ -312,8 +270,6 @@ def main(cfg: DictConfig) -> None:
     n_skipped = 0
 
     for band_config in list(cfg.band_configs):
-        # A TerraMind config only ever measures the band config its declared
-        # modality matches; the sibling `_rgb` / S2L2A config covers the other.
         if _is_terramind(cfg.model):
             declared = str(cfg.model.get("modality", "S2L2A"))
             if declared != _MODALITY_FOR_BAND_CONFIG[band_config]:
@@ -337,7 +293,6 @@ def main(cfg: DictConfig) -> None:
             "num_classes": int(cfg.probe_num_classes),
         }
 
-        # --- classification cell ------------------------------------------
         cls_key = (model_name, band_config, "classification", "")
         if cls_key in completed:
             logger.info("Skip (%s, %s, classification) — already done", model_name, band_config)
@@ -401,7 +356,6 @@ def main(cfg: DictConfig) -> None:
                 feature_dim,
             )
 
-        # --- segmentation cells -------------------------------------------
         seg_band_configs = set(cfg.seg_band_configs)
         if band_config not in seg_band_configs or not seg_layers:
             if band_config in seg_band_configs and not seg_layers:

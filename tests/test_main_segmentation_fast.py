@@ -1,4 +1,4 @@
-"""Fast offline tests for segmentation orchestration in ``torchgeo_bench.main``."""
+"""Offline tests for the segmentation runner."""
 
 from pathlib import Path
 from unittest import mock
@@ -14,8 +14,6 @@ from .test_main_fast import _chainable_model_mock, _compose_cfg
 
 
 class _SegmentationDataset(Dataset):
-    """Small dataset wrapper that emits ``{"image", "mask"}`` samples."""
-
     def __init__(self, images: torch.Tensor, masks: torch.Tensor) -> None:
         self._images = images
         self._masks = masks
@@ -34,7 +32,6 @@ def _synthetic_segmentation_loaders(
     channels: int = 3,
     n_classes: int = 3,
 ) -> tuple[_SegmentationDataset, DataLoader, DataLoader, DataLoader]:
-    """Return train dataset + train/val/test loaders for segmentation."""
     rng = torch.Generator().manual_seed(1)
     train_images = torch.rand(n_train, channels, 64, 64, generator=rng)
     val_images = torch.rand(n_val, channels, 64, 64, generator=rng)

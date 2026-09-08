@@ -1,19 +1,13 @@
 #!/usr/bin/env python
-"""Compare LBFGS vs Adam for linear probing — speed and final accuracy.
+"""Compare L-BFGS and Adam fit time and linear-probe accuracy.
 
-Both branches use :class:`torchgeo_bench.linear.LogisticRegression` (the
-same class the main pipeline uses for its linear probe), so the comparison
-is apples-to-apples on regularization and the training objective::
+Both solvers use :class:`torchgeo_bench.linear.LogisticRegression` and the same loss, so changing optimizers does not change the weight penalty::
 
     loss = (1/n) * CrossEntropy + (1/n) * 0.5/C * ||W||^2
 
-For each (model, dataset, fit_config) we record wall-clock fit time,
-number of optimizer iterations, and train/val/test accuracy.
+For each model, dataset, and fit setting, record fit time, optimizer iterations, and train/validation/test accuracy.
 
-Configs swept (per (model, dataset)):
-    - LBFGS: one fit per ``C``, ``lr=1.0`` (LBFGS uses strong-Wolfe line
-      search, so ``lr`` is mostly a starting step; we keep the default).
-    - Adam:  one fit per (``C``, ``lr``) on a small LR grid.
+L-BFGS adjusts its step size during fitting, so use the default starting learning rate of 1.0. Adam gets a separate learning-rate sweep for each C value.
 
 Usage:
     python experiments/run_effect_of_lbfgs_vs_adam.py
@@ -65,20 +59,18 @@ MODEL_CONFIGS = {
     },
 }
 
-# Wider grid than the original (1e-3..100) to make sure we bracket each
-# (model, dataset)'s optimum on both ends.
+# Search a broad C range so the best result need not sit at an endpoint.
 C_VALUES = [1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1000.0]
-# Wider Adam LR grid (1e-5..3.0) — the original (1e-3..1.0) saturated at the
-# boundary in 5 of 10 (model, dataset) cells, so we need to extend both ends.
+# Earlier runs selected endpoint learning rates, so search a wider range.
 ADAM_LRS = [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1.0, 3.0]
 
-# Match main.py's linear-probe call (LogisticRegression(C=c, max_iter=2000, tol=1e-6)).
+# Use the benchmark's stopping criteria for a fair comparison.
 MAX_ITER = 2000
 TOL = 1e-6
 
 
 def instantiate_model(model_cfg: dict, bands: list) -> torch.nn.Module:
-    """Instantiate a model from its ``MODEL_CONFIGS`` entry."""
+    """Create a model with the requested configuration and input bands."""
     target = model_cfg["_target_"]
     module_name, class_name = target.rsplit(".", 1)
     module = __import__(module_name, fromlist=[class_name])
@@ -90,7 +82,7 @@ def instantiate_model(model_cfg: dict, bands: list) -> torch.nn.Module:
 
 
 def build_configs() -> list[dict]:
-    """Build a flat list of ``(solver, C, lr)`` fit configurations."""
+    """List the solver, C, and learning-rate combinations to compare."""
     configs: list[dict] = []
     for c in C_VALUES:
         configs.append({"solver": "lbfgs", "C": float(c), "lr": 1.0})
@@ -108,7 +100,7 @@ def fit_one(
     x_test: torch.Tensor,
     device: torch.device,
 ) -> tuple[LogisticRegression, float, np.ndarray, np.ndarray, np.ndarray]:
-    """Fit one config and return ``(clf, fit_seconds, train_pred, val_pred, test_pred)``."""
+    """Return the fitted classifier, fit duration, and train/validation/test predictions."""
     clf = LogisticRegression(
         C=cfg["C"],
         lr=cfg["lr"],
@@ -139,7 +131,7 @@ def run_dataset(
     device: torch.device,
     all_rows: list[dict],
 ) -> list[dict]:
-    """Run all (model, config) fits for one dataset, appending rows to ``all_rows``."""
+    """Append unfinished single-label fits for one dataset to ``all_rows``."""
     completed = {
         (r["model"], r["solver"], float(r["C"]), float(r["lr"]))
         for r in all_rows
@@ -255,7 +247,7 @@ def run_dataset(
 
 
 def main() -> int:
-    """Entry point."""
+    """Run the optimizer comparison and save fit times and scores."""
     parser = argparse.ArgumentParser(description="LBFGS vs Adam linear-probing speed test")
     add_devices_argument(parser)
     args = parser.parse_args()

@@ -1,14 +1,13 @@
 """Public package exports for torchgeo-bench.
 
-Heavy submodules (torch, torchgeo, sklearn) load lazily so importing the
-package — and therefore CLI startup — stays fast.
+Benchmark dependencies load on first use to keep package imports and CLI startup fast.
 """
 
 from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("torchgeo-bench")
-except PackageNotFoundError:  # editable / pre-install fallback
+except PackageNotFoundError:
     __version__ = "0.5.0"
 
 __author__ = "torchgeo-bench contributors"

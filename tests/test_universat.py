@@ -1,8 +1,6 @@
 """Tests for the UniverSat wrapper.
 
-Fast tests exercise the sensor→modality grouping without loading weights. The
-forward test loads the released UniverSat weights via torch.hub and is marked
-``slow`` (skipped unless ``-m slow``) since it pulls ~201M params.
+Fast grouping tests load no weights; ``-m slow`` also runs forwards with the released torch.hub model (about 201M parameters).
 """
 
 import pytest
@@ -35,7 +33,7 @@ def test_single_sensor_group():
 
 
 def test_multi_sensor_grouping():
-    # s2 + s1 interleaved -> two groups, indices preserved, s1 -> sensor codes
+    # Interleaving sensors checks that each group keeps the original channel indices.
     bands = [_s2_band("b04", 0.665), _sar_band("vv"), _s2_band("b03", 0.56), _sar_band("vh")]
     groups = {g["modality"]: g for g in _build_sensor_groups(bands)}
     assert set(groups) == {"s2", "s1"}

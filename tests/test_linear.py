@@ -27,9 +27,6 @@ def _xy_ml(
     return X, y
 
 
-# __init__ validation
-
-
 def test_invalid_c_raises():
     with pytest.raises(ValueError, match="C must be > 0"):
         LogisticRegression(C=0.0)
@@ -41,13 +38,9 @@ def test_invalid_solver_raises():
 
 
 def test_cuda_fallback_to_cpu(monkeypatch):
-    """When CUDA unavailable, device should silently fall back to CPU."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     model = LogisticRegression(device="cuda")
     assert model.device.type == "cpu"
-
-
-# fit validation
 
 
 def test_fit_non_tensor_raises():
@@ -93,9 +86,6 @@ def test_fit_xy_length_mismatch_raises():
         model.fit(torch.randn(10, 4), torch.zeros(5, dtype=torch.long))
 
 
-# Fitting and inference — single-label
-
-
 def test_fit_and_predict_singlelabel():
     X, y = _xy()
     model = LogisticRegression(C=1.0, max_iter=50, random_state=0)
@@ -137,9 +127,6 @@ def test_coef_before_fit_raises():
         _ = model.coef_
 
 
-# Fitting and inference — multi-label
-
-
 def test_fit_and_predict_multilabel():
     X, y = _xy_ml()
     model = LogisticRegression(C=1.0, max_iter=50, random_state=0, multi_label=True)
@@ -156,9 +143,6 @@ def test_predict_proba_multilabel_range():
     proba = model.predict_proba(X)
     assert proba.shape == (len(X), 4)
     assert np.all(proba >= 0) and np.all(proba <= 1)
-
-
-# predict_proba / decision_function validation
 
 
 def test_predict_proba_before_fit_raises():

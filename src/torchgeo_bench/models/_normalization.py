@@ -1,10 +1,6 @@
 """Selectable input-normalisation strategies for benchmark models.
 
-Each pretrained backbone was trained against a specific input pipeline, but
-"the right" cross-dataset normalisation is empirical — what works for
-m-eurosat (raw S2 DN) doesn't generalise to m-so2sat (already reflectance)
-or m-pv4ger (uint8 NAIP).  Rather than hard-code one policy, expose a
-strategy enum and let the sweep treat it as another axis.
+Input scales differ across datasets (raw S2 DN in m-eurosat, reflectance in m-so2sat, and uint8 aerial imagery in m-pv4ger), so normalization is a configurable benchmark parameter.
 
 Strategies:
 
@@ -92,8 +88,6 @@ def build_normalizer(
 
     if strategy is NormalizationStrategy.MINMAX_ZSCORE:
         lo, span = _bandspec_min_max(bands)
-        # Post-minmax mean_i = (raw_mean_i - min_i) / (max_i - min_i)
-        # Post-minmax std_i  = raw_std_i  / (max_i - min_i)
         n = len(bands)
         pmean = torch.tensor(
             [(b.mean - b.min) / max(b.max - b.min, 1e-8) for b in bands],
@@ -130,16 +124,7 @@ def build_normalizer(
         convert = lambda x: x  # noqa: E731
 
     if pretrain_mean is None:
-        # Unit conversion alone is not a normalisation: it would feed raw DN
-        # (0 - 10 000) straight into the backbone, which measurably collapses
-        # the features — Prithvi scored an identical 0.264 on treesatai at
-        # 86M, 304M and 631M parameters, below the imagestats baseline.
-        #
-        # Raising here would break wrappers that install their own
-        # model_native normaliser *after* super().__init__ (TerraMind) or that
-        # override normalize_inputs entirely (the torchgeo wrappers, which use
-        # the Normalize bound to their weights).  So defer: fail only if this
-        # normaliser is actually the one used.
+        # Defer failure until use: wrappers can replace this normalizer after construction or override normalize_inputs.
         def _undefined(_x: torch.Tensor) -> torch.Tensor:
             raise UnsupportedNormalizationError(
                 "model_native normalisation is undefined for this model: it declares "

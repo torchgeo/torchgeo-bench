@@ -1,9 +1,6 @@
-"""Detect a dataset's input unit and convert between scales for model-faithful normalisation.
+"""Detect dataset input units and convert to the pretrained model's scale.
 
-Each pretrained backbone was trained on inputs in a specific scale (raw S2
-DN, reflectance in [0, 1], uint8/255, etc.).  Wrappers declare their
-expected unit and use these helpers to bring whatever the dataset emits
-into that scale before applying any model-specific per-band normalisation.
+Wrappers declare their expected input scale (raw S2 DN, reflectance in [0, 1], uint8/255, etc.) and convert to it before applying model-specific per-band normalisation.
 """
 
 from enum import StrEnum
@@ -14,7 +11,7 @@ from torchgeo_bench.datasets.base import BandSpec
 
 
 class InputUnit(StrEnum):
-    """Coarse buckets for image-tensor scales we encounter in GeoBench."""
+    """Input scales used by GeoBench image tensors."""
 
     S2_DN = "s2_dn"  # raw Sentinel-2 sensor counts, 0..~10000+
     REFLECTANCE_0_1 = "reflectance_0_1"  # already-normalised, ~0..1 (2.8 max in m-so2sat)
@@ -94,7 +91,7 @@ def to_uint8(images: torch.Tensor, src: InputUnit) -> torch.Tensor:
 
 
 def convert_unit(images: torch.Tensor, src: InputUnit, dst: InputUnit) -> torch.Tensor:
-    """Route to the right ``to_<dst>`` helper.  No-op if src == dst."""
+    """Convert image values between input scales; leave them unchanged if src == dst."""
     if src == dst:
         return images
     if dst == InputUnit.S2_DN:

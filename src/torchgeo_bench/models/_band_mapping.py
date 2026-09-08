@@ -85,14 +85,8 @@ _BAND_ALIASES: dict[str, str] = {
 }
 
 
-#: True Sentinel-2 (MSI) centre wavelengths in micrometres, by canonical band
-#: name -- the same constants already hardcoded per-dataset in
-#: ``datasets/eurosat.py`` and similar. Most classification datasets here are
-#: Sentinel-2 derived, so this is the right default for any dataset that
-#: doesn't ship its own ``wavelength_um`` (e.g. a Landsat dataset's nir/swir
-#: bands are close enough in practice to be a useful fallback, not exact --
-#: see ``wavelengths_um``'s docstring). Values: ESA Sentinel-2 MSI spectral
-#: response, S2A center wavelengths.
+#: Sentinel-2A MSI centre wavelengths in micrometres, from ESA's spectral response data.
+#: Used when a band has no wavelength_um; values for other sensors are approximate.
 S2_WAVELENGTHS_UM: dict[str, float] = {
     "coastal": 0.443,
     "blue": 0.490,
@@ -170,12 +164,8 @@ def select_src_bands(
     return indices, selected
 
 
-#: When a target band is absent, substitute this spectrally-nearest
-#: neighbor's data instead of zero-filling or raising. Coastal aerosol
-#: (0.443 um) is the only band this currently applies to -- it sits right
-#: next to blue (0.49 um) in the spectrum, and a real (if approximate) blue
-#: reading is a better stand-in for a required "coastal" slot than a zeroed
-#: channel. Callers can override or disable via ``band_fallbacks``.
+#: Substitute blue (0.49 um) for missing coastal aerosol (0.443 um), its nearest spectral neighbor.
+#: Callers can override or disable this approximation with ``band_fallbacks``.
 DEFAULT_BAND_FALLBACKS: dict[str, str] = {"coastal": "blue"}
 
 
@@ -190,15 +180,9 @@ def map_to_model_bands(
 ) -> tuple[torch.Tensor, list[bool]]:
     """Rearrange ``images`` from src band order to ``target_band_names``, zero-filling gaps.
 
-    A target band missing from ``src_bands`` first tries
-    ``band_fallbacks`` (default :data:`DEFAULT_BAND_FALLBACKS`) -- copying a
-    spectrally-nearest neighbor's real data -- before falling through to
-    zero-fill (``allow_missing=True``) or raising. Pass ``band_fallbacks={}``
-    to disable.
+    Missing bands first use ``band_fallbacks`` (default :data:`DEFAULT_BAND_FALLBACKS`) to copy a spectral neighbor. Remaining gaps are zero-filled if ``allow_missing=True``, or raise otherwise. Pass ``band_fallbacks={}`` to disable substitution.
 
-    Returns ``(mapped, missing)`` where ``missing[i]`` is True iff slot
-    ``i`` was zero-filled (a fallback-substituted slot is *not* counted as
-    missing, since it carries real, if approximate, data).
+    Returns ``(mapped, missing)`` where ``missing[i]`` is True only for zero-filled slots, not substituted ones.
     """
     if images.shape[1] != len(src_bands):
         raise ValueError(
@@ -241,14 +225,9 @@ def map_to_model_bands(
 def wavelengths_um(bands: list[BandSpec], default_um: float | None = None) -> list[float]:
     """Return per-band centre wavelengths in micrometres.
 
-    A band missing ``wavelength_um`` (e.g. a Landsat dataset that didn't
-    bother declaring it, since most datasets here are Sentinel-2) falls back
-    to :data:`S2_WAVELENGTHS_UM` by canonical band name -- most datasets
-    genuinely are Sentinel-2, and even for Landsat the true wavelengths are
-    close enough (nir 0.842 vs. ~0.865 um) to be a useful default rather than
-    a hard stop. Only a band whose canonical name has no known S2 wavelength
-    either (e.g. SAR) raises, unless the caller passes an explicit
-    ``default_um`` for that case.
+    Bands without ``wavelength_um`` use :data:`S2_WAVELENGTHS_UM` by canonical name. This is approximate for other sensors, such as Landsat (nir 0.842 vs. ~0.865 um).
+
+    Bands with no known S2 wavelength (e.g. SAR) raise unless the caller supplies ``default_um``.
     """
     still_missing = [
         b.name

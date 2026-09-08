@@ -51,7 +51,7 @@ def test_documented_fourier_encoder_example(points: tuple[np.ndarray, np.ndarray
 def test_linear_probe_regression_recovers_smooth_target(
     points: tuple[np.ndarray, np.ndarray],
 ) -> None:
-    # A target that is linear in the sin/cos features is (near-)perfectly recoverable.
+    # Ridge regression should recover a target built directly from the features.
     lon, lat = points
     feats = SinCosLocationEncoder(device="cpu").encode(lon, lat)
     labels = 3.0 * feats[:, 0] - 2.0 * feats[:, 3] + 0.5  # 3*sin(lat) - 2*cos(lon) + b
@@ -63,10 +63,10 @@ def test_linear_probe_regression_recovers_smooth_target(
 def test_linear_and_knn_classification(points: tuple[np.ndarray, np.ndarray]) -> None:
     lon, lat = points
     feats = SinCosLocationEncoder(device="cpu").encode(lon, lat)
-    labels = (lat > 0).astype(np.int64)  # northern vs southern hemisphere
+    labels = (lat > 0).astype(np.int64)  # The sign of sin(latitude) separates the hemispheres.
     lin, _ = linear_probe_score(feats, labels, "classification", device="cpu")
     knn, folds = knn_probe_score(feats, labels, device="cpu", k=5)
-    assert lin > 0.9  # sin(lat) sign is trivially separable
+    assert lin > 0.9
     assert knn > 0.9
     assert len(folds) == 5
 
@@ -76,7 +76,6 @@ def test_spatial_fold_ids_group_by_cell(points: tuple[np.ndarray, np.ndarray]) -
     fa = spatial_fold_ids(lat, lon, folds=5, cell_deg=10.0, seed=0)
     assert fa.shape == (len(lon),)
     assert set(np.unique(fa)).issubset(set(range(5)))
-    # Points in the same 10-degree cell must share a fold.
     cell = np.floor(lat / 10.0).astype(int) * 100003 + np.floor(lon / 10.0).astype(int)
     for c in np.unique(cell):
         assert len(np.unique(fa[cell == c])) == 1
@@ -89,7 +88,7 @@ def test_test_mask_split_single_fold(points: tuple[np.ndarray, np.ndarray]) -> N
     mask = np.zeros(len(lon), dtype=bool)
     mask[::4] = True  # 25% held out
     _, fold_scores = linear_probe_score(feats, labels, "regression", device="cpu", test_mask=mask)
-    assert len(fold_scores) == 1  # official split -> one held-out score
+    assert len(fold_scores) == 1  # An official split has one held-out score, not a CV average.
 
 
 def _synthetic_benchmarks() -> list[CoordBenchmark]:
@@ -148,14 +147,13 @@ def test_run_coordbench_end_to_end(tmp_path, monkeypatch) -> None:
 
     df = pd.read_csv(cfg.coord.output)
     assert {"dataset", "task", "method", "split", "metric_name", "metric_value"} <= set(df.columns)
-    # regression -> linear only; classification -> linear + knn5
     reg = df[df.dataset == "synthetic-reg"]
     clf = df[df.dataset == "synthetic-clf"]
     assert set(reg.method) == {"linear"}
     assert set(reg.metric_name) == {"r2"}
     assert set(clf.method) == {"linear", "knn5"}
     assert set(clf.metric_name) == {"accuracy"}
-    # both random and spatial CV rows present (no official split on synthetic data)
+    # Without an official split, both cross-validation schemes should run.
     assert {"random", "spatial"} <= set(df.split)
     assert (df.metric_value.abs() <= 1.5).all()
 
@@ -170,7 +168,7 @@ def test_run_coordbench_resume_skips(tmp_path, monkeypatch) -> None:
 
     cfg.resume = True
     run_coordbench(cfg)
-    assert len(pd.read_csv(cfg.coord.output)) == n_first  # nothing re-appended
+    assert len(pd.read_csv(cfg.coord.output)) == n_first
 
 
 def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> None:
@@ -189,7 +187,7 @@ def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> No
 
 
 def test_load_benchmarks_selection(monkeypatch) -> None:
-    # Stub the parquet fetch so family loaders work offline.
+    # Use local tables instead of downloading Parquet files.
     tables = {
         "country": pd.DataFrame(
             {"lon": [0.0, 1.0, 2.0], "lat": [0.0, 1.0, 2.0], "country": [1, 2, 1]}
@@ -206,7 +204,7 @@ def test_load_benchmarks_selection(monkeypatch) -> None:
     wc = load_benchmarks("worldclim")
     assert {b.name for b in wc} == {"worldclim-bio1", "worldclim-bio12"}
 
-    single = load_benchmarks("worldclim-bio1")  # individual benchmark name filters within family
+    single = load_benchmarks("worldclim-bio1")
     assert [b.name for b in single] == ["worldclim-bio1"]
 
     assert "pdfm" in cb_datasets.list_families()
@@ -225,11 +223,11 @@ def test_mind_load_roundtrip(tmp_path) -> None:
     loaded = load_mind(str(path))
     assert loaded.embed_dim == 16
     assert len(loaded.blocks) == 2
-    assert not loaded.use_year  # in_dim == 2 -> coordinate-only
+    assert not loaded.use_year  # A two-input checkpoint has coordinates but no year.
 
     latlon = torch.tensor([[37.77, -122.42], [51.51, -0.13]], dtype=torch.float32)
-    assert loaded(latlon, return_features=True).shape == (2, 16)  # pooled trunk
-    assert loaded(latlon).shape == (2, 8)  # head output
+    assert loaded(latlon, return_features=True).shape == (2, 16)
+    assert loaded(latlon).shape == (2, 8)
 
 
 def test_mind_encoder_dim_slice(monkeypatch) -> None:
@@ -243,14 +241,14 @@ def test_mind_encoder_dim_slice(monkeypatch) -> None:
 
     enc = MINDLocationEncoder(dim=8, feature="pooled", device="cpu")
     out = enc.encode(np.array([1.0, 2.0]), np.array([37.0, 51.0]))
-    assert out.shape == (2, 8)  # Matryoshka prefix of the 32-d trunk
+    assert out.shape == (2, 8)  # MIND's training permits using a prefix of the 32 features.
     assert out.dtype == np.float32
 
 
 def test_family_index_matches_loaders() -> None:
-    # Every family has a static benchmark-name index (guards network-free listing/selection).
+    # Static family indexes allow listing and selection without downloads.
     assert set(cb_datasets.FAMILY_BENCHMARKS) == set(cb_datasets.FAMILY_LOADERS)
     all_names = cb_datasets.list_benchmarks()
-    assert len(all_names) == len(set(all_names))  # no duplicate names across families
+    assert len(all_names) == len(set(all_names))
     assert "pdfm-conus27" in all_names
     assert sum(n.startswith("dm-") for n in all_names) == 15

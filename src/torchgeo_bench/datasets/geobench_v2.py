@@ -1,9 +1,4 @@
-"""GeoBench V2 dataset adapter and per-wrapper base class.
-
-Each :class:`~torchgeo_bench.datasets.base.BenchDataset` subclass that wraps
-a GeoBench V2 dataset inherits from :class:`_V2Dataset`, which dispatches to
-the matching ``geobench_v2.datasets.GeoBench<X>`` upstream class.
-"""
+"""GeoBench V2 adapters with raw sensor values and shared wrapper defaults."""
 
 import logging
 import os
@@ -22,7 +17,6 @@ logger = logging.getLogger(__name__)
 V2_ROOT = Path("data/geobenchv2")
 
 
-# Map dataset name → upstream class name on ``geobench_v2.datasets``.
 _V2_REGISTRY: dict[str, str] = {
     "benv2": "GeoBenchBENV2",
     "burn_scars": "GeoBenchBurnScars",
@@ -40,7 +34,7 @@ _V2_REGISTRY: dict[str, str] = {
     "treesatai": "GeoBenchTreeSatAI",
 }
 
-# A few upstream classes only accept "val" instead of "validation".
+# KuroSiwo expects "val"; the other upstream loaders expect "validation".
 _V2_VAL_AS_VAL: frozenset[str] = frozenset({"kuro_siwo"})
 
 
@@ -75,7 +69,7 @@ class _ChainedTransform:
 
 
 class GeoBenchv2(Dataset):
-    """Thin :class:`Dataset` adapter around any GeoBench V2 upstream class.
+    """Load a GeoBench V2 dataset through its upstream class.
 
     Args:
         root: Path to the GeoBench V2 collection root (the directory
@@ -105,8 +99,7 @@ class GeoBenchv2(Dataset):
                 f"Unknown GeoBench V2 dataset '{dataset_name}'. "
                 f"Available: {', '.join(list_v2_datasets())}"
             )
-        # Deferred: importing geobench_v2 costs ~2 s, so pay it only when a
-        # V2 dataset is actually constructed (never at CLI startup).
+        # Import GeoBench V2 only when needed to keep CLI startup fast.
         import geobench_v2.datasets as _gb_v2
 
         cls: type[Dataset] = getattr(_gb_v2, _V2_REGISTRY[dataset_name])
@@ -141,21 +134,14 @@ class GeoBenchv2(Dataset):
 class _V2Dataset(BenchDataset):
     """Base class for every GeoBench V2 wrapper.
 
-    Concrete subclasses just declare metadata; ``get_dataset`` is fully
-    implemented here and dispatches to :class:`GeoBenchv2`. Multi-modality
-    wrappers (those whose bands span multiple sensors and whose upstream class
-    expects ``band_order`` as a ``dict``) opt in by setting
-    ``band_order_strategy = "by_sensor"``. Wrappers that need to remap the
-    upstream sample dict (e.g. ``KuroSiwo`` collapsing a temporal axis) override
-    :meth:`canonicalize_sample`; wrappers that need extra (or different)
-    upstream constructor arguments declare them in :attr:`upstream_kwargs`.
+    Wrappers declare metadata and set ``band_order_strategy = "by_sensor"`` when the upstream loader expects bands grouped by sensor.
+
+    Override :meth:`canonicalize_sample` to adapt sample keys or temporal dimensions. Use :attr:`upstream_kwargs` to customize upstream loader arguments.
     """
 
     band_order_strategy: Literal["flat", "by_sensor"] = "flat"
 
-    #: Extra keyword arguments forwarded to the upstream loader. Applied last
-    #: in ``get_dataset``, so entries here also override the defaults it
-    #: builds (e.g. ``return_stacked_image``).
+    #: Extra upstream loader arguments; these override the defaults in ``get_dataset`` (including ``return_stacked_image``).
     upstream_kwargs: ClassVar[dict[str, object]] = {}
 
     @classmethod
@@ -173,11 +159,9 @@ class _V2Dataset(BenchDataset):
         return [spec.source_name for spec in specs]
 
     def canonicalize_sample(self, sample: dict) -> dict:
-        """Map an upstream sample dict onto the framework's canonical schema.
+        """Adapt an upstream sample to ``image`` and ``label``/``mask`` keys.
 
-        Default implementation is a no-op. Subclasses override when the upstream
-        loader yields keys other than ``image`` and ``label``/``mask`` (e.g.
-        ``image_a``/``image_b`` for change-detection, or temporal stacks).
+        The default leaves samples unchanged. Wrappers override this for change-detection pairs (``image_a``/``image_b``) or temporal stacks.
         """
         return sample
 
@@ -189,20 +173,17 @@ class _V2Dataset(BenchDataset):
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
     ) -> Dataset:
-        """Return a :class:`GeoBenchv2` for the given split (raw values).
+        """Return raw sensor values for a split.
 
-        Forces ``data_normalizer=nn.Identity`` so the upstream class emits
-        raw sensor values; per-channel normalization belongs on
-        :class:`~torchgeo_bench.models.interface.BenchModel`.
+        ``data_normalizer=nn.Identity`` disables upstream normalization; per-channel normalization belongs on :class:`~torchgeo_bench.models.interface.BenchModel`.
         """
         del partition
         band_order = self.build_band_order(bands)
 
         kwargs: dict[str, object] = {
             "data_normalizer": nn.Identity,
-            # No-op if the tortilla file is already present; otherwise pulls
-            # it from the upstream HF mirror (aialliance/<name>) on first use.
-            # Set GEOBENCH_V2_NO_DOWNLOAD=1 to disable (CI / offline runs).
+            # Download missing tortilla files from aialliance/<name> on Hugging Face.
+            # Set GEOBENCH_V2_NO_DOWNLOAD=1 for offline runs.
             "download": os.environ.get("GEOBENCH_V2_NO_DOWNLOAD") != "1",
         }
         if self.band_order_strategy == "by_sensor":
@@ -220,30 +201,17 @@ class _V2Dataset(BenchDataset):
 
 
 class _OffsetMaskV2Dataset(_V2Dataset):
-    """Base for V2 wrappers whose upstream masks carry a vestigial ``+1`` offset.
+    """Restore SpaceNet's native two-class building masks.
 
-    The SpaceNet building-footprint tasks are natively 2-class
-    ``{0: no-building, 1: building}``. Upstream GeoBench applies
-    ``mask = mask + 1`` (*"to have a true background class"*), declaring 3
-    classes ``('background', 'no-building', 'building')`` and shipping masks
-    valued ``{1, 2}`` — the added ``background`` class 0 never actually occurs,
-    giving segmentation heads a never-correct label to escape to on low-signal
-    tiles. :meth:`canonicalize_sample` reverses the offset.
+    Upstream adds 1 to ``{0: no-building, 1: building}``, reserving an unused background class 0. :meth:`canonicalize_sample` removes this offset so the probe learns only the two real classes.
 
-    See https://github.com/The-AI-Alliance/GEO-Bench-2 (``geobench_v2/datasets/
-    spacenet2.py`` and ``spacenet7.py``: ``sample["mask"] = ... + 1``).
+    See https://github.com/The-AI-Alliance/GEO-Bench-2 (``geobench_v2/datasets/spacenet2.py`` and ``spacenet7.py``: ``sample["mask"] = ... + 1``).
     """
 
     def canonicalize_sample(self, sample: dict) -> dict:
         """Reverse GeoBench's ``+1`` offset: mask ``1 -> 0``, ``2 -> 1``.
 
-        Upstream ships masks valued ``{1: no-building, 2: building}`` after
-        adding 1 to the native ``{0, 1}`` labels. Subtracting one recovers the
-        native 2-class labels and drops the never-used ``background`` (0). The
-        ``clamp(min=0)`` is defensive: if GeoBench ever emitted its reserved
-        class 0, it folds into ``no-building`` (the correct default for a pixel
-        with no building) rather than wrapping to ``-1``. Runs before any resize
-        transform; masks are integer class ids so the shift is exact.
+        ``clamp(min=0)`` maps any reserved upstream class 0 to no-building rather than creating a negative class ID. This runs before resizing.
         """
         mask = sample.get("mask")
         if mask is not None:

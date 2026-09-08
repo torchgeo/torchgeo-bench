@@ -9,17 +9,9 @@ from .geobench_v2 import _V2Dataset
 class KuroSiwo(_V2Dataset):
     """SAR flood mapping segmentation (4 classes).
 
-    Upstream emits multi-temporal SAR (``image_pre_1`` / ``image_pre_2`` /
-    ``image_post``) plus a static DEM (``image_dem``).  Its built-in
-    ``return_stacked_image=True`` path stacks per-timestep tensors along a
-    new temporal axis, which (a) leaves the result 4-D ``(C, T, H, W)`` and
-    (b) hits an assertion when SAR and DEM channel counts differ.
+    Upstream provides SAR at three dates (``image_pre_1`` / ``image_pre_2`` / ``image_post``) plus a static DEM (``image_dem``).
 
-    To produce a clean 3-D ``(C, H, W)`` image we bypass that path
-    altogether: :attr:`upstream_kwargs` asks upstream for per-modality keys
-    (``return_stacked_image=False``) and the post-event SAR only
-    (``time_step=["post"]``), then :meth:`canonicalize_sample` concatenates
-    SAR and optional DEM along the channel dimension ourselves.
+    Its ``return_stacked_image=True`` path produces ``(C, T, H, W)`` tensors and fails when SAR and DEM channel counts differ. Request ``return_stacked_image=False`` and ``time_step=["post"]`` instead, then join post-event SAR and optional DEM into a ``(C, H, W)`` image.
     """
 
     band_order_strategy = "by_sensor"
@@ -41,13 +33,9 @@ class KuroSiwo(_V2Dataset):
     # fmt: on
 
     def canonicalize_sample(self, sample: dict) -> dict:
-        """Fold per-modality keys into a single 3-D ``(C, H, W)`` image tensor.
+        """Join post-event SAR and optional DEM into a ``(C, H, W)`` image.
 
-        Upstream emits ``image_post`` for SAR (we only request the post-event
-        timestep) and/or ``image_dem`` depending on the requested band order.
-        Both are 3-D ``(C, H, W)`` so we can simply concatenate them along
-        the channel dimension. Per-modality keys are removed from the sample
-        once merged.
+        Channels from ``image_post`` precede those from ``image_dem``. The original keys are removed after merging.
         """
         modalities: list[torch.Tensor] = []
         for key in ("image_post", "image_dem"):

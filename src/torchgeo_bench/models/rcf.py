@@ -3,11 +3,7 @@
 
 """Random Convolutional Features (RCF) BenchModel and its underlying nn.Module.
 
-The :class:`RCF` ``nn.Module`` is a vendored copy of the MOSAIKS-style
-random / empirical convolutional feature extractor (originally adapted from
-``torchgeo.models.RCF``) with an added ``stats_mode`` knob for choosing
-which pooling statistics to concatenate.  It is module-private:
-:class:`RCFBench` is the only consumer.
+The MOSAIKS-style extractor is adapted from ``torchgeo.models.RCF``; ``stats_mode`` selects which pooling statistics to concatenate. :class:`RCFBench` exposes it through the benchmark interface.
 """
 
 import numpy as np
@@ -59,9 +55,6 @@ class RCF(nn.Module):
     ) -> None:
         """Initializes the RCF model.
 
-        This is a static model that serves to extract fixed length feature vectors from
-        input patches.
-
         Args:
             in_channels: number of input channels
             features: number of features to compute, must be divisible by 2
@@ -84,10 +77,7 @@ class RCF(nn.Module):
         if seed:
             generator = generator.manual_seed(seed)
 
-        # We register the weight and bias tensors as "buffers". This does two things:
-        # makes them behave correctly when we call .to(...) on the module, and makes
-        # them explicitly _not_ Parameters of the model (which might get updated) if
-        # a user tries to train with this model.
+        # Buffers move with the model but stay outside its trainable parameters.
         self.register_buffer(
             "weights",
             torch.randn(
@@ -143,16 +133,13 @@ class RCF(nn.Module):
         orig_shape = patches.shape
         patches = patches.reshape(patches.shape[0], -1)
 
-        # Zero mean every feature
         patches = patches - np.mean(patches, axis=1, keepdims=True)
 
-        # Normalize
         patch_norms = np.linalg.norm(patches, axis=1)
 
-        # Get rid of really small norms
+        # Avoid amplifying near-zero patches.
         patch_norms[np.where(patch_norms < min_divisor)] = 1
 
-        # Make features unit norm
         patches = patches / patch_norms[:, np.newaxis]
 
         patches_cov = 1.0 / n_patches * patches.T.dot(patches)
@@ -224,7 +211,6 @@ class _NormalizingDatasetView(Dataset):
 
     def __init__(self, base: Dataset, mean: torch.Tensor, std: torch.Tensor) -> None:
         self._base = base
-        # Per-channel (C, 1, 1) tensors for sample-level normalization.
         self._mean = mean.detach().view(-1, 1, 1).cpu().float()
         self._std = std.detach().clamp_min(1e-8).view(-1, 1, 1).cpu().float()
 

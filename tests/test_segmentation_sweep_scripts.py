@@ -11,11 +11,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def _load_script(filename: str) -> ModuleType:
-    """Load a script module without requiring ``scripts`` to be a package.
-
-    The sweep and study scripts both import ``_seg_sweep_common`` as a
-    top-level module, so ``scripts/`` must be on ``sys.path`` before exec.
-    """
+    """Add ``scripts/`` to the import path because standalone sweep runners import ``_seg_sweep_common`` directly."""
     scripts_dir = str(ROOT / "scripts")
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)

@@ -282,7 +282,7 @@ def _evaluate_benchmark(
                         model_target=model_target,
                     ).to_row()
                 )
-        # A benchmark with an official split is split-invariant; don't re-run per CV mode.
+        # An official test set is evaluated once, even when both CV modes were requested.
         if bench.test_mask is not None:
             break
     return rows

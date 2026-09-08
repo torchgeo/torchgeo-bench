@@ -1,10 +1,7 @@
 #!/usr/bin/env python
-"""CLS-token vs spatial-average sweep for ViT/DeiT models.
+"""Compare a transformer's classification token with averaged image-patch features.
 
-Each ViT/DeiT model is evaluated twice per dataset — once with
-``model.use_cls_token=false`` (spatial average) and once with
-``model.use_cls_token=true`` (CLS token). Swin models are excluded (no CLS
-token).
+Each ViT/DeiT model runs with ``model.use_cls_token`` set to false and true. Swin is excluded because it has no classification token.
 
 Usage:
     python experiments/run_cls_token_experiment.py
@@ -34,7 +31,7 @@ MODELS = [
 
 
 def build_jobs() -> list[Job]:
-    """Build dataset × model × use_cls_token jobs."""
+    """Create runs for classification-token and averaged-patch features."""
     jobs: list[Job] = []
     for dataset in DATASETS:
         for model in MODELS:
@@ -53,7 +50,7 @@ def build_jobs() -> list[Job]:
 
 
 def main() -> int:
-    """Entry point."""
+    """Run the classification-token comparison on the selected GPUs."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_devices_argument(parser)
     args = parser.parse_args()

@@ -58,14 +58,16 @@ class NewModel(BenchModel):
         # Option C — "model_native" (exact pretrain scale is known):
         #   Framework unit-converts to your backbone's expected input scale,
         #   then applies declared per-channel mean/std.
-        #   Real examples: Prithvi-EO (S2_DN), Clay v1.5 / CROMA (REFLECTANCE_0_1)
+        #   The shared normalizer requires pretrain_mean; pretrain_std defaults to ones if omitted.
+        #   Wrappers that implement their own normalization can omit these statistics.
+        #   Real examples: Prithvi-EO / Clay v1.5 (S2_DN), CROMA (REFLECTANCE_0_1; custom normalization).
         #   Pattern: declare class attributes BEFORE the super().__init__ call:
         #
         #     from torchgeo_bench.models._input_units import InputUnit
         #     class NewModel(BenchModel):
         #         expected_input_unit = InputUnit.REFLECTANCE_0_1  # or S2_DN
-        #         pretrain_mean = [0.485, 0.456, 0.406]  # optional, per channel
-        #         pretrain_std  = [0.229, 0.224, 0.225]  # optional, per channel
+        #         pretrain_mean = [0.485, 0.456, 0.406]  # required for the shared normalizer
+        #         pretrain_std  = [0.229, 0.224, 0.225]  # defaults to ones if omitted
         #         def __init__(self, bands, ...):
         #             super().__init__(bands=bands, normalization="model_native")
         # self.num_channels == len(bands) is now available.
@@ -91,7 +93,7 @@ class NewModel(BenchModel):
     def _forward_patch_features(
         self,
         images: torch.Tensor,
-        _bboxes: torch.Tensor | None = None,  # required by interface; ignore
+        _bboxes: torch.Tensor | None = None,  # optional; BenchModel passes images only
     ) -> torch.Tensor:
         """Return embeddings ``(B, K)`` from already-normalized inputs.
 

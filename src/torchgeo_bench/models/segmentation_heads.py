@@ -187,8 +187,7 @@ class FPNHead(nn.Module):
 
     def __init__(self, channels_list: list[int], num_classes: int, hidden_dim: int = 256) -> None:
         super().__init__()
-        # Normalise raw CNN features before projection. BN is appropriate here:
-        # CNN channels have per-filter semantics and batch stats are stable.
+        # CNN filters have consistent channel meanings, so BatchNorm can use their batch statistics.
         self.input_norms = nn.ModuleList([nn.BatchNorm2d(c) for c in channels_list])
         self.laterals = nn.ModuleList(
             [nn.Conv2d(c, hidden_dim, kernel_size=1, bias=False) for c in channels_list]
@@ -239,24 +238,16 @@ class FPNHead(nn.Module):
         return logits
 
 
-# ---------------------------------------------------------------------------
-# DPT decoder
-#
 # The fusion cascade is the reference implementation from
 # ``transformers.models.dpt.modeling_dpt`` (Apache-2.0), itself a faithful port
 # of Intel-ISL DPT. It is imported rather than reimplemented so the residual
 # and upsampling arithmetic cannot silently drift from the paper.
-# ---------------------------------------------------------------------------
 
 
 class ChannelLayerNorm(nn.Module):
     """LayerNorm over the channel dimension of a (B, C, H, W) feature map.
 
-    Normalises each spatial position independently across channels — equivalent
-    to the LayerNorm inside a ViT block.  This is the natural choice before
-    projecting ViT intermediate features, where residual-stream outliers can
-    cause large inter-layer scale differences that BatchNorm handles poorly
-    (sample-wise norm is immune to per-batch outlier corruption).
+    ViT features can have outliers and large scale differences between layers. Normalizing each spatial position across channels, as in a ViT block, avoids sharing one sample's outliers through batch statistics.
     """
 
     def __init__(self, num_channels: int) -> None:
@@ -265,25 +256,17 @@ class ChannelLayerNorm(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply layer norm over channels."""
-        # x: (B, C, H, W) → permute to (B, H, W, C) → LN → back
         return self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2).contiguous()
 
 
 def _dpt_fusion_layer(hidden_dim: int) -> nn.Module:
     """Construct a reference ``DPTFeatureFusionLayer`` at ``hidden_dim`` channels.
 
-    ``DPTFeatureFusionLayer`` and the ``DPTPreActResidualLayer`` s it owns are
-    plain ``nn.Module`` s that read exactly three scalars off ``config``; they
-    never touch the rest of ``DPTConfig``. A ``SimpleNamespace`` therefore lets
-    us reuse the reference implementation verbatim without pulling in
-    ``DPTConfig``, ``DPTNeck``, or the bundled ViT.
+    ``DPTFeatureFusionLayer`` and its ``DPTPreActResidualLayer`` children read only three config values. A ``SimpleNamespace`` avoids constructing ``DPTConfig``, ``DPTNeck``, or the bundled ViT.
 
-    The two boolean settings reproduce the stock ViT-DPT defaults:
-    ``use_batch_norm_in_fusion_residual=False`` (the reference disables BN for
-    the ViT variants), which in turn makes the residual convs biased.
+    The settings match stock ViT-DPT: ``use_batch_norm_in_fusion_residual=False`` disables BatchNorm and enables biased residual convolutions.
 
-    ``transformers`` is an optional dependency, so the import is deferred to
-    construction time — only the ``dpt`` head needs it.
+    The ``transformers`` import is deferred because only the optional ``dpt`` head needs it.
     """
     try:
         from transformers.models.dpt.modeling_dpt import DPTFeatureFusionLayer
@@ -309,17 +292,9 @@ class DPTHead(nn.Module):
     ResNet). Features are normalised and projected to ``hidden_dim``, then run
     through a top-down cascade of :class:`DPTFeatureFusionLayer`.
 
-    The fusion layers are imported from ``transformers`` rather than
-    reimplemented, so the residual/fusion arithmetic matches Intel-ISL DPT
-    exactly: pre-activation residual units, refinement applied to the *skip*
-    (not the primary input), a post-fusion 1×1 projection, and a 2× upsample
-    inside every fusion layer. Four stacked layers therefore take a 14×14 ViT
-    token grid to 224×224 with no separate pre- or post-upsampling step.
+    The imported fusion layers match Intel-ISL DPT: pre-activation residual units, refinement of the *skip* input, a post-fusion 1×1 projection, and 2× upsampling per layer. Four layers take a 14×14 ViT grid to 224×224 without separate pre- or post-upsampling.
 
-    Only the reassemble stage is ours: ``ChannelLayerNorm`` + a 1×1 projection
-    stands in for ``DPTReassembleStage``, because ``SegmentationProbe`` hands
-    the head backbone-agnostic ``(B, D, H, W)`` grids rather than the token
-    sequences plus patch geometry that the reference reassemble stage consumes.
+    ``SegmentationProbe`` supplies ``(B, D, H, W)`` grids, not token sequences with patch geometry, so ``ChannelLayerNorm`` + a 1×1 projection replaces ``DPTReassembleStage``.
 
     Args:
         channels_list: Channel count for each hooked feature layer (coarse-to-fine).
@@ -340,17 +315,11 @@ class DPTHead(nn.Module):
                 f"DPTHead requires exactly 4 feature layers, got {len(channels_list)}. "
                 "Specify exactly 4 layer names in coarse-to-fine order in the model config."
             )
-        # Normalise ViT residual-stream features before projection. LayerNorm
-        # over channels (per spatial position) matches the ViT's own internal
-        # normalisation and is sample-wise — robust to the per-layer outlier
-        # activations common in specialist ViTs (e.g. DOFA).
+        # Per-position LayerNorm matches ViT normalization without mixing sample statistics (important for DOFA's outliers).
         self.input_norms = nn.ModuleList([ChannelLayerNorm(c) for c in channels_list])
-        # 1×1 projection — index 0 = coarsest
         self.convs = nn.ModuleList(
             [nn.Conv2d(c, hidden_dim, kernel_size=1, padding=0) for c in channels_list]
         )
-        # Fusion cascade: index 0 consumes the coarsest map alone, 1-3 each take
-        # the running fused state plus the next finer map as the skip.
         self.ref = nn.ModuleList([_dpt_fusion_layer(hidden_dim) for _ in channels_list])
         self.out_conv = nn.Sequential(
             nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
@@ -366,13 +335,9 @@ class DPTHead(nn.Module):
             input_h: Target output height.
             input_w: Target output width.
         """
-        # Reassemble stand-in: normalise → 1×1 project to hidden_dim.
         projected = [conv(norm(f)) for norm, conv, f in zip(self.input_norms, self.convs, features)]
 
-        # Top-down cascade, coarsest (0) → finest (3). The running fused state is
-        # the primary input and the next feature map enters as the skip, matching
-        # ``DPTFeatureFusionStage``. Each layer upsamples 2×, so the cascade
-        # supplies all the upsampling (14×14 → 224×224 for a patch16 ViT).
+        # Match DPTFeatureFusionStage: pass the running state first and the next finer map as the skip; each layer upsamples 2×.
         out = self.ref[0](projected[0])
         for layer, feat in zip(self.ref[1:], projected[1:]):
             out = layer(out, feat)

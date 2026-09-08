@@ -1,9 +1,6 @@
 """Report which model configs support ``dataset.normalization=model_native``.
 
-``model_native`` is only meaningful when a model can state what its pretraining
-pipeline was: pretrain statistics, a weights-bound ``Normalize``, or its own
-normaliser.  Without one of those it used to fall through to a bare unit
-conversion, handing the backbone raw sensor values.
+``model_native`` must use the model's training-time input scaling, not just convert sensor units. Try the setting for each model and report unsupported cases.
 
 Usage:
     python experiments/scripts/audit_model_native.py --out model_native_audit.json
@@ -34,7 +31,6 @@ def band_specs(dataset: str, bands: str):
 
 
 def main() -> None:
-    """Entry point."""
     logging.basicConfig(level=logging.ERROR)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)

@@ -77,8 +77,6 @@ def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int
             end_x, end_y = h_tokens, w_tokens
             scale = window_size / h_tokens
         else:
-            # Windowed layers: RoPE always covers one window — no change needed,
-            # so this is a no-op.
             end_x, end_y = window_size, window_size
             scale = 1.0
 
@@ -160,7 +158,6 @@ class SAM3Encoder(BenchModel):
             param.requires_grad = False
         self.backbone.eval()
 
-        # RoPE is reset lazily on the first forward call for the actual input size.
         self._rope_size: tuple[int, int] | None = None
 
     def _maybe_reset_rope(self, H: int, W: int) -> None:

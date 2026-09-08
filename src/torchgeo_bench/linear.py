@@ -31,11 +31,11 @@ class LogisticRegression:
         batch_size: int = 1024,
         solver: str = "lbfgs",
         tol: float = 1e-4,
-        patience: int = 1,  # only used by Adam path now
+        patience: int = 1,  # Adam only.
         random_state: int | None = None,
         device: str | torch.device | None = None,
         verbose: bool = False,
-        use_tf32: bool = True,  # enable TF32 on CUDA for speed
+        use_tf32: bool = True,  # Faster CUDA matrix multiplication.
         multi_label: bool = False,
     ) -> None:
         if C <= 0:
@@ -69,7 +69,6 @@ class LogisticRegression:
             torch.manual_seed(self.random_state)
             np.random.seed(self.random_state)
 
-        # CUDA matmul speedup (TF32) if available & allowed
         if self.device.type == "cuda" and self.use_tf32:
             with suppress(Exception):
                 torch.set_float32_matmul_precision("high")
@@ -140,8 +139,7 @@ class LogisticRegression:
         else:
             criterion = torch.nn.CrossEntropyLoss(reduction="mean")
 
-        # Regularization factor matches sklearn scaling exactly.
-        # BCE mean divides by (n_samples * n_classes), so scale reg to match.
+        # Binary cross-entropy averages over samples and labels; match sklearn's weight-penalty scale.
         if self.multi_label:
             reg = 0.5 * (1.0 / self.C) / float(n_samples * n_classes)
         else:
@@ -151,12 +149,11 @@ class LogisticRegression:
             optimizer = torch.optim.LBFGS(
                 model.parameters(),
                 lr=self.lr,
-                max_iter=self.max_iter,  # let LBFGS run all iterations internally
+                max_iter=self.max_iter,
                 history_size=10,
-                line_search_fn="strong_wolfe",  # usually better steps
+                line_search_fn="strong_wolfe",
                 tolerance_grad=1e-7,
-                tolerance_change=self.tol
-                * 0.1,  # small but positive; mirrors early-stop-ish behavior
+                tolerance_change=self.tol * 0.1,
             )
 
             def closure() -> Tensor:
@@ -173,7 +170,7 @@ class LogisticRegression:
             state = optimizer.state[first_param]
             self.n_iter_ = int(state.get("n_iter", self.max_iter))
 
-        else:  # Adam (mini-batch) -- keep everything on device, no DataLoader
+        else:
             optimizer = torch.optim.AdamW(model.parameters(), lr=self.lr, weight_decay=0.0)
             best_loss = float("inf")
             epochs_since_improve = 0
@@ -273,7 +270,7 @@ class LogisticRegression:
         return probs
 
     def decision_function(self, X: Tensor) -> np.ndarray:
-        """Compute raw logits (decision function values).
+        """Compute unnormalized class scores.
 
         Args:
             X: Feature matrix of shape ``(n_samples, n_features)``.

@@ -2,12 +2,9 @@ paper/
 results/*
 !results/contributed/
 results/contributed/*.csv
-# Per-model benchmark results: one CSV per model, tracked so a new model PR
-# adds its own file instead of editing a shared one.
+# Track per-model results so model changes can include their benchmark data.
 !results/models/
 !results/models/*.csv
-# Profile/intrinsic-dim rows are one-time model+hardware measurements, split
-# out of results/models/ so routine metrics reruns don't touch them.
 !results/profiles/
 !results/profiles/*.csv
 !results/intrinsic_dim/
@@ -100,7 +97,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Hydra outputs
+# Experiment outputs
 outputs/
 multirun/
 .hydra/
@@ -117,12 +114,9 @@ data/
 # Results
 *.csv
 *.json
-# Per-model benchmark results: one CSV per model, tracked so a new model PR
-# adds its own file instead of editing a shared one.
+# Keep the result and metadata files needed by the benchmark and docs.
 !results/models/
 !results/models/*.csv
-# Profile/intrinsic-dim rows are one-time model+hardware measurements, split
-# out of results/models/ so routine metrics reruns don't touch them.
 !results/profiles/
 !results/profiles/*.csv
 !results/intrinsic_dim/

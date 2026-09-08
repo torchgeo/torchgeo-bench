@@ -5,12 +5,7 @@ from .geobench_v2 import _V2Dataset
 
 
 class CaFFe(_V2Dataset):
-    """Aerial grayscale calving-front segmentation (4 classes).
-
-    The upstream GeoBench V2 dataset returns ``(image, mask)`` pairs, so this
-    wrapper exposes it as a segmentation task even though the dataset name
-    historically suggested classification.
-    """
+    """Aerial grayscale calving-front segmentation (4 classes)."""
 
     name = "caffe"
     task = "segmentation"

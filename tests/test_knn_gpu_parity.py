@@ -1,8 +1,4 @@
-"""CPU↔CUDA parity for :class:`KNNClassifier`.
-
-Ported from the former ``experiments/scripts/test_knn_gpu_smoke.py`` smoke
-script. Skipped when CUDA is unavailable.
-"""
+"""CPU/CUDA parity for :class:`KNNClassifier`; requires CUDA and GPU-enabled FAISS."""
 
 import numpy as np
 import pytest

@@ -1,18 +1,13 @@
-"""Backbone compute/efficiency profile metrics for benchmark models.
+"""Measure model compute cost and prediction speed.
 
-Measured once per (model, dataset, bands) combination, isolated from
-dataloader overhead. Reports:
+Measure each (model, dataset, bands) combination without dataloader overhead. Reports:
 
 - ``throughput_samples_per_sec`` — sustained samples/s on a fixed batch
 - ``latency_ms_per_batch_p50`` — median per-batch forward latency
 - ``peak_gpu_mem_gb`` — peak CUDA memory during measurement
 - ``params_m`` — total parameter count (millions)
-- ``reserved_gpu_mem_gb`` — allocator-reserved VRAM (vs ``peak`` which is
-  the actually-used high-water mark; ratio reveals fragmentation)
-- ``gflops`` — FLOPs for one sample via ``torch.utils.flop_counter``
-  (stdlib, no extra dep; handles modern ops like SDPA / ViT attention)
-
-All metrics work without extras.
+- ``reserved_gpu_mem_gb`` — GPU memory held by PyTorch, including cached unused blocks
+- ``gflops`` — billions of floating-point operations per sample, counted with ``torch.utils.flop_counter``
 """
 
 import logging
@@ -52,11 +47,10 @@ def measure_profile(
     n_warmup: int = 3,
     n_measure: int = 20,
 ) -> dict[str, float | None]:
-    """Run forward-only timing + memory profile on a fixed batch.
+    """Measure forward-pass time and memory on a fixed batch.
 
     Args:
-        model: BenchModel (its ``forward`` goes through normalization +
-            ``_forward_patch_features``).
+        model: BenchModel; ``forward`` includes normalization and ``_forward_patch_features``.
         sample_batch: representative batch shaped ``(B, C, H, W)``, already
             on ``device``.
         device: torch device used for the measurement.
@@ -64,8 +58,7 @@ def measure_profile(
         n_measure: timed forward passes.
 
     Returns:
-        Mapping of metric name to value; entries may be ``None`` when the
-        underlying probe is unavailable (e.g. CPU device → no GPU-memory metrics).
+        Metric values, or ``None`` when a measurement is unavailable (for example, GPU memory on CPU).
     """
     model.eval()
     batch_size = sample_batch.shape[0]
@@ -115,21 +108,16 @@ def measure_cpu_throughput(
     n_measure: int,
     time_budget_s: float,
 ) -> dict[str, float | None]:
-    """Wall-clock-budgeted CPU pass; returns ``*_cpu`` throughput and latency.
+    """Return ``*_cpu`` throughput and latency within a wall-time budget.
 
-    The model and a fresh batch are moved to CPU for the duration, then moved
-    back so the rest of the pipeline can keep using CUDA.  If even the first
-    warmup pass exceeds ``time_budget_s`` (big ViT-L backbones can take
-    minutes per batch on CPU), the metrics are returned as None with a
-    warning instead of burning the budget.
+    Move the model to CPU for measurement, then restore its original device. Return ``None`` metrics with a warning if warmup exceeds ``time_budget_s``; otherwise stop timing after the first completed batch that exceeds the budget.
     """
     none_result: dict[str, float | None] = {
         "throughput_samples_per_sec_cpu": None,
         "latency_ms_per_batch_p50_cpu": None,
     }
     cpu_dev = torch.device("cpu")
-    # rcf/imagestats baselines have no parameters; use the input sample's
-    # device as the restoration target since model.to() is a no-op anyway.
+    # Parameter-free baselines use the sample's device as their restoration target.
     first_param = next(iter(model.parameters()), None)
     orig_dev = first_param.device if first_param is not None else sample.device
     cpu_sample = sample[:batch_size].detach().to(cpu_dev)

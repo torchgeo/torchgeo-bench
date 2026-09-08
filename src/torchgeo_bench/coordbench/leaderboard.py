@@ -79,7 +79,6 @@ def main() -> None:
         print(f"\n{view.upper()} holdout — {args.method} probe — mean metric (R²/acc, per family)")
         with pd.option_context("display.float_format", lambda v: f"{v:6.3f}"):
             print(metrics.reindex(order))
-    # Surface anything unmapped so the taxonomy stays honest.
     unknown = sorted({d for d in df["dataset"].unique() if family_of(d) == "other"})
     if unknown:
         print(f"\n[warn] benchmarks with no family (counted only in macro): {unknown}")
