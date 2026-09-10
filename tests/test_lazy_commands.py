@@ -25,7 +25,7 @@ import sys
 from torchgeo_bench.cli import main
 try:
     main(ARGUMENTS)
-except SystemExit as error:
+except SystemExit as error:  # allow-except: help exits successfully without running a benchmark
     assert error.code in (0, None)
 assert not {'torch', 'torchgeo', 'timm', 'pandas'} & sys.modules.keys()
 """.replace("ARGUMENTS", repr(arguments))
