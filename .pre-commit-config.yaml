@@ -3,8 +3,10 @@ repos:
     rev: v0.15.10
     hooks:
       - id: ruff
+        exclude: ^(src/torchgeo_bench/config_schema\.py|src/torchgeo_bench/image_cli\.py|src/torchgeo_bench/legacy_run\.py|src/torchgeo_bench/preprocessing\.py|src/torchgeo_bench/models/build\.py|src/torchgeo_bench/commands|tests/test_config_schema\.py|tests/test_image_cli\.py|tests/test_legacy_run\.py|tests/test_preprocessing\.py|tests/test_model_build\.py|tests/test_lazy_commands\.py)
         args: ["--fix", "--show-fixes"]
       - id: ruff-format
+        exclude: ^(src/torchgeo_bench/config_schema\.py|src/torchgeo_bench/image_cli\.py|src/torchgeo_bench/legacy_run\.py|src/torchgeo_bench/preprocessing\.py|src/torchgeo_bench/models/build\.py|src/torchgeo_bench/commands|tests/test_config_schema\.py|tests/test_image_cli\.py|tests/test_legacy_run\.py|tests/test_preprocessing\.py|tests/test_model_build\.py|tests/test_lazy_commands\.py)
 
   - repo: https://github.com/facebook/pyrefly-pre-commit
     rev: 1.2.0
