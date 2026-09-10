@@ -50,14 +50,8 @@ class DegenerateSpectrumError(ValueError):
 
 def _load_estimator(name: str) -> type:
     """Lazy-import a torchid global estimator class by name."""
-    try:
-        from torchid import estimators as _est
-    except ImportError as e:
-        raise ImportError(
-            "torchid is required for intrinsic-dimension metrics. "
-            "Install with `pip install 'torchgeo-bench[id]'` "
-            "(requires Python >=3.13)."
-        ) from e
+    from torchid import estimators as _est
+
     if not hasattr(_est, name):
         raise ValueError(
             f"Unknown torchid estimator '{name}'. Supported: {', '.join(SUPPORTED_ESTIMATORS)}."
@@ -181,7 +175,7 @@ def _two_nearest_distances(X: torch.Tensor) -> torch.Tensor:
     """Pairwise (d1, d2) for each row, matching torchid's knn precision.
 
     Replicates torchid's exact squared-distance formula
-    (``x_sq + y_sq − 2·x·y.T`` then ``clamp_(min=0)``) rather than using
+    (``x_sq + y_sq - 2*x*y.T`` then ``clamp_(min=0)``) rather than using
     ``torch.cdist``.  ``cdist`` is more stable on CUDA, so its distances
     disagree with torchid's at the underflow boundary: torchid's formula
     can cancel to a tiny negative, clamp to 0, and underflow to 0 in fp32
@@ -216,8 +210,11 @@ def _drop_zero_distance_rows(X_tensor: torch.Tensor) -> torch.Tensor:
     n_drop = int((~keep).sum().item())
     if n_drop > 0:
         logger.info(
-            f"[intrinsic-dim] dropped {n_drop} rows with zero-distance neighbours "
-            f"({X_tensor.shape[0]} -> {int(keep.sum().item())}) before estimation."
+            "[intrinsic-dim] dropped %d rows with zero-distance neighbours "
+            "(%d -> %d) before estimation.",
+            n_drop,
+            X_tensor.shape[0],
+            int(keep.sum().item()),
         )
         return X_tensor[keep]
     return X_tensor

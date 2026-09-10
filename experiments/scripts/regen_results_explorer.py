@@ -15,9 +15,12 @@ Usage::
 import argparse
 import csv
 import json
+import logging
 import re
 from datetime import date
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "results" / "models"
@@ -112,10 +115,7 @@ def _load_csv_rows(label: str) -> list[dict]:
             if v is None or v == "":
                 row[k] = None
             elif k in NUMERIC:
-                try:
-                    row[k] = float(v)
-                except ValueError:
-                    row[k] = None
+                row[k] = float(v)
             elif k in BOOL:
                 row[k] = v.lower() in ("true", "1")
             else:
@@ -139,6 +139,7 @@ def main() -> None:
         help="Label for the snapshot generated from the current CSV (default: today).",
     )
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     today_rows = _load_csv_rows(args.label)
@@ -236,11 +237,17 @@ def main() -> None:
     )
 
     HTML_PATH.write_text(text)
-    print(
-        f"Wrote {HTML_PATH.relative_to(ROOT)}: "
-        f"{len(snapshot_meta)} snapshots, latest={latest_label} "
-        f"({len(latest_rows)} rows, {n_models} models, {n_datasets} datasets) — "
-        f"best {best['metric_value']:.4f} ({best['name']} on {best['dataset']})"
+    logger.info(
+        "Wrote %s: %d snapshots, latest=%s (%d rows, %d models, %d datasets) — best %.4f (%s on %s)",
+        HTML_PATH.relative_to(ROOT),
+        len(snapshot_meta),
+        latest_label,
+        len(latest_rows),
+        n_models,
+        n_datasets,
+        best["metric_value"],
+        best["name"],
+        best["dataset"],
     )
 
 

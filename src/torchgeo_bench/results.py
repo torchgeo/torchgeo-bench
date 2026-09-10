@@ -172,7 +172,7 @@ def bootstrap_miou(
     )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class EvaluationResult:
     """Container for a single evaluation result row."""
 
@@ -180,12 +180,12 @@ class EvaluationResult:
     method: str  # 'knn5', 'linear', or seg head type
     metric_name: str  # 'accuracy', 'micro_mAP', or 'mIoU' (primary metric)
     metric_value: float
-    ci_lower: float
-    ci_upper: float
+    ci_lower: float = 0.0
+    ci_upper: float = 0.0
     feature_dim: int
-    best_c: float | None
-    best_lr: float | None
-    best_batch_size: int | None
+    best_c: float | None = None
+    best_lr: float | None = None
+    best_batch_size: int | None = None
     n_train: int
     n_val: int
     n_test: int
@@ -229,35 +229,6 @@ class EvaluationResult:
     def to_row(self) -> dict:
         """Convert to a flat dictionary suitable for CSV/DataFrame export."""
         return self.__dict__.copy()
-
-
-def metric_row(
-    common_meta: dict,
-    *,
-    method: str,
-    metric_name: str,
-    metric_value: float,
-    feature_dim: int,
-    n_counts: dict[str, int],
-    **extra: object,
-) -> dict:
-    """Build one CSV row dict; CIs default to 0 and probe hyperparams to None."""
-    return EvaluationResult(
-        **common_meta,
-        method=method,
-        metric_name=metric_name,
-        metric_value=metric_value,
-        feature_dim=feature_dim,
-        ci_lower=extra.pop("ci_lower", 0.0),
-        ci_upper=extra.pop("ci_upper", 0.0),
-        best_c=extra.pop("best_c", None),
-        best_lr=extra.pop("best_lr", None),
-        best_batch_size=extra.pop("best_batch_size", None),
-        n_train=n_counts.get("train", 0),
-        n_val=n_counts.get("val", 0),
-        n_test=n_counts.get("test", 0),
-        **extra,  # type: ignore[arg-type]
-    ).to_row()
 
 
 def append_rows_atomic(path: str, rows: list[dict]) -> None:

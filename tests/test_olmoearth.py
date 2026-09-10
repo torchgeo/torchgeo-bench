@@ -304,8 +304,6 @@ def test_forestnet_landsat_imputes_missing_bands() -> None:
     ]
     model = OlmoEarthBenchModel(bands=landsat_bands, model_size="nano", normalization="identity")
     g = model._sensor_groups[0]
-    # pan<-green(3), coastal<-blue(2), cirrus/tirs1/tirs2<-swir2(7); each
-    # source channel (3, 2, 7) is one of the present bands.
     assert g["impute_ops"] == [(3, 0), (2, 1), (7, 8), (7, 9), (7, 10)]
     assert all(src in set(g["dst_indices"]) for src, _ in g["impute_ops"])
     model.eval()
@@ -318,7 +316,7 @@ def test_forestnet_landsat_imputes_missing_bands() -> None:
 @requires_olmoearth
 def test_landsat_dataset_stats_normalization() -> None:
     """norm_from_pretrained=False normalizes each band with its BandSpec stats
-    (helios-style ±2σ no-clip), bypassing the DN rescale + pretrained
+    (helios-style ±2std no-clip), bypassing the DN rescale + pretrained
     Normalizer — required for GeoBench's uint8 Landsat scale."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
@@ -340,7 +338,8 @@ def test_landsat_dataset_stats_normalization() -> None:
     )
     assert model.norm_from_pretrained is False
     g = model._sensor_groups[0]
-    assert len(g["src_means"]) == 6 and len(g["src_stds"]) == 6
+    assert len(g["src_means"]) == 6
+    assert len(g["src_stds"]) == 6
     model.eval()
     x = torch.rand(2, 6, 64, 64) * 200.0  # uint8-scale Landsat
     out = model.forward_patch_features(x)
@@ -368,7 +367,8 @@ def test_auto_normalization_default_per_sensor() -> None:
     assert ls_model._sensor_groups[0]["sensor"] in _DATASET_STATS_SENSORS
     ls_model.eval()
     ls_out = ls_model.forward_patch_features(torch.rand(2, 6, 64, 64) * 200.0)
-    assert ls_out.shape == (2, EXPECTED_DIM["nano"]) and torch.isfinite(ls_out).all()
+    assert ls_out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(ls_out).all()
 
     # S2 (DN) — 'auto' should keep the pretrained normalizer (rescale to DN).
     s2 = [
@@ -381,7 +381,8 @@ def test_auto_normalization_default_per_sensor() -> None:
     assert s2_model._sensor_groups[0]["sensor"] not in _DATASET_STATS_SENSORS
     s2_model.eval()
     s2_out = s2_model.forward_patch_features(torch.rand(2, 3, 64, 64) * 3000.0)
-    assert s2_out.shape == (2, EXPECTED_DIM["nano"]) and torch.isfinite(s2_out).all()
+    assert s2_out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(s2_out).all()
     # sanity: input-unit detection still runs on the S2 (pretrained) path
     assert s2_model._sensor_groups[0]["input_unit"] == InputUnit.S2_DN
 

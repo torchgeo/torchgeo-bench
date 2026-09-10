@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 import torch
 from filelock import FileLock, Timeout
@@ -103,7 +103,7 @@ def run_exclusively(
         try:
             for path in lock_paths:
                 stack.enter_context(FileLock(str(path)).acquire(timeout=0))
-        except Timeout as error:
+        except Timeout as error:  # allow-except: identify the conflicting sweep lock
             raise RuntimeError(error_message) from error
         run()
 
@@ -115,7 +115,7 @@ class BaseGpuRunner:
     ``_run_job`` and ``_failed_record``.
     """
 
-    subprocess_env = {"OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4"}
+    subprocess_env: ClassVar[dict[str, str]] = {"OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4"}
 
     def __init__(self, config: RunnerConfig, jobs: Sequence[SupportsJobId]) -> None:
         self.config = config
@@ -207,7 +207,7 @@ class BaseGpuRunner:
         while not self.stop_requested.is_set():
             try:
                 job = jobs.get_nowait()
-            except queue.Empty:
+            except queue.Empty:  # allow-except: another GPU worker may drain the shared queue
                 return
             with self.state_lock:
                 self.counts["queued"] -= 1

@@ -17,15 +17,16 @@ Checkpoint:
 Layer naming for SegmentationProbe:
     The FPN neck produces 4 multi-scale feature maps, each with 256 channels.
     Their spatial dimensions scale with the input resolution:
-    at 252×252 input (18×18 patch grid) the levels are:
-        neck.fpn_layers.3 — coarsest (scale 0.5×)
-        neck.fpn_layers.2 — medium   (scale 1×)
-        neck.fpn_layers.1 — fine     (scale 2×)
-        neck.fpn_layers.0 — finest   (scale 4×)
+    at 252x252 input (18x18 patch grid) the levels are:
+        neck.fpn_layers.3 — coarsest (scale 0.5x)
+        neck.fpn_layers.2 — medium   (scale 1x)
+        neck.fpn_layers.1 — fine     (scale 2x)
+        neck.fpn_layers.0 — finest   (scale 4x)
     Use coarse-to-fine order for FPN/DPT heads.
 """
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -33,18 +34,21 @@ from torchgeo_bench.datasets.base import BandSpec
 
 from .interface import BenchModel
 
+if TYPE_CHECKING:
+    from transformers.models.sam3.modeling_sam3 import Sam3VisionModel
+
 logger = logging.getLogger(__name__)
 
 _PATCH_SIZE = 14  # SAM3 ViT-H patch size (fixed by architecture)
 
 
-def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int) -> None:
+def _reset_sam3_rope(vision_encoder: "Sam3VisionModel", input_h: int, input_w: int) -> None:
     """Recompute RoPE buffers in every ViT layer for a new input resolution.
 
     Each ``Sam3ViTLayer`` owns a ``Sam3ViTRotaryEmbedding`` (``self.rotary_emb``)
     with pre-computed ``rope_embeddings_cos / rope_embeddings_sin`` buffers sized
-    for the pretrain token grid (72×72 at 1008×1008 input).  We rebuild them for
-    the actual token grid derived from ``input_h × input_w``.
+    for the pretrain token grid (72x72 at 1008x1008 input).  We rebuild them for
+    the actual token grid derived from ``input_h x input_w``.
 
     For windowed-attention layers the RoPE grid is always ``(window_size,
     window_size)`` — identical to pretrain, so nothing changes there.  For global
@@ -61,13 +65,16 @@ def _reset_sam3_rope(vision_encoder: torch.nn.Module, input_h: int, input_w: int
 
     if h_tokens == 0 or w_tokens == 0:
         raise ValueError(
-            f"Input size {input_h}×{input_w} is smaller than patch_size={patch_size}. "
+            f"Input size {input_h}x{input_w} is smaller than patch_size={patch_size}. "
             "Images must be at least patch_size pixels in each spatial dimension."
         )
 
     logger.info(
-        f"SAM3: resetting RoPE embeddings for {input_h}×{input_w} "
-        f"({h_tokens}×{w_tokens} token grid)"
+        "SAM3: resetting RoPE embeddings for %dx%d (%dx%d token grid)",
+        input_h,
+        input_w,
+        h_tokens,
+        w_tokens,
     )
 
     for i, layer in enumerate(vision_encoder.backbone.layers):
@@ -138,16 +145,10 @@ class SAM3Encoder(BenchModel):
                 "Run with dataset.bands=[red,green,blue] or skip this dataset."
             )
 
-        try:
-            from transformers import Sam3Model
-        except ImportError as e:
-            raise ImportError(
-                "SAM3Encoder requires the 'transformers' package. "
-                "Install it with: pip install torchgeo-bench[sam3]"
-            ) from e
+        from transformers import Sam3Model
 
         source = checkpoint_path or model_name_or_path
-        logger.info(f"Loading SAM3 from {source!r} …")
+        logger.info("Loading SAM3 from %r …", source)
         full_model = Sam3Model.from_pretrained(
             source,
             local_files_only=(checkpoint_path is not None),
@@ -171,8 +172,13 @@ class SAM3Encoder(BenchModel):
             return
         if h != H or w != W:
             logger.warning(
-                f"SAM3: input {H}×{W} is not a multiple of patch_size={_PATCH_SIZE}; "
-                f"images will be cropped to {h}×{w} before encoding."
+                "SAM3: input %dx%d is not a multiple of patch_size=%d; "
+                "images will be cropped to %dx%d before encoding.",
+                H,
+                W,
+                _PATCH_SIZE,
+                h,
+                w,
             )
         _reset_sam3_rope(self.backbone, h, w)
         self._rope_size = (h, w)
@@ -187,7 +193,7 @@ class SAM3Encoder(BenchModel):
         H, W = images.shape[-2:]
         if H < _PATCH_SIZE or W < _PATCH_SIZE:
             raise ValueError(
-                f"Input spatial size {H}×{W} is smaller than patch_size={_PATCH_SIZE}. "
+                f"Input spatial size {H}x{W} is smaller than patch_size={_PATCH_SIZE}. "
                 "Images must be at least patch_size pixels in each spatial dimension."
             )
         h = (H // _PATCH_SIZE) * _PATCH_SIZE

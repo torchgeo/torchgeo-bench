@@ -6,6 +6,7 @@ import torch
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models._band_mapping import (
     S2_WAVELENGTHS_UM,
+    BandMappingPolicy,
     canonical_band_name,
     map_to_model_bands,
     select_src_bands,
@@ -69,7 +70,9 @@ class TestMapToModelBands:
         src = [_band("red"), _band("green"), _band("blue")]
         x = torch.arange(3 * 4 * 4, dtype=torch.float32).reshape(1, 3, 4, 4)
         target = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
-        out, missing = map_to_model_bands(x, src, target, allow_missing=True)
+        out, missing = map_to_model_bands(
+            x, src, target, policy=BandMappingPolicy(allow_missing=True)
+        )
         assert out.shape == (1, 6, 4, 4)
         # red came from src[0], green from src[1], blue from src[2]
         assert torch.equal(out[:, 0], x[:, 2])  # blue
@@ -95,7 +98,7 @@ class TestMapToModelBands:
         src = [_band("red"), _band("green"), _band("blue")]
         x = torch.zeros(1, 3, 4, 4)
         with pytest.raises(ValueError, match="Missing required model band"):
-            map_to_model_bands(x, src, ["coastal"], band_fallbacks={})
+            map_to_model_bands(x, src, ["coastal"], policy=BandMappingPolicy(band_fallbacks={}))
 
     def test_alias_resolution(self) -> None:
         src = [_band("B04"), _band("B03"), _band("B02")]
@@ -109,18 +112,17 @@ class TestMapToModelBands:
     def test_channel_count_mismatch_raises(self) -> None:
         src = [_band("red"), _band("green")]
         x = torch.zeros(1, 3, 4, 4)
-        try:
+        with pytest.raises(ValueError, match="images has 3 channels"):
             map_to_model_bands(x, src, ["red"])
-        except ValueError:
-            return
-        raise AssertionError("expected ValueError for channel-count mismatch")
 
     def test_preferred_sensor_wins_slot(self) -> None:
         src = [_band("red", sensor="aerial"), _band("B04")]
         x = torch.zeros(1, 2, 2, 2)
         x[:, 0] = 1.0
         x[:, 1] = 2.0
-        out, _ = map_to_model_bands(x, src, ["red"], preferred_sensors=("s2",))
+        out, _ = map_to_model_bands(
+            x, src, ["red"], policy=BandMappingPolicy(preferred_sensors=("s2",))
+        )
         assert torch.equal(out[:, 0], x[:, 1])
 
 
@@ -207,8 +209,5 @@ class TestDofaWavelengths:
 
     def test_manual_override_length_must_match_channels(self) -> None:
         bands = [_band("red", 0.665), _band("green", 0.56)]
-        try:
+        with pytest.raises(ValueError, match="wavelengths"):
             _resolve_dofa_wavelengths(bands, [0.665, 0.56, 0.49])
-        except ValueError:
-            return
-        raise AssertionError("expected ValueError for DOFA wavelength/channel mismatch")

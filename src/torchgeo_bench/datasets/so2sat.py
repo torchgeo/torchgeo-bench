@@ -1,5 +1,7 @@
 """So2Sat (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v2 import _V2Dataset
 
@@ -16,11 +18,11 @@ class So2Sat(_V2Dataset):
     task = "classification"
     num_classes = 17
     multilabel = False
-    rgb_bands = ["b04", "b03", "b02"]
-    split_sizes = {"train": 19992, "val": 986, "test": 986}
+    rgb_bands: ClassVar[list[str]] = ["b04", "b03", "b02"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 19992, "val": 986, "test": 986}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("s2", "b02", "B02", mean=0.1295, std=0.0414, min=0.0001, max=2.8, wavelength_um=0.49),
         BandSpec("s2", "b03", "B03", mean=0.1172, std=0.052, min=0.0001, max=2.8, wavelength_um=0.56),
         BandSpec("s2", "b04", "B04", mean=0.1138, std=0.0733, min=0.0001, max=2.8, wavelength_um=0.665),

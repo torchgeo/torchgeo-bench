@@ -119,7 +119,7 @@ def test_accuracy(combo: dict, tmp_path: Path) -> None:
         "eval.bootstrap=10",
         f"device={_DEVICE}",
     )
-    assert result.returncode == 0, f"CLI failed for {model_config} × {dataset}:\n{result.stderr}"
+    assert result.returncode == 0, f"CLI failed for {model_config} x {dataset}:\n{result.stderr}"
 
     actual_df = pd.read_csv(out)
     fixture_rows = _fixture_df[
@@ -130,9 +130,9 @@ def test_accuracy(combo: dict, tmp_path: Path) -> None:
     for _, row in fixture_rows.iterrows():
         method = row["method"]
         match = actual_df[actual_df["method"] == method]
-        assert len(match) > 0, f"Method {method} not found in output for {model_config} × {dataset}"
+        assert len(match) > 0, f"Method {method} not found in output for {model_config} x {dataset}"
         actual = match.iloc[0]["metric_value"]
         expected = row["expected_value"]
         assert actual == pytest.approx(expected, abs=_TOL), (
-            f"{model_config} × {dataset} {method}: got {actual:.4f}, expected {expected:.4f} ±{_TOL}"
+            f"{model_config} x {dataset} {method}: got {actual:.4f}, expected {expected:.4f} ±{_TOL}"
         )

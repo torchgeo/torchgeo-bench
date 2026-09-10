@@ -70,7 +70,7 @@ def test_forward_shapes_s2(n_bands):
 
 @pytest.mark.slow
 def test_forward_multi_sensor():
-    bands = _RGB + [_sar_band("vv"), _sar_band("vh")]
+    bands = [*_RGB, _sar_band("vv"), _sar_band("vh")]
     model = UniverSatBenchModel(bands=bands).eval()
     x = torch.randn(2, 5, 32, 32)
     with torch.no_grad():

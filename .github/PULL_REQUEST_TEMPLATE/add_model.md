@@ -46,9 +46,9 @@ uv sync --extra dev
 # uv sync --extra dev --extra <required_extra>
 ```
 
-Download the benchmark data. This intentionally fetches the full V1 bundle;
-single-dataset auto-download is useful for quick trials, but not for a full
-model submission.
+Download the benchmark data before running the model. These commands fetch
+the full V1 and V2 sets; use `--datasets m-eurosat` on the V1 command for a
+quick trial.
 
 ```bash
 uv run torchgeo-bench download geobench_v1

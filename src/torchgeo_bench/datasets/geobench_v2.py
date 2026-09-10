@@ -6,7 +6,6 @@ the matching ``geobench_v2.datasets.GeoBench<X>`` upstream class.
 """
 
 import logging
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -134,8 +133,8 @@ class GeoBenchv2(Dataset):
     def __len__(self) -> int:
         return len(self._inner)  # type: ignore[arg-type]
 
-    def __getitem__(self, idx: int) -> dict:
-        return self._inner[idx]
+    def __getitem__(self, index: int) -> dict:
+        return self._inner[index]
 
 
 class _V2Dataset(BenchDataset):
@@ -200,10 +199,7 @@ class _V2Dataset(BenchDataset):
 
         kwargs: dict[str, object] = {
             "data_normalizer": nn.Identity,
-            # No-op if the tortilla file is already present; otherwise pulls
-            # it from the upstream HF mirror (aialliance/<name>) on first use.
-            # Set GEOBENCH_V2_NO_DOWNLOAD=1 to disable (CI / offline runs).
-            "download": os.environ.get("GEOBENCH_V2_NO_DOWNLOAD") != "1",
+            "download": False,
         }
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True

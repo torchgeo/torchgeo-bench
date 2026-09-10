@@ -30,7 +30,7 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
      - Hugging Face ``aialliance/<name>``
    * - ``eurosat``
      - ``data/eurosat/``
-     - torchgeo's ``EuroSAT`` downloader
+     - torchgeo's ``EuroSAT`` and ``EuroSATSpatial`` downloaders
    * - ``resisc45``
      - ``data/resisc45/``
      - torchgeo's ``RESISC45`` downloader
@@ -60,13 +60,12 @@ GeoBench V1 — classification
 
 V1 datasets use the ``m-`` prefix on the command line.
 
-The first time a V1 dataset is requested without a local copy under
-``data/classification_v1.0`` or ``data/classification_v1.0_wds``, the
-loader auto-downloads the requested dataset from the public mirror
-``isaaccorley/geobenchv1-webdataset`` on the Hugging Face Hub.  Set
-``GEOBENCH_V1_NO_HF_DOWNLOAD=1`` to disable the auto-download and force a
-local-only path (``torchgeo-bench download geobench_v1`` still works for
-the legacy per-sample HDF5 layout).
+Download V1 data before running a benchmark. For example,
+``torchgeo-bench download geobench_v1 --datasets m-eurosat`` fetches EuroSAT
+from ``isaaccorley/geobenchv1-webdataset`` on the Hugging Face Hub into
+``data/classification_v1.0_wds``. To use the legacy per-sample HDF5 layout
+under ``data/classification_v1.0``, download the full bundle with
+``torchgeo-bench download geobench_v1``.
 
 .. list-table::
    :header-rows: 1
@@ -131,10 +130,9 @@ CLI name           #cls   bands multilabel   sensor                             
 ================== ====== ===== ============ ====================================== =====================================
 
 V2 datasets are stored as a single ``.tortilla`` file each, hosted under
-``aialliance/<name>`` on the Hugging Face Hub.  ``_V2Dataset.get_dataset``
-passes ``download=True`` to the upstream class, so a missing tortilla is
-fetched on first use — no separate ``torchgeo-bench download`` step
-required for the sweep.
+``aialliance/<name>`` on the Hugging Face Hub. Download the selected datasets
+before running a benchmark, for example with
+``torchgeo-bench download geobench_v2 --datasets benv2,burn_scars``.
 
 .. note::
 

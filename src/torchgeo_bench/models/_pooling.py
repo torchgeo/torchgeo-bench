@@ -29,7 +29,7 @@ def pool_tokens(tokens: torch.Tensor, mode: str = "mean") -> torch.Tensor:
         raise ValueError(f"pool mode {mode!r} not in {VALID_MODES}")
 
     n = tokens.shape[1]
-    side = int(round(n**0.5))
+    side = round(n**0.5)
     has_cls = side * side == n - 1
 
     if mode == "cls":

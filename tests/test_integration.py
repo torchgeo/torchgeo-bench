@@ -2,7 +2,7 @@
 
 These tests run the actual CLI workflow end-to-end: load a real dataset,
 extract features with a real model, and evaluate with KNN / logistic
-regression.  They are slow (10–60 s each) and require data on disk, so
+regression.  They are slow (10-60 s each) and require data on disk, so
 they are skipped by default.
 
 Run with::

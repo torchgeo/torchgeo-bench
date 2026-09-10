@@ -19,7 +19,7 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 from rich.progress import track
-from torchgeo.datasets import RESISC45, EuroSAT
+from torchgeo.datasets import RESISC45, EuroSAT, EuroSATSpatial
 
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
 
@@ -133,12 +133,13 @@ def download_geobench_v2(output_dir: Path, datasets: list[str] | None = None) ->
 
 
 def download_eurosat(output_dir: Path) -> None:
-    """Download torchgeo's EuroSAT into ``output_dir/eurosat`` for all splits."""
+    """Download EuroSAT images and both random and spatial splits into ``output_dir/eurosat``."""
     target = Path(output_dir) / "eurosat"
     target.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading torchgeo EuroSAT -> %s", target)
-    for split in ("train", "val", "test"):
-        EuroSAT(root=str(target), split=split, download=True)
+    for dataset in (EuroSAT, EuroSATSpatial):
+        for split in ("train", "val", "test"):
+            dataset(root=str(target), split=split, download=True)
     logger.info("EuroSAT download complete.")
 
 

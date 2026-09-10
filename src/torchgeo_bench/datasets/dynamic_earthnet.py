@@ -1,5 +1,7 @@
 """Dynamic EarthNet (GeoBench V2) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v2 import _V2Dataset
 
@@ -13,11 +15,11 @@ class DynamicEarthNet(_V2Dataset):
     task = "segmentation"
     num_classes = 7
     multilabel = False
-    rgb_bands = ["r", "g", "b"]
-    split_sizes = {"train": 700, "val": 100, "test": 200}
+    rgb_bands: ClassVar[list[str]] = ["r", "g", "b"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 700, "val": 100, "test": 200}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("planet", "b", "b", mean=664.423, std=639.946, min=10, max=10051),
         BandSpec("planet", "g", "g", mean=929.265, std=805.98, min=17, max=10039),
         BandSpec("planet", "r", "r", mean=1031.28, std=1072.23, min=9, max=10057),

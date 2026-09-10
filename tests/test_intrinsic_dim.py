@@ -143,7 +143,7 @@ class TestFeatureSpectrum:
         assert metrics["spectral_anisotropy"] == pytest.approx(expected_anisotropy)
 
     @pytest.mark.parametrize(
-        "X,match",
+        ("X", "match"),
         [
             (np.ones(5), "2D"),
             (np.empty((2, 0)), "at least one feature"),
@@ -208,7 +208,7 @@ class TestErrorHandling:
         import torchid.estimators as real_estimators
 
         class _Boom:
-            def fit(self, X: torch.Tensor) -> "_Boom":  # noqa: ARG002
+            def fit(self, X: torch.Tensor) -> "_Boom":
                 raise RuntimeError("boom")
 
         X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
@@ -240,7 +240,7 @@ class TestLoadEstimator:
 
         with (
             mock.patch.object(builtins, "__import__", side_effect=_mock),
-            pytest.raises(ImportError, match="torchid is required"),
+            pytest.raises(ImportError, match="mocked"),
         ):
             _load_estimator("TwoNN")
 
@@ -295,7 +295,7 @@ class TestDegenerateManifoldError:
         class _NaNEstimator:
             dimension_: float = float("nan")
 
-            def fit(self, X: torch.Tensor) -> "_NaNEstimator":  # noqa: ARG002
+            def fit(self, X: torch.Tensor) -> "_NaNEstimator":
                 return self
 
         X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
@@ -314,7 +314,6 @@ class TestRealTorchid:
     @pytest.fixture(autouse=True)
     def _seed(self) -> None:
         torch.manual_seed(0)
-        np.random.seed(0)
 
     @staticmethod
     def _swiss_roll(n: int) -> np.ndarray:

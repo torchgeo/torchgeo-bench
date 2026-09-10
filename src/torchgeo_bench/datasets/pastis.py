@@ -1,6 +1,7 @@
 """PASTIS (GeoBench V2) benchmark dataset."""
 
 from collections.abc import Callable
+from typing import ClassVar
 
 import torch.nn as nn
 from torch.utils.data import Dataset
@@ -21,11 +22,11 @@ class PASTIS(_V2Dataset):
     task = "segmentation"
     num_classes = 20
     multilabel = False
-    rgb_bands = ["b04", "b03", "b02"]
-    split_sizes = {"train": 1455, "val": 482, "test": 496}
+    rgb_bands: ClassVar[list[str]] = ["b04", "b03", "b02"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 1455, "val": 482, "test": 496}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("s2", "b02", "B02", mean=982.691, std=1778.79, min=-951, max=15720, wavelength_um=0.49),
         BandSpec("s2", "b03", "B03", mean=1200.18, std=1748.09, min=0, max=15300, wavelength_um=0.56),
         BandSpec("s2", "b04", "B04", mean=1279.17, std=1815.64, min=-847, max=14267, wavelength_um=0.665),

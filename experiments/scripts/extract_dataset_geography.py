@@ -19,8 +19,6 @@ Usage::
     python experiments/scripts/extract_dataset_geography.py --check
 """
 
-from __future__ import annotations
-
 import argparse
 import logging
 import os
@@ -36,22 +34,24 @@ from torchgeo_bench.geography import (
     write_record,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _check() -> int:
-    """Print the current store's coverage; non-zero if a dataset is missing."""
+    """Report the current store's coverage; non-zero if a dataset is missing."""
     store = list_geography()
     missing = missing_datasets()
 
     for name in sorted(store):
         record = store[name]
         detail = record.reason or f"n={record.n}"
-        print(f"  {name:20s} {record.status:15s} {detail}")
+        logger.info("  %-20s %-15s %s", name, record.status, detail)
 
     if missing:
-        print(f"\n{len(missing)} registered dataset(s) with no record: {sorted(missing)}")
-        print("Run with --all (or --dataset <name>) to generate them.")
+        logger.warning("%d registered dataset(s) with no record: %s", len(missing), sorted(missing))
+        logger.info("Run with --all (or --dataset <name>) to generate them.")
         return 1
-    print(f"\nAll {len(store)} registered datasets have a record.")
+    logger.info("All %d registered datasets have a record.", len(store))
     return 0
 
 
@@ -77,27 +77,30 @@ def main() -> int:
 
     names = list_datasets() if args.all else [args.dataset]
     if not args.all and args.dataset not in list_datasets():
-        print(f"Unknown dataset {args.dataset!r}. Available: {', '.join(list_datasets())}")
+        logger.error("Unknown dataset %r. Available: %s", args.dataset, ", ".join(list_datasets()))
         return 1
 
     for name in names:
         record = extract_geography(name, workers=args.workers)
         write_record(record)
         detail = record.reason or f"n={record.n}, {len(record.bins)} bins"
-        print(f"  {name:20s} {record.status:15s} {detail}")
+        logger.info("  %-20s %-15s %s", name, record.status, detail)
 
     index = build_index()
     totals = index["totals"]
-    print(
-        f"\nWrote {STORE_DIR}: {totals['datasets']} records "
-        f"({totals['extracted']} extracted, {totals['samples']} samples)"
+    logger.info(
+        "Wrote %s: %d records (%d extracted, %d samples)",
+        STORE_DIR,
+        totals["datasets"],
+        totals["extracted"],
+        totals["samples"],
     )
     for continent, share in list(totals["continents"].items())[:6]:
-        print(f"  {continent:20s} {share:5.1f}%")
+        logger.info("  %-20s %5.1f%%", continent, share)
 
     missing = missing_datasets()
     if missing:
-        print(f"\nWARNING: no record for {sorted(missing)}")
+        logger.warning("No record for %s", sorted(missing))
         return 1
     return 0
 

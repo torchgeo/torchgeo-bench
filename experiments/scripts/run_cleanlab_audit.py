@@ -120,7 +120,7 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
@@ -184,8 +184,8 @@ def main() -> None:
     summary = pd.DataFrame(summary_rows).sort_values(["dataset", "split"])
     summary_path = args.out_dir / "summary.csv"
     summary.to_csv(summary_path, index=False)
-    print(json.dumps({"summary": str(summary_path), "n_rows": len(summary)}, indent=2))
-    print(summary.to_string(index=False))
+    print(json.dumps({"summary": str(summary_path), "n_rows": len(summary)}, indent=2))  # noqa: T201
+    logger.info("\n%s", summary.to_string(index=False))
 
 
 if __name__ == "__main__":

@@ -64,7 +64,7 @@ def _mock_sam3_pretrained(monkeypatch):
             super().__init__()
             self.vision_encoder = _FakeVisionEncoder()
 
-    def _from_pretrained(source, local_files_only=False, **_kwargs):
+    def _from_pretrained(source, *, local_files_only=False, **_kwargs):
         if local_files_only and not Path(source).exists():
             raise FileNotFoundError(source)
         return _FakeSam3()

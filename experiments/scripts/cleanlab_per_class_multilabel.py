@@ -14,7 +14,7 @@ on the saved test probs and reports per-class statistics:
   with this class — used to spot near-identical / nested classes that the
   model can't distinguish
 
-Output: ``results/cleanlab/perclass_<dataset>_<split>.csv`` and a printed
+Output: ``results/cleanlab/perclass_<dataset>_<split>.csv`` and a logged
 top-K worst classes per dataset.
 """
 
@@ -123,26 +123,26 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
     split = rest.rsplit("_", 1)[1]  # train|test
     out_path = out_dir / f"perclass_{dataset}_{split}.csv"
     df.to_csv(out_path, index=False)
-    logger.warning("[%s/%s] K=%d wrote %s", dataset, split, K, out_path)
+    logger.info("[%s/%s] K=%d wrote %s", dataset, split, K, out_path)
 
-    # Print worst classes by `flag_among_pos`.
     worst = df.sort_values("flag_among_pos", ascending=False).head(top_k)
-    print(f"\n=== {dataset}/{split} — top {top_k} classes by flag_among_pos ===")
-    print(
+    logger.info("%s/%s — top %d classes by flag_among_pos", dataset, split, top_k)
+    logger.info(
+        "\n%s",
         worst.to_string(
             index=False, float_format=lambda v: f"{v:.3f}" if isinstance(v, float) else str(v)
-        )
+        ),
     )
 
-    # Also print classes with high Jaccard (near-duplicate labels).
     sticky = df.sort_values("jaccard_top_score", ascending=False).head(top_k)
-    print(f"\n=== {dataset}/{split} — top {top_k} classes by Jaccard with another class ===")
-    print(
+    logger.info("%s/%s — top %d classes by Jaccard with another class", dataset, split, top_k)
+    logger.info(
+        "\n%s",
         sticky[
             ["class", "jaccard_top_class", "jaccard_top_score", "n_pos", "ap", "flag_among_pos"]
         ].to_string(
             index=False, float_format=lambda v: f"{v:.3f}" if isinstance(v, float) else str(v)
-        )
+        ),
     )
     return df
 
@@ -161,7 +161,7 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 

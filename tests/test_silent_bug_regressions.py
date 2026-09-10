@@ -27,7 +27,7 @@ def test_extract_features_preserves_batch_dimension_for_head_global_pool() -> No
         {"image": torch.zeros(3, 2, 2), "label": torch.tensor(1)},
     ]
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
-    features, labels = extract_features(_HeadPoolModel(), loader, "cpu", verbose=False)
+    features, labels = extract_features(_HeadPoolModel(), loader, "cpu", description=None)
     assert features.shape == (2, 4)
     np.testing.assert_array_equal(labels, np.array([0, 1]))
 

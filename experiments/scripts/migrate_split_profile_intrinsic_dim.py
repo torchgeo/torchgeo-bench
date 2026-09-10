@@ -23,7 +23,10 @@ Usage::
 """
 
 import csv
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = ROOT / "results" / "models"
@@ -88,6 +91,7 @@ def migrate_one(path: Path) -> tuple[int, dict[str, int]]:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     csv_paths = sorted(MODELS_DIR.glob("*.csv"))
     total_original = 0
     total_kept = 0
@@ -101,19 +105,21 @@ def main() -> None:
         for method, count in moved_counts.items():
             total_moved[method] += count
         if any(moved_counts.values()):
-            print(f"{path.name}: kept={kept}, moved={moved_counts}")
+            logger.info("%s: kept=%d, moved=%s", path.name, kept, moved_counts)
 
     total_moved_all = sum(total_moved.values())
-    print(
-        f"\nTotal rows: original={total_original}, "
-        f"kept in models/={total_kept}, moved={total_moved} "
-        f"(sum moved={total_moved_all})"
+    logger.info(
+        "Total rows: original=%d, kept in models/=%d, moved=%s (sum moved=%d)",
+        total_original,
+        total_kept,
+        total_moved,
+        total_moved_all,
     )
     if total_kept + total_moved_all != total_original:
         raise SystemExit(
             f"Row count mismatch: {total_kept} + {total_moved_all} != {total_original}"
         )
-    print("Row counts conserved.")
+    logger.info("Row counts conserved.")
 
 
 if __name__ == "__main__":

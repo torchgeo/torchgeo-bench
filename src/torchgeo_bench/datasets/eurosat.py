@@ -36,13 +36,13 @@ class EuroSAT(BenchDataset):
     task = "classification"
     num_classes = 10
     multilabel = False
-    rgb_bands = ["red", "green", "blue"]
-    split_sizes = {"train": 16200, "val": 5400, "test": 5400}
+    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 16200, "val": 5400, "test": 5400}
     supports_partitions = False
 
     # Band statistics mirror m-eurosat (computed from the same EuroSAT data).
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("s2", "coastal_aerosol", "B01", mean=1354.41, std=245.718, min=816, max=17720, wavelength_um=0.443),
         BandSpec("s2", "blue", "B02", mean=1118.24, std=333.009, min=0, max=28000, wavelength_um=0.49),
         BandSpec("s2", "green", "B03", mean=1042.93, std=395.094, min=0, max=28000, wavelength_um=0.56),
@@ -103,4 +103,4 @@ class EuroSATSpatial(EuroSAT):
     name = "eurosat-spatial"
     # Longitude-based 60/20/20: same totals as the random split, just
     # reassigned across regions.
-    split_sizes = {"train": 16200, "val": 5400, "test": 5400}
+    split_sizes: ClassVar[dict[str, int]] = {"train": 16200, "val": 5400, "test": 5400}

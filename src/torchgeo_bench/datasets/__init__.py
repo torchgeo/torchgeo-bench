@@ -23,24 +23,20 @@ from .loading import (
 )
 
 __all__ = [
-    # Core types
+    "BENV2",
+    "FLAIR2",
+    "PASTIS",
+    "RESISC45",
     "BandSpec",
     "BenchDataset",
-    # Loading API
-    "get_bench_dataset_class",
-    "get_datasets",
-    "list_datasets",
-    # Individual dataset classes
-    "BENV2",
     "BurnScars",
     "CaFFe",
     "CloudSEN12",
     "DynamicEarthNet",
     "EuroSAT",
     "EuroSATSpatial",
-    "FLAIR2",
-    "Forestnet",
     "FieldsOfTheWorld",
+    "Forestnet",
     "KuroSiwo",
     "MBigEarthNet",
     "MBrickKiln",
@@ -48,12 +44,13 @@ __all__ = [
     "MForestnet",
     "MPv4ger",
     "MSo2Sat",
-    "PASTIS",
-    "RESISC45",
     "So2Sat",
     "SpaceNet2",
     "SpaceNet7",
     "TreeSatAI",
+    "get_bench_dataset_class",
+    "get_datasets",
+    "list_datasets",
 ]
 
 # Class name -> defining submodule, resolved on first attribute access.

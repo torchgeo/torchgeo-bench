@@ -4,7 +4,9 @@ import pytest
 import torch
 from torch import nn
 
+from torchgeo_bench import model_profile
 from torchgeo_bench.model_profile import (
+    FlopCountUnavailableError,
     _count_gflops,
     _count_params,
     measure_profile,
@@ -51,7 +53,8 @@ def test_measure_profile_cpu_returns_dict() -> None:
     assert isinstance(result, dict)
     assert "params_m" in result
     assert "throughput_samples_per_sec" in result
-    assert result["params_m"] is not None and result["params_m"] > 0
+    assert result["params_m"] is not None
+    assert result["params_m"] > 0
 
 
 def test_count_gflops_inference_attrerror_falls_back_to_no_grad() -> None:
@@ -78,5 +81,38 @@ def test_count_gflops_assertion_chain_raises_not_implemented() -> None:
                 raise AttributeError("next_functions")
             raise AssertionError("Expected gradient function to be set")
 
-    with pytest.raises(NotImplementedError, match="incompatible"):
+    with pytest.raises(FlopCountUnavailableError, match="incompatible"):
         _count_gflops(AssertionChainModel(), torch.rand(1, 3, 8, 8))
+
+
+def test_measure_profile_propagates_model_not_implemented(monkeypatch: pytest.MonkeyPatch) -> None:
+    def count(_model: nn.Module, _sample: torch.Tensor) -> float:
+        raise NotImplementedError("unsupported model forward")
+
+    monkeypatch.setattr(model_profile, "_count_gflops", count)
+    with pytest.raises(NotImplementedError, match="unsupported model forward"):
+        measure_profile(nn.Linear(4, 2), torch.rand(2, 4), torch.device("cpu"), 0, 1)
+
+
+def test_measure_profile_keeps_timing_when_flops_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def count(_model: nn.Module, _sample: torch.Tensor) -> float:
+        raise FlopCountUnavailableError("unsupported grad_fn")
+
+    monkeypatch.setattr(model_profile, "_count_gflops", count)
+    metrics = measure_profile(nn.Linear(4, 2), torch.rand(2, 4), torch.device("cpu"), 0, 1)
+    assert metrics["gflops"] is None
+    assert metrics["throughput_samples_per_sec"] > 0
+
+
+def test_lenient_grad_hooks_propagates_unrelated_assertion(monkeypatch: pytest.MonkeyPatch) -> None:
+    def register(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("unrelated assertion")
+
+    monkeypatch.setattr(model_profile.autograd_graph, "register_multi_grad_hook", register)
+    with (
+        model_profile.lenient_grad_hooks(),
+        pytest.raises(AssertionError, match="unrelated assertion"),
+    ):
+        model_profile.autograd_graph.register_multi_grad_hook((torch.rand(1),), lambda _grads: None)

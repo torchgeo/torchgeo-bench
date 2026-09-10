@@ -34,7 +34,7 @@ class _1DModel(torch.nn.Module):
         return x.flatten(1).squeeze(0)  # (C,) for batch=1
 
 
-def _make_loader(n: int = 8, c: int = 3, h: int = 4, multi_label: bool = False) -> DataLoader:
+def _make_loader(n: int = 8, c: int = 3, h: int = 4, *, multi_label: bool = False) -> DataLoader:
     images = torch.rand(n, c, h, h)
     labels = torch.randint(0, 4, (n,)) if not multi_label else torch.randint(0, 2, (n, 5))
     dataset = [{"image": images[i], "label": labels[i]} for i in range(n)]
@@ -44,7 +44,7 @@ def _make_loader(n: int = 8, c: int = 3, h: int = 4, multi_label: bool = False) 
 def test_basic_extraction():
     loader = _make_loader()
     model = _IdentityModel()
-    X, y = extract_features(model, loader, device="cpu", verbose=False)
+    X, y = extract_features(model, loader, device="cpu", description=None)
     assert X.shape[0] == 8
     assert y.shape == (8,)
 
@@ -52,7 +52,7 @@ def test_basic_extraction():
 def test_dict_norm_output():
     loader = _make_loader()
     model = _DictModel()
-    X, y = extract_features(model, loader, device="cpu", verbose=False)
+    X, _y = extract_features(model, loader, device="cpu", description=None)
     assert X.shape[0] == 8
     assert np.isfinite(X).all()
 
@@ -60,7 +60,7 @@ def test_dict_norm_output():
 def test_dict_global_pool_output():
     loader = _make_loader()
     model = _GlobalPoolModel()
-    X, y = extract_features(model, loader, device="cpu", verbose=False)
+    X, _y = extract_features(model, loader, device="cpu", description=None)
     assert X.shape[0] == 8
 
 
@@ -70,7 +70,7 @@ def test_missing_label_key_raises():
     loader = DataLoader(dataset, batch_size=4)
     model = _IdentityModel()
     with pytest.raises(KeyError, match="label"):
-        extract_features(model, loader, device="cpu", verbose=False)
+        extract_features(model, loader, device="cpu", description=None)
 
 
 def test_unknown_dict_key_raises():
@@ -80,14 +80,14 @@ def test_unknown_dict_key_raises():
 
     loader = _make_loader()
     with pytest.raises(ValueError, match="Unexpected features"):
-        extract_features(_BadModel(), loader, device="cpu", verbose=False)
+        extract_features(_BadModel(), loader, device="cpu", description=None)
 
 
 def test_with_transforms():
     loader = _make_loader(c=3)
     model = _IdentityModel()
     transform = lambda x: x * 2.0  # noqa: E731
-    X, y = extract_features(model, loader, device="cpu", transforms=transform, verbose=False)
+    X, _y = extract_features(model, loader, device="cpu", transforms=transform, description=None)
     assert X.shape[0] == 8
 
 
@@ -99,6 +99,6 @@ def test_3d_output_mean_pooled():
             return x.flatten(2).permute(0, 2, 1)  # (B, HW, C)
 
     loader = _make_loader(n=4, c=2, h=3)
-    X, y = extract_features(_SeqModel(), loader, device="cpu", verbose=False)
+    X, _y = extract_features(_SeqModel(), loader, device="cpu", description=None)
     assert X.ndim == 2
     assert X.shape[0] == 4

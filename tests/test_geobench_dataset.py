@@ -207,7 +207,7 @@ class TestErrorHandling:
 
     def test_invalid_split(self, geobench_root):
         """Invalid split raises ValueError."""
-        with pytest.raises(ValueError, match="Split.*not found"):
+        with pytest.raises(ValueError, match=r"Split.*not found"):
             GeoBenchv1(
                 root=geobench_root,
                 dataset_name="m-eurosat",

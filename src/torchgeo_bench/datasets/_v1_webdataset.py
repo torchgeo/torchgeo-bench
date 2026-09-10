@@ -3,8 +3,8 @@
 Drops the per-sample HDF5 file-open from ``__getitem__`` (one NFS round-trip
 per sample) by reading from ~22 tar shards instead.  Format is produced by
 ``experiments/scripts/repack_geobench_v1.py`` and mirrored on the Hub at
-``isaaccorley/geobenchv1-webdataset`` (auto-pulled by
-:func:`ensure_sharded_root` when no local copy is present).
+``isaaccorley/geobenchv1-webdataset`` (downloaded by
+:func:`ensure_sharded_root`).
 
 Each shard contains ``<sid>.bands.npz`` and ``<sid>.meta.pkl`` files for
 ~1000 samples.  Indexing happens once in ``__init__``: every sample's byte
@@ -43,7 +43,7 @@ def ensure_sharded_root(
     sharded_root: Path,
     *,
     repo_id: str = V1_HF_REPO_ID,
-    cache_dir: str | os.PathLike | None = None,
+    cache_dir: str | os.PathLike[str] | None = None,
 ) -> Path:
     """Snapshot-download the sharded V1 mirror into ``sharded_root`` if absent.
 
@@ -55,14 +55,7 @@ def ensure_sharded_root(
     if target.exists() and any(target.glob("shard_*.tar")):
         return target
 
-    try:
-        from huggingface_hub import snapshot_download
-    except ImportError as e:
-        raise RuntimeError(
-            "huggingface_hub is required to auto-download the GeoBench V1 "
-            "WebDataset mirror.  Install via `pip install huggingface_hub`, "
-            "or set GEOBENCH_V1_NO_HF_DOWNLOAD=1 and provide the data manually."
-        ) from e
+    from huggingface_hub import snapshot_download
 
     sharded_root = Path(sharded_root)
     sharded_root.mkdir(parents=True, exist_ok=True)
@@ -72,11 +65,11 @@ def ensure_sharded_root(
         repo_type="dataset",
         local_dir=sharded_root,
         allow_patterns=[f"{dataset_name}/*"],
-        cache_dir=cache_dir,
+        cache_dir=Path(cache_dir) if cache_dir is not None else None,
     )
     if not any(target.glob("shard_*.tar")):
         raise RuntimeError(
-            f"Auto-download of {repo_id}/{dataset_name} produced no shards under "
+            f"Download of {repo_id}/{dataset_name} produced no shards under "
             f"{target}; check the repo layout."
         )
     return target
@@ -85,7 +78,7 @@ def ensure_sharded_root(
 class GeoBenchv1Sharded(Dataset):
     """GeoBench V1 dataset reading from WebDataset tar shards."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public dataset constructor.
         self,
         root: str | Path,
         dataset_name: str,
@@ -97,7 +90,10 @@ class GeoBenchv1Sharded(Dataset):
         super().__init__()
         self.dataset_dir = Path(root) / dataset_name
         if not self.dataset_dir.exists():
-            raise FileNotFoundError(f"Sharded dataset dir not found: {self.dataset_dir}")
+            raise FileNotFoundError(
+                f"Sharded dataset dir not found: {self.dataset_dir}. "
+                f"Run `torchgeo-bench download geobench_v1 --datasets {dataset_name}`."
+            )
 
         partition_file = self.dataset_dir / f"{partition}_partition.json"
         with open(partition_file) as f:
@@ -149,8 +145,8 @@ class GeoBenchv1Sharded(Dataset):
     def __len__(self) -> int:
         return len(self.sample_ids)
 
-    def __getitem__(self, idx: int) -> dict:
-        sid = self.sample_ids[idx]
+    def __getitem__(self, index: int) -> dict:
+        sid = self.sample_ids[index]
         parts = self._index[sid]
         bands_dict = dict(np.load(io.BytesIO(self._read(parts["bands.npz"]))))
         meta = unpickle_metadata(self._read(parts["meta.pkl"]))

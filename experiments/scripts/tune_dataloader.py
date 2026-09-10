@@ -63,16 +63,8 @@ def _build_model(model_cfg: str, bands_list):
 
 
 def _bench(
-    model, dataset, batch_size: int, num_workers: int, device: torch.device, max_batches: int
-):
-    dl = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        shuffle=False,
-        pin_memory=device.type == "cuda",
-        persistent_workers=num_workers > 0,
-    )
+    model: torch.nn.Module, dl: DataLoader, device: torch.device, max_batches: int
+) -> tuple[float, float, float]:
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
     t0 = time.perf_counter()
@@ -120,7 +112,7 @@ def main() -> None:
     model = _build_model(args.model, bands_list).to(device).eval()
 
     console = Console()
-    console.rule(f"Tuning [bold]{args.model}[/] × {args.dataset}/{args.bands} on {device}")
+    console.rule(f"Tuning [bold]{args.model}[/] on {args.dataset}/{args.bands} on {device}")
 
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("bs", justify="right")
@@ -132,14 +124,17 @@ def main() -> None:
     results = []
     for bs in bs_list:
         for nw in nw_list:
-            try:
-                sps, peak, dt = _bench(model, dataset, bs, nw, device, args.max_batches)
-                results.append((sps, bs, nw, peak, dt))
-                table.add_row(str(bs), str(nw), f"{sps:.1f}", f"{peak:.2f}", f"{dt:.2f}s")
-            except Exception as e:
-                table.add_row(
-                    str(bs), str(nw), "[red]FAIL[/]", "", f"{type(e).__name__}: {str(e)[:40]}"
-                )
+            loader = DataLoader(
+                dataset,
+                batch_size=bs,
+                num_workers=nw,
+                shuffle=False,
+                pin_memory=device.type == "cuda",
+                persistent_workers=nw > 0,
+            )
+            sps, peak, dt = _bench(model, loader, device, args.max_batches)
+            results.append((sps, bs, nw, peak, dt))
+            table.add_row(str(bs), str(nw), f"{sps:.1f}", f"{peak:.2f}", f"{dt:.2f}s")
 
     console.print(table)
     if results:

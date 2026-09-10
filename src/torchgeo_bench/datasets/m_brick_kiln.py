@@ -1,5 +1,7 @@
 """MBrickKiln (GeoBench V1) benchmark dataset."""
 
+from typing import ClassVar
+
 from .base import BandSpec
 from .geobench_v1 import _V1Dataset
 
@@ -14,11 +16,11 @@ class MBrickKiln(_V1Dataset):
     task = "classification"
     num_classes = 2
     multilabel = False
-    rgb_bands = ["red", "green", "blue"]
-    split_sizes = {"train": 15063, "val": 999, "test": 999}
+    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+    split_sizes: ClassVar[dict[str, int]] = {"train": 15063, "val": 999, "test": 999}
 
     # fmt: off
-    bands = [
+    bands: ClassVar[list[BandSpec]] = [
         BandSpec("s2", "coastal_aerosol", "01 - Coastal aerosol", mean=572.205, std=190.09, min=9.6923, max=2823.22, wavelength_um=0.443),
         BandSpec("s2", "blue", "02 - Blue", mean=669, std=234.367, min=48.6667, max=3959.5, wavelength_um=0.49),
         BandSpec("s2", "green", "03 - Green", mean=879.878, std=272.815, min=98, max=5260.67, wavelength_um=0.56),

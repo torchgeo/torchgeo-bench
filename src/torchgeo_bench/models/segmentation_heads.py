@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 
 class LinearHead(nn.Module):
-    """Per-layer BN + 1×1 conv heads with learned scale-weighted fusion.
+    """Per-layer BN + 1x1 conv heads with learned scale-weighted fusion.
 
     For a single layer the output is returned directly. For multiple layers,
     each head's logits are upsampled to the input resolution and combined via
@@ -34,7 +34,7 @@ class LinearHead(nn.Module):
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
         """Upsample and sum per-layer logits."""
         total_logits: torch.Tensor | int = 0
-        for idx, (feat, head) in enumerate(zip(features, self.heads)):
+        for idx, (feat, head) in enumerate(zip(features, self.heads, strict=True)):
             logits = head(feat)
             if logits.shape[-2:] != (input_h, input_w):
                 logits = F.interpolate(
@@ -115,11 +115,11 @@ class PatchLinearHead(nn.Module):
 
 
 class ConvBlockHead(nn.Module):
-    """Per-layer 1×1 projection to hidden_dim, aligned concat, 1×1 classification head.
+    """Per-layer 1x1 projection to hidden_dim, aligned concat, 1x1 classification head.
 
     All feature maps are projected to the same channel count, upsampled to the
     finest spatial resolution in the batch, concatenated, and classified with a
-    single 1×1 conv.
+    single 1x1 conv.
 
     Args:
         channels_list: Channel count for each hooked feature layer.
@@ -143,7 +143,7 @@ class ConvBlockHead(nn.Module):
 
     def forward(self, features: list[torch.Tensor], input_h: int, input_w: int) -> torch.Tensor:
         """Project, upsample, concat, and classify features."""
-        proj_feats = [proj(f) for f, proj in zip(features, self.projectors)]
+        proj_feats = [proj(f) for f, proj in zip(features, self.projectors, strict=True)]
 
         target_h, target_w = 0, 0
         for f in proj_feats:
@@ -171,9 +171,9 @@ class ConvBlockHead(nn.Module):
 class FPNHead(nn.Module):
     """Feature Pyramid Network decoder head.
 
-    Applies lateral 1×1 convs, a top-down merging pathway, 3×3 refinement
+    Applies lateral 1x1 convs, a top-down merging pathway, 3x3 refinement
     convs, then upsamples all levels to the finest resolution, concatenates,
-    and classifies with a 1×1 conv.
+    and classifies with a 1x1 conv.
 
     Layers must be provided in **coarse-to-fine order** (deepest / lowest-
     resolution first). Example for ResNet:
@@ -213,7 +213,10 @@ class FPNHead(nn.Module):
             input_h: Target output height (input image height).
             input_w: Target output width (input image width).
         """
-        laterals = [lat(norm(f)) for f, norm, lat in zip(features, self.input_norms, self.laterals)]
+        laterals = [
+            lat(norm(f))
+            for f, norm, lat in zip(features, self.input_norms, self.laterals, strict=True)
+        ]
 
         # Top-down merging: from coarsest (0) to finest (-1)
         for i in range(len(laterals) - 1):
@@ -222,7 +225,7 @@ class FPNHead(nn.Module):
                 laterals[i], size=target_size, mode="bilinear", align_corners=False
             )
 
-        fpn_outs = [conv(p) for p, conv in zip(laterals, self.fpn_convs)]
+        fpn_outs = [conv(p) for p, conv in zip(laterals, self.fpn_convs, strict=True)]
 
         finest_size = fpn_outs[-1].shape[-2:]
         aligned = []
@@ -285,13 +288,7 @@ def _dpt_fusion_layer(hidden_dim: int) -> nn.Module:
     ``transformers`` is an optional dependency, so the import is deferred to
     construction time — only the ``dpt`` head needs it.
     """
-    try:
-        from transformers.models.dpt.modeling_dpt import DPTFeatureFusionLayer
-    except ImportError as e:  # pragma: no cover - exercised only without the extra
-        raise ImportError(
-            "DPTHead requires the 'transformers' package for its fusion cascade. "
-            "Install it with: pip install 'torchgeo-bench[sam3]' or pip install transformers"
-        ) from e
+    from transformers.models.dpt.modeling_dpt import DPTFeatureFusionLayer
 
     config = SimpleNamespace(
         fusion_hidden_size=hidden_dim,
@@ -312,11 +309,11 @@ class DPTHead(nn.Module):
     The fusion layers are imported from ``transformers`` rather than
     reimplemented, so the residual/fusion arithmetic matches Intel-ISL DPT
     exactly: pre-activation residual units, refinement applied to the *skip*
-    (not the primary input), a post-fusion 1×1 projection, and a 2× upsample
-    inside every fusion layer. Four stacked layers therefore take a 14×14 ViT
-    token grid to 224×224 with no separate pre- or post-upsampling step.
+    (not the primary input), a post-fusion 1x1 projection, and a 2x upsample
+    inside every fusion layer. Four stacked layers therefore take a 14x14 ViT
+    token grid to 224x224 with no separate pre- or post-upsampling step.
 
-    Only the reassemble stage is ours: ``ChannelLayerNorm`` + a 1×1 projection
+    Only the reassemble stage is ours: ``ChannelLayerNorm`` + a 1x1 projection
     stands in for ``DPTReassembleStage``, because ``SegmentationProbe`` hands
     the head backbone-agnostic ``(B, D, H, W)`` grids rather than the token
     sequences plus patch geometry that the reference reassemble stage consumes.
@@ -345,7 +342,7 @@ class DPTHead(nn.Module):
         # normalisation and is sample-wise — robust to the per-layer outlier
         # activations common in specialist ViTs (e.g. DOFA).
         self.input_norms = nn.ModuleList([ChannelLayerNorm(c) for c in channels_list])
-        # 1×1 projection — index 0 = coarsest
+        # 1x1 projection — index 0 = coarsest
         self.convs = nn.ModuleList(
             [nn.Conv2d(c, hidden_dim, kernel_size=1, padding=0) for c in channels_list]
         )
@@ -366,15 +363,18 @@ class DPTHead(nn.Module):
             input_h: Target output height.
             input_w: Target output width.
         """
-        # Reassemble stand-in: normalise → 1×1 project to hidden_dim.
-        projected = [conv(norm(f)) for norm, conv, f in zip(self.input_norms, self.convs, features)]
+        # Reassemble stand-in: normalise → 1x1 project to hidden_dim.
+        projected = [
+            conv(norm(f))
+            for norm, conv, f in zip(self.input_norms, self.convs, features, strict=True)
+        ]
 
         # Top-down cascade, coarsest (0) → finest (3). The running fused state is
         # the primary input and the next feature map enters as the skip, matching
-        # ``DPTFeatureFusionStage``. Each layer upsamples 2×, so the cascade
-        # supplies all the upsampling (14×14 → 224×224 for a patch16 ViT).
+        # ``DPTFeatureFusionStage``. Each layer upsamples 2x, so the cascade
+        # supplies all the upsampling (14x14 → 224x224 for a patch16 ViT).
         out = self.ref[0](projected[0])
-        for layer, feat in zip(self.ref[1:], projected[1:]):
+        for layer, feat in zip(self.ref[1:], projected[1:], strict=True):
             out = layer(out, feat)
 
         out = self.out_conv(out)
