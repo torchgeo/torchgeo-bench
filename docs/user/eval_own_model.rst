@@ -194,15 +194,15 @@ available names):
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model dataset.names=[m-eurosat]
-   $ torchgeo-bench run model=new_model \
+   $ python -m torchgeo_bench.cli run model=new_model dataset.names=[m-eurosat]
+   $ python -m torchgeo_bench.cli run model=new_model \
        dataset.names=[m-eurosat,m-bigearthnet,benv2,burn_scars]
 
 Skip the (slow) linear probe and reduce bootstrap samples for a quick trial:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model dataset.names=[m-eurosat] \
+   $ python -m torchgeo_bench.cli run model=new_model dataset.names=[m-eurosat] \
        eval.skip_linear=true eval.bootstrap=100
 
 To write results to a dedicated file instead of the shared
@@ -210,7 +210,7 @@ the per-model file, pass ``output=``:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model \
+   $ python -m torchgeo_bench.cli run model=new_model \
        dataset.names=[m-eurosat,m-so2sat] \
        output=results/new_model_results.csv
 
@@ -219,7 +219,7 @@ interrupted run can be continued against the same file:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model output=results/new_model_results.csv resume=true
+   $ python -m torchgeo_bench.cli run model=new_model output=results/new_model_results.csv resume=true
 
 .. _eval-results:
 

@@ -9,6 +9,7 @@ from torch import nn
 
 from torchgeo_bench import model_profile
 from torchgeo_bench.model_profile import (
+    ProfileTiming,
     _count_gflops,
     _count_params,
     measure_cpu_throughput,
@@ -43,7 +44,13 @@ def test_count_gflops_matches_conv_and_linear_ops(requires_grad) -> None:
     assert all(p.grad is None for p in model.parameters())
 
 
-def test_count_gflops_handles_parameter_views_without_mutating_model() -> None:
+@pytest.mark.parametrize("use_profile", [False, True])
+@pytest.mark.parametrize("outer_inference", [False, True])
+def test_count_gflops_handles_parameter_views_without_mutating_model(
+    *, use_profile: bool, outer_inference: bool
+) -> None:
+    calls: list[tuple[bool, bool, bool, bool]] = []
+
     class LearnedQuery(nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -52,14 +59,54 @@ def test_count_gflops_handles_parameter_views_without_mutating_model() -> None:
             self.project.weight.requires_grad_(False)
 
         def forward(self, images: torch.Tensor) -> torch.Tensor:
+            calls.append(
+                (
+                    torch.is_inference_mode_enabled(),
+                    torch.is_grad_enabled(),
+                    self.query.requires_grad,
+                    images.requires_grad,
+                )
+            )
             return self.project(self.query.expand(images.shape[0], -1))
 
-    model = LearnedQuery().eval()
-    original_query = model.query
-    assert _count_gflops(model, torch.randn(2, 3, 8, 8)) == 16 / 1e9
-    assert model.query is original_query
-    assert model.query.requires_grad
-    assert not model.project.weight.requires_grad
+    model = LearnedQuery()
+    model.project.eval()
+    original_parameters = dict(model.named_parameters())
+    original_flags = {
+        name: parameter.requires_grad for name, parameter in original_parameters.items()
+    }
+    for parameter in original_parameters.values():
+        parameter.grad = torch.ones_like(parameter)
+    original_grads = {name: parameter.grad for name, parameter in original_parameters.items()}
+    original_modes = {module: module.training for module in model.modules()}
+    sample = torch.randn(2, 3, 8, 8, requires_grad=True)
+
+    with torch.inference_mode(outer_inference):
+        if use_profile:
+            result = profile_inference(
+                model,
+                sample,
+                device=torch.device("cpu"),
+                n_warmup=1,
+                n_measure=2,
+                count_flops=True,
+            )
+            gflops = result.flops.gflops
+            assert result.flops.status == "measured"
+        else:
+            gflops = _count_gflops(model, sample)
+        assert torch.is_inference_mode_enabled() is outer_inference
+
+    assert gflops == pytest.approx(16 / 1e9)
+    assert len(calls) == (4 if use_profile else 1)
+    assert calls[-1] == (False, False, False, False)
+    assert sample.requires_grad
+    assert sample.grad is None
+    assert {module: module.training for module in model.modules()} == original_modes
+    for name, parameter in model.named_parameters():
+        assert parameter is original_parameters[name]
+        assert parameter.requires_grad is original_flags[name]
+        assert parameter.grad is original_grads[name]
 
 
 @pytest.mark.parametrize(
@@ -105,7 +152,13 @@ def test_measure_profile_cpu_returns_dict() -> None:
 
 
 def test_measure_profile_does_not_hide_counter_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unsupported_counter(model: nn.Module, sample: torch.Tensor) -> float:
+    def unsupported_counter(
+        model: nn.Module,
+        sample: torch.Tensor,
+        *,
+        device: torch.device | None = None,
+        precision: str = "float32",
+    ) -> float:
         raise NotImplementedError("unsupported counter operation")
 
     monkeypatch.setattr(model_profile, "_count_gflops", unsupported_counter)
@@ -176,7 +229,10 @@ def test_cpu_budget_and_denominator(monkeypatch: pytest.MonkeyPatch) -> None:
     timestamps = iter([0.0, 0.2, 0.2, 0.7, 0.7, 0.7])
     monkeypatch.setattr(model_profile.time, "perf_counter", lambda: next(timestamps))
     result = measure_cpu_throughput(
-        nn.Identity(), torch.ones(2, 2), batch_size=2, n_warmup=0, n_measure=10, time_budget_s=0.5
+        nn.Identity(),
+        torch.ones(2, 2),
+        ProfileTiming(batch_size=2, n_warmup=0, n_measure=10),
+        time_budget_s=0.5,
     )
     assert result["throughput_samples_per_sec_cpu"] == pytest.approx(4)
     assert result["latency_ms_per_batch_p50_cpu"] == pytest.approx(500)
@@ -187,7 +243,10 @@ def test_cpu_budget_can_expire_during_warmup(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(model_profile.time, "perf_counter", lambda: next(timestamps))
     model = nn.Identity()
     result = measure_cpu_throughput(
-        model, torch.ones(2, 2), batch_size=2, n_warmup=1, n_measure=1, time_budget_s=1
+        model,
+        torch.ones(2, 2),
+        ProfileTiming(batch_size=2, n_warmup=1, n_measure=1),
+        time_budget_s=1,
     )
     assert all(value is None for value in result.values())
     assert model.training
@@ -198,27 +257,43 @@ def test_cpu_invalid_settings() -> None:
         profile_inference(nn.Identity(), torch.empty(0, 2), device=torch.device("cpu"))
     with pytest.raises(ValueError, match="sample batch"):
         measure_cpu_throughput(
-            nn.Identity(), torch.ones(1, 2), batch_size=2, n_warmup=0, n_measure=1, time_budget_s=1
+            nn.Identity(),
+            torch.ones(1, 2),
+            ProfileTiming(batch_size=2, n_warmup=0, n_measure=1),
+            time_budget_s=1,
         )
     with pytest.raises(ValueError, match="positive"):
         measure_cpu_throughput(
-            nn.Identity(), torch.ones(1, 2), batch_size=1, n_warmup=0, n_measure=0, time_budget_s=1
+            nn.Identity(),
+            torch.ones(1, 2),
+            ProfileTiming(batch_size=1, n_warmup=0, n_measure=0),
+            time_budget_s=1,
         )
 
 
-def test_count_gflops_propagates_inference_error() -> None:
+@pytest.mark.parametrize("outer_inference", [False, True])
+def test_count_gflops_uses_one_frozen_no_grad_forward(*, outer_inference: bool) -> None:
+    calls: list[int] = []
+
     class InferenceAttrErrorModel(nn.Module):
         def __init__(self) -> None:
             super().__init__()
             self.conv = nn.Conv2d(3, 4, 1)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
+            calls.append(x.shape[0])
             if torch.is_inference_mode_enabled():
                 raise AttributeError("next_functions")
+            assert not torch.is_grad_enabled()
+            assert not x.requires_grad
+            assert not any(parameter.requires_grad for parameter in self.parameters())
             return self.conv(x)
 
-    with pytest.raises(AttributeError, match="next_functions"):
-        _count_gflops(InferenceAttrErrorModel(), torch.rand(2, 3, 8, 8))
+    with torch.inference_mode(outer_inference):
+        gflops = _count_gflops(InferenceAttrErrorModel(), torch.rand(2, 3, 8, 8))
+        assert torch.is_inference_mode_enabled() is outer_inference
+    assert calls == [1]
+    assert gflops == pytest.approx(2 * 4 * 3 * 8 * 8 / 1e9)
 
 
 def test_count_gflops_propagates_execution_error() -> None:
@@ -280,15 +355,18 @@ def test_profile_propagates_unsupported_model_flops() -> None:
                 raise NotImplementedError("operator is unsupported")
             return x
 
+    model = Unsupported()
     with pytest.raises(NotImplementedError, match="unsupported"):
         profile_inference(
-            Unsupported(),
+            model,
             torch.rand(1, 2),
             device=torch.device("cpu"),
             n_warmup=0,
             n_measure=1,
             count_flops=True,
         )
+    assert model.calls == 2
+    assert model.training
 
 
 def test_profile_propagates_real_flop_execution_failure() -> None:
@@ -325,7 +403,8 @@ def test_profile_does_not_mutate_autograd_hooks() -> None:
     assert module_tracker.register_multi_grad_hook is tracker_hook
 
 
-def test_profile_restores_mixed_training_modes() -> None:
+@pytest.mark.parametrize("count_flops", [False, True])
+def test_profile_restores_mixed_training_modes(*, count_flops: bool) -> None:
     model = nn.Sequential(nn.Linear(4, 2), nn.BatchNorm1d(2))
     model.train()
     model[1].eval()
@@ -335,7 +414,7 @@ def test_profile_restores_mixed_training_modes() -> None:
         device=torch.device("cpu"),
         n_warmup=0,
         n_measure=1,
-        count_flops=False,
+        count_flops=count_flops,
     )
     assert model.training is True
     assert model[1].training is False
@@ -343,16 +422,21 @@ def test_profile_restores_mixed_training_modes() -> None:
 
 @pytest.mark.parametrize("precision", ["float16", "bfloat16"])
 def test_profile_accepts_autocast_precisions(precision: str) -> None:
-    result = profile_inference(
-        nn.Linear(4, 2),
-        torch.rand(1, 4),
-        device=torch.device("cpu"),
-        precision=precision,
-        n_warmup=0,
-        n_measure=1,
-        count_flops=False,
-    )
+    model = nn.Linear(4, 2)
+    dtypes: list[torch.dtype] = []
+    with model.register_forward_hook(lambda module, args, output: dtypes.append(output.dtype)):
+        result = profile_inference(
+            model,
+            torch.rand(1, 4),
+            device=torch.device("cpu"),
+            precision=precision,
+            n_warmup=0,
+            n_measure=1,
+            count_flops=True,
+        )
     assert result.precision == precision
+    assert dtypes == [getattr(torch, precision)] * 2
+    assert result.flops.gflops == pytest.approx(16 / 1e9)
 
 
 def test_profile_rejects_invalid_settings() -> None:
@@ -386,11 +470,10 @@ def test_cpu_profile_restores_model_and_reports_metrics() -> None:
     metrics = measure_cpu_throughput(
         model,
         torch.rand(2, 2),
-        batch_size=2,
-        n_warmup=0,
-        n_measure=1,
+        ProfileTiming(batch_size=2, n_warmup=0, n_measure=1),
         time_budget_s=1,
     )
     assert metrics["throughput_samples_per_sec_cpu"] is not None
     assert metrics["latency_ms_per_batch_p50_cpu"] is not None
     assert next(model.parameters()).device == torch.device("cpu")
+    assert model.training

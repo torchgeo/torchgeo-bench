@@ -212,7 +212,9 @@ class StudyRunner(BaseGpuRunner):
     def _command(self, job: Job, gpu: int, attempt: int) -> list[str]:
         loader_batch = max(1, job.model.loader_batch_size // (2 ** (attempt - 1)))
         return [
-            str(self.config.cli),
+            sys.executable,
+            "-m",
+            "torchgeo_bench.cli",
             "run",
             f"model={job.model.config}",
             f"dataset.names=[{job.dataset.name}]",

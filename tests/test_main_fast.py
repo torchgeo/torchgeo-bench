@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.config import compose_config
-from torchgeo_bench.main import main, resolve_model_config
+from torchgeo_bench.main import LinearProbeDivergedError, main, resolve_model_config
 from torchgeo_bench.resume import _resume_config_hash
 
 
@@ -309,7 +309,17 @@ def test_linear_row_emitted(tmp_path: Path):
     assert row["metric_name"] == "accuracy"
 
 
-def test_completed_knn_survives_later_linear_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("error", "strict"),
+    [
+        (RuntimeError("linear probe failed"), False),
+        (RuntimeError("linear probe failed"), True),
+        (LinearProbeDivergedError("linear probe failed"), True),
+    ],
+)
+def test_completed_knn_survives_later_linear_failure(
+    tmp_path: Path, *, error: RuntimeError, strict: bool
+) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out)
 
@@ -321,12 +331,10 @@ def test_completed_knn_survives_later_linear_failure(tmp_path: Path) -> None:
             "torchgeo_bench.main.evaluate_knn",
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_logistic", side_effect=RuntimeError("linear probe failed")
-        ),
+        mock.patch("torchgeo_bench.main.evaluate_logistic", side_effect=error),
         pytest.raises(RuntimeError, match="linear probe failed"),
     ):
-        main(cfg)
+        main(cfg, strict=strict)
 
     df = pd.read_csv(out)
     assert list(df["method"]) == ["knn5"]
@@ -434,7 +442,10 @@ def test_non_resume_still_runs_even_with_matching_existing_rows(tmp_path: Path):
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 2
 
 
-def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_path: Path):
+@pytest.mark.parametrize("strict", [False, True])
+def test_model_eval_overrides_do_not_change_classification_resume_semantics(
+    tmp_path: Path, *, strict: bool
+) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
@@ -450,9 +461,11 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
             "+model.eval.merge_val=true",
             "+model.eval.knn_device=meta-device",
             "+model.eval.calibration.n_bins_linear=99",
+            "+model.eval.c_range=[-5,-4,2]",
         ],
     )
-    pd.DataFrame([_resume_row(cfg, method="knn7", metric_name="accuracy")]).to_csv(out, index=False)
+    method = "knn5" if strict else "knn7"
+    pd.DataFrame([_resume_row(cfg, method=method, metric_name="accuracy")]).to_csv(out, index=False)
     model = _chainable_model_mock()
 
     with (
@@ -474,7 +487,7 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
             ),
         ) as linear_mock,
     ):
-        main(cfg)
+        main(cfg, strict=strict)
 
     data_mock.assert_called_once()
     instantiate_mock.assert_called_once()
@@ -482,6 +495,8 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
     linear_mock.assert_called_once()
 
     linear_call = linear_mock.call_args
+    expected_start, expected_stop, _ = cfg.eval.c_range if strict else cfg.model.eval.c_range
+    assert linear_call.args[1] == pytest.approx([10**expected_start, 10**expected_stop])
     evaluation_cfg = linear_call.args[2].eval
     assert evaluation_cfg.bootstrap == cfg.eval.bootstrap
     assert evaluation_cfg.merge_val is cfg.eval.merge_val
@@ -491,8 +506,10 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
     linear_row = df[df["method"] == "linear"].iloc[0]
     assert linear_row["bootstrap"] == cfg.eval.bootstrap
     assert bool(linear_row["merge_val"]) is bool(cfg.eval.merge_val)
-    assert int((df["method"] == "knn7").sum()) == 1
     assert int((df["method"] == "linear").sum()) == 1
+    assert int((df["method"] == method).sum()) == 1
+    assert linear_row["c_range_start"] == expected_start
+    assert linear_row["c_range_stop"] == expected_stop
 
 
 def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):

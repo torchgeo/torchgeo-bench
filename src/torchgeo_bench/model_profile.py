@@ -96,16 +96,13 @@ def _count_gflops(
     precision: str = "float32",
 ) -> float:
     """Count one frozen forward pass without changing the model's parameters."""
-    from torch.utils.flop_counter import FlopCounterMode
-
     inputs = (
         sample[:1].detach()
         if isinstance(sample, torch.Tensor)
         else [feature[:1].detach() for feature in sample]
     )
-    actual_device = (
-        device if device is not None else sample.device if isinstance(sample, torch.Tensor) else sample[0].device
-    )
+    input_device = sample.device if isinstance(sample, torch.Tensor) else sample[0].device
+    actual_device = input_device if device is None else device
     parameters = {name: parameter.detach() for name, parameter in model.named_parameters()}
     with (
         torch.inference_mode(False),
@@ -119,7 +116,7 @@ def _count_gflops(
 
 def _precision_context(
     device: torch.device, precision: str
-) -> contextlib.AbstractContextManager[None]:
+) -> contextlib.AbstractContextManager[object]:
     if precision == "float32":
         return contextlib.nullcontext()
     if precision == "float16":
@@ -138,6 +135,33 @@ def _evaluation_mode(model: nn.Module) -> Iterator[None]:
     finally:
         for module, training in states.items():
             module.train(training)
+
+
+def _validate_profile_inputs(
+    model: nn.Module, sample_batch: torch.Tensor, device: torch.device, precision: str
+) -> torch.device:
+    """Validate float32 inputs before autocast and resolve the CUDA device index."""
+    if sample_batch.ndim == 0 or sample_batch.shape[0] <= 0:
+        raise ValueError("sample_batch must have a non-empty batch dimension")
+    if device.type not in {"cpu", "cuda"}:
+        raise ValueError("device must be 'cpu' or 'cuda'")
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA is not available")
+    if device.type == "cuda" and device.index is None:
+        device = torch.device("cuda", torch.cuda.current_device())
+    if sample_batch.device != device:
+        raise ValueError(f"sample_batch is on {sample_batch.device}, expected {device}")
+    if precision not in {"float32", "float16", "bfloat16"}:
+        raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
+    model_tensors = (*model.parameters(), *model.buffers())
+    if len({tensor.device for tensor in model_tensors}) > 1:
+        raise ValueError("model parameters and buffers must use one device")
+    if model_tensors and model_tensors[0].device != device:
+        raise ValueError(f"model tensors are on {model_tensors[0].device}, expected {device}")
+    floating_dtypes = {tensor.dtype for tensor in model_tensors if tensor.is_floating_point()}
+    if floating_dtypes - {torch.float32} or sample_batch.dtype != torch.float32:
+        raise ValueError("profiling requires float32 inputs and model tensors before autocast")
+    return device
 
 
 def profile_inference(  # noqa: PLR0913 - public profiling options
@@ -170,26 +194,7 @@ def profile_inference(  # noqa: PLR0913 - public profiling options
     """
     if n_warmup < 0 or n_measure <= 0:
         raise ValueError("n_warmup must be non-negative and n_measure must be positive")
-    if sample_batch.ndim == 0 or sample_batch.shape[0] <= 0:
-        raise ValueError("sample_batch must have a non-empty batch dimension")
-    if device.type not in {"cpu", "cuda"}:
-        raise ValueError("device must be 'cpu' or 'cuda'")
-    if device.type == "cuda" and not torch.cuda.is_available():
-        raise ValueError("CUDA is not available")
-    if device.type == "cuda" and device.index is None:
-        device = torch.device("cuda", torch.cuda.current_device())
-    if sample_batch.device != device:
-        raise ValueError(f"sample_batch is on {sample_batch.device}, expected {device}")
-    if precision not in {"float32", "float16", "bfloat16"}:
-        raise ValueError("precision must be 'float32', 'float16', or 'bfloat16'")
-    model_tensors = (*model.parameters(), *model.buffers())
-    if len({tensor.device for tensor in model_tensors}) > 1:
-        raise ValueError("model parameters and buffers must use one device")
-    if model_tensors and model_tensors[0].device != device:
-        raise ValueError(f"model tensors are on {model_tensors[0].device}, expected {device}")
-    floating_dtypes = {tensor.dtype for tensor in model_tensors if tensor.is_floating_point()}
-    if floating_dtypes - {torch.float32} or sample_batch.dtype != torch.float32:
-        raise ValueError("profiling requires float32 inputs and model tensors before autocast")
+    device = _validate_profile_inputs(model, sample_batch, device, precision)
     batch_size = sample_batch.shape[0]
     is_cuda = device.type == "cuda"
     with _evaluation_mode(model), torch.inference_mode(), _precision_context(device, precision):

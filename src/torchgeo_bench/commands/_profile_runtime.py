@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from ..config import compose_config, instantiate, list_model_configs
 from ..datasets import get_bench_dataset_class, get_datasets, list_datasets
@@ -24,40 +24,43 @@ from ..utils import resolve_device
 
 
 def _resolve_input_settings(
-    args: argparse.Namespace, cfg: Any, model_cfg: Any
+    args: argparse.Namespace, cfg: DictConfig, model_cfg: DictConfig
 ) -> tuple[int | None, str, str, str]:
     """Resolve input settings with CLI, model, then dataset precedence."""
     image_size = args.image_size
     if image_size is None:
-        image_size = model_cfg.get('image_size', cfg.dataset.get('image_size'))
+        image_size = model_cfg.get("image_size", cfg.dataset.get("image_size"))
     interpolation = args.interpolation
     if interpolation is None:
-        interpolation = model_cfg.get(
-            'interpolation', cfg.dataset.get('interpolation', 'bilinear')
-        )
-    normalization = args.normalization or 'bandspec_zscore'
-    input_normalization = model_cfg.get('input_normalization', normalization)
+        interpolation = model_cfg.get("interpolation", cfg.dataset.get("interpolation", "bilinear"))
+    normalization = args.normalization or "bandspec_zscore"
+    input_normalization = model_cfg.get("input_normalization", normalization)
     return image_size, interpolation, normalization, input_normalization
+
+
+def _validate_request(args: argparse.Namespace) -> torch.device:
+    if args.batch_size <= 0 or args.warmup < 0 or args.measurements <= 0:
+        raise SystemExit(
+            "error: batch-size must be positive, warmup non-negative, measurements positive"
+        )
+    if args.model not in list_model_configs():
+        raise SystemExit(f"error: unknown model {args.model!r}")
+    if args.dataset not in list_datasets():
+        raise SystemExit(f"error: unknown dataset {args.dataset!r}")
+    if args.seed < 0 or (args.image_size is not None and args.image_size <= 0):
+        raise SystemExit("error: seed must be non-negative and image-size positive")
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
+        raise SystemExit(f"error: requested {args.device!r}, but CUDA is unavailable")
+    return resolve_device(args.device)
 
 
 def run(args: argparse.Namespace) -> None:
     """Load one real dataset batch, measure it, and write one JSON record."""
-    if args.batch_size <= 0 or args.warmup < 0 or args.measurements <= 0:
-        raise SystemExit(
-            'error: batch-size must be positive, warmup non-negative, measurements positive'
-        )
-    if args.model not in list_model_configs():
-        raise SystemExit(f'error: unknown model {args.model!r}')
-    if args.dataset not in list_datasets():
-        raise SystemExit(f'error: unknown dataset {args.dataset!r}')
-    if args.seed < 0 or args.image_size is not None and args.image_size <= 0:
-        raise SystemExit('error: seed must be non-negative and image-size positive')
-    if args.device.startswith('cuda') and not torch.cuda.is_available():
-        raise SystemExit(f'error: requested {args.device!r}, but CUDA is unavailable')
-    requested = resolve_device(args.device)
-
-    cfg = compose_config([f'model={args.model}'])
+    requested = _validate_request(args)
+    cfg = compose_config([f"model={args.model}", f"seed={args.seed}"])
     model_cfg = resolve_model_config(cfg.model, args.dataset)
+    if args.image_size is not None and "image_size" in model_cfg:
+        model_cfg.image_size = args.image_size
     (
         effective_image_size,
         effective_interpolation,
@@ -65,16 +68,16 @@ def run(args: argparse.Namespace) -> None:
         input_normalization,
     ) = _resolve_input_settings(args, cfg, model_cfg)
     torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
+    np.random.seed(args.seed)  # noqa: NPY002 - Dataset transforms use NumPy's global RNG.
     dataset_class = get_bench_dataset_class(args.dataset)
     bands = (
         args.bands
-        if args.bands in {'rgb', 'all'}
-        else [name.strip() for name in args.bands.split(',')]
+        if args.bands in {"rgb", "all"}
+        else [name.strip() for name in args.bands.split(",")]
     )
     if isinstance(bands, list) and (not bands or any(not name for name in bands)):
-        raise SystemExit('error: bands must be non-empty names')
-    _, train_loader, _, _ = get_datasets(
+        raise SystemExit("error: bands must be non-empty names")
+    train_dataset, train_loader, _, _ = get_datasets(
         dataset_name=args.dataset,
         batch_size=args.batch_size,
         num_workers=0,
@@ -84,25 +87,36 @@ def run(args: argparse.Namespace) -> None:
         bands=bands,
         partition_name=args.partition,
     )
-    batch = next(iter(train_loader))['image']
+    batch = next(iter(train_loader))["image"]
     if batch.shape[0] != args.batch_size:
         raise RuntimeError(
-            f'dataset returned batch size {batch.shape[0]}, requested {args.batch_size}'
+            f"dataset returned batch size {batch.shape[0]}, requested {args.batch_size}"
         )
     dataset = dataset_class()
     selected_bands = dataset.select_band_specs(
         tuple(dataset.rgb_bands)
-        if args.bands == 'rgb'
+        if args.bands == "rgb"
         else None
-        if args.bands == 'all'
+        if args.bands == "all"
         else tuple(bands)
     )
     resolved_model_config = OmegaConf.to_container(model_cfg, resolve=True)
-    if 'eval' in model_cfg:
+    if "eval" in model_cfg:
         model_cfg.eval = {}
-    model = instantiate(
-        model_cfg, bands=selected_bands, normalization=requested_normalization
-    )
+    model_options: dict[str, Any] = {
+        "bands": selected_bands,
+        "normalization": requested_normalization,
+    }
+    if (
+        model_cfg.get("_target_")
+        in {
+            "torchgeo_bench.models.RCFBench",
+            "torchgeo_bench.models.rcf.RCFBench",
+        }
+        and model_cfg.get("mode") == "empirical"
+    ):
+        model_options["dataset"] = train_dataset
+    model = instantiate(model_cfg, **model_options)
     model = model.to(requested).eval()
     sample = batch.to(requested)
     result = profile_inference(
@@ -121,35 +135,35 @@ def run(args: argparse.Namespace) -> None:
         requested.index
         if requested.index is not None
         else torch.cuda.current_device()
-        if requested.type == 'cuda'
+        if requested.type == "cuda"
         else None
     )
     hardware = (
         torch.cuda.get_device_name(device_index)
-        if requested.type == 'cuda'
+        if requested.type == "cuda"
         else platform.platform()
     )
     record = {
-        'timestamp_utc': datetime.now(UTC).isoformat(),
-        'model': args.model,
-        'dataset': args.dataset,
-        'seed': args.seed,
-        'bands': [spec.name for spec in selected_bands],
-        'normalization': requested_normalization,
-        'input_normalization': input_normalization,
-        'dataset_partition': args.partition,
-        'sample_sha256': sample_hash,
-        'model_config': resolved_model_config,
-        'model_config_hash': model_config_hash,
-        'device_index': device_index,
-        'input_shape': list(sample.shape),
-        'image_size': effective_image_size,
-        'interpolation': effective_interpolation,
-        'device': str(requested),
-        'hardware': hardware,
-        'torch_version': torch.__version__,
-        'python_version': sys.version.split()[0],
-        'scope': 'encoder inference on one real dataset batch',
-        'profile': asdict(result),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "model": args.model,
+        "dataset": args.dataset,
+        "seed": args.seed,
+        "bands": [spec.name for spec in selected_bands],
+        "normalization": requested_normalization,
+        "input_normalization": input_normalization,
+        "dataset_partition": args.partition,
+        "sample_sha256": sample_hash,
+        "model_config": resolved_model_config,
+        "model_config_hash": model_config_hash,
+        "device_index": device_index,
+        "input_shape": list(sample.shape),
+        "image_size": effective_image_size,
+        "interpolation": effective_interpolation,
+        "device": str(requested),
+        "hardware": hardware,
+        "torch_version": torch.__version__,
+        "python_version": sys.version.split()[0],
+        "scope": "encoder inference on one real dataset batch",
+        "profile": asdict(result),
     }
     print(json.dumps(record, allow_nan=False))

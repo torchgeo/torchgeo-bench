@@ -9,9 +9,9 @@ import argparse
 
 _RUN_EPILOG = """\
 examples:
-  torchgeo-bench run -m timm/resnet50 -d m-eurosat
-  torchgeo-bench run -m torchgeo/scalemae_large_fmow -d m-eurosat,m-so2sat --device cuda:1
-  torchgeo-bench run -m rcf dataset.batch_size=128 eval.knn_k=10
+  python -m torchgeo_bench.cli run -m timm/resnet50 -d m-eurosat
+  python -m torchgeo_bench.cli run -m torchgeo/scalemae_large_fmow -d m-eurosat --device cuda:1
+  python -m torchgeo_bench.cli run -m rcf dataset.batch_size=128 eval.knn_k=10
 
 Any key=value pair overrides the config (values parse as YAML, e.g.
 dataset.names=[m-eurosat]). Flags are shorthand for common overrides and win
@@ -28,9 +28,35 @@ def _add_override_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
+    """Share the fixed-batch profiling options between both entry points."""
+    parser.add_argument("-m", "--model", required=True, help="Model preset")
+    parser.add_argument("-d", "--dataset", required=True, help="One dataset name")
+    parser.add_argument("--partition", default="default", help="Dataset partition")
+    parser.add_argument("--device", default="cpu", help="cpu, cuda, or cuda:<index>")
+    parser.add_argument("--bands", default="rgb", help="rgb, all, or comma-separated bands")
+    parser.add_argument("--image-size", type=int, default=None)
+    parser.add_argument(
+        "--interpolation", choices=("area", "bilinear", "bicubic", "nearest"), default=None
+    )
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--measurements", type=int, default=20)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--normalization",
+        choices=("bandspec_zscore", "model_native", "minmax", "minmax_zscore", "identity"),
+        default=None,
+    )
+    parser.add_argument(
+        "--precision", choices=("float32", "float16", "bfloat16"), default="float32"
+    )
+    parser.add_argument("--count-flops", action="store_true")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="torchgeo-bench",
+        prog="python -m torchgeo_bench.cli",
         description="Benchmark geospatial foundation models on GeoBench datasets.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -127,36 +153,7 @@ def _build_parser() -> argparse.ArgumentParser:
     flops.set_defaults(func="flops")
 
     profile = sub.add_parser("profile", help="Measure one real inference batch")
-    profile.add_argument("-m", "--model", required=True, help="Model preset")
-    profile.add_argument("-d", "--dataset", required=True, help="One dataset name")
-    profile.add_argument("--partition", default="default", help="Dataset partition")
-    profile.add_argument("--device", default="cpu", help="cpu, cuda, or cuda:<index>")
-    profile.add_argument("--bands", default="rgb", help="rgb, all, or comma-separated bands")
-    profile.add_argument("--image-size", type=int, default=None)
-    profile.add_argument(
-        "--interpolation",
-        choices=("area", "bilinear", "bicubic", "nearest"),
-        default=None,
-    )
-    profile.add_argument("--batch-size", type=int, default=32)
-    profile.add_argument("--warmup", type=int, default=3)
-    profile.add_argument("--measurements", type=int, default=20)
-    profile.add_argument("--seed", type=int, default=0)
-    profile.add_argument(
-        "--normalization",
-        choices=(
-            "bandspec_zscore",
-            "model_native",
-            "minmax",
-            "minmax_zscore",
-            "identity",
-        ),
-        default=None,
-    )
-    profile.add_argument(
-        "--precision", choices=("float32", "float16", "bfloat16"), default="float32"
-    )
-    profile.add_argument("--count-flops", action="store_true")
+    add_profile_arguments(profile)
     profile.set_defaults(func="profile")
 
     download = sub.add_parser("download", help="Download benchmark datasets")

@@ -23,8 +23,8 @@ features in the spirit of MOSAIKS.
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=rcf
-   $ torchgeo-bench run model=rcf model.mode=empirical model.features=1024
+   $ python -m torchgeo_bench.cli run model=rcf
+   $ python -m torchgeo_bench.cli run model=rcf model.mode=empirical model.features=1024
 
 Image statistics baseline
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -34,7 +34,7 @@ returns per-channel mean / std as the feature vector.
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=imagestats
+   $ python -m torchgeo_bench.cli run model=imagestats
 
 timm — ImageNet-pretrained CNNs and ViTs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -46,10 +46,10 @@ ViT / DeiT / Swin variants live under :file:`timm/vit/`.
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=timm/resnet50
-   $ torchgeo-bench run model=timm/convnext_base dataset.names=[m-eurosat]
-   $ torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224
-   $ torchgeo-bench run model=timm/vit/swin_base_patch4_window7_224 eval.skip_linear=true
+   $ python -m torchgeo_bench.cli run model=timm/resnet50
+   $ python -m torchgeo_bench.cli run model=timm/convnext_base dataset.names=[m-eurosat]
+   $ python -m torchgeo_bench.cli run model=timm/vit/vit_base_patch16_224 dataset.image_size=224
+   $ python -m torchgeo_bench.cli run model=timm/vit/swin_base_patch4_window7_224 eval.skip_linear=true
 
 ViT-style backbones expect a fixed spatial resolution.  Set
 ``dataset.image_size=224`` (``bilinear`` by default; switch to
@@ -82,22 +82,22 @@ RGB-only self-supervised checkpoints from torchgeo's model hub.
 .. code-block:: console
 
    $ # Sentinel-2 RGB SSL
-   $ torchgeo-bench run model=torchgeo/resnet50_s2rgb_moco
-   $ torchgeo-bench run model=torchgeo/resnet18_s2rgb_seco
-   $ torchgeo-bench run model=torchgeo/resnet50_fmow_gassl
+   $ python -m torchgeo_bench.cli run model=torchgeo/resnet50_s2rgb_moco
+   $ python -m torchgeo_bench.cli run model=torchgeo/resnet18_s2rgb_seco
+   $ python -m torchgeo_bench.cli run model=torchgeo/resnet50_fmow_gassl
 
    $ # ScaleMAE on fMoW RGB
-   $ torchgeo-bench run model=torchgeo/scalemae_large_fmow
+   $ python -m torchgeo_bench.cli run model=torchgeo/scalemae_large_fmow
 
    $ # DOFA — band-agnostic (currently configured for Sentinel-2 RGB wavelengths)
-   $ torchgeo-bench run model=torchgeo/dofa_base
+   $ python -m torchgeo_bench.cli run model=torchgeo/dofa_base
 
    $ # Satlas Swin-V2 (NAIP / Sentinel-2 RGB)
-   $ torchgeo-bench run model=torchgeo/swinv2b_naip_satlas_mi
-   $ torchgeo-bench run model=torchgeo/swinv2b_s2rgb_satlas_mi
+   $ python -m torchgeo_bench.cli run model=torchgeo/swinv2b_naip_satlas_mi
+   $ python -m torchgeo_bench.cli run model=torchgeo/swinv2b_s2rgb_satlas_mi
 
    $ # EarthLoc place-recognition descriptor
-   $ torchgeo-bench run model=torchgeo/earthloc_s2_resnet50
+   $ python -m torchgeo_bench.cli run model=torchgeo/earthloc_s2_resnet50
 
 OlmoEarth (AI2)
 ^^^^^^^^^^^^^^^
@@ -110,19 +110,19 @@ optional ``olmoearth`` extra:
    $ pip install 'torchgeo-bench[olmoearth]'
 
    $ # OlmoEarth v1 (Nano / Tiny / Base / Large)
-   $ torchgeo-bench run model=olmoearth_nano
-   $ torchgeo-bench run model=olmoearth_base
-   $ torchgeo-bench run model=olmoearth_large dataset.bands=all
+   $ python -m torchgeo_bench.cli run model=olmoearth_nano
+   $ python -m torchgeo_bench.cli run model=olmoearth_base
+   $ python -m torchgeo_bench.cli run model=olmoearth_large dataset.bands=all
 
    $ # OlmoEarth v1.1 (Nano / Tiny / Base)
-   $ torchgeo-bench run model=olmoearth_v1_1_nano
-   $ torchgeo-bench run model=olmoearth_v1_1_tiny
-   $ torchgeo-bench run model=olmoearth_v1_1_base
+   $ python -m torchgeo_bench.cli run model=olmoearth_v1_1_nano
+   $ python -m torchgeo_bench.cli run model=olmoearth_v1_1_tiny
+   $ python -m torchgeo_bench.cli run model=olmoearth_v1_1_base
 
    $ # OlmoEarth v1.2 (Nano / Tiny / Small / Base)
-   $ torchgeo-bench run model=olmoearth_v1_2_nano
-   $ torchgeo-bench run model=olmoearth_v1_2_small
-   $ torchgeo-bench run model=olmoearth_v1_2_base
+   $ python -m torchgeo_bench.cli run model=olmoearth_v1_2_nano
+   $ python -m torchgeo_bench.cli run model=olmoearth_v1_2_small
+   $ python -m torchgeo_bench.cli run model=olmoearth_v1_2_base
 
 OlmoEarth v1.1 uses a **linear patch embedding** (vs. convolutional in v1),
 a single bandset per modality, and updated masking/loss functions, yielding a
@@ -220,7 +220,7 @@ SAM 3 vision encoder
 .. code-block:: console
 
    $ pip install 'torchgeo-bench[sam3]'
-   $ torchgeo-bench run model=sam3_encoder dataset.bands=[red,green,blue]
+   $ python -m torchgeo_bench.cli run model=sam3_encoder dataset.bands=[red,green,blue]
 
 Adding a new model
 ------------------

@@ -223,9 +223,9 @@ registered dataset:
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.names=[m-eurosat]
-   $ torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
-   $ torchgeo-bench run dataset.names=all
+   $ python -m torchgeo_bench.cli run dataset.names=[m-eurosat]
+   $ python -m torchgeo_bench.cli run dataset.names=[burn_scars,pastis,flair2]
+   $ python -m torchgeo_bench.cli run dataset.names=all
 
 Bands selection
 ---------------
@@ -248,7 +248,7 @@ distinguishable.
 .. code-block:: console
 
    $ # All 13 Sentinel-2 bands on EuroSAT with a pretrained timm ResNet-18
-   $ torchgeo-bench run model=timm/resnet18 dataset.names=[m-eurosat] dataset.bands=all
+   $ python -m torchgeo_bench.cli run model=timm/resnet18 dataset.names=[m-eurosat] dataset.bands=all
 
 Multi-modality (V2)
 -------------------
@@ -286,7 +286,7 @@ ignore it.
 .. code-block:: console
 
    $ # Train on 1% of the V1 training split, write to a separate CSV
-   $ torchgeo-bench run dataset.partition=0.01x_train output=results/1pct.csv
+   $ python -m torchgeo_bench.cli run dataset.partition=0.01x_train output=results/1pct.csv
 
 Common partition values: ``default``, ``0.01x_train``, ``0.02x_train``,
 ``0.05x_train``, ``0.10x_train``, ``0.20x_train``, ``0.50x_train``,

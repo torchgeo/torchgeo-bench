@@ -2,7 +2,7 @@
 
 Run from the repository root:
 
-    PYTHONPATH=. uv run torchgeo-bench run mode=coord model=sincos \
+    PYTHONPATH=. uv run python -m torchgeo_bench.cli run mode=coord model=sincos \
         model._target_=examples.coordbench_location_encoder.FourierLocationEncoder \
         model.name=fourier +model.num_frequencies=8 \
         coord.names=california_housing coord.methods=[linear] coord.folds=2 \

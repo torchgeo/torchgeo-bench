@@ -43,7 +43,9 @@ def test_representative_sweep_passes_seed_and_rejects_unknown_metadata(tmp_path:
     )
     runner = sweep.SweepRunner(config)
 
-    assert "seed=17" in runner._command(runner.jobs[0], gpu=0, attempt=1)
+    command = runner._command(runner.jobs[0], gpu=0, attempt=1)
+    assert command[:4] == [sys.executable, "-m", "torchgeo_bench.cli", "run"]
+    assert "seed=17" in command
     assert sweep.sweep_metadata(ROOT, image_size=224, seed=17)["seed"] == 17
 
     config.output.write_text("dataset\n")
@@ -67,7 +69,9 @@ def test_protocol_study_passes_configured_seed(tmp_path: Path) -> None:
     )
     runner = study.StudyRunner(config)
 
-    assert "seed=23" in runner._command(runner.jobs[0], gpu=0, attempt=1)
+    command = runner._command(runner.jobs[0], gpu=0, attempt=1)
+    assert command[:4] == [sys.executable, "-m", "torchgeo_bench.cli", "run"]
+    assert "seed=23" in command
     assert study.study_metadata(ROOT, seed=23)["seed"] == 23
 
 
@@ -85,9 +89,10 @@ def test_queue_dry_run_logs_without_launching_jobs(
 
     assert runner.run_jobs(jobs, [0, 2], output="results.csv", dry_run=True) == 0
     assert (
-        "torchgeo-bench run model=rcf device=cuda:0 output=results.csv resume=true" in caplog.text
+        "-m torchgeo_bench.cli run model=rcf device=cuda:0 output=results.csv resume=true"
+        in caplog.text
     )
-    assert "torchgeo-bench run model=timm/resnet18 device=cuda:2" in caplog.text
+    assert "-m torchgeo_bench.cli run model=timm/resnet18 device=cuda:2" in caplog.text
 
 
 @pytest.mark.parametrize("returncode", [0, 1])
@@ -97,6 +102,7 @@ def test_queue_reports_job_result_at_the_expected_log_level(
     runner = _load_script("../experiments/_runner.py")
 
     def run_command(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+        assert command[:4] == [sys.executable, "-m", "torchgeo_bench.cli", "run"]
         return subprocess.CompletedProcess(command, returncode, "", "failed to load checkpoint")
 
     monkeypatch.setattr(runner.subprocess, "run", run_command)

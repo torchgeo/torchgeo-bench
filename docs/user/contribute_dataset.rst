@@ -237,7 +237,7 @@ and produces sensible results:
 
 .. code-block:: console
 
-   $ torchgeo-bench run -m timm/resnet50 -d my_dataset --skip-linear --bootstrap 10
+   $ python -m torchgeo_bench.cli run -m timm/resnet50 -d my_dataset --skip-linear --bootstrap 10
 
 The config default is ``device: cuda:0``.  On a machine without a GPU, pass
 ``--device cpu`` or the run fails inside feature extraction with a bare CUDA

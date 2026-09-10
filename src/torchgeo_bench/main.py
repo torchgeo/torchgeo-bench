@@ -954,7 +954,7 @@ def run_dataset(
     model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
     eval_cfg = cast(
         DictConfig,
-        OmegaConf.merge(model_eval or {}, cfg.eval)
+        OmegaConf.merge(OmegaConf.create(model_eval or {}), cfg.eval)
         if strict
         else OmegaConf.merge(cfg.eval, model_eval or {}),
     )

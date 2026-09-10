@@ -5,9 +5,9 @@
 
 import argparse
 
-from . import _profile_runtime as runtime
+from .. import commands
 
 
 def profile(args: argparse.Namespace) -> None:
     """Profile one selected model and dataset."""
-    runtime.run(args)
+    commands._profile_runtime.run(args)

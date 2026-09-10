@@ -1,5 +1,6 @@
 from . import _image as _image
 from . import _image_runtime as _image_runtime
+from . import _profile_runtime as _profile_runtime
 from ._download import download as download
 from ._download_runtime import download_module as download_module
 from ._flops import flops as flops
