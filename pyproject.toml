@@ -130,7 +130,6 @@ exclude = [
   "outputs",
 ]
 extend-exclude = [
-  "scripts/check_refactor_style.py",
   "src/torchgeo_bench/commands",
   "src/torchgeo_bench/config_schema.py",
   "src/torchgeo_bench/image_cli.py",
