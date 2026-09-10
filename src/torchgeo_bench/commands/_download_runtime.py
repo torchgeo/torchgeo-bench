@@ -5,4 +5,4 @@
 
 import importlib
 
-download_module = importlib.import_module('torchgeo_bench.download')
+download_module = importlib.import_module("torchgeo_bench.download")
