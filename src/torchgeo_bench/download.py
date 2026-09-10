@@ -27,6 +27,31 @@ GEOBENCH_V2_REPO_PREFIX = "aialliance"
 
 DEFAULT_V2_DATASETS: tuple[str, ...] = tuple(list_v2_datasets())
 
+V1_DATASETS: tuple[str, ...] = (
+    "m-eurosat",
+    "m-forestnet",
+    "m-so2sat",
+    "m-pv4ger",
+    "m-brick-kiln",
+    "m-bigearthnet",
+)
+TORCHGEO_DATASETS: tuple[str, ...] = ("eurosat", "resisc45")
+DOWNLOADABLE_DATASETS: tuple[str, ...] = V1_DATASETS + DEFAULT_V2_DATASETS + TORCHGEO_DATASETS
+
+
+def _validate_names(names: list[str]) -> list[str]:
+    """Validate and deduplicate names before creating download roots."""
+    if not names:
+        raise ValueError("datasets must contain at least one dataset name")
+    unique = list(dict.fromkeys(names))
+    unknown = sorted(set(unique) - set(DOWNLOADABLE_DATASETS))
+    if unknown:
+        raise ValueError(
+            f"Unknown dataset(s): {', '.join(unknown)}. "
+            f"Available: {', '.join(DOWNLOADABLE_DATASETS)}"
+        )
+    return unique
+
 
 def download_geobench_v1(output_dir: Path, datasets: list[str] | None = None) -> None:
     """Download verified, pickle-free GeoBench V1 shards to ``output_dir``.
@@ -63,8 +88,6 @@ def download_geobench_v2(output_dir: Path, datasets: list[str] | None = None) ->
         datasets: Specific dataset names to fetch. ``None`` downloads
             :data:`DEFAULT_V2_DATASETS`.
     """
-    v2_root = Path(output_dir) / "geobenchv2"
-    v2_root.mkdir(parents=True, exist_ok=True)
     if datasets is None:
         names = list(DEFAULT_V2_DATASETS)
     elif not datasets:
@@ -78,6 +101,8 @@ def download_geobench_v2(output_dir: Path, datasets: list[str] | None = None) ->
             f"Unknown GeoBench V2 dataset(s): {', '.join(unknown)}. "
             f"Available: {', '.join(DEFAULT_V2_DATASETS)}"
         )
+    v2_root = Path(output_dir) / "geobenchv2"
+    v2_root.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading %d GeoBench v2 dataset(s) to %s", len(names), v2_root)
     for name in names:
         download_geobench_v2_dataset(name, v2_root)
@@ -106,3 +131,26 @@ def download_resisc45(output_dir: Path) -> None:
     for split in ("train", "val", "test"):
         RESISC45(root=str(target), split=split, download=True, checksum=True)
     logger.info("RESISC45 download complete.")
+
+
+def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None:
+    """Download individually named benchmark datasets.
+
+    Args:
+        names: Dataset names from :data:`DOWNLOADABLE_DATASETS`.
+        output_dir: Benchmark data root.
+
+    Raises:
+        ValueError: If a name is unknown or *names* is empty.
+    """
+    selected = _validate_names(names)
+    v1 = [name for name in selected if name in V1_DATASETS]
+    v2 = [name for name in selected if name in DEFAULT_V2_DATASETS]
+    for name in v1:
+        download_geobench_v1(output_dir, datasets=[name])
+    if v2:
+        download_geobench_v2(output_dir, datasets=v2)
+    if "eurosat" in selected:
+        download_eurosat(output_dir)
+    if "resisc45" in selected:
+        download_resisc45(output_dir)

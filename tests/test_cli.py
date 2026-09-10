@@ -69,7 +69,6 @@ def test_interleaved_overrides_keep_their_order(command, overrides, capsys) -> N
         ["run", "--unknown=value", "--print-config"],
         ["run", "model=rcf", "--print-config", "--unknown=value"],
         ["flops", "model=rcf", "--print-config", "--unknown=value"],
-        ["download", "eurosat", "model=rcf"],
     ],
 )
 def test_unrecognized_arguments_are_rejected(argv, capsys) -> None:
@@ -132,10 +131,9 @@ def test_run_model_help_rejects_path_traversal() -> None:
         cli_main(["run", "--model-help", "../flops_config"])
 
 
-def test_download_invalid_target(capsys) -> None:
-    with pytest.raises(SystemExit):
+def test_download_invalid_target() -> None:
+    with pytest.raises(SystemExit, match="Unknown dataset"):
         cli_main(["download", "bogus"])
-    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_download_geobench_v1(monkeypatch) -> None:
@@ -158,6 +156,43 @@ def test_download_geobench_v2_with_datasets(monkeypatch) -> None:
     monkeypatch.setattr("torchgeo_bench.download.download_geobench_v2", _fake_download)
     cli_main(["download", "geobench_v2", "--datasets", "burn_scars,benv2"])
     assert calls == [("data", ["burn_scars", "benv2"])]
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ["m-eurosat", "burn_scars"],
+        ["m-eurosat", "eurosat"],
+        ["eurosat", "resisc45"],
+        ["m-eurosat", "burn_scars", "eurosat", "resisc45"],
+    ],
+)
+def test_download_named_datasets(monkeypatch, names: list[str]) -> None:
+    calls: list[tuple[list[str], str]] = []
+
+    def _fake_download(names, path) -> None:
+        calls.append((names, str(path)))
+
+    monkeypatch.setattr("torchgeo_bench.download.download_datasets", _fake_download)
+    cli_main(["download", *names])
+    assert calls == [(names, "data")]
+
+
+@pytest.mark.parametrize("names", [["geobench_v1", "eurosat"], ["geobench_v1", "geobench_v2"]])
+def test_download_rejects_mixed_collection_targets(names: list[str]) -> None:
+    with pytest.raises(SystemExit, match="collection targets cannot be mixed"):
+        cli_main(["download", *names])
+
+
+@pytest.mark.parametrize("invalid", ["unknown", "model=rcf"])
+def test_download_named_dataset_rejects_unknown_before_backend(monkeypatch, invalid: str) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "torchgeo_bench.download.snapshot_download", lambda *args, **kwargs: calls.append(args)
+    )
+    with pytest.raises(SystemExit, match="Unknown dataset"):
+        cli_main(["download", "m-eurosat", invalid])
+    assert calls == []
 
 
 def test_download_eurosat(monkeypatch) -> None:

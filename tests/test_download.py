@@ -17,6 +17,7 @@ from torchgeo_bench.datasets.geobench_v1 import _V1Dataset
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
 from torchgeo_bench.download import (
     DEFAULT_V2_DATASETS,
+    download_datasets,
     download_eurosat,
     download_geobench_v1,
     download_geobench_v2,
@@ -109,7 +110,7 @@ def test_v1_requires_explicit_download_before_loading(
     monkeypatch.setattr(geobench_v1, "V1_ROOT", tmp_path / "hdf5")
     monkeypatch.setattr(geobench_v1, "V1_SHARDED_ROOT", root)
     bench = get_bench_dataset_class("m-eurosat")()
-    with pytest.raises(FileNotFoundError, match="download geobench_v1"):
+    with pytest.raises(FileNotFoundError, match="download m-eurosat"):
         bench.get_dataset("train", bands=tuple(bench.rgb_bands))
     v1_download.assert_not_called()
 
@@ -130,6 +131,21 @@ def test_v1_archive_checksums_cover_the_published_suite() -> None:
     assert len(checksums) == 89
     assert {name.split("/", 1)[0] for name in checksums} == datasets
     assert all(name.endswith(".tar") and len(value) == 64 for name, value in checksums.items())
+
+
+def test_named_v1_downloads_use_the_verified_json_backend(tmp_path: Path, v1_download) -> None:
+    from torchgeo_bench.cli import main
+
+    arguments = ["download", "m-eurosat", "--output-dir", str(tmp_path)]
+    main(arguments)
+    assert v1_download.call_args.kwargs["repo_id"] == v1.V1_HF_REPO_ID
+    assert v1_download.call_args.kwargs["revision"] == v1.V1_HF_REVISION
+    assert v1_download.call_args.kwargs["allow_patterns"] == ["m-eurosat/*"]
+
+    path = tmp_path / "classification_v1.0_wds/m-eurosat/shard_00000.tar"
+    path.write_bytes(b"corrupt cached download")
+    with pytest.raises(SystemExit, match="archive checksum mismatch"):
+        main(arguments)
 
 
 def test_download_geobench_v2_subset(tmp_path: Path) -> None:
@@ -199,3 +215,47 @@ def test_download_resisc45_verifies_the_archive_checksum(tmp_path: Path) -> None
         download_resisc45(tmp_path)
 
     assert all(kwargs["checksum"] for _, kwargs in resisc_mock.call_args_list)
+
+
+def test_download_datasets_dispatches_only_selected_names(tmp_path: Path) -> None:
+    with (
+        mock.patch("torchgeo_bench.download.download_geobench_v1") as v1,
+        mock.patch("torchgeo_bench.download.download_geobench_v2") as v2,
+        mock.patch("torchgeo_bench.download.download_eurosat") as eurosat,
+        mock.patch("torchgeo_bench.download.download_resisc45") as resisc45,
+    ):
+        download_datasets(["m-eurosat", "burn_scars", "eurosat"], tmp_path)
+
+    v1.assert_called_once_with(tmp_path, datasets=["m-eurosat"])
+    v2.assert_called_once_with(tmp_path, datasets=["burn_scars"])
+    eurosat.assert_called_once_with(tmp_path)
+    resisc45.assert_not_called()
+
+
+def test_download_datasets_validates_every_name_before_dispatch(tmp_path: Path) -> None:
+    with (
+        mock.patch("torchgeo_bench.download.snapshot_download") as snapshot,
+        pytest.raises(ValueError, match="Unknown dataset"),
+    ):
+        download_datasets(["m-eurosat", "not-a-dataset"], tmp_path)
+
+    snapshot.assert_not_called()
+
+
+def test_download_datasets_deduplicates_names(tmp_path: Path) -> None:
+    with mock.patch("torchgeo_bench.download.download_eurosat") as eurosat:
+        download_datasets(["eurosat", "eurosat"], tmp_path)
+
+    eurosat.assert_called_once_with(tmp_path)
+
+
+def test_v1_loader_reports_explicit_download_for_missing_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from torchgeo_bench.datasets import geobench_v1
+    from torchgeo_bench.datasets.m_eurosat import MEurosat
+
+    monkeypatch.setattr(geobench_v1, "V1_ROOT", tmp_path / "hdf5")
+    monkeypatch.setattr(geobench_v1, "V1_SHARDED_ROOT", tmp_path / "sharded")
+    with pytest.raises(FileNotFoundError, match="download m-eurosat"):
+        MEurosat().get_dataset("train")
