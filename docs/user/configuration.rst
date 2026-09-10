@@ -1,18 +1,19 @@
 Configuration
 =============
 
-``torchgeo-bench`` is configured with `OmegaConf <https://omegaconf.readthedocs.io>`_
-YAML files.  The primary config lives at :file:`src/torchgeo_bench/conf/config.yaml`
+This page describes the OmegaConf interface at ``python -m torchgeo_bench.cli``. The ``torchgeo-bench run`` image command instead accepts validated YAML with ``--config``; use ``torchgeo-bench run --config-help`` for that schema.
+
+The primary OmegaConf config lives at :file:`src/torchgeo_bench/conf/config.yaml`
 and is composed with a model preset selected from
 :file:`src/torchgeo_bench/conf/model/`.
 
 Every value in the config can be overridden on the command line using
 dotted-path ``key=value`` syntax (common settings also have flags — see
-``torchgeo-bench run --help``):
+``python -m torchgeo_bench.cli run --help``):
 
 .. code-block:: console
 
-   $ torchgeo-bench run \
+   $ python -m torchgeo_bench.cli run \
        model=timm/resnet50 \
        dataset.names=[m-eurosat] \
        eval.bootstrap=100 \

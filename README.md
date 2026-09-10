@@ -18,7 +18,7 @@ OmegaConf configs.
   random, spatial-block, and official holdouts.
 - **Config-driven** — sweep models, datasets, partitions, image sizes, and
   bands without code changes.
-- **Resumable** — `resume=true` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
+- **Resumable** — `--resume` skips already-computed `(dataset, method, model, …)` rows. Atomic CSV appends are safe across parallel jobs.
 - **Bring your own model** — copy
   [`contrib_template.py`](src/torchgeo_bench/models/contrib_template.py),
   implement `_forward_patch_features`, and add a one-file model config.
@@ -69,11 +69,12 @@ for all options.
 ## Run a basic experiment
 
 ```bash
-# Default: random convolutional features (RCF) on every available dataset
-torchgeo-bench run
+# Inspect available presets and datasets without loading ML dependencies
+torchgeo-bench models
+torchgeo-bench datasets
 
 # A single dataset with a pretrained ImageNet ResNet-50
-torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
+torchgeo-bench run --model timm/resnet50 --dataset m-eurosat
 ```
 
 The default device is `cuda:0`. On a machine without a working CUDA GPU (or if
@@ -81,10 +82,14 @@ a GPU run crashes — see [troubleshooting](https://torchgeo.org/torchgeo-bench/
 fall back to CPU:
 
 ```bash
-torchgeo-bench run dataset.names=[m-eurosat] device=cpu
+torchgeo-bench run --model rcf --dataset m-eurosat --device cpu
 ```
 
-Results are appended to `results/models/<model name>.csv`, which **ship pre-populated with reference results** — to start from a clean slate, write to your own file with `output=results/my_run.csv`. Re-run with `resume=true` to skip already-completed rows. Each evaluation is saved as soon as it finishes, so a later failure does not discard completed metrics. Without an explicit `output=`, one-time profile/intrinsic-dim measurements go to their own `results/profiles/` and `results/intrinsic_dim/` files instead, so routine metrics reruns don't touch them.
+Results are appended to `results/models/<model name>.csv`, which **ship pre-populated with reference results**. To start from a clean slate, set `output.file: results/my_run.csv` in a YAML file passed with `--config`. Re-run with `--resume` to skip completed rows. Each evaluation is saved as soon as it finishes, so a later failure does not discard completed metrics.
+
+See `examples/image-run.yaml` for a complete config and `run --config-help` for its schema. The standalone `profile` command writes JSON to stdout; redirect it to a separate file when needed.
+
+The previous interface remains available through `python -m torchgeo_bench.cli` for existing `key=value` scripts, `flops`, and coordinate workflows. Without an explicit `output=`, its profile and intrinsic-dimension rows retain their separate per-model files.
 
 ## CoordBench — location encoders
 
@@ -98,10 +103,10 @@ is probed with **KNN** and a **ridge linear** head under **random** or
 
 ```bash
 # MIND on the full suite, using random and spatial cross-validation
-torchgeo-bench run mode=coord model=mind coord.split=both
+python -m torchgeo_bench.cli run mode=coord model=mind coord.split=both
 
 # One dataset family with the sine/cosine baseline and a linear probe
-torchgeo-bench run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
+python -m torchgeo_bench.cli run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
 ```
 
 `model=mind` and `model=mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),

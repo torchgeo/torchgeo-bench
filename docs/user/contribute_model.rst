@@ -177,7 +177,7 @@ coverage and write the results to :file:`results/contributed/<model_name>.csv`:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model \
+   $ python -m torchgeo_bench.cli run model=new_model \
        dataset.names=[m-eurosat,m-so2sat,m-bigearthnet,m-brick-kiln,m-forestnet,m-pv4ger] \
        output=results/contributed/new_model.csv
 
@@ -185,7 +185,7 @@ For V2 datasets:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model \
+   $ python -m torchgeo_bench.cli run model=new_model \
        dataset.names=[benv2,treesatai,so2sat,forestnet] \
        output=results/contributed/new_model.csv resume=true
 

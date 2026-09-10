@@ -20,11 +20,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 @dataclass
 class Job:
-    """One ``torchgeo-bench run`` invocation.
+    """One legacy benchmark CLI invocation.
 
     Attributes:
         label: Short human-readable identifier for log lines.
-        overrides: Config overrides forwarded to ``torchgeo-bench run``
+        overrides: Config overrides forwarded to ``python -m torchgeo_bench.cli run``
             (e.g. ``["model=timm/resnet18", "dataset.names=[m-eurosat]"]``).
             ``device`` and ``output`` are appended automatically by the
             runner — do not include them here.
@@ -71,7 +71,9 @@ def default_output(script_file: str | Path) -> str:
 def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResult:
     """Run one benchmark job on the assigned GPU."""
     cmd = [
-        "torchgeo-bench",
+        sys.executable,
+        "-m",
+        "torchgeo_bench.cli",
         "run",
         *job.overrides,
         f"device=cuda:{gpu}",
@@ -183,7 +185,8 @@ def run_jobs(
             gpu = devices[(index - 1) % len(devices)]
             logger.info("[%d/%d] %s -> cuda:%d", index, total, job.label, gpu)
             logger.info(
-                "torchgeo-bench run %s device=cuda:%d output=%s resume=true",
+                "%s -m torchgeo_bench.cli run %s device=cuda:%d output=%s resume=true",
+                sys.executable,
                 " ".join(job.overrides),
                 gpu,
                 output,

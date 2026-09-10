@@ -30,15 +30,15 @@ CUDA out of memory
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.batch_size=32
+   $ python -m torchgeo_bench.cli run dataset.batch_size=32
    $ # or run on CPU
-   $ torchgeo-bench run device=cpu
+   $ python -m torchgeo_bench.cli run device=cpu
 
 For segmentation, also try
 
 .. code-block:: console
 
-   $ torchgeo-bench run \
+   $ python -m torchgeo_bench.cli run \
        eval.segmentation.cache_dtype=float32 \
        eval.segmentation.cache_features=false
 
@@ -64,7 +64,7 @@ Either way you can fall back to CPU (slower, but always works):
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.names=[m-eurosat] device=cpu
+   $ python -m torchgeo_bench.cli run dataset.names=[m-eurosat] device=cpu
 
 CPU is fine for the small V1 splits, but large V2 datasets (e.g. ``benv2`` /
 BigEarthNet) can take far longer — prefer a working GPU for those.

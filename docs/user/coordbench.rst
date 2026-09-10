@@ -19,7 +19,7 @@ small CPU example evaluates one regression benchmark with two random folds:
 
 .. code-block:: console
 
-   $ torchgeo-bench run \
+   $ python -m torchgeo_bench.cli run \
        mode=coord \
        model=sincos \
        coord.names=california_housing \
@@ -57,7 +57,7 @@ spatial-block cross-validation:
 
 .. code-block:: console
 
-   $ torchgeo-bench run \
+   $ python -m torchgeo_bench.cli run \
        mode=coord \
        model=satclip \
        coord.names=satclip \
@@ -113,7 +113,7 @@ root by replacing the built-in ``sincos`` target through a config override:
 
 .. code-block:: console
 
-   $ PYTHONPATH=. uv run torchgeo-bench run \
+   $ PYTHONPATH=. uv run python -m torchgeo_bench.cli run \
        mode=coord \
        model=sincos \
        model._target_=examples.coordbench_location_encoder.FourierLocationEncoder \

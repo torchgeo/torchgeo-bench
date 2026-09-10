@@ -9,9 +9,9 @@ import argparse
 
 _RUN_EPILOG = """\
 examples:
-  torchgeo-bench run -m timm/resnet50 -d m-eurosat
-  torchgeo-bench run -m torchgeo/scalemae_large_fmow -d m-eurosat,m-so2sat --device cuda:1
-  torchgeo-bench run -m rcf dataset.batch_size=128 eval.knn_k=10
+  python -m torchgeo_bench.cli run -m timm/resnet50 -d m-eurosat
+  python -m torchgeo_bench.cli run -m torchgeo/scalemae_large_fmow -d m-eurosat --device cuda:1
+  python -m torchgeo_bench.cli run -m rcf dataset.batch_size=128 eval.knn_k=10
 
 Any key=value pair overrides the config (values parse as YAML, e.g.
 dataset.names=[m-eurosat]). Flags are shorthand for common overrides and win
@@ -28,9 +28,35 @@ def _add_override_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
+    """Share the fixed-batch profiling options between both entry points."""
+    parser.add_argument("-m", "--model", required=True, help="Model preset")
+    parser.add_argument("-d", "--dataset", required=True, help="One dataset name")
+    parser.add_argument("--partition", default="default", help="Dataset partition")
+    parser.add_argument("--device", default="cpu", help="cpu, cuda, or cuda:<index>")
+    parser.add_argument("--bands", default="rgb", help="rgb, all, or comma-separated bands")
+    parser.add_argument("--image-size", type=int, default=None)
+    parser.add_argument(
+        "--interpolation", choices=("area", "bilinear", "bicubic", "nearest"), default=None
+    )
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--measurements", type=int, default=20)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--normalization",
+        choices=("bandspec_zscore", "model_native", "minmax", "minmax_zscore", "identity"),
+        default=None,
+    )
+    parser.add_argument(
+        "--precision", choices=("float32", "float16", "bfloat16"), default="float32"
+    )
+    parser.add_argument("--count-flops", action="store_true")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="torchgeo-bench",
+        prog="python -m torchgeo_bench.cli",
         description="Benchmark geospatial foundation models on GeoBench datasets.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -42,7 +68,10 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     run.add_argument(
-        "-m", "--model", default=None, help="Model config, e.g. timm/resnet50 (default: rcf)"
+        "-m",
+        "--model",
+        default=None,
+        help="Model config, e.g. timm/resnet50 (default: rcf)",
     )
     run.add_argument(
         "-d", "--datasets", default=None, help="Comma-separated dataset names, or 'all'"
@@ -63,28 +92,44 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--partition", default=None, help="GeoBench partition (default: 'default')")
     run.add_argument("--bands", default=None, help="rgb | all | comma-separated band names")
     run.add_argument(
-        "--batch-size", type=int, default=None, help="Dataloader batch size (default: 64)"
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Dataloader batch size (default: 64)",
     )
     run.add_argument(
         "--image-size", type=int, default=None, help="Resize edge in px (default: 224)"
     )
     run.add_argument(
         "--normalization",
-        choices=["bandspec_zscore", "model_native", "minmax", "minmax_zscore", "identity"],
+        choices=[
+            "bandspec_zscore",
+            "model_native",
+            "minmax",
+            "minmax_zscore",
+            "identity",
+        ],
         default=None,
         help="Input normalization strategy (default: bandspec_zscore)",
     )
     run.add_argument("--skip-linear", action="store_true", help="Skip the linear probe (KNN only)")
     run.add_argument(
-        "--bootstrap", type=int, default=None, help="Bootstrap resamples for CIs (default: 200)"
+        "--bootstrap",
+        type=int,
+        default=None,
+        help="Bootstrap resamples for CIs (default: 200)",
     )
     run.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging")
     run.add_argument("--print-config", action="store_true", help="Print the merged config and exit")
     run.add_argument(
-        "--list-models", action="store_true", help="List available model configs and exit"
+        "--list-models",
+        action="store_true",
+        help="List available model configs and exit",
     )
     run.add_argument(
-        "--list-datasets", action="store_true", help="List available dataset names and exit"
+        "--list-datasets",
+        action="store_true",
+        help="List available dataset names and exit",
     )
     run.add_argument(
         "--model-help",
@@ -106,6 +151,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_override_arg(flops)
     flops.set_defaults(func="flops")
+
+    profile = sub.add_parser("profile", help="Measure one real inference batch")
+    add_profile_arguments(profile)
+    profile.set_defaults(func="profile")
 
     download = sub.add_parser("download", help="Download benchmark datasets")
     download.add_argument(

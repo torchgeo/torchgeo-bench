@@ -9,6 +9,7 @@ import logging
 import random
 import signal
 import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -219,7 +220,9 @@ class SweepRunner(BaseGpuRunner):
         loader_batch = max(1, job.model.loader_batch_size // divisor)
         probe_batch = job.model.probe_batch_size
         return [
-            str(self.config.cli),
+            sys.executable,
+            "-m",
+            "torchgeo_bench.cli",
             "run",
             f"model={job.model.config}",
             f"dataset.names=[{job.dataset}]",

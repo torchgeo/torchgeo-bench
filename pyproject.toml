@@ -48,6 +48,8 @@ dependencies = [
   "omegaconf>=2.3",
   "pandas>=2",
   "pyarrow>=14",                                                               # Required for CoordBench's Parquet files.
+  "pydantic>=2",
+  "pyyaml>=6",
   "safetensors>=0.4",                                                          # Loads MIND's location-model weights.
   "scikit-learn>=1.3",
   "timm>=0.9",
@@ -103,7 +105,7 @@ urls.Documentation = "https://torchgeo.org/torchgeo-bench/"
 urls.Homepage = "https://github.com/torchgeo/torchgeo-bench"
 urls.Issues = "https://github.com/torchgeo/torchgeo-bench/issues"
 urls.Repository = "https://github.com/torchgeo/torchgeo-bench"
-scripts.torchgeo-bench = "torchgeo_bench.cli:main"
+scripts.torchgeo-bench = "torchgeo_bench.image_cli:main"
 
 [tool.hatch]
 build.targets.wheel.packages = [ "src/torchgeo_bench" ]
@@ -179,6 +181,7 @@ lint.per-file-ignores."projects/cleanlab/**/*.py" = [ "D" ]
 lint.per-file-ignores."projects/cleanlab/tests/**/*.py" = [ "ARG", "D" ]
 lint.per-file-ignores."src/torchgeo_bench/cli.py" = [ "T201" ]  # CLI payloads go to stdout
 lint.per-file-ignores."src/torchgeo_bench/commands/**/*.py" = [ "T201" ]
+lint.per-file-ignores."src/torchgeo_bench/image_cli.py" = [ "T201" ]
 lint.per-file-ignores."tests/**/*.py" = [ "ARG", "D" ]
 lint.flake8-tidy-imports.banned-api."__future__.annotations".msg = "Use ordinary annotations or quoted forward references."
 lint.flake8-tidy-imports.banned-api."contextlib.suppress".msg = "Let errors propagate or use an explicit except clause with a reason."

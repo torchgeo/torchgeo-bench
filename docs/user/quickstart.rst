@@ -38,31 +38,33 @@ canonical destination subdirectories.
 Run a benchmark
 ---------------
 
+The image CLI accepts explicit selections, for example ``torchgeo-bench run --model rcf --dataset m-eurosat --device cpu``. The examples below use the retained ``python -m torchgeo_bench.cli`` interface for arbitrary ``key=value`` overrides and coordinate workflows.
+
 Run the default model (Random Convolutional Features) on EuroSAT V1 with
 KNN-5 + linear probing + 200 bootstrap resamples:
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.names=[m-eurosat]
+   $ python -m torchgeo_bench.cli run dataset.names=[m-eurosat]
 
 Use a different backbone preset (anything in :file:`src/torchgeo_bench/conf/model/`):
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat,m-pv4ger]
+   $ python -m torchgeo_bench.cli run model=timm/resnet50 dataset.names=[m-eurosat,m-pv4ger]
 
 Skip the (slow) linear probe and reduce bootstrap noise to iterate quickly:
 
 .. code-block:: console
 
-   $ torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
+   $ python -m torchgeo_bench.cli run eval.skip_linear=true eval.bootstrap=100
 
 The default device is ``cuda:0``.  On a machine without a working CUDA GPU
 (or if a GPU run crashes — see :doc:`troubleshooting`), add ``device=cpu``:
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.names=[m-eurosat] device=cpu
+   $ python -m torchgeo_bench.cli run dataset.names=[m-eurosat] device=cpu
 
 When the selected FAISS backend has no GPU resources, the runner evaluates KNN
 on CPU while keeping feature extraction on the configured accelerator. It logs
@@ -76,7 +78,7 @@ location baseline on a single regression benchmark with:
 
 .. code-block:: console
 
-   $ torchgeo-bench run mode=coord model=sincos \
+   $ python -m torchgeo_bench.cli run mode=coord model=sincos \
        coord.names=california_housing coord.methods=[linear] \
        coord.folds=2 device=cpu
 
@@ -93,7 +95,7 @@ output CSV:
 
 .. code-block:: console
 
-   $ torchgeo-bench run resume=true
+   $ python -m torchgeo_bench.cli run resume=true
 
 See :doc:`results-format` for the exact key schema used by resume mode.
 
