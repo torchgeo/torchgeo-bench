@@ -148,7 +148,7 @@ def _instantiate_explicit_model(target: str, config: dict, overrides: dict[str, 
             "input_normalization",
         }
         if target.endswith("TimmPatchBenchModel")
-        else {"features", "kernel_size", "mode", "stats_mode", "dataset"}
+        else {"features", "kernel_size", "mode", "stats_mode", "dataset", "seed"}
     )
     unknown = set(config) - allowed - metadata
     unknown.update(set(overrides) - allowed - {"bands", "normalization"})
