@@ -1,27 +1,16 @@
 # Portions of this file are adapted from torchgeo.
 # Copyright (c) TorchGeo Contributors. All rights reserved.
 
-# Configuration file for the Sphinx documentation builder.
-#
-# For the full list of built-in configuration values, see the documentation:
-# https://www.sphinx-doc.org/en/master/usage/configuration.html
 """Sphinx configuration for the torchgeo-bench documentation site."""
-
-# -- Path setup --------------------------------------------------------------
 
 import inspect
 import os
 import sys
 
-# Make the src/ layout importable so autodoc can resolve the package without
-# requiring it to be installed (the GitHub Pages workflow installs the package
-# via 'uv sync --extra docs', but a bare 'make html' from a fresh checkout
-# should still work).
+# Let autodoc import the src/ package from a source checkout.
 sys.path.insert(0, os.path.abspath(os.path.join("..", "src")))
 
 import torchgeo_bench
-
-# -- Project information -----------------------------------------------------
 
 project = "torchgeo-bench"
 copyright = "torchgeo-bench Contributors"  # noqa: A001 - Sphinx configuration key
@@ -29,8 +18,6 @@ author = torchgeo_bench.__author__
 version = ".".join(torchgeo_bench.__version__.split(".")[:2])
 release = torchgeo_bench.__version__
 
-
-# -- General configuration ---------------------------------------------------
 
 extensions = [
     "myst_parser",
@@ -44,20 +31,15 @@ extensions = [
     "sphinx_design",
 ]
 
-# Files / directories the builder should ignore.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "plans"]
 
-# Sphinx 5.3+ required to allow section titles inside autodoc class docstrings
-# https://github.com/sphinx-doc/sphinx/pull/10887
+# Class docstrings with section titles need Sphinx 5.3+: https://github.com/sphinx-doc/sphinx/pull/10887
 needs_sphinx = "5.3"
 
-# Surface every cross-reference miss as a warning so the RTD build (with
-# ``fail_on_warning: true``) will fail loudly on broken docs.  Known
-# unfixable misses go in ``nitpick_ignore`` below.
+# Fail the docs build on broken links, except for the known missing targets below.
 nitpicky = True
 nitpick_ignore = [
-    # Private internal types referenced from public docstrings / autoclass
-    # ``:show-inheritance:`` (intentionally not exported).
+    # Private types shown by the API documentation.
     ("py:class", "torchgeo_bench.datasets.geobench_v1._V1Dataset"),
     ("py:class", "torchgeo_bench.datasets.geobench_v2._V2Dataset"),
     ("py:class", "torchgeo_bench.datasets.geobench_v2._OffsetMaskV2Dataset"),
@@ -70,7 +52,7 @@ nitpick_ignore = [
     ("py:class", "torchgeo_bench.segmentation_probe.GPUTensorCache"),
     ("py:class", "CachedFeaturesDataset"),
     ("py:class", "GPUTensorCache"),
-    # Source-docstring references to module-level constants / private helpers
+    # Names that autodoc cannot link to a documentation page.
     ("py:data", "_REGISTRY"),
     ("py:data", "OLMOEARTH_S2_BANDS"),
     ("py:data", "DEFAULT_V2_DATASETS"),
@@ -88,7 +70,7 @@ nitpick_ignore = [
     ("py:meth", "_forward_patch_features"),
     ("py:meth", "SegmentationProbe.extract_segmentation_features"),
     ("py:mod", "torchgeo_bench.main"),
-    # Third-party types we don't control intersphinx mappings for
+    # Third-party types without links in their published documentation.
     ("py:class", "faiss.swigfaiss_avx2.IndexFlatL2"),
     ("py:class", "geobench.task.Task"),
     ("py:class", "geobench_v2.GeoBenchDataModule"),
@@ -100,21 +82,16 @@ nitpick_ignore = [
     ("py:class", "timm.models.vision_transformer.VisionTransformer"),
     ("py:class", "torchgeo.models.api.WeightsEnum"),
     ("py:class", "transformers.modeling_utils.PreTrainedModel"),
-    # Generic / forward references we resolve at runtime
+    # Self refers to the containing class, not a separate documented type.
     ("py:class", "Self"),
 ]
 
-# Modules whose entries are looked up via intersphinx — when intersphinx is
-# unreachable (e.g. an offline build), don't fail the build over them.  When
-# the network is available (CI, GitHub Pages) the inventory fetches succeed
-# and these references resolve correctly.
+# Offline builds cannot resolve links to these external libraries.
 nitpick_ignore_regex = [
     (r"py:.*", r"^(numpy|torch|sklearn|pandas|matplotlib|PIL|pillow|torchgeo|torchvision)(\..*)?$"),
     (r"py:.*", r"^(pathlib|abc|collections|typing|argparse)(\..*)?$"),
 ]
 
-
-# -- Options for HTML output -------------------------------------------------
 
 html_theme = "pydata_sphinx_theme"
 
@@ -149,9 +126,6 @@ html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 
 
-# -- Extension configuration -------------------------------------------------
-
-# sphinx.ext.autodoc
 autodoc_default_options = {
     "members": True,
     "show-inheritance": True,
@@ -160,7 +134,6 @@ autodoc_member_order = "bysource"
 autodoc_typehints = "description"
 autodoc_typehints_description_target = "documented"
 
-# sphinx.ext.intersphinx
 intersphinx_mapping = {
     "matplotlib": ("https://matplotlib.org/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
@@ -172,7 +145,6 @@ intersphinx_mapping = {
     "torchvision": ("https://docs.pytorch.org/vision/stable/", None),
 }
 
-# myst-parser
 myst_enable_extensions = [
     "colon_fence",
     "deflist",
@@ -187,12 +159,10 @@ suppress_warnings = [
     "intersphinx.fetch_inventory",
 ]
 
-# sphinx-copybutton
 copybutton_prompt_text = r">>> |\.\.\. |\$ "
 copybutton_prompt_is_regexp = True
 
 
-# sphinx.ext.linkcode
 def linkcode_resolve(domain: str, info: dict[str, str]) -> str | None:
     """Resolve a GitHub URL for the given Python object."""
     if domain != "py":

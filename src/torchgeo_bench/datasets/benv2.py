@@ -7,7 +7,7 @@ from .geobench_v2 import _V2Dataset
 
 
 class BENV2(_V2Dataset):
-    """Sentinel-2 + SAR multi-class classification (19 classes).
+    """Sentinel-2 + SAR multi-label classification (19 classes).
 
     BigEarthNet V2 with 12 Sentinel-2 optical bands and 2 SAR bands.
     """

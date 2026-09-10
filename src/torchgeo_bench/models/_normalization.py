@@ -1,10 +1,7 @@
 """Selectable input-normalisation strategies for benchmark models.
 
-Each pretrained backbone was trained against a specific input pipeline, but
-"the right" cross-dataset normalisation is empirical — what works for
-m-eurosat (raw S2 DN) doesn't generalise to m-so2sat (already reflectance)
-or m-pv4ger (uint8 NAIP).  Rather than hard-code one policy, expose a
-strategy enum and let the sweep treat it as another axis.
+Input scales include raw S2 DN (m-eurosat), reflectance (m-so2sat), and uint8 (m-pv4ger).
+Normalization is therefore a configurable benchmark parameter.
 
 Strategies:
 
@@ -31,6 +28,10 @@ import torch
 from torchgeo_bench.datasets.base import BandSpec
 
 from ._input_units import InputUnit, detect_input_unit, to_reflectance, to_s2_dn
+
+
+class UnsupportedNormalizationError(ValueError):
+    """A model does not define the requested normalization pipeline."""
 
 
 class NormalizationStrategy(StrEnum):
@@ -88,8 +89,6 @@ def build_normalizer(
 
     if strategy is NormalizationStrategy.MINMAX_ZSCORE:
         lo, span = _bandspec_min_max(bands)
-        # Post-minmax mean_i = (raw_mean_i - min_i) / (max_i - min_i)
-        # Post-minmax std_i  = raw_std_i  / (max_i - min_i)
         n = len(bands)
         pmean = torch.tensor(
             [(b.mean - b.min) / max(b.max - b.min, 1e-8) for b in bands],
@@ -121,7 +120,9 @@ def build_model_native_normalizer(
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     """Convert sensor units before applying pretrained channel statistics."""
     if expected_input_unit is None:
-        raise ValueError("model_native normalisation requires expected_input_unit")
+        raise UnsupportedNormalizationError(
+            "model_native normalisation requires expected_input_unit"
+        )
     src = detect_input_unit(bands)
     if expected_input_unit == InputUnit.S2_DN:
         convert = lambda x: to_s2_dn(x, src)  # noqa: E731
@@ -134,9 +135,9 @@ def build_model_native_normalizer(
         convert = lambda x: x  # noqa: E731
 
     if pretrain_mean is None:
-        # Some wrappers install their own normalizer after construction.
+        # Wrappers may replace this normalizer before use.
         def _undefined(_x: torch.Tensor) -> torch.Tensor:
-            raise ValueError(
+            raise UnsupportedNormalizationError(
                 "model_native normalisation is undefined for this model: it declares "
                 f"expected_input_unit={expected_input_unit.value!r} but no pretrain_mean/"
                 "pretrain_std, and it does not supply its own normaliser.  Converting "

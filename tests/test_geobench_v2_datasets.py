@@ -36,7 +36,7 @@ class MockV2Dataset:
         sample = {"image": img}
         if self.transforms:
             sample = self.transforms(sample)
-        # Return both label and mask so segmentation+classification tests both pass.
+        # One fixture serves classification and segmentation tests.
         sample.setdefault("label", torch.tensor(1))
         sample.setdefault("mask", torch.randint(0, 2, (self.h, self.w)))
         return sample
@@ -44,7 +44,6 @@ class MockV2Dataset:
 
 @pytest.fixture
 def mock_v2_env():
-    """Patch the V2 dataset classes at their upstream module location."""
     with (
         patch(
             "geobench_v2.datasets.GeoBenchBENV2",
@@ -135,8 +134,6 @@ class TestV2Loading:
             num_workers=0,
         )
 
-        # The resize transform is forwarded as ``transforms`` to the upstream
-        # mock through ``GeoBenchv2._inner``.
         assert ds._inner.transforms is not None
 
         dl = DataLoader(ds, batch_size=1)
@@ -148,7 +145,7 @@ class TestV2Loading:
             get_datasets(dataset_name="phantom_dataset")
 
     def test_no_double_root_join(self, mock_v2_env):
-        """``GeoBenchv2`` must combine collection-root + dataset-name once."""
+        """Upstream expects a dataset-specific root, not the collection root."""
         with patch(
             "geobench_v2.datasets.GeoBenchBENV2",
             MagicMock(side_effect=MockV2Dataset),
@@ -166,7 +163,7 @@ class TestV2Loading:
                 assert kwargs["download"] is False
 
     def test_band_order_shape_dict(self, mock_v2_env):
-        """Multi-modality V2 wrappers must hand a dict ``band_order`` upstream."""
+        """Upstream multi-modality loaders require bands grouped by sensor."""
         with patch(
             "geobench_v2.datasets.GeoBenchBENV2",
             MagicMock(side_effect=MockV2Dataset),
@@ -184,7 +181,7 @@ class TestV2Loading:
                 assert bo == {"s2": ["B04", "B03", "B02"]}, bo
 
     def test_band_order_shape_flat(self, mock_v2_env):
-        """Single-modality V2 wrappers must hand a flat list ``band_order`` upstream."""
+        """Upstream single-modality loaders require a flat band list."""
         with patch(
             "geobench_v2.datasets.GeoBenchBurnScars",
             MagicMock(side_effect=MockV2Dataset),
@@ -203,15 +200,9 @@ class TestV2Loading:
 
 
 class MockKuroSiwo:
-    """Stand-in for ``geobench_v2.datasets.GeoBenchKuroSiwo``.
+    """Match upstream Kuro Siwo samples, with each image shaped ``(C, H, W)``.
 
-    Mirrors the real upstream loader's *unstacked* output shape: a per-modality
-    dict containing ``image_pre_1`` / ``image_pre_2`` / ``image_post`` for SAR
-    (gated by ``time_step``) and ``image_dem`` for DEM, plus ``mask`` and
-    ``invalid_data``. Each tensor is 3-D ``(C, H, W)``.
-
-    Channel counts come from ``band_order`` (a ``dict[modality, list[str]]``),
-    which is what the wrapper's ``band_order_strategy = "by_sensor"`` produces.
+    SAR keys follow ``time_step``; DEM has its own ``image_dem`` key.
     """
 
     def __init__(  # noqa: PLR0913 - matches the upstream dataset constructor.
@@ -257,8 +248,6 @@ class MockKuroSiwo:
 
 
 class TestKuroSiwoCanonicalization:
-    """The kuro_siwo wrapper folds per-modality keys into a 3-D image."""
-
     @pytest.fixture
     def mocked_kuro_siwo(self):
         with patch(
@@ -281,7 +270,6 @@ class TestKuroSiwoCanonicalization:
     def test_image_is_3d_with_correct_channel_count(
         self, mocked_kuro_siwo, bands, expected_channels
     ):
-        """For every band selection the canonical image must be ``(C, H, W)``."""
         bench = get_bench_dataset_class("kuro_siwo")()
         ds = bench.get_dataset("train", bands=bands)
         sample = ds[0]
@@ -298,31 +286,29 @@ class TestKuroSiwoCanonicalization:
         assert mocked_kuro_siwo.called
 
     def test_uses_post_event_sar_only(self, mocked_kuro_siwo):
-        """The wrapper must request ``time_step=['post']`` from upstream."""
         bench = get_bench_dataset_class("kuro_siwo")()
         bench.get_dataset("train", bands=("vv", "vh"))
         for call in mocked_kuro_siwo.call_args_list:
             assert call.kwargs["time_step"] == ["post"], call.kwargs
 
     def test_does_not_request_stacked_image(self, mocked_kuro_siwo):
-        """The wrapper must NOT request upstream's broken stacking path."""
+        """Upstream stacking adds a time axis and fails when SAR and DEM channel counts differ."""
         bench = get_bench_dataset_class("kuro_siwo")()
         bench.get_dataset("train", bands=None)
         for call in mocked_kuro_siwo.call_args_list:
             assert call.kwargs.get("return_stacked_image", False) is False, call.kwargs
 
     def test_dem_concatenated_after_sar(self, mocked_kuro_siwo):
-        """When both SAR and DEM are requested, DEM lives in the trailing channels."""
-        del mocked_kuro_siwo  # only used to install the mock
+        del mocked_kuro_siwo
         bench = get_bench_dataset_class("kuro_siwo")()
         ds = bench.get_dataset("train", bands=("vv", "vh", "dem"))
         img = ds[0]["image"]
-        # MockKuroSiwo paints SAR-post with 3.0 and DEM with 99.0
+        # Distinct values identify post-event SAR (3) and DEM (99).
         assert torch.allclose(img[:2], torch.full_like(img[:2], 3.0))
         assert torch.allclose(img[2:], torch.full_like(img[2:], 99.0))
 
     def test_resize_runs_after_canonicalization(self, mocked_kuro_siwo):
-        """Framework transforms must see the folded ``image`` key."""
+        """Resize needs a single image tensor, not separate modality keys."""
         del mocked_kuro_siwo
         _, train_dl, _ = get_datasets(
             dataset_name="kuro_siwo",
@@ -338,7 +324,7 @@ class TestKuroSiwoCanonicalization:
 
 @pytest.mark.slow
 class TestKuroSiwoLive:
-    """Smoke tests against real Kuro Siwo data (skipped if the dataset is missing)."""
+    """Smoke tests against locally supplied Kuro Siwo data."""
 
     @pytest.mark.parametrize(
         ("bands", "expected_channels"),
@@ -349,7 +335,6 @@ class TestKuroSiwoLive:
         ],
     )
     def test_real_sample_is_3d(self, geobench_v2_root, bands, expected_channels):
-        """Loading real kuro_siwo data must yield a 3-D image with the expected channels."""
         del geobench_v2_root
         bench = get_bench_dataset_class("kuro_siwo")()
         ds = bench.get_dataset("train", bands=bands)

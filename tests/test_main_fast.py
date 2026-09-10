@@ -1,4 +1,4 @@
-"""Fast offline tests for classification orchestration in ``torchgeo_bench.main``."""
+"""Offline tests for the classification runner."""
 
 from collections.abc import Sequence
 from pathlib import Path
@@ -18,8 +18,6 @@ from torchgeo_bench.resume import _resume_config_hash
 
 
 class _DictTensorDataset(Dataset):
-    """Small dataset wrapper that emits ``{"image", "label"}`` samples."""
-
     def __init__(self, images: torch.Tensor, labels: torch.Tensor) -> None:
         self._images = images
         self._labels = labels
@@ -35,7 +33,6 @@ class _DictTensorDataset(Dataset):
 
 
 def _compose_cfg(output_path: Path, overrides: Sequence[str] | None = None) -> DictConfig:
-    """Compose the config for fast offline main-path tests."""
     extra = list(overrides or [])
     return compose_config(
         [
@@ -60,7 +57,6 @@ def _synthetic_loaders(
     n_classes: int = 10,
     channels: int = 3,
 ) -> tuple[_DictTensorDataset, DataLoader, DataLoader, DataLoader]:
-    """Return train dataset + train/val/test loaders matching benchmark contract."""
     rng = torch.Generator().manual_seed(0)
     train_images = torch.rand(n_train, channels, 64, 64, generator=rng) * 3000.0
     val_images = torch.rand(n_val, channels, 64, 64, generator=rng) * 3000.0
@@ -81,7 +77,7 @@ def _synthetic_loaders(
 
 
 def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
-    """Return deterministic (X, y) tuples for train/val/test ``embed_split`` calls."""
+    """Embeddings in the order of the train, validation, and test calls."""
     rng = np.random.default_rng(0)
     x_train = rng.standard_normal((16, 8), dtype=np.float32)
     y_train = rng.integers(0, 10, size=(16,), dtype=np.int64)
@@ -93,7 +89,7 @@ def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
 
 
 def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, object]:
-    """Build a resume-key-matching CSV row for pre-seeding output files."""
+    """Seed the CSV with a row matching this configuration."""
     return {
         "dataset": "m-eurosat",
         "method": method,
@@ -112,7 +108,6 @@ def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, 
 
 
 def _chainable_model_mock() -> mock.Mock:
-    """Return a mock model whose ``to().eval()`` chain returns itself."""
     model = mock.Mock()
     model.to.return_value = model
     model.eval.return_value = model
@@ -314,6 +309,33 @@ def test_linear_row_emitted(tmp_path: Path):
     assert row["metric_name"] == "accuracy"
 
 
+def test_completed_knn_survives_later_linear_failure(tmp_path: Path) -> None:
+    out = tmp_path / "out.csv"
+    cfg = _compose_cfg(out)
+
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.instantiate", return_value=_chainable_model_mock()),
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
+        mock.patch(
+            "torchgeo_bench.main.evaluate_logistic", side_effect=RuntimeError("linear probe failed")
+        ),
+        pytest.raises(RuntimeError, match="linear probe failed"),
+    ):
+        main(cfg)
+
+    df = pd.read_csv(out)
+    assert list(df["method"]) == ["knn5"]
+    row = df.iloc[0]
+    assert (row["metric_value"], row["ci_lower"], row["ci_upper"]) == (0.5, 0.45, 0.55)
+    assert row["ece"] == 0.05
+    assert row["config_hash"] == _resume_config_hash(cfg)
+
+
 def test_resume_skips_completed_knn_row(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
@@ -474,17 +496,10 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
 
 
 def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
-    """Regression for the resume-key int/float mismatch (image_size).
-
-    A populated results CSV with any missing ``image_size`` cell is typed by
-    pandas as ``float64``, so the default ``224`` round-trips as ``"224.0"``
-    while the config-side key is ``"224"``. Resume must still treat the row
-    as complete instead of recomputing and appending a duplicate.
-    """
+    """Resume must match CSV floats such as ``224.0`` to integer config values such as ``224``."""
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
     df = pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")])
-    # Reproduce the float64 dtype a real (partially-NaN) results CSV exhibits.
     df["image_size"] = df["image_size"].astype(float)
     df.to_csv(out, index=False)
 

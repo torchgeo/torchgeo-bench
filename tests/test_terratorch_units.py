@@ -5,10 +5,6 @@ import torch
 
 from torchgeo_bench.models.terratorch_models import _maybe_resize, _reduce_to_vec
 
-# ---------------------------------------------------------------------------
-# _maybe_resize
-# ---------------------------------------------------------------------------
-
 
 def test_maybe_resize_none_is_noop():
     x = torch.rand(2, 3, 16, 16)
@@ -19,9 +15,9 @@ def test_maybe_resize_none_is_noop():
 @pytest.mark.parametrize(
     ("in_hw", "size"),
     [
-        (32, 32),  # same size: no-op
-        (16, 32),  # upsample
-        (64, 32),  # downsample
+        (32, 32),
+        (16, 32),
+        (64, 32),
     ],
 )
 def test_maybe_resize(in_hw: int, size: int):
@@ -30,11 +26,6 @@ def test_maybe_resize(in_hw: int, size: int):
     assert out.shape == (2, 3, size, size)
     if in_hw == size:
         assert out is x
-
-
-# ---------------------------------------------------------------------------
-# _reduce_to_vec
-# ---------------------------------------------------------------------------
 
 
 def test_reduce_to_vec_4d_mean():
@@ -60,7 +51,6 @@ def test_reduce_to_vec_list_takes_last():
     a = torch.rand(2, 4, 2, 2)
     b = torch.rand(2, 8, 2, 2)
     out = _reduce_to_vec([a, b], pool="mean")
-    # last element is b, shape (2, 8, 2, 2) → GAP → (2, 8)
     assert out.shape == (2, 8)
 
 

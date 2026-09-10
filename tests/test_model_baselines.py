@@ -8,6 +8,9 @@ import pandas as pd
 import pytest
 import torch
 
+from .test_cli_program import run_cli
+from .test_integration import require_dataset_data
+
 _DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -27,31 +30,8 @@ _FIXTURE_COLS = {
 
 _TOL = 0.02
 
-_V1_DATA = Path("data/classification_v1.0")
-_V2_DATA = Path("data/geobenchv2")
-
-_V1_DATASETS = {"m-eurosat", "m-forestnet", "m-so2sat", "m-pv4ger", "m-brick-kiln", "m-bigearthnet"}
-
-
-def _dataset_data_exists(dataset: str) -> bool:
-    if dataset in _V1_DATASETS:
-        return _V1_DATA.exists()
-    return (_V2_DATA / dataset).exists()
-
-
-def _run_bench(*overrides: str, timeout: int = 600) -> subprocess.CompletedProcess:
-    cmd = [sys.executable, "-m", "torchgeo_bench", *overrides]
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=str(_REPO_ROOT),
-    )
-
 
 def test_accuracy_check_marker_is_registered() -> None:
-    """Verify accuracy_check marker is listed in pytest --markers output."""
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "--markers"],
         capture_output=True,
@@ -68,7 +48,6 @@ def test_accuracy_check_marker_is_registered() -> None:
     not list(_RESULTS_DIR.glob("*.csv")), reason="no per-model results in results/models"
 )
 def test_update_baselines_script_runs(tmp_path: Path) -> None:
-    """Script runs, exits 0, and outputs a CSV with expected columns."""
     out = tmp_path / "out.csv"
     result = subprocess.run(
         [sys.executable, str(_REPO_ROOT / "scripts" / "update_baselines.py"), "--output", str(out)],
@@ -82,7 +61,7 @@ def test_update_baselines_script_runs(tmp_path: Path) -> None:
     assert _FIXTURE_COLS.issubset(set(df.columns))
 
 
-# Load fixture at module level for parametrisation (empty DF if file absent)
+# Missing baseline CSVs leave no accuracy cases to collect.
 _fixture_df: pd.DataFrame
 if _FIXTURE_PATH.exists():
     _fixture_df = pd.read_csv(_FIXTURE_PATH)
@@ -102,22 +81,24 @@ def _combo_id(combo: dict) -> str:
 @pytest.mark.accuracy_check
 @pytest.mark.parametrize("combo", _COMBOS, ids=[_combo_id(c) for c in _COMBOS])
 def test_accuracy(combo: dict, tmp_path: Path) -> None:
-    """Run bench CLI for one (model_config, dataset, bands) combo and check accuracy."""
     model_config = combo["model_config"]
     dataset = combo["dataset"]
     bands = combo["bands"]
 
-    if not _dataset_data_exists(dataset):
-        pytest.skip(f"Dataset data not found for {dataset}")
+    require_dataset_data(dataset)
 
     out = tmp_path / "out.csv"
-    result = _run_bench(
+    result = run_cli(
+        "run",
         f"model={model_config}",
         f"dataset.names=[{dataset}]",
         f"dataset.bands={bands}",
         f"output={out}",
         "eval.bootstrap=10",
         f"device={_DEVICE}",
+        cwd=Path.cwd(),
+        timeout=600,
+        offline=False,
     )
     assert result.returncode == 0, f"CLI failed for {model_config} x {dataset}:\n{result.stderr}"
 

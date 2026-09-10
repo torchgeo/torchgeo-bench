@@ -83,7 +83,6 @@ def main() -> None:
         )
         with pd.option_context("display.float_format", lambda v: f"{v:6.3f}"):
             print(metrics.reindex(order))  # noqa: T201
-    # Surface anything unmapped so the taxonomy stays honest.
     unknown = sorted({d for d in df["dataset"].unique() if family_of(d) == "other"})
     if unknown:
         logger.warning("Benchmarks with no family (counted only in macro): %s", unknown)

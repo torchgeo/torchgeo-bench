@@ -1,7 +1,5 @@
-# OlmoEarth-v1-Tiny (AI2 geospatial foundation model)
-# Feature dimension: 192
-# Default: RGB mode (3 channels). For full S2, set dataset.bands=all
-# Run with: dataset.normalization=identity (the wrapper applies OlmoEarth's own normalizer)
+# Use dataset.bands=all to include non-RGB bands.
+# No need to set dataset.normalization=identity; the wrapper uses pretrained statistics for S2/SAR and dataset statistics for Landsat.
 
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
 model_size: tiny

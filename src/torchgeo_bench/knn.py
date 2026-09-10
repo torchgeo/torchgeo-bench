@@ -2,10 +2,8 @@
 
 Single-label and multi-label k-nearest neighbours backed by FAISS.
 
-The CPU path uses the selected FAISS backend's ``IndexFlatL2`` implementation.
-The GPU path delegates to :mod:`faissknn` when that backend provides CUDA
-resources. The two paths produce identical predictions modulo float-precision
-noise.
+CPU uses ``IndexFlatL2``; CUDA delegates to :mod:`faissknn` when GPU resources are available.
+For L2 distance, predictions agree apart from floating-point differences.
 """
 
 import logging
@@ -66,16 +64,15 @@ def resolve_knn_device(requested_device: str | None, model_device: str) -> str:
 class KNNClassifier:
     """FAISS-backed KNN classifier with single- and multi-label support.
 
-    Multi-label mode is auto-detected from the shape of ``y`` during
-    :meth:`fit`: 1-D labels → single-label, 2-D labels → multi-label.
+    :meth:`fit` uses 1-D labels for single-label tasks and 2-D labels for multi-label tasks.
 
     Args:
         n_neighbors: Number of neighbours (k). Clamped to ``min(k, n_train)``
             before either backend is constructed.
-        device: ``"cpu"`` (default) → the FAISS CPU index. Anything else
-            (``"cuda"``, ``"cuda:0"``) requires ``faissknn`` with a GPU FAISS
-            backend (installed automatically on Linux x86_64); raises an
-            actionable error if unavailable.
+        device: ``"cpu"`` (default) uses the FAISS CPU index.
+            Other values require ``faissknn`` with GPU FAISS.
+            The GPU backend is installed automatically on Linux x86_64.
+            An unavailable backend raises an error.
         metric: Distance metric — ``"l2"`` (default), ``"ip"`` (inner
             product), or ``"cosine"`` (cosine similarity; auto-normalizes
             inputs). GPU path only; CPU path always uses L2.
@@ -99,13 +96,11 @@ class KNNClassifier:
         self.metric = metric
         self.use_fp16 = use_fp16
 
-        # CPU path state
         self._index: faiss.Index | None = None
         self._y: np.ndarray | None = None
         self._n_classes: int | None = None
         self._multi_label: bool = False
 
-        # GPU path state (faissknn delegate)
         self._impl = None
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> Self:
@@ -130,8 +125,6 @@ class KNNClassifier:
             self._fit_gpu(X, y)
         return self
 
-    # ---- CPU path (faiss IndexFlatL2) -------------------------------------
-
     def _fit_cpu(self, X: np.ndarray, y: np.ndarray) -> None:
         self._index = faiss.IndexFlatL2(X.shape[1])
         self._index.add(X)
@@ -150,7 +143,7 @@ class KNNClassifier:
         return indices
 
     def _neighbour_counts(self, indices: np.ndarray) -> np.ndarray:
-        """Vectorized per-row bincount: shape (n_test, n_classes)."""
+        """Count each class's votes per test sample, returning shape (n_test, n_classes)."""
         assert self._y is not None
         assert self._n_classes is not None
         n_test, _k = indices.shape
@@ -177,8 +170,6 @@ class KNNClassifier:
             return self._y[indices].mean(axis=1)
         return self._neighbour_counts(indices).astype(np.float32) / k_eff
 
-    # ---- GPU path (faissknn delegate) -------------------------------------
-
     def _fit_gpu(self, X: np.ndarray, y: np.ndarray) -> None:
         from faissknn import FaissKNNClassifier, FaissKNNMultilabelClassifier
 
@@ -199,18 +190,14 @@ class KNNClassifier:
             self._n_classes = int(y.shape[1])
             self._impl = FaissKNNMultilabelClassifier(**kwargs)
         else:
-            # faissknn uses len(unique(y)) as n_classes, which breaks when labels
-            # have gaps (e.g. a small partition missing class 4 but containing class 11).
-            # Pass n_classes=max(y)+1 to guarantee the counts array is large enough.
+            # Gaps in class IDs require max(y) + 1 slots, not faissknn's unique-label count.
             self._n_classes = int(np.max(y)) + 1
             self._impl = FaissKNNClassifier(n_classes=self._n_classes, **kwargs)
         self._impl.fit(X, y.astype(np.int64))
 
     def _to_gpu_tensor(self, X: np.ndarray) -> torch.Tensor:
-        """Convert numpy array to a CUDA tensor for zero-copy faissknn input."""
+        """Give faissknn a CUDA tensor so it can use device memory directly."""
         return torch.from_numpy(np.ascontiguousarray(X.astype(np.float32))).to(self.device)
-
-    # ---- Public API -------------------------------------------------------
 
     @property
     def multi_label(self) -> bool:

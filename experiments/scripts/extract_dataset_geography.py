@@ -1,15 +1,12 @@
-"""Generate the committed per-dataset geographic store.
+"""Write geographic metadata for every registered dataset.
 
-Thin CLI over :mod:`torchgeo_bench.geography`, which owns all the extraction
-logic.  Writes one ``<dataset>.json`` per registered dataset plus an
-``index.json`` under ``docs/_static/_dataset_geography/``.
+Write dataset records and ``index.json`` to ``docs/_static/_dataset_geography/``.
 
-Coverage comes from the dataset registry, so a newly registered dataset is
-picked up here automatically -- no edit to this script is needed.
+Use the registry so newly added datasets appear in the store.
 
 Usage::
 
-    # regenerate the whole store (the V1 HDF5 scan is the slow part)
+    # regenerate the whole store
     python experiments/scripts/extract_dataset_geography.py --all
 
     # regenerate a single dataset without rescanning everything
@@ -65,7 +62,7 @@ def main() -> int:
         "--workers",
         type=int,
         default=min(32, (os.cpu_count() or 8)),
-        help="processes used for the V1 HDF5 scan",
+        help="processes used for the V1 metadata scan",
     )
     args = parser.parse_args()
 

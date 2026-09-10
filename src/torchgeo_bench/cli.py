@@ -1,13 +1,12 @@
 """Command-line interface for ``torchgeo-bench``.
 
-Subcommands: ``run`` (benchmark), ``flops`` (compute-cost measurement), and
-``download`` (datasets).  This module imports only the standard library so
-``torchgeo-bench --help`` is instant; torch and friends load only once a
-command actually starts doing work.
+Run benchmarks with ``run``, measure cost with ``flops``, or fetch data with ``download``.
+
+Load command dependencies lazily so ``--help`` stays fast.
 """
 
 import argparse
-import sys
+import logging
 
 _RUN_EPILOG = """\
 examples:
@@ -127,15 +126,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _setup_logging(*, verbose: bool = False) -> None:
-    import logging
-
-    from rich.logging import RichHandler
-
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
-        format="%(message)s",
-        datefmt="[%X]",
-        handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+        format="%(levelname)s: %(message)s",
     )
 
 
@@ -157,7 +150,6 @@ def input_overrides(args: argparse.Namespace) -> list[str]:
 
 
 def _flag_overrides(args: argparse.Namespace) -> list[str]:
-    """Translate convenience flags into config dotlist overrides."""
     overrides = []
     if args.model is not None:
         overrides.append(f"model={args.model}")
@@ -276,22 +268,17 @@ def _cmd_download(args: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``torchgeo-bench`` console script."""
-    argv = list(sys.argv[1:] if argv is None else argv)
-    # key=value override tokens can appear anywhere after the subcommand;
-    # pull them out before argparse so they mix freely with flags.
-    overrides: list[str] = []
-    if argv and argv[0] in ("run", "flops"):
-        rest = [argv[0]]
-        for token in argv[1:]:
-            if "=" in token and not token.startswith("-"):
-                overrides.append(token)
-            else:
-                rest.append(token)
-        argv = rest
     parser = _build_parser()
-    args = parser.parse_args(argv)
-    if hasattr(args, "overrides"):
-        args.overrides = [*args.overrides, *overrides]
+    args, extras = parser.parse_known_args(argv)
+    # argparse can leave interleaved positionals and their "--" separator unconsumed.
+    if hasattr(args, "overrides") and "--" in extras:
+        extras.remove("--")
+    if extras:
+        if not hasattr(args, "overrides") or any(
+            token.startswith("-") or "=" not in token for token in extras
+        ):
+            parser.error(f"unrecognized arguments: {' '.join(extras)}")
+        args.overrides.extend(extras)
     args.func(args)
 
 

@@ -23,8 +23,8 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
      - Default destination
      - Source
    * - ``geobench_v1``
-     - ``data/classification_v1.0/``
-     - Hugging Face ``recursix/geo-bench-1.0``
+     - ``data/classification_v1.0_wds/<name>/``
+     - Hugging Face ``calebrob6/geobenchv1-webdataset``
    * - ``geobench_v2``
      - ``data/geobenchv2/<name>/``
      - Hugging Face ``aialliance/<name>``
@@ -42,7 +42,7 @@ The bundled :doc:`/api/cli` provides one subcommand per family:
 
 .. code-block:: console
 
-   $ torchgeo-bench download geobench_v1                              # full V1 bundle
+   $ torchgeo-bench download geobench_v1                              # all six V1 datasets
    $ torchgeo-bench download geobench_v1 --datasets m-eurosat         # V1 subset
    $ torchgeo-bench download geobench_v2                              # default V2 set
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # V2 subset
@@ -60,12 +60,36 @@ GeoBench V1 — classification
 
 V1 datasets use the ``m-`` prefix on the command line.
 
-Download V1 data before running a benchmark. For example,
-``torchgeo-bench download geobench_v1 --datasets m-eurosat`` fetches EuroSAT
-from ``isaaccorley/geobenchv1-webdataset`` on the Hugging Face Hub into
-``data/classification_v1.0_wds``. To use the legacy per-sample HDF5 layout
-under ``data/classification_v1.0``, download the full bundle with
-``torchgeo-bench download geobench_v1``.
+Download V1 data before running a benchmark. ``torchgeo-bench download geobench_v1`` downloads all six classification datasets; ``--datasets`` selects a subset.
+
+Downloads use the pickle-free ``calebrob6/geobenchv1-webdataset`` mirror at a pinned revision. They write JSON-metadata tar shards under ``data/classification_v1.0_wds/<name>/`` and verify each downloaded archive against the SHA-256 list bundled with the package. These are archive-level integrity checks, not per-sample metadata approvals.
+
+V1 metadata format
+^^^^^^^^^^^^^^^^^^
+
+V1 readers use JSON metadata only. Tar shards pair ``<sample_id>.bands.npz`` with ``<sample_id>.meta.json``; image arrays are loaded with ``allow_pickle=False``. Custom HDF5 samples under ``data/classification_v1.0/<name>/`` must store a UTF-8 JSON string in the ``metadata_json`` attribute. The JSON object must contain a numeric ``label`` (or a numeric list for multilabel data) and a non-empty ``bands_order`` list of source-band names.
+
+.. code-block:: json
+
+   {
+     "label": 2,
+     "bands_order": ["04 - Red", "03 - Green", "02 - Blue"],
+     "04 - Red": {
+       "transform": [10, 0, 500000, 0, -10, 5200000],
+       "crs": "EPSG:32631"
+     }
+   }
+
+Per-band ``transform`` and ``crs`` entries are optional. Geographic extraction accepts six affine coefficients ``[a, b, c, d, e, f]`` (or the nine-element affine matrix) and a CRS string; use ``null`` when georeferencing is unavailable. Python objects such as affine/CRS classes and NumPy label arrays must be exported as JSON numbers, lists, and strings by the data producer.
+
+.. warning::
+
+   Existing pickle-based V1 caches are not converted or unpickled. Replace them with ``torchgeo-bench download geobench_v1`` (or ``--datasets m-eurosat`` for a subset). If an archive checksum fails, remove the named corrupt archive and retry the download. Custom datasets must supply JSON metadata.
+
+Geography extraction reads the JSON metadata directly from the default shards or custom HDF5 files. ``experiments/scripts/repack_geobench_v1.py`` repacks custom JSON-metadata HDF5 files into JSON-based shards; it does not read or convert pickle metadata.
+
+Supported V1 datasets
+^^^^^^^^^^^^^^^^^^^^^
 
 .. list-table::
    :header-rows: 1

@@ -1,14 +1,11 @@
-"""Intrinsic dimension (ID) estimation over feature embeddings.
+"""Intrinsic dimension (ID) and spectrum diagnostics for feature embeddings.
 
-Thin wrapper around ``torchid`` (https://github.com/isaaccorley/torchid).
-Provides a single entry point to compute one or more global ID estimates on a
-feature matrix and return scalar values per estimator.
+Compute one scalar per estimator with ``torchid`` (https://github.com/isaaccorley/torchid).
 
-The module also provides dependency-free effective-rank, participation-ratio,
-variance-explained, and anisotropy diagnostics from centered embeddings.
+Centered embeddings provide effective rank, participation ratio, variance explained, and anisotropy.
+These spectrum diagnostics do not require torchid.
 
-ID is computed on raw embeddings (no L2-normalization) to match the distance
-geometry used by KNN/linear probes elsewhere in this package.
+Use raw embeddings, without L2 normalization, to match the KNN and linear probes.
 """
 
 import logging
@@ -21,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class DegenerateManifoldError(ValueError):
-    """Feature manifold is degenerate; the estimator returned a non-finite dimension."""
+    """Raised when an estimator returns a non-finite intrinsic dimension."""
 
 
 SUPPORTED_ESTIMATORS: tuple[str, ...] = (
@@ -81,7 +78,6 @@ def _subsample(X: np.ndarray, max_samples: int | None, seed: int) -> np.ndarray:
 
 
 def _validate_max_samples(max_samples: int | None) -> None:
-    """Reject a ``max_samples`` that would make ``_subsample`` misbehave."""
     if max_samples is not None and (
         isinstance(max_samples, bool) or not isinstance(max_samples, int) or max_samples < 2
     ):
@@ -97,15 +93,12 @@ def compute_feature_spectrum(
 ) -> dict[str, float]:
     """Compute scale-invariant spectral diagnostics on centered embeddings.
 
-    The squared singular values of the centered feature matrix are normalized
-    into variance proportions ``p``. Effective rank is ``exp(H(p))``;
-    participation ratio is ``1 / sum(p**2)``. Spectral anisotropy normalizes
-    leading-component dominance against the isotropic ``1 / d_eff`` baseline,
-    where ``d_eff = min(d, n - 1)`` is the number of singular values centering
-    can leave nonzero: ``(d_eff * p[0] - 1) / (d_eff - 1)``. Using the raw
-    feature dimension ``d`` here would give small splits (``n <= d``, common
-    for val/test) an anisotropy floor above zero even for isotropic data,
-    making the score incomparable across datasets with different split sizes.
+    Squared singular values of centered features give normalized variance shares ``p``.
+    Effective rank is ``exp(H(p))``; participation ratio is ``1 / sum(p**2)``.
+
+    Spectral anisotropy is ``(d_eff * p[0] - 1) / (d_eff - 1)``.
+    Centering limits the rank to ``d_eff = min(d, n - 1)``.
+    Using ``d`` alone would bias small splits upward, even with evenly spread variance.
 
     Args:
         X: Feature matrix of shape ``(n_samples, n_features)``.
@@ -172,16 +165,11 @@ def compute_feature_spectrum(
 
 
 def _two_nearest_distances(X: torch.Tensor) -> torch.Tensor:
-    """Pairwise (d1, d2) for each row, matching torchid's knn precision.
+    """Return each row's nearest distances ``(d1, d2)``, matching torchid's precision.
 
-    Replicates torchid's exact squared-distance formula
-    (``x_sq + y_sq - 2*x*y.T`` then ``clamp_(min=0)``) rather than using
-    ``torch.cdist``.  ``cdist`` is more stable on CUDA, so its distances
-    disagree with torchid's at the underflow boundary: torchid's formula
-    can cancel to a tiny negative, clamp to 0, and underflow to 0 in fp32
-    after ``.sqrt()`` for rows this function would otherwise call
-    non-degenerate.  Matching it keeps dedup and the estimator agreeing on
-    which rows are degenerate.
+    Use torchid's ``x_sq + y_sq - 2*x*y.T`` formula and clamp negative values to zero.
+    Its float32 cancellation differs from ``torch.cdist`` on CUDA.
+    Matching it keeps duplicate filtering consistent with the estimator.
     """
     x_sq = (X * X).sum(dim=1, keepdim=True)
     y_sq = x_sq.squeeze(1)
@@ -192,18 +180,13 @@ def _two_nearest_distances(X: torch.Tensor) -> torch.Tensor:
 
 
 def _drop_zero_distance_rows(X_tensor: torch.Tensor) -> torch.Tensor:
-    """Drop rows whose computed nearest-neighbour distance underflows to zero.
+    """Drop rows with zero computed nearest-neighbour distances.
 
-    TwoNN's slope is ``sum(x * y) / sum(x * x)`` over ``x = log(mu)`` where
-    ``mu = d2 / d1``.  When two rows are close enough that their fp32 squared
-    distance underflows, ``d1 == 0``; the estimator's inner ``clamp_min``
-    leaves ``mu = 0``, and ``log(0) = -inf`` poisons the slope to ``nan`` —
-    observed in the wild on Prithvi / Clay CLS-token embeddings.
+    TwoNN fits ``sum(x * y) / sum(x * x)`` over ``x = log(mu)``, where ``mu = d2 / d1``.
+    Zero distances can leave ``mu = 0`` after clamping, producing ``log(0) = -inf`` and a NaN slope.
 
-    Bit-exact dedup doesn't catch this case because the rows differ in
-    their last few bits; only the *distance* underflows.  Drop the rows
-    where ``d1 == 0`` or ``d2 == 0`` so the remaining set has well-defined
-    distance ratios.
+    Float32 can round distances to zero even when rows differ.
+    Removing only exact duplicates misses these cases; require both ``d1 > 0`` and ``d2 > 0``.
     """
     d = _two_nearest_distances(X_tensor)
     keep = (d[:, 0] > 0) & (d[:, 1] > 0)
@@ -256,7 +239,6 @@ def compute_intrinsic_dim(
 
     out: dict[str, float] = {}
     for name in estimators:
-        # Only a non-finite dimension_ after a clean fit is a soft failure.
         cls = _load_estimator(name)
         est: Any = cls().fit(X_tensor)
         value = float(est.dimension_)

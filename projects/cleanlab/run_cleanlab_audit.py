@@ -14,7 +14,10 @@ out-of-sample probs, so train issue counts will be biased low. Test probs
 are out-of-sample and unbiased.
 
 Multi-label datasets (e.g. m-bigearthnet, benv2, treesatai) use
-``cleanlab.multilabel_classification.filter.find_label_issues`` if available.
+``cleanlab.multilabel_classification.filter.find_label_issues``.
+
+Only labels, probabilities, and classes are loaded. Model names come from
+filenames, so unused legacy object metadata is never deserialized.
 """
 
 import argparse
@@ -25,12 +28,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger("cleanlab_audit")
+logger = logging.getLogger(__name__)
 
 
-def _load_npz(path: Path) -> dict:
-    z = np.load(path, allow_pickle=True)
-    return {k: z[k] for k in z.files}
+def _load_npz(path: Path) -> dict[str, np.ndarray]:
+    with np.load(path, allow_pickle=False) as z:
+        return {key: z[key] for key in ("labels", "probs", "classes")}
 
 
 def _is_multilabel(labels: np.ndarray) -> bool:
@@ -41,7 +44,7 @@ def _audit_singlelabel(labels: np.ndarray, probs: np.ndarray, classes: np.ndarra
     from cleanlab.filter import find_label_issues
     from cleanlab.rank import get_label_quality_scores
 
-    # Map dataset labels to dense [0..C-1] indexing matching classes order.
+    # Cleanlab expects dense labels indexing the probability columns.
     label_to_idx = {int(c): i for i, c in enumerate(classes.tolist())}
     y = np.array([label_to_idx[int(v)] for v in labels], dtype=np.int64)
 
@@ -72,8 +75,7 @@ def _audit_multilabel(labels: np.ndarray, probs: np.ndarray) -> pd.DataFrame:
     from cleanlab.multilabel_classification.rank import get_label_quality_scores as ml_quality
 
     y = labels.astype(np.int64)
-    # Cleanlab's multilabel API expects per-sample lists of positive class
-    # indices, not binary indicator vectors.
+    # Cleanlab expects lists of positive class indices, not indicator vectors.
     y_lists = [np.flatnonzero(row).tolist() for row in y]
     quality = ml_quality(labels=y_lists, pred_probs=probs)
     issues_idx = ml_find(labels=y_lists, pred_probs=probs)
@@ -104,6 +106,7 @@ def _confused_pair(df: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    """Audit saved probabilities and write per-sample and aggregate reports."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--probs-dir",
@@ -168,9 +171,7 @@ def main() -> None:
                 {
                     "dataset": dataset,
                     "split": split,
-                    "model": str(data.get("meta", np.array([None, None]))[1])
-                    if "meta" in data
-                    else "",
+                    "model": npz_path.stem.split("__", 1)[1].removesuffix(f"_{split}"),
                     "multilabel": multilabel,
                     "n": n,
                     "n_flagged": n_flag,

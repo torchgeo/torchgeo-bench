@@ -2,39 +2,38 @@
 """Detect overlapping tiles across the EuroSAT family.
 
 Hashes RGB tiles from ``m-eurosat`` (GeoBench V1), ``eurosat-spatial`` (the
-new spatial-split variant), and torchgeo's stock ``eurosat`` using a
+spatial-split variant), and torchgeo's stock ``eurosat`` using a
 perceptual hash (``imagehash.phash``). Reports collision groups so we can
 flag tiles that appear in train of one variant and test of another — an
 overlap that turns IID-test accuracy into a leakage signal.
 
 Outputs:
 - ``results/cleanlab/dedup_eurosat_family.csv``: one row per (dataset, split,
-  index) with its phash and any cross-dataset matches.
+  index) with its phash.
+- ``results/cleanlab/dedup_eurosat_family_collisions.csv``: cross-dataset
+  collision groups.
 - summary logged to stderr.
 """
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
+import imagehash
 import numpy as np
 import pandas as pd
+import torch
+from PIL import Image
+from torch.utils.data import Dataset
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "src"))
+from torchgeo_bench.datasets import get_datasets
 
-import imagehash  # noqa: E402
-from PIL import Image  # noqa: E402
-
-from torchgeo_bench.datasets import get_datasets  # noqa: E402
-
-logger = logging.getLogger("dedup")
+logger = logging.getLogger(__name__)
 
 DATASETS = ["m-eurosat", "eurosat-spatial", "eurosat"]
 
 
-def _load_splits(dataset: str):
+def _load_splits(dataset: str) -> dict[str, Dataset]:
     result = get_datasets(
         dataset_name=dataset,
         partition_name="default",
@@ -54,7 +53,7 @@ def _load_splits(dataset: str):
     }
 
 
-def _phash_image(arr) -> str:
+def _phash_image(arr: torch.Tensor) -> str:
     img = arr.detach().cpu().float().numpy()
     img = np.transpose(img, (1, 2, 0))
     lo = np.percentile(img, 2, axis=(0, 1), keepdims=True)
@@ -65,6 +64,7 @@ def _phash_image(arr) -> str:
 
 
 def hash_dataset(dataset: str) -> pd.DataFrame:
+    """Hash each RGB tile in the train, validation, and test splits."""
     splits = _load_splits(dataset)
     rows = []
     for split, ds in splits.items():
@@ -89,6 +89,7 @@ def hash_dataset(dataset: str) -> pd.DataFrame:
 
 
 def main() -> None:
+    """Write EuroSAT-family tile hashes and cross-dataset collisions."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--out", type=Path, default=Path("results/cleanlab/dedup_eurosat_family.csv")
@@ -108,7 +109,6 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, index=False)
 
-    # Summary: collisions across datasets.
     grouped = df.groupby("phash")
     cross = []
     for ph, sub in grouped:

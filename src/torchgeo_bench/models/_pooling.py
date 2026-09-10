@@ -45,6 +45,6 @@ def pool_tokens(tokens: torch.Tensor, mode: str = "mean") -> torch.Tensor:
     if mode == "mean":
         return mean
 
-    # both — concat cls and mean_patches; falls back to mean+mean when no CLS
+    # Without a CLS token, "both" repeats the mean to keep the output width at 2D.
     cls = tokens[:, 0, :] if has_cls else mean
     return torch.cat([cls, mean], dim=-1)

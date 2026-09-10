@@ -11,7 +11,6 @@ Output: ``results/cleanlab/galleries/<dataset>_<split>.png``.
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -21,23 +20,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+from torch.utils.data import Dataset
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "src"))
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets  # noqa: E402
-
-logger = logging.getLogger("gallery")
+logger = logging.getLogger(__name__)
 
 
-def _load_split_dataset(dataset: str, split: str, partition: str = "default"):
+def _load_split_dataset(dataset: str, split: str, partition: str = "default") -> Dataset:
     result = get_datasets(
         dataset_name=dataset,
         partition_name=partition,
         batch_size=1,
         num_workers=0,
         return_val=True,
-        image_size=None,  # native resolution for visualization
+        image_size=None,
         bands="all",
         interpolation="bicubic",
     )
@@ -71,6 +68,7 @@ def render_gallery(
     out_path: Path,
     cols: int = 10,
 ) -> None:
+    """Save a grid of flagged RGB tiles for manual review."""
     if flagged.empty:
         logger.warning("[%s/%s] no flagged samples", dataset, split)
         return
@@ -112,6 +110,7 @@ def render_gallery(
 
 
 def main() -> None:
+    """Render galleries from the selected per-sample issue reports."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--issues-dir",

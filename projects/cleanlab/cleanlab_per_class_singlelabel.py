@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger("perclass-sl")
+logger = logging.getLogger(__name__)
 
 
 def class_metrics(
@@ -34,6 +34,7 @@ def class_metrics(
     quality: np.ndarray,
     is_issue: np.ndarray,
 ) -> pd.DataFrame:
+    """Summarize accuracy, label quality, and confusion for each class."""
     from sklearn.metrics import average_precision_score
 
     K = probs.shape[1]
@@ -46,8 +47,6 @@ def class_metrics(
             continue
         correct = int(((pred == y) & in_class).sum())
         n_flag = int((is_issue & in_class).sum())
-        # Off-diagonal confusion: most common prediction among flagged
-        # samples for this class.
         flagged_preds = pred[is_issue & in_class]
         if flagged_preds.size:
             uniq, cnt = np.unique(flagged_preds, return_counts=True)
@@ -56,14 +55,12 @@ def class_metrics(
         else:
             top, top_n = -1, 0
         ap = float(average_precision_score(in_class.astype(int), probs[:, c]))
-        # Most-confused-OUT pair fraction across the whole class:
-        # max over c' != c of P(pred=c' | given=c)
         conf_share = np.zeros(K, dtype=float)
         if n > 0:
             uniq2, cnt2 = np.unique(pred[in_class], return_counts=True)
             for u, q in zip(uniq2, cnt2, strict=False):
                 conf_share[u] = q / n
-        conf_share[c] = 0.0  # mask self
+        conf_share[c] = 0.0
         top_conf_class = int(conf_share.argmax())
         top_conf_share = float(conf_share.max())
         rows.append(
@@ -85,15 +82,16 @@ def class_metrics(
 
 
 def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFrame:
-    from cleanlab.filter import find_label_issues
-    from cleanlab.rank import get_label_quality_scores
-
-    z = np.load(npz_path, allow_pickle=True)
-    labels = z["labels"]
-    probs = z["probs"].astype(np.float32)
-    classes = z["classes"]
+    """Write per-class metrics from numeric single-label probability arrays."""
+    with np.load(npz_path, allow_pickle=False) as z:
+        labels = z["labels"]
+        probs = z["probs"].astype(np.float32)
+        classes = z["classes"]
     if labels.ndim != 1:
         raise SystemExit(f"{npz_path}: not single-label (labels ndim={labels.ndim})")
+
+    from cleanlab.filter import find_label_issues
+    from cleanlab.rank import get_label_quality_scores
 
     label_to_idx = {int(c): i for i, c in enumerate(classes.tolist())}
     y = np.array([label_to_idx[int(v)] for v in labels], dtype=np.int64)
@@ -141,6 +139,7 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
 
 
 def main() -> None:
+    """Report single-label issues for the requested datasets and splits."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--probs-dir", type=Path, default=Path("results/cleanlab/probs"))
     parser.add_argument("--out-dir", type=Path, default=Path("results/cleanlab"))

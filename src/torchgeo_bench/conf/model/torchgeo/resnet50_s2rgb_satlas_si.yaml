@@ -1,5 +1,4 @@
-# torchgeo ResNet-50 — Sentinel-2 RGB SatlasPretrain (single-image)
-# Feature dimension: 2048
+# SatlasPretrain single-image weights for Sentinel-2 RGB.
 
 _target_: torchgeo_bench.models.TorchGeoResNetBench
 factory: resnet50

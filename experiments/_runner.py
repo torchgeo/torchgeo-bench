@@ -1,14 +1,6 @@
-"""Shared GPU queue dispatcher for non-custom experiment runners.
+"""Run experiment jobs with one worker per GPU.
 
-Each non-custom experiment script builds a list of :class:`Job` instances
-(one per ``torchgeo-bench run …`` invocation it wants to make) and calls
-:func:`run_jobs` to execute them. With a single device the jobs run
-sequentially; with multiple devices they fan out across one worker thread
-per device, each pulling jobs from a shared queue.
-
-This module is invoked as a sibling import from scripts in the same
-directory (``from _runner import …``) — Python prepends the script's
-directory to ``sys.path`` so no path setup is required.
+Each worker takes the next available :class:`Job` until the queue is empty.
 """
 
 import argparse
@@ -32,7 +24,7 @@ class Job:
 
     Attributes:
         label: Short human-readable identifier for log lines.
-        overrides: Hydra-style overrides forwarded to ``torchgeo-bench run``
+        overrides: Config overrides forwarded to ``torchgeo-bench run``
             (e.g. ``["model=timm/resnet18", "dataset.names=[m-eurosat]"]``).
             ``device`` and ``output`` are appended automatically by the
             runner — do not include them here.
@@ -52,10 +44,7 @@ class _JobResult:
 
 
 def add_devices_argument(parser: argparse.ArgumentParser) -> None:
-    """Register a ``--devices`` flag that takes one or more GPU indices.
-
-    Defaults to ``[0]`` (single GPU, sequential execution).
-    """
+    """Add a ``--devices`` option; the default is GPU 0."""
     parser.add_argument(
         "--devices",
         nargs="+",
@@ -70,7 +59,7 @@ def add_devices_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def default_output(script_file: str | Path) -> str:
-    """Derive the standard ``results/<basename>.csv`` path from a script's ``__file__``.
+    """Choose a results CSV name from the experiment script's filename.
 
     Drops the ``run_`` prefix and ``.py`` suffix. For example,
     ``run_cls_token_experiment.py`` becomes ``results/cls_token_experiment.csv``.
@@ -80,7 +69,7 @@ def default_output(script_file: str | Path) -> str:
 
 
 def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResult:
-    """Shell out to ``torchgeo-bench run …`` for a single job."""
+    """Run one benchmark job on the assigned GPU."""
     cmd = [
         "torchgeo-bench",
         "run",
@@ -169,16 +158,13 @@ def run_jobs(
     output: str,
     dry_run: bool = False,
 ) -> int:
-    """Dispatch ``jobs`` across ``devices`` and return a process exit code.
+    """Run jobs on the selected GPUs and return an exit code.
 
     Args:
         jobs: List of :class:`Job` instances to execute.
-        devices: GPU indices to dispatch across. With one device jobs run
-            sequentially; with multiple devices each device gets a worker
-            thread that pulls from a shared queue.
+        devices: GPU indices, with at most one job running on each GPU.
         output: CSV path passed as ``output=<path>`` to every invocation.
-        dry_run: If ``True``, log the planned jobs and return 0 without
-            running anything.
+        dry_run: Log planned commands without starting jobs.
 
     Returns:
         ``0`` if every job succeeded, ``1`` otherwise (or if ``jobs`` is
@@ -193,9 +179,9 @@ def run_jobs(
         return 0
 
     if dry_run:
-        for i, job in enumerate(jobs, start=1):
-            gpu = devices[(i - 1) % len(devices)]
-            logger.info("[%d/%d] %s -> cuda:%d", i, total, job.label, gpu)
+        for index, job in enumerate(jobs, start=1):
+            gpu = devices[(index - 1) % len(devices)]
+            logger.info("[%d/%d] %s -> cuda:%d", index, total, job.label, gpu)
             logger.info(
                 "torchgeo-bench run %s device=cuda:%d output=%s resume=true",
                 " ".join(job.overrides),

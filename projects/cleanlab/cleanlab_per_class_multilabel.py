@@ -20,16 +20,12 @@ top-K worst classes per dataset.
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "src"))
-
-logger = logging.getLogger("perclass")
+logger = logging.getLogger(__name__)
 
 
 def _ap_per_class(y: np.ndarray, p: np.ndarray) -> np.ndarray:
@@ -73,9 +69,10 @@ def _co_occur_top(y_col: np.ndarray, y_other: np.ndarray) -> tuple[int, float]:
 
 
 def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFrame:
-    z = np.load(npz_path, allow_pickle=True)
-    y = z["labels"].astype(np.int64)
-    probs = z["probs"].astype(np.float32)
+    """Write per-class metrics from numeric multi-label probability arrays."""
+    with np.load(npz_path, allow_pickle=False) as z:
+        y = z["labels"].astype(np.int64)
+        probs = z["probs"].astype(np.float32)
     if y.ndim != 2:
         raise SystemExit(f"{npz_path}: not multi-label (labels ndim={y.ndim})")
     K = y.shape[1]
@@ -90,16 +87,13 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
         n_pos = int(y[:, c].sum())
         n_pred = int(pred_pos[:, c].sum())
         n_flag = int(f.sum())
-        # Flag rate restricted to true positives — "of the samples labeled c,
-        # how many does cleanlab think are wrong?"
+        # Of the samples labeled c, how many does cleanlab think are wrong?
         flag_pos = int((f & y[:, c].astype(bool)).sum())
         flag_neg = int((f & ~y[:, c].astype(bool)).sum())
-        # Highest Jaccard with another class (excluding self) — proxy for
-        # near-duplicate / nested labels.
+        # Exclude self when looking for near-duplicate or nested labels.
         mask = np.ones(K, dtype=bool)
         mask[c] = False
         j_idx, j_score = _co_occur_top(y[:, c], y[:, mask])
-        # Map j_idx back through the mask to original column index.
         real_idx = int(np.flatnonzero(mask)[j_idx]) if j_idx >= 0 else -1
         rows.append(
             {
@@ -118,9 +112,9 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
     df = pd.DataFrame(rows)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = npz_path.stem  # e.g. benv2__tt_terramind_v1_large_test
+    stem = npz_path.stem
     dataset, rest = stem.split("__", 1)
-    split = rest.rsplit("_", 1)[1]  # train|test
+    split = rest.rsplit("_", 1)[1]
     out_path = out_dir / f"perclass_{dataset}_{split}.csv"
     df.to_csv(out_path, index=False)
     logger.info("[%s/%s] K=%d wrote %s", dataset, split, K, out_path)
@@ -148,6 +142,7 @@ def report_dataset(npz_path: Path, out_dir: Path, top_k: int = 10) -> pd.DataFra
 
 
 def main() -> None:
+    """Report multi-label issues for the requested datasets and splits."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--probs-dir",

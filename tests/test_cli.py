@@ -1,6 +1,7 @@
 """Unit tests for CLI entrypoints."""
 
 import pytest
+from omegaconf import OmegaConf
 
 from torchgeo_bench.cli import main as cli_main
 
@@ -16,11 +17,66 @@ def test_run_composes_and_calls_main(monkeypatch) -> None:
     assert cfg.device == "cpu"
 
 
-def test_run_flags_win_over_positional_overrides(monkeypatch) -> None:
-    received = []
-    monkeypatch.setattr("torchgeo_bench.main.main", received.append)
-    cli_main(["run", "device=cuda:0", "--device", "cpu"])
-    assert received[0].device == "cpu"
+@pytest.mark.parametrize("command", ["run", "flops"])
+def test_flags_win_over_positional_overrides(command, capsys) -> None:
+    cli_main(
+        [
+            command,
+            "model=rcf",
+            "device=cuda:0",
+            "--device",
+            "cpu",
+            "device=cuda:1",
+            "--print-config",
+        ]
+    )
+    assert OmegaConf.create(capsys.readouterr().out).device == "cpu"
+
+
+@pytest.mark.parametrize("command", ["run", "flops"])
+@pytest.mark.parametrize(
+    "output_args",
+    [
+        ["--output", "results/run=1.csv"],
+        ["-o", "results/run=1.csv"],
+        ["--output=results/run=1.csv"],
+    ],
+)
+def test_output_flag_value_can_contain_equals(command, output_args, capsys) -> None:
+    cli_main([command, "model=rcf", *output_args, "--print-config"])
+    assert OmegaConf.create(capsys.readouterr().out).output == "results/run=1.csv"
+
+
+@pytest.mark.parametrize("command", ["run", "flops"])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        ["seed=1", "--device", "cpu", "seed=2"],
+        ["seed=1", "--device", "cpu", "--", "seed=2"],
+        ["seed=1", "--device", "cpu", "seed=1", "--", "seed=2"],
+    ],
+)
+def test_interleaved_overrides_keep_their_order(command, overrides, capsys) -> None:
+    cli_main([command, "--model", "rcf", "--print-config", *overrides])
+    cfg = OmegaConf.create(capsys.readouterr().out)
+    assert cfg.seed == 2
+    assert cfg.device == "cpu"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["run", "--unknown=value", "--print-config"],
+        ["run", "model=rcf", "--print-config", "--unknown=value"],
+        ["flops", "model=rcf", "--print-config", "--unknown=value"],
+        ["download", "eurosat", "model=rcf"],
+    ],
+)
+def test_unrecognized_arguments_are_rejected(argv, capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli_main(argv)
+    assert exc.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
 
 
 def test_run_datasets_flag_becomes_list(monkeypatch) -> None:
@@ -162,12 +218,7 @@ def test_bad_override_is_not_a_traceback() -> None:
 
 
 def test_double_plus_override_sets_the_real_key():
-    """`++key=value` must override, not create a literal `+key` node.
-
-    Hydra spelled add as `+key` and add-or-override as `++key`; stripping only
-    one `+` left a `+model` section and silently no-op'd the intended override,
-    which the sweep scripts rely on.
-    """
+    """``++key=value`` adds or overrides a key, not a literal ``+key``."""
     from torchgeo_bench.config import compose_config
 
     cfg = compose_config(["model=rcf", "++model.pool=cls", "+model.gsd=1.0"])
@@ -177,11 +228,7 @@ def test_double_plus_override_sets_the_real_key():
 
 
 def test_model_names_are_posix_on_every_platform():
-    """Config names are CLI identifiers, so they must not use OS separators.
-
-    On Windows `str(Path)` produced `torchgeo\\scalemae_large_fmow`, which no
-    documented command, config, or sweep script would match.
-    """
+    """Model names are CLI identifiers and must use forward slashes even on Windows."""
     from torchgeo_bench.config import list_model_configs
 
     names = list_model_configs()

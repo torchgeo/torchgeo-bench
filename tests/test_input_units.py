@@ -23,11 +23,6 @@ def _band(max_val: float, sensor: str = "s2") -> BandSpec:
     )
 
 
-# ---------------------------------------------------------------------------
-# detect_input_unit
-# ---------------------------------------------------------------------------
-
-
 def test_detect_s2_dn():
     assert detect_input_unit([_band(10000.0)]) == InputUnit.S2_DN
 
@@ -44,11 +39,6 @@ def test_detect_mixed_sensors_raises():
     bands = [_band(10000.0, sensor="s2"), _band(1.0, sensor="aerial")]
     with pytest.raises(ValueError, match="Cannot infer one input unit"):
         detect_input_unit(bands)
-
-
-# ---------------------------------------------------------------------------
-# convert_unit
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

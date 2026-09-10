@@ -13,7 +13,6 @@ family:
 Regression scores are floored at :data:`R2_FLOOR` before averaging.
 """
 
-# Socioeconomic / health / human-activity.
 SOCIO = (
     {
         "pdfm-conus27",
@@ -50,7 +49,6 @@ SOCIO = (
     }
 )
 
-# Physical environment: climate, elevation, soil, biomass, tree cover.
 ENV = {
     "worldclim-bio1",
     "worldclim-bio12",
@@ -66,7 +64,6 @@ ENV = {
     "bt-bioclim",
 }
 
-# Land cover / land use / crop type + biome/ecoregion/country classification.
 LAND = {
     f"dm-{k}"
     for k in (
@@ -96,7 +93,7 @@ LAND = {
 
 FAMILIES = ("socio", "env", "land")
 
-# Floor per-benchmark R^2 before averaging; deep-negative values are unstable noise.
+# Floor R² before averaging so extreme negative scores do not dominate.
 R2_FLOOR = -1.0
 
 

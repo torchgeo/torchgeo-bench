@@ -46,18 +46,17 @@ dependencies = [
   "numpy>=1.24",
   "omegaconf>=2.3",
   "pandas>=2",
-  "pyarrow>=14",                                                               # read CoordBench parquet tables via pandas
-  "rich>=13",
-  "safetensors>=0.4",                                                          # load MIND location-encoder weights
+  "pyarrow>=14",                                                               # Required for CoordBench's Parquet files.
+  "safetensors>=0.4",                                                          # Loads MIND's location-model weights.
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
   "torchgeo>=0.10",
   "torchmetrics>=1.4",
   "torchvision>=0.15",
+  "tqdm>=4.66",
 ]
 optional-dependencies.all = [
-  "torchgeo-bench[cleanlab]",
   "torchgeo-bench[coordbench]",
   "torchgeo-bench[dev]",
   "torchgeo-bench[docs]",
@@ -65,16 +64,9 @@ optional-dependencies.all = [
   "torchgeo-bench[olmoearth]",
   "torchgeo-bench[sam3]",
   "torchgeo-bench[terratorch]",
-  "torchgeo-bench[viz]",
-]
-optional-dependencies.cleanlab = [
-  "cleanlab>=2.7",
-  "imagehash>=4.3",
-  "matplotlib>=3.5",
-  "pillow>=9",
 ]
 optional-dependencies.coordbench = [
-  "rshf>=0.2", # pretrained location encoders: SatCLIP/GeoCLIP/Climplicit/SINR
+  "rshf>=0.2", # Required by SatCLIP, GeoCLIP, Climplicit, and SINR.
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
@@ -98,17 +90,13 @@ optional-dependencies.id = [
   "torchid>=0.3; python_version>='3.13'",
 ]
 optional-dependencies.olmoearth = [
-  "olmoearth-pretrain-minimal>=0.0.6", # 0.0.6 adds OlmoEarth v1.2 (ModelID.OLMOEARTH_V1_2_*)
+  "olmoearth-pretrain-minimal>=0.0.6", # OlmoEarth v1.2 weights require this version.
 ]
 optional-dependencies.sam3 = [
   "transformers>=4.50",
 ]
 optional-dependencies.terratorch = [
   "terratorch>=1",
-]
-optional-dependencies.viz = [
-  "matplotlib>=3.5",
-  "pillow>=9",
 ]
 urls.Documentation = "https://torchgeo.org/torchgeo-bench/"
 urls.Homepage = "https://github.com/torchgeo/torchgeo-bench"
@@ -180,12 +168,14 @@ lint.ignore = [
   "D104",   # missing docstring in public package
   "D105",   # missing docstring in magic method
   "D107",   # missing docstring in __init__ (documented in class docstring)
-  "E501",   # line too long (handled by ruff format)
+  "E501",   # Let the formatter handle line length.
   "SIM108", # allow explicit if/else
   "SIM116", # allow explicit branches
   "TRY003", # allow concise messages at the raise site
 ]
 lint.per-file-ignores."experiments/scripts/**/*.py" = [ "D" ]
+lint.per-file-ignores."projects/cleanlab/**/*.py" = [ "D" ]
+lint.per-file-ignores."projects/cleanlab/tests/**/*.py" = [ "ARG", "D" ]
 lint.per-file-ignores."src/torchgeo_bench/cli.py" = [ "T201" ]  # CLI payloads go to stdout
 lint.per-file-ignores."tests/**/*.py" = [ "ARG", "D" ]
 lint.flake8-tidy-imports.banned-api."__future__.annotations".msg = "Use ordinary annotations or quoted forward references."

@@ -1,7 +1,3 @@
-# DenseNet-161 (28M params)
-# Feature dimension: 2208
-# Model: densenet161
-
 _target_: torchgeo_bench.models.TimmPatchBenchModel
 model_name: densenet161
 pretrained: true

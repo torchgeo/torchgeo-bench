@@ -1,49 +1,41 @@
-"""End-to-end smoke test for the all-bands code path.
+"""Check all-band CSV results with real m-eurosat data.
 
-Runs ``torchgeo-bench run model=timm/resnet18 dataset.bands=all`` on a small
-``m-eurosat`` partition and asserts the resulting CSV records the new
-``bands`` column with the right value, plus both KNN-5 and linear-probe rows.
+Run ResNet-18 with all bands on a small ``m-eurosat`` partition.
 
-Marked ``slow`` because it shells out and runs feature extraction on real data.
+Marked ``slow`` because feature extraction uses real imagery.
 """
 
-import shutil
-import subprocess
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from .test_cli_program import run_cli
+from .test_integration import require_dataset_data
+
 
 @pytest.mark.slow
-def test_all_bands_e2e(geobench_root, tmp_path: Path):
-    """Run torchgeo-bench end-to-end with ``dataset.bands=all`` and check the CSV."""
-    del geobench_root  # only used to gate skipping
-    cli = shutil.which("torchgeo-bench")
-    if cli is None:
-        pytest.skip("torchgeo-bench CLI not on PATH")
+def test_all_bands_e2e(tmp_path: Path):
+    require_dataset_data("m-eurosat")
 
     output = tmp_path / "results.csv"
     cmd = [
-        cli,
         "run",
         "model=timm/resnet18",
+        "model.pretrained=false",
+        "model.seed=0",
         "dataset.names=[m-eurosat]",
         "dataset.bands=all",
         "dataset.partition=0.01x_train",
+        "dataset.image_size=32",
         "dataset.batch_size=16",
+        "dataset.num_workers=0",
         "eval.bootstrap=10",
         "eval.c_range=[-2,2,3]",
         "device=cpu",
         f"output={output}",
     ]
-    completed = subprocess.run(
-        cmd,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=900,
-    )
+    completed = run_cli(*cmd, cwd=Path.cwd(), timeout=600)
     assert completed.returncode == 0, (
         f"torchgeo-bench exited {completed.returncode}\n"
         f"stdout:\n{completed.stdout}\n"
@@ -68,7 +60,6 @@ def test_all_bands_e2e(geobench_root, tmp_path: Path):
     feature_dims = rows["feature_dim"].unique().tolist()
     assert feature_dims == [512], f"Expected resnet18 feature_dim=512, got {feature_dims}"
 
-    # Sanity-check accuracies are floats in [0, 1].
     metric_values = rows["metric_value"].astype(float)
     assert metric_values.between(0.0, 1.0).all(), (
         f"metric_value out of range: {metric_values.tolist()}"

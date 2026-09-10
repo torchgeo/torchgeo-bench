@@ -21,16 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_num_prefix_tokens(backbone: nn.Module) -> int | None:
-    """Return timm's ``num_prefix_tokens`` from anywhere in the module tree.
+    """Find a declared ``num_prefix_tokens`` in the backbone, or return ``None``.
 
-    The benchmark nests the timm model under ``.backbone`` (sometimes deeper),
-    so walk the tree rather than reading the top-level attribute.  Returns
-    ``None`` for non-timm token models, which must declare the count by hand.
+    Search the module tree because timm models may be nested under ``.backbone``.
+    Non-timm token models must declare their own count.
 
-    This is what distinguishes a CLS token from DINOv3's 1 CLS + 4 registers.
-    Guessing "one prefix token" silently corrupts the latter: at 256px a
-    DINOv3 ViT-L emits ``(B, 261, 1024)``, and 261 is neither ``s**2`` nor
-    ``s**2 + 1``.
+    DINOv3 has 1 CLS token and 4 register tokens, giving ``(B, 261, 1024)`` at 256 px.
+    Removing only CLS leaves no square patch grid.
     """
     for module in backbone.modules():
         n = getattr(module, "num_prefix_tokens", None)
@@ -40,13 +37,11 @@ def _resolve_num_prefix_tokens(backbone: nn.Module) -> int | None:
 
 
 class CachedFeaturesDataset(Dataset):
-    """In-RAM cache of pre-extracted backbone features and masks.
+    """Backbone features and masks cached in RAM.
 
-    Stores data layer-first: ``layer_tensors[li]`` is a ``(N, C, H, W)``
-    float16 tensor for layer *li*, and ``masks`` is an ``(N, H, W)`` long
-    tensor.  This contiguous layout eliminates per-sample Python iteration
-    during :meth:`GPUTensorCache.from_cached` — the GPU transfer becomes a
-    single ``Tensor.to(device)`` call per layer.
+    ``layer_tensors[li]`` holds contiguous ``(N, C, H, W)`` features, float16 by default.
+    ``masks`` is an ``(N, H, W)`` long tensor.
+    :meth:`GPUTensorCache.from_cached` transfers whole layers, avoiding per-sample Python work.
 
     Each ``__getitem__`` returns a ``(features, mask)`` tuple.
     """
@@ -56,8 +51,8 @@ class CachedFeaturesDataset(Dataset):
         layer_tensors: list[torch.Tensor],
         masks: torch.Tensor,
     ) -> None:
-        self.layer_tensors = layer_tensors  # list of (N, C, H, W)
-        self.masks = masks  # (N, H, W)
+        self.layer_tensors = layer_tensors
+        self.masks = masks
 
     def __len__(self) -> int:
         return self.masks.shape[0]
@@ -67,7 +62,6 @@ class CachedFeaturesDataset(Dataset):
 
 
 def _estimate_cache_bytes(cache: "CachedFeaturesDataset") -> int:
-    """Estimate total bytes occupied by a CachedFeaturesDataset."""
     if not cache.layer_tensors:
         return 0
     return (
@@ -77,16 +71,14 @@ def _estimate_cache_bytes(cache: "CachedFeaturesDataset") -> int:
 
 
 class GPUTensorCache:
-    """All cached features pre-stacked and moved to GPU as contiguous tensors.
+    """Cached features and masks kept on the target device.
 
-    Eliminates per-batch CPU→GPU transfers and per-batch ``torch.stack`` calls
-    in the training loop.  Use :meth:`from_cached` to build from a
-    :class:`CachedFeaturesDataset`, then iterate with :meth:`shuffled_batches`
-    (training) or :meth:`ordered_batches` (evaluation).
+    Build with :meth:`from_cached` to avoid copying or stacking features each batch.
+    Use :meth:`shuffled_batches` for training and :meth:`ordered_batches` for evaluation.
 
     Args:
-        layer_tensors: One ``(N, C, H, W)`` float16 tensor per hooked layer,
-            already on the target device.
+        layer_tensors: Contiguous ``(N, C, H, W)`` tensors, one per hooked layer on ``device``.
+            ``from_cached`` uses float16 on CUDA and float32 on CPU.
         masks: ``(N, H, W)`` long tensor on the target device.
         device: The device these tensors live on.
     """
@@ -110,17 +102,17 @@ class GPUTensorCache:
         cache: "CachedFeaturesDataset",
         device: torch.device | str,
     ) -> "GPUTensorCache":
-        """Stack and move all features + masks to *device* in one shot.
+        """Move cached features and masks to ``device``.
 
         Args:
             cache: CPU-resident cached features.
-            device: Target device (must be CUDA for the speedup to be useful).
+            device: Target device.
 
         Returns:
             A :class:`GPUTensorCache` with all data on *device*.
         """
         target_device = torch.device(device)
-        # Keep float32 on CPU (no autocast); use float16 on CUDA for AMP efficiency.
+        # CPU heads need float32 without autocast; CUDA uses float16 for mixed precision.
         dtype = torch.float16 if target_device.type == "cuda" else torch.float32
         layer_tensors = [t.to(target_device, dtype=dtype) for t in cache.layer_tensors]
         masks = cache.masks.to(target_device, dtype=torch.long)
@@ -129,10 +121,7 @@ class GPUTensorCache:
     def shuffled_batches(
         self, batch_size: int
     ) -> Iterator[tuple[list[torch.Tensor], torch.Tensor]]:
-        """Yield *(features, masks)* mini-batches in random order.
-
-        All tensors are already on the GPU — zero host→device transfer per batch.
-        """
+        """Yield *(features, masks)* mini-batches in random order."""
         idx = torch.randperm(len(self), device=self.device)
         for start in range(0, len(self), batch_size):
             b = idx[start : start + batch_size]
@@ -146,17 +135,10 @@ class GPUTensorCache:
 
 
 class SegmentationProbe(nn.Module):
-    """Multi-scale segmentation probe that hooks into backbone feature layers.
+    """Predict per-pixel class logits from selected backbone feature layers.
 
-    Backbone layers are tapped via forward hooks. Features are passed to a
-    decoder head (``LinearHead``, ``ConvBlockHead``, ``FPNHead``, or
-    ``DPTHead``) that produces per-pixel class logits.
-
-    Layer ordering convention (applies to all head types):
-      - **Coarse-to-fine** — deepest / lowest-resolution layer first.
-      - Example for ResNet: ``["layer4", "layer3", "layer2", "layer1"]``.
-      - For ``DPTHead`` this means index 0 = coarsest, which is also what the
-        DPT cascade expects.
+    All heads, including ``DPTHead``, expect coarse-to-fine layers, deepest/lowest resolution first.
+    For ResNet, use ``["layer4", "layer3", "layer2", "layer1"]``.
 
     Args:
         backbone: Feature extractor. May be a raw backbone or a ``BenchModel``
@@ -232,10 +214,6 @@ class SegmentationProbe(nn.Module):
                 f"{head_type!r}. Choose from: linear, conv_block, fpn, dpt, patch_linear"
             )
 
-    # ------------------------------------------------------------------
-    # Hook / dry-run helpers
-    # ------------------------------------------------------------------
-
     def register_hooks(self) -> None:
         """Register feature hooks and reject missing or duplicate layer names."""
         duplicate_layers = {name for name in self.layer_names if self.layer_names.count(name) > 1}
@@ -273,7 +251,7 @@ class SegmentationProbe(nn.Module):
         return hook
 
     def _backbone_device(self) -> torch.device:
-        """Return the device of the backbone, falling back to CPU for parameterless backbones."""
+        """Use a backbone parameter or buffer's device, defaulting to CPU."""
         p = next(self.backbone.parameters(), None)
         if p is not None:
             return p.device
@@ -311,13 +289,10 @@ class SegmentationProbe(nn.Module):
             return feat.view(feat.shape[0], feat.shape[1], 1, 1)
         if feat.ndim == 3:
             return self.reshape_tokens(feat)
-        # 4D tensor: NCHW (standard) or NHWC (Swin-family).
-        # Detect NHWC: spatial dims are square (H==W) and channel dim (last) is
-        # larger than the spatial dims — the opposite of typical NCHW feature maps.
+        # Infer NHWC when H == W and channels exceed the spatial dimensions; otherwise keep NCHW.
         if feat.ndim == 4:
             _, d1, d2, d3 = feat.shape
             if d1 == d2 and d3 > d1:
-                # NHWC → NCHW
                 return feat.permute(0, 3, 1, 2).contiguous()
         return feat
 
@@ -326,7 +301,7 @@ class SegmentationProbe(nn.Module):
         bsz, d1, d2 = feat.shape
         n_prefix = _resolve_num_prefix_tokens(self.backbone)
 
-        # DINOv3 prefixes include register tokens as well as the CLS token.
+        # Try the declared prefix count before the 0/1-token fallbacks.
         for drop in dict.fromkeys(([n_prefix] if n_prefix else []) + [0, 1]):
             if drop >= d1:
                 continue
@@ -335,6 +310,7 @@ class SegmentationProbe(nn.Module):
                 return feat[:, drop:, :].permute(0, 2, 1).reshape(bsz, d2, side, side)
 
         # A declared prefix count fixes the token axis; never reinterpret channel width.
+        # Otherwise, a square channel width can be mistaken for the patch grid.
         if n_prefix is None and d1 < d2:
             side = math.isqrt(d2)
             if side * side == d2:
@@ -348,10 +324,6 @@ class SegmentationProbe(nn.Module):
             f"Got shape={tuple(feat.shape)}, num_prefix_tokens={n_prefix}. "
             "Expected tokens with L=s^2 after dropping prefix tokens."
         )
-
-    # ------------------------------------------------------------------
-    # Feature caching
-    # ------------------------------------------------------------------
 
     @torch.no_grad()
     def extract_segmentation_features(
@@ -373,8 +345,6 @@ class SegmentationProbe(nn.Module):
         was_training = self.backbone.training
         self.backbone.eval()
         try:
-            # Accumulate per-batch tensors layer-wise, then cat once at the end.
-            # This avoids N individual per-sample allocations during GPU transfer.
             batches_per_layer: list[list[torch.Tensor]] = [[] for _ in self.layer_names]
             all_masks: list[torch.Tensor] = []
             device = self._backbone_device()
@@ -406,18 +376,13 @@ class SegmentationProbe(nn.Module):
         logger.info("Cached features for %s samples.", masks_tensor.shape[0])
         return CachedFeaturesDataset(layer_tensors, masks_tensor)
 
-    # ------------------------------------------------------------------
-    # Forward
-    # ------------------------------------------------------------------
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Compute segmentation logits from input images.
 
         Args:
-            x: ``(B, C, H, W)``, or ``(B, T, C, H, W)`` for a time series.  A
-                time series is folded into the batch, encoded once, and pooled
-                back over ``T`` in feature space — the backbone stays a
-                single-image encoder and the decoder sees one map per sample.
+            x: ``(B, C, H, W)`` images or a ``(B, T, C, H, W)`` time series.
+                Each time step is encoded as an image before pooling features over ``T``.
+                This gives the head one map per sample.
 
         Returns:
             Logits tensor of shape ``(B, num_classes, H, W)``.

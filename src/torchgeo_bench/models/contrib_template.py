@@ -54,7 +54,7 @@ class NewModel(BenchModel):
     def _forward_patch_features(
         self,
         images: torch.Tensor,
-        _bboxes: torch.Tensor | None = None,  # required by interface; ignore
+        _bboxes: torch.Tensor | None = None,  # optional; BenchModel passes images only
     ) -> torch.Tensor:
         """Return embeddings ``(B, K)`` from already-normalized inputs.
 

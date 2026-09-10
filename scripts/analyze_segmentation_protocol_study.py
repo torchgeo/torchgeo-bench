@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Combine segmentation protocol-study outputs and validation curves."""
+"""Combine segmentation results and per-epoch validation scores."""
 
 import argparse
 import json
@@ -93,7 +93,7 @@ def write_summary(combined: pd.DataFrame, output: Path) -> None:
 
 
 def main() -> None:
-    """Write one combined, analysis-ready row per study job."""
+    """Write one row per job with its results and validation summary."""
     args = _parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     events = [json.loads(line) for line in args.events.read_text().splitlines()]

@@ -1,3 +1,2 @@
-# ImageStats benchmark model configuration
 _target_: torchgeo_bench.models.ImageStatsBench
 name: imagestats

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Model:
-    """Model preset and conservative per-process batch sizes."""
+    """Model settings and initial batch sizes for each job."""
 
     config: str
     name: str
@@ -43,11 +43,11 @@ class RunnerConfig:
 
 
 class SupportsJobId(Protocol):
-    """A schedulable job with a filesystem-safe identifier."""
+    """A job with a name that can be used in filenames."""
 
     @property
     def job_id(self) -> str:
-        """Return a filesystem-safe identifier."""
+        """Return the name used for log and output files."""
         ...
 
 
@@ -57,7 +57,7 @@ def utc_timestamp() -> str:
 
 
 def write_json_atomic(path: Path, payload: object) -> None:
-    """Write JSON to ``path`` via a temporary file and atomic replace."""
+    """Write JSON without exposing a partly written file."""
     temporary = Path(f"{path}.tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     temporary.replace(path)
@@ -98,7 +98,7 @@ def torchgeo_bench_cli(*, require: bool = False) -> Path:
 def run_exclusively(
     run: Callable[[], None], lock_paths: Sequence[Path | str], error_message: str
 ) -> None:
-    """Call ``run`` while holding zero-timeout file locks on every path in ``lock_paths``."""
+    """Run only if every lock is available immediately."""
     with contextlib.ExitStack() as stack:
         try:
             for path in lock_paths:
@@ -109,10 +109,11 @@ def run_exclusively(
 
 
 class BaseGpuRunner:
-    """Dynamically schedule independent benchmark subprocesses across GPUs.
+    """Run benchmark jobs with one worker per GPU.
 
-    Subclasses implement ``_command`` and ``_summary_extra``, and may override
-    ``_run_job`` and ``_failed_record``.
+    Implement ``_command`` and ``_summary_extra``.
+
+    Override ``_run_job`` and ``_failed_record`` to customize execution and error records.
     """
 
     subprocess_env: ClassVar[dict[str, str]] = {"OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4"}

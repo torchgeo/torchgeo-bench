@@ -1,15 +1,12 @@
 """Coordinate-only encoders for the CoordBench location-encoder track.
 
-A :class:`LocationEncoder` maps points ``(lon, lat[, year])`` to a fixed-length
-feature vector, one row per point; the probes and cross-validation live downstream.
-Add a model by subclassing :class:`LocationEncoder`, implementing :meth:`_encode`,
-and pointing a Hydra ``model`` config's ``_target_`` at it.
+A :class:`LocationEncoder` maps ``(lon, lat[, year])`` to one feature vector per point.
 
-The trivial :class:`SinCosLocationEncoder` and the pretrained
-:class:`MINDLocationEncoder` ship in the base install. The other pretrained
-reference encoders (SatCLIP / GeoCLIP / Climplicit / SINR) are thin wrappers
-over the ``rshf`` package and require the ``coordbench`` extra
-(``pip install -e ".[coordbench]"``).
+Add models by implementing :meth:`LocationEncoder._encode` and selecting their config target.
+
+SinCos and MIND ship with the base install.
+
+SatCLIP, GeoCLIP, Climplicit, and SINR need ``pip install -e '.[coordbench]'``.
 """
 
 import logging
@@ -89,11 +86,11 @@ class SinCosLocationEncoder(LocationEncoder):
 class MINDLocationEncoder(LocationEncoder):
     """MIND location encoder (distilled from AlphaEarth/Climplicit/GeoCLIP/SINR).
 
-    Loads a released checkpoint from the HuggingFace Hub. Two configs ship:
-    ``mind`` (the 64-d Matryoshka deploy prefix of the pooled trunk) and
-    ``mind_small`` (the distilled student's 128-d head output). ``feature`` picks
-    the trunk (``pooled``) or the projected head (``head``); ``dim`` truncates the
-    Matryoshka embedding.
+    Load released weights from Hugging Face. ``mind`` uses the first 64 trunk features.
+
+    ``mind_small`` uses the distilled student's 128-dimensional head output.
+
+    Select trunk or head with ``feature``; ``dim`` keeps the first embedding dimensions.
 
     Args:
         repo: HuggingFace repo id holding the weights.

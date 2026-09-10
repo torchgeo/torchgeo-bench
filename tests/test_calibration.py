@@ -2,6 +2,8 @@
 
 import numpy as np
 import pytest
+import torch
+from torchmetrics.classification import MulticlassCalibrationError
 
 from torchgeo_bench.calibration import (
     apply_temperature,
@@ -11,7 +13,6 @@ from torchgeo_bench.calibration import (
 
 
 def test_perfect_calibration_singlelabel():
-    """One-hot probabilities matching labels => zero calibration error."""
     rng = np.random.default_rng(0)
     n, c = 200, 4
     y_true = rng.integers(0, c, size=n)
@@ -23,18 +24,76 @@ def test_perfect_calibration_singlelabel():
 
 
 def test_worst_calibration_singlelabel():
-    """High-confidence wrong predictions => ECE near 1."""
+    """Certain but wrong predictions have the largest calibration error."""
     n, c = 200, 4
     y_true = np.zeros(n, dtype=np.int64)
     y_proba = np.zeros((n, c), dtype=np.float32)
-    y_proba[:, 1] = 1.0  # always confidently predict class 1
+    y_proba[:, 1] = 1.0
     out = compute_calibration_metrics(y_true, y_proba, multi_label=False)
     assert out["ece"] == pytest.approx(1.0, abs=1e-4)
     assert out["mce"] == pytest.approx(1.0, abs=1e-4)
 
 
+@pytest.mark.parametrize("n_classes", [2, 5])
+def test_singlelabel_calibration_matches_multiclass_reference(n_classes: int) -> None:
+    rng = np.random.default_rng(8)
+    targets = rng.integers(n_classes, size=100)
+    probabilities = rng.dirichlet(np.ones(n_classes), size=100).astype(np.float32)
+    actual = compute_calibration_metrics(targets, probabilities, multi_label=False)
+    tensor = torch.from_numpy(probabilities)
+    tensor = tensor / tensor.sum(dim=1, keepdim=True)
+    for key, norm in (("ece", "l1"), ("rms_ce", "l2"), ("mce", "max")):
+        reference = MulticlassCalibrationError(n_classes, n_bins=15, norm=norm)(
+            tensor, torch.from_numpy(targets)
+        )
+        assert actual[key] == pytest.approx(reference.item())
+
+
+def test_calibration_respects_probability_column_labels() -> None:
+    probabilities = np.array([[0.9, 0.1], [0.2, 0.8], [0.7, 0.3]], dtype=np.float32)
+    expected = compute_calibration_metrics(np.array([0, 1, 0]), probabilities, multi_label=False)
+    actual = compute_calibration_metrics(
+        np.array([7, 2, 7]),
+        probabilities,
+        multi_label=False,
+        class_labels=np.array([7, 2]),
+    )
+    assert actual == pytest.approx(expected)
+
+
+def test_calibration_handles_a_single_trained_class_and_an_unseen_target() -> None:
+    actual = compute_calibration_metrics(
+        np.array([2, 7]),
+        np.ones((2, 1), dtype=np.float32),
+        multi_label=False,
+        class_labels=np.array([2]),
+    )
+    assert actual == pytest.approx({"ece": 0.5, "rms_ce": 0.5, "mce": 0.5})
+
+
+def test_temperature_respects_logit_column_labels() -> None:
+    logits = np.array([[1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, -1.0]])
+    expected = fit_temperature(logits, np.array([0, 1, 0, 1]), multi_label=False)
+    actual = fit_temperature(
+        logits,
+        np.array([7, 2, 7, 2]),
+        multi_label=False,
+        class_labels=np.array([7, 2]),
+    )
+    assert actual == pytest.approx(expected)
+
+
+def test_temperature_rejects_unseen_validation_classes() -> None:
+    with pytest.raises(ValueError, match="validation classes present in training"):
+        fit_temperature(
+            np.array([[1.0, -1.0]]),
+            np.array([9]),
+            multi_label=False,
+            class_labels=np.array([2, 7]),
+        )
+
+
 def test_multilabel_shapes_and_range():
-    """Multi-label path returns the same keys with values in [0, 1]."""
     rng = np.random.default_rng(0)
     n, c = 100, 5
     y_true = rng.integers(0, 2, size=(n, c))
@@ -46,7 +105,6 @@ def test_multilabel_shapes_and_range():
 
 
 def test_multilabel_perfect_calibration():
-    """Hard 0/1 probabilities matching labels => zero per-label error."""
     rng = np.random.default_rng(1)
     n, c = 80, 3
     y_true = rng.integers(0, 2, size=(n, c))
@@ -60,11 +118,11 @@ def test_multilabel_perfect_calibration():
 
 
 def test_temperature_overconfident_singlelabel():
-    """Sharp logits with many wrong predictions => T > 1 (flatten)."""
+    """Increasing temperature should soften overconfident predictions."""
     rng = np.random.default_rng(0)
     n, c = 1000, 4
     y_true = rng.integers(0, c, size=n)
-    # 50% accuracy but logits are very sharp => model is overconfident.
+    # Half the predictions are wrong despite near-certain probabilities.
     pred = y_true.copy()
     flip = rng.choice(n, size=n // 2, replace=False)
     pred[flip] = (y_true[flip] + 1) % c
@@ -75,7 +133,7 @@ def test_temperature_overconfident_singlelabel():
 
 
 def test_temperature_underconfident_singlelabel():
-    """Sharp logits with mostly correct predictions => T < 1 (sharpen)."""
+    """Correct but low-confidence predictions need a temperature below 1."""
     rng = np.random.default_rng(0)
     n, c = 500, 4
     y_true = rng.integers(0, c, size=n)
@@ -86,7 +144,7 @@ def test_temperature_underconfident_singlelabel():
 
 
 def test_temperature_scaling_reduces_ece():
-    """TS applied on overconfident logits should reduce ECE on the same split."""
+    """Fit and evaluate temperature on the same split for this calibration check."""
     rng = np.random.default_rng(0)
     n, c = 1000, 4
     y_true = rng.integers(0, c, size=n)
@@ -106,7 +164,6 @@ def test_temperature_scaling_reduces_ece():
 
 
 def test_temperature_multilabel_runs():
-    """Multi-label TS produces a positive T and valid calibration."""
     rng = np.random.default_rng(0)
     n, c = 200, 5
     y_true = rng.integers(0, 2, size=(n, c))

@@ -1,5 +1,3 @@
-# Makefile for torchgeo-bench
-
 CONDA_RUN := conda run --no-capture-output -n torchgeo-bench
 
 .PHONY: install sync tests lint format clean help accuracy-check update-baselines docs docs-clean help

@@ -1,12 +1,12 @@
-"""Segmentation Training Task Logic."""
+"""Training and evaluation for segmentation probes."""
 
 import logging
 import math
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
-from rich.progress import track
 from torch.utils.data import DataLoader
 
 if TYPE_CHECKING:
@@ -17,6 +17,7 @@ from torchmetrics.classification import (
     MulticlassPrecision,
     MulticlassRecall,
 )
+from tqdm.auto import tqdm
 
 from .segmentation_probe import (
     CachedFeaturesDataset,
@@ -30,7 +31,7 @@ SegMetrics = dict[str, float]
 
 
 class SegmentationSolver:
-    """A lightweight trainer for the SegmentationProbe."""
+    """Train and evaluate a segmentation probe."""
 
     def __init__(  # noqa: PLR0913 -- Public constructor options.
         self,
@@ -43,7 +44,7 @@ class SegmentationSolver:
         lr_scheduler: str = "cosine",
         ignore_index: int = 255,
     ) -> None:
-        """Initialize the SegmentationSolver.
+        """Configure the optimizer, loss, and segmentation metrics.
 
         Args:
             model: The SegmentationProbe model to train.
@@ -152,7 +153,7 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             desc = f"Epoch {epoch + 1}/{epochs}"
-            batches = track(train_loader, description=desc) if verbose else train_loader
+            batches = tqdm(train_loader, desc=desc, disable=not verbose)
             for batch in batches:
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
@@ -185,63 +186,23 @@ class SegmentationSolver:
 
         return last_val_miou
 
-    @torch.no_grad()
     def evaluate(
         self,
         dataloader: DataLoader,
         *,
-        collect_preds: bool = False,
         collect_confusions: bool = False,
-    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
+    ) -> SegMetrics | tuple[SegMetrics, torch.Tensor]:
         """Evaluate the model on a dataloader and return segmentation metrics.
 
         Args:
             dataloader: Evaluation data loader.
-            collect_preds: If True, also return predicted class maps (N, H, W) int64.
             collect_confusions: If True, also return per-image confusion matrices.
 
         Returns:
-            Metrics, optionally followed by predictions and/or per-image confusion matrices.
+            Metrics, optionally followed by per-image confusion matrices.
         """
-        self.model.eval()
-        for m in self._all_metrics:
-            m.reset()
-            m.to(self.device)
-
-        pred_list: list[torch.Tensor] = []
-        confusion_list: list[torch.Tensor] = []
-
-        for batch in dataloader:
-            if isinstance(batch, dict):
-                images = batch["image"].to(self.device)
-                masks = batch["mask"].to(self.device)
-            else:
-                images, masks = batch[0].to(self.device), batch[1].to(self.device)
-
-            # Ensure masks are (B, H, W)
-            if masks.ndim == 4:
-                masks = masks.squeeze(1)
-            masks = masks.long()
-
-            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
-                logits = self.model(images)
-
-            for m in self._all_metrics:
-                m.update(logits, masks)
-
-            if collect_preds or collect_confusions:
-                predictions = logits.argmax(dim=1)
-                if collect_preds:
-                    pred_list.append(predictions.cpu())
-                if collect_confusions:
-                    confusion_list.append(self._per_image_confusions(predictions, masks).cpu())
-
-        metrics = self._compute_metrics()
-        return self._evaluation_result(
-            metrics,
-            pred_list,
-            confusion_list,
-            collect_preds=collect_preds,
+        return self._evaluate(
+            dataloader,
             collect_confusions=collect_confusions,
         )
 
@@ -254,15 +215,12 @@ class SegmentationSolver:
         *,
         verbose: bool = True,
     ) -> float | None:
-        """Train the segmentation head on pre-cached backbone features.
+        """Train the segmentation head on cached backbone features.
 
-        The backbone is **not** called during training — cached features are fed
-        directly to ``self.model.head``, which is the only component that runs
-        a forward/backward pass.
+        Cached features go directly to ``self.model.head``; the backbone is not called.
 
-        The entire feature cache is pre-moved to the GPU as contiguous tensors
-        (:class:`GPUTensorCache`), eliminating per-batch CPU→GPU DMA transfers
-        and ``torch.stack`` calls.
+        Keep the full cache on the training device to avoid per-batch transfers and stacking.
+        Pass a ``GPUTensorCache`` as ``train_cache`` or ``val_cache`` to reuse it across calls.
 
         Args:
             train_cache: Pre-extracted training features from
@@ -286,7 +244,6 @@ class SegmentationSolver:
             else val_cache
         )
 
-        # Fast path: GPU tensor cache — no DataLoader, no host→device transfer per batch
         scheduler = self._make_scheduler(epochs)
 
         input_hw: tuple[int, int] = (gpu_train.masks.shape[-2], gpu_train.masks.shape[-1])
@@ -300,8 +257,12 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             desc = f"Epoch {epoch + 1}/{epochs}"
-            batches = gpu_train.shuffled_batches(batch_size)
-            batches = track(batches, total=num_batches, description=desc) if verbose else batches
+            batches = tqdm(
+                gpu_train.shuffled_batches(batch_size),
+                total=num_batches,
+                desc=desc,
+                disable=not verbose,
+            )
             for features, masks in batches:
                 self.optimizer.zero_grad()
                 with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
@@ -316,7 +277,7 @@ class SegmentationSolver:
                 scheduler.step()
 
             if gpu_val is not None:
-                val_metrics = self._evaluate_gpu_cache(gpu_val, batch_size)
+                val_metrics = self._evaluate(gpu_val, batch_size)
                 assert isinstance(val_metrics, dict)
                 last_val_miou = val_metrics["mIoU"]
                 self.val_history.append(last_val_miou)
@@ -330,29 +291,25 @@ class SegmentationSolver:
         cache: CachedFeaturesDataset,
         batch_size: int = 64,
         *,
-        collect_preds: bool = False,
         collect_confusions: bool = False,
-    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
-        """Evaluate on a CachedFeaturesDataset.
+    ) -> SegMetrics | tuple[SegMetrics, torch.Tensor]:
+        """Evaluate segmentation metrics from cached backbone features.
 
-        The cache is moved to GPU as a :class:`GPUTensorCache` for zero
-        per-batch host→device transfers.
+        Transfer the cache once as a :class:`GPUTensorCache` to avoid per-batch copies.
 
         Args:
             cache: Pre-extracted features (output of
                 :meth:`SegmentationProbe.extract_segmentation_features`).
             batch_size: Batch size for iterating over the cache.
-            collect_preds: If True, also return predicted class maps (N, H, W) int64.
             collect_confusions: If True, also return per-image confusion matrices.
 
         Returns:
-            Metrics, optionally followed by predictions and/or per-image confusion matrices.
+            Metrics, optionally followed by per-image confusion matrices.
         """
         gpu_cache = GPUTensorCache.from_cached(cache, self.device)
-        return self._evaluate_gpu_cache(
+        return self._evaluate(
             gpu_cache,
             batch_size,
-            collect_preds=collect_preds,
             collect_confusions=collect_confusions,
         )
 
@@ -367,23 +324,6 @@ class SegmentationSolver:
         counts = torch.bincount(indices, minlength=len(masks) * self.num_classes**2)
         return counts.reshape(len(masks), self.num_classes, self.num_classes)
 
-    @staticmethod
-    def _evaluation_result(
-        metrics: SegMetrics,
-        pred_list: list[torch.Tensor],
-        confusion_list: list[torch.Tensor],
-        *,
-        collect_preds: bool,
-        collect_confusions: bool,
-    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
-        if collect_preds and collect_confusions:
-            return metrics, torch.cat(pred_list, dim=0), torch.cat(confusion_list, dim=0)
-        if collect_preds:
-            return metrics, torch.cat(pred_list, dim=0)
-        if collect_confusions:
-            return metrics, torch.cat(confusion_list, dim=0)
-        return metrics
-
     def _compute_metrics(self) -> "SegMetrics":
         """Compute and return all metrics as a dict."""
         return {
@@ -394,45 +334,59 @@ class SegmentationSolver:
             "f1": self.metric_f1.compute().item(),
         }
 
+    def _evaluation_batches(
+        self, data: DataLoader | GPUTensorCache, batch_size: int
+    ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+        """Yield logits and masks in input order using the appropriate forward path."""
+        if isinstance(data, GPUTensorCache):
+            input_hw = (data.masks.shape[-2], data.masks.shape[-1])
+            for features, masks in data.ordered_batches(batch_size):
+                with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+                    logits = self.model.head(features, *input_hw)
+                yield logits, masks
+            return
+
+        for batch in data:
+            if isinstance(batch, dict):
+                images, masks = batch["image"], batch["mask"]
+            else:
+                images, masks = batch[0], batch[1]
+            images = images.to(self.device)
+            masks = masks.to(self.device)
+            if masks.ndim == 4:
+                masks = masks.squeeze(1)
+            masks = masks.long()
+            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
+                logits = self.model(images)
+            yield logits, masks
+
     @torch.no_grad()
-    def _evaluate_gpu_cache(
+    def _evaluate(
         self,
-        gpu_cache: GPUTensorCache,
-        batch_size: int,
+        data: DataLoader | GPUTensorCache,
+        batch_size: int = 64,
         *,
-        collect_preds: bool = False,
         collect_confusions: bool = False,
-    ) -> "SegMetrics | tuple[SegMetrics, torch.Tensor] | tuple[SegMetrics, torch.Tensor, torch.Tensor]":
-        """Evaluate on a :class:`GPUTensorCache` and return segmentation metrics."""
+    ) -> SegMetrics | tuple[SegMetrics, torch.Tensor]:
+        """Evaluate raw images or device-resident features with the same metrics."""
         self.model.eval()
         for m in self._all_metrics:
             m.reset()
             m.to(self.device)
 
-        pred_list: list[torch.Tensor] = []
         confusion_list: list[torch.Tensor] = []
 
-        input_hw = (gpu_cache.masks.shape[-2], gpu_cache.masks.shape[-1])
-        for features, masks in gpu_cache.ordered_batches(batch_size):
-            with torch.autocast(device_type=self.device_type, enabled=self.use_amp):
-                logits = self.model.head(features, *input_hw)
+        for logits, masks in self._evaluation_batches(data, batch_size):
             for m in self._all_metrics:
                 m.update(logits, masks)
-            if collect_preds or collect_confusions:
+            if collect_confusions:
                 predictions = logits.argmax(dim=1)
-                if collect_preds:
-                    pred_list.append(predictions.cpu())
-                if collect_confusions:
-                    confusion_list.append(self._per_image_confusions(predictions, masks).cpu())
+                confusion_list.append(self._per_image_confusions(predictions, masks).cpu())
 
         metrics = self._compute_metrics()
-        return self._evaluation_result(
-            metrics,
-            pred_list,
-            confusion_list,
-            collect_preds=collect_preds,
-            collect_confusions=collect_confusions,
-        )
+        if collect_confusions:
+            return metrics, torch.cat(confusion_list, dim=0)
+        return metrics
 
 
 def build_seg_probe_and_solver(

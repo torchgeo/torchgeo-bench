@@ -1,8 +1,17 @@
+from unittest import mock
+
 import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
+from torchmetrics.functional.classification import (
+    multiclass_confusion_matrix,
+    multiclass_f1_score,
+    multiclass_jaccard_index,
+    multiclass_precision,
+    multiclass_recall,
+)
 
 from torchgeo_bench.results import bootstrap_miou
 from torchgeo_bench.segmentation_probe import (
@@ -26,8 +35,6 @@ def test_bootstrap_miou_uses_per_image_resampling() -> None:
 
 
 class MockBackbone(nn.Module):
-    """A simple CNN to simulate a backbone with intermediate layers."""
-
     def __init__(self):
         super().__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(3, 16, kernel_size=3, padding=1, stride=2), nn.ReLU())
@@ -42,7 +49,7 @@ class MockBackbone(nn.Module):
 
 
 class WrappedBackbone(nn.Module):
-    """Backbone whose layers are nested under a 'backbone' attribute, as in BenchModel wrappers."""
+    """Match BenchModel wrappers, which nest layers under ``backbone``."""
 
     def __init__(self):
         super().__init__()
@@ -53,7 +60,7 @@ class WrappedBackbone(nn.Module):
 
 
 class ViTBackbone(nn.Module):
-    """Emit (B, L, C) tokens from an intermediate layer, mimicking a ViT patch encoder."""
+    """Expose token-first ``(B, L, C)`` features to the hooks."""
 
     def __init__(self):
         super().__init__()
@@ -61,15 +68,13 @@ class ViTBackbone(nn.Module):
         self.blocks = nn.Identity()
 
     def forward(self, x):
-        x = self.patch_embed(x)  # (B, 16, H/16, W/16)
-        x = x.flatten(2).transpose(1, 2)  # (B, H*W, C) = (B, L, C)
+        x = self.patch_embed(x)
+        x = x.flatten(2).transpose(1, 2)
         x = self.blocks(x)
         return x
 
 
 class TwoChannelBackbone(nn.Module):
-    """Backbone with a BenchModel-like num_channels attribute."""
-
     num_channels = 2
 
     def __init__(self):
@@ -120,7 +125,6 @@ def make_loader(images, masks, *, as_dict=False, mask_4d=False):
 
 
 def test_probe_unknown_head_type(mock_backbone):
-    """Test that an invalid head_type raises a ValueError."""
     with pytest.raises(ValueError, match="Unknown head_type"):
         SegmentationProbe(
             backbone=mock_backbone, layer_names=["layer1"], num_classes=2, head_type="invalid_type"
@@ -128,7 +132,7 @@ def test_probe_unknown_head_type(mock_backbone):
 
 
 def test_probe_rejects_missing_or_duplicate_layers(mock_backbone):
-    """Layer typos must fail before a benchmark starts extracting features."""
+    """Reject invalid hook layers before feature extraction."""
     with pytest.raises(ValueError, match="not found"):
         SegmentationProbe(
             backbone=mock_backbone,
@@ -144,7 +148,7 @@ def test_probe_rejects_missing_or_duplicate_layers(mock_backbone):
 
 
 def test_build_seg_probe_requires_spatial_layers(mock_backbone):
-    """Segmentation evaluation refuses the global-output fallback."""
+    """A pooled image vector is not a spatial segmentation feature map."""
     eval_cfg = OmegaConf.create(
         {
             "segmentation": {
@@ -188,13 +192,12 @@ def test_build_seg_solver_uses_criterion_ignore_index(mock_backbone):
 
 
 def test_probe_dry_run_exception_handling():
-    """Test that dry_run_channels catches exceptions from the backbone."""
+    """Backbone failures during shape inference must remain visible."""
 
     class BrokenBackbone(nn.Module):
         def __init__(self):
             super().__init__()
-            # A real `layer1` so the probe gets past its layer-name check and
-            # this test exercises the forward crash it is named for.
+            # A valid hook layer lets construction reach the failing forward pass.
             self.layer1 = nn.Conv2d(3, 4, 1)
 
         def forward(self, x):
@@ -208,7 +211,7 @@ def test_probe_dry_run_exception_handling():
 
 
 def test_segmentation_probe_initialization(mock_backbone, dummy_data):
-    """Freezes backbone params and registers one hook per requested layer."""
+    """Freeze backbone parameters while leaving the probe head trainable."""
     images = dummy_data["image"]
     num_classes = 5
     layer_names = ["layer1", "layer2"]
@@ -232,7 +235,6 @@ def test_segmentation_probe_initialization(mock_backbone, dummy_data):
 
 
 def test_segmentation_probe_conv_block_head(mock_backbone, dummy_data):
-    """Test the MLP head configuration."""
     data = dummy_data
     num_classes = 5
 
@@ -246,7 +248,6 @@ def test_segmentation_probe_conv_block_head(mock_backbone, dummy_data):
 
     logits = probe(data["image"])
     assert logits.shape == (2, num_classes, 64, 64)
-    # conv_block head is a ConvBlockHead with projectors + a final Conv2d
     from torchgeo_bench.models.segmentation_heads import ConvBlockHead
 
     assert isinstance(probe.head, ConvBlockHead)
@@ -255,7 +256,6 @@ def test_segmentation_probe_conv_block_head(mock_backbone, dummy_data):
 
 
 def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
-    """Test the training loop and evaluation metric."""
     data = dummy_data
     dataset = TensorDataset(data["image"], data["mask"])
     loader = DataLoader(dataset, batch_size=2)
@@ -275,8 +275,101 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
+@pytest.mark.parametrize("collect_confusions", [False, True])
+@pytest.mark.parametrize(
+    ("as_dict", "mask_4d", "ignore_index"), [(False, False, 255), (True, True, -1)]
+)
+def test_solver_evaluation_parity(
+    *,
+    collect_confusions: bool,
+    as_dict: bool,
+    mask_4d: bool,
+    ignore_index: int,
+) -> None:
+    """Both paths reset metrics and preserve optional outputs in sample order."""
+    predictions = torch.tensor(
+        [
+            [[0, 1, 2], [2, 1, 0]],
+            [[2, 2, 1], [0, 0, 1]],
+            [[1, 0, 1], [2, 2, 0]],
+            [[0, 2, 2], [1, 1, 0]],
+            [[2, 1, 0], [0, 2, 1]],
+        ]
+    )
+    masks = torch.tensor(
+        [
+            [[0, 1, 2], [1, 255, 0]],
+            [[2, 0, 1], [0, 1, 255]],
+            [[255, 0, 1], [2, 0, 0]],
+            [[2, 2, 1], [1, 0, 0]],
+            [[255, 255, 255], [255, 255, 255]],
+        ]
+    )
+    masks[masks == 255] = ignore_index
+    images = nn.functional.one_hot(predictions, num_classes=3).permute(0, 3, 1, 2).float()
+    backbone = nn.Sequential(nn.Conv2d(3, 3, 1, bias=False))
+    probe = SegmentationProbe(backbone, ["0"], num_classes=3)
+    for module in probe.modules():
+        if isinstance(module, nn.Conv2d):
+            nn.init.dirac_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+    solver = SegmentationSolver(probe, num_classes=3, device="cpu", ignore_index=ignore_index)
+    loader = make_loader(images, masks, as_dict=as_dict, mask_4d=mask_4d)
+    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+
+    solver.evaluate(make_loader(images, predictions))
+    probe.train()
+    raw_result = solver.evaluate(loader, collect_confusions=collect_confusions)
+    assert not probe.training
+    assert not probe.backbone.training
+
+    with mock.patch.object(
+        backbone,
+        "forward",
+        side_effect=AssertionError("Cached evaluation must bypass the backbone"),
+    ):
+        solver.evaluate_cached(
+            CachedFeaturesDataset(cache.layer_tensors, predictions), batch_size=3
+        )
+        probe.train()
+        cached_result = solver.evaluate_cached(
+            cache, batch_size=3, collect_confusions=collect_confusions
+        )
+    assert not probe.training
+    assert not probe.backbone.training
+
+    metric_args = {"num_classes": 3, "ignore_index": ignore_index}
+    expected_metrics = {
+        "mIoU": multiclass_jaccard_index(predictions, masks, average="macro", **metric_args).item(),
+        "fw_IoU": multiclass_jaccard_index(
+            predictions, masks, average="weighted", **metric_args
+        ).item(),
+        "precision": multiclass_precision(
+            predictions, masks, average="macro", **metric_args
+        ).item(),
+        "recall": multiclass_recall(predictions, masks, average="macro", **metric_args).item(),
+        "f1": multiclass_f1_score(predictions, masks, average="macro", **metric_args).item(),
+    }
+    if collect_confusions:
+        expected_confusions = torch.stack(
+            [
+                multiclass_confusion_matrix(pred, mask, **metric_args)
+                for pred, mask in zip(predictions, masks, strict=True)
+            ]
+        )
+    for result in (raw_result, cached_result):
+        if collect_confusions:
+            assert isinstance(result, tuple)
+            metrics, confusions = result
+            torch.testing.assert_close(confusions, expected_confusions)
+        else:
+            metrics = result
+        assert isinstance(metrics, dict)
+        assert metrics == pytest.approx(expected_metrics)
+
+
 def test_probe_fpn_head(mock_backbone, dummy_data):
-    """FPN head forward pass produces correct output shape and has expected attributes."""
     from torchgeo_bench.models.segmentation_heads import FPNHead
 
     probe = make_probe(mock_backbone, ["layer2", "layer1"], head_type="fpn", hidden_dim=16)
@@ -291,18 +384,14 @@ def test_probe_fpn_head(mock_backbone, dummy_data):
 
 
 def test_probe_backbone_prefix_stripping(dummy_data):
-    """Layer names prefixed with 'backbone.' are resolved in wrapped models."""
+    """Unprefixed layer names must resolve inside a BenchModel-style wrapper."""
     backbone = WrappedBackbone()
-    # The inner layers are at backbone.layer1 / backbone.layer2 inside the wrapper,
-    # but SegmentationProbe should strip the leading 'backbone.' prefix so that
-    # specifying ["layer1"] still works.
     probe = make_probe(backbone, ["layer1", "layer2"])
     logits = probe(dummy_data["image"])
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
 
 def test_probe_linear_multi_layer_weighted(mock_backbone, dummy_data):
-    """Multi-layer linear probe uses scale_weights and returns correct shape."""
     probe = make_probe(mock_backbone, ["layer1", "layer2"], head_type="linear")
     assert hasattr(probe.head, "scale_weights")
     logits = probe(dummy_data["image"])
@@ -310,14 +399,13 @@ def test_probe_linear_multi_layer_weighted(mock_backbone, dummy_data):
 
 
 def test_probe_conv_block_multi_layer(mock_backbone, dummy_data):
-    """conv_block with two layers at different resolutions triggers interpolation alignment."""
+    """Feature maps at different resolutions must align before concatenation."""
     probe = make_probe(mock_backbone, ["layer1", "layer2"], head_type="conv_block", hidden_dim=16)
     logits = probe(dummy_data["image"])
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
 
 def test_probe_unfrozen_backbone(mock_backbone, dummy_data):
-    """With freeze_backbone=False the backbone runs in train mode and grads flow."""
     probe = make_probe(mock_backbone, ["layer1"], freeze=False)
     for param in probe.backbone.parameters():
         assert param.requires_grad is True
@@ -325,13 +413,9 @@ def test_probe_unfrozen_backbone(mock_backbone, dummy_data):
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
 
-# Probe: ViT-style (B, L, C) token features via _process_feature
-
-
 def test_probe_vit_token_features():
-    """ViT backbone emitting (B, L, C) tokens is reshaped to (B, C, H, H)."""
+    """Turn ViT tokens into spatial feature maps before applying the segmentation head."""
     backbone = ViTBackbone()
-    # 'blocks' is an Identity that passes through (B, L, C); hook it directly
     probe = make_probe(backbone, ["blocks"], head_type="linear")
     images = torch.randn(2, 3, 64, 64)
     logits = probe(images)
@@ -339,7 +423,7 @@ def test_probe_vit_token_features():
 
 
 def test_resolve_num_prefix_tokens_walks_module_tree():
-    """The resolver finds timm's num_prefix_tokens however deeply it is nested."""
+    """Read prefix-token counts through wrappers rather than assuming a bare timm model."""
 
     class _Inner(nn.Module):
         def __init__(self):
@@ -357,11 +441,9 @@ def test_resolve_num_prefix_tokens_walks_module_tree():
 
 
 def test_process_feature_drops_dinov3_register_tokens():
-    """DINOv3's 1 CLS + 4 registers are dropped, not reshaped into a fake grid.
+    """DINOv3's 261 tokens contain 256 patches, one CLS token, and four registers.
 
-    (B, 261, 1024) has L=261 (neither s^2 nor s^2+1); without prefix-token
-    stripping the (B, C, L) branch treats 1024 as a perfect square and
-    produces a 32x32 grid of 261 "channels" with no error.
+    Mistaking feature width 1024 for the token count would create a 32x32 grid with 261 channels.
     """
 
     class _DinoV3Backbone(nn.Module):
@@ -398,14 +480,7 @@ def test_process_feature_plain_vit_cls_token_unchanged():
 
 
 def test_process_feature_rejects_unreshapeable_tokens():
-    """A declared-prefix model with a non-square token count raises, not guesses.
-
-    The (B, C, L) fallback is gated on the model *not* declaring
-    num_prefix_tokens: a model that declares it is token-first by construction,
-    so a token count that survives prefix-stripping without becoming square is a
-    genuine mismatch.  Ungated, 1024 is a perfect square and this silently
-    reshapes into a 32x32 grid of 261 "channels".
-    """
+    """Prefix metadata fixes the token axis; reject non-square token counts."""
 
     class _OddBackbone(nn.Module):
         def __init__(self):
@@ -430,20 +505,54 @@ def test_probe_dry_run_uses_backbone_num_channels():
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
 
-def test_solver_no_lr_scheduler(mock_backbone, dummy_data):
-    """lr_scheduler='none' runs without a scheduler and completes training."""
-    images, masks = dummy_data["image"], dummy_data["mask"]
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize(
+    ("lr_scheduler", "expected_lrs"),
+    [("none", [1e-3, 1e-3, 1e-3]), ("cosine", [1e-3, 0.0005005, 1e-6])],
+)
+def test_solver_training_schedule_and_frozen_backbone(
+    lr_scheduler: str, expected_lrs: list[float], *, cached: bool
+) -> None:
+    """Both training paths step the scheduler per epoch and only update the head."""
+    rng = torch.Generator().manual_seed(3)
+    images = torch.randn(2, 3, 8, 8, generator=rng)
+    masks = torch.randint(0, NUM_CLASSES, (2, 8, 8), generator=rng)
+    masks[0, :2, :2] = 255
     loader = make_loader(images, masks)
-    probe = make_probe(mock_backbone, ["layer1"])
+    backbone = nn.Sequential(nn.Conv2d(3, 4, 1), nn.BatchNorm2d(4))
+    probe = make_probe(backbone, ["1"])
     solver = SegmentationSolver(
-        model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu", lr_scheduler="none"
+        model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu", lr_scheduler=lr_scheduler
     )
-    result = solver.fit(loader, epochs=1, verbose=False)
-    assert result is None  # no val_loader → returns None
+    backbone_before = {name: value.clone() for name, value in backbone.state_dict().items()}
+    head_before = [param.detach().clone() for param in probe.head.parameters()]
+    lrs = []
+
+    def record_lr(_module: nn.Module, _inputs: tuple[object, ...]) -> None:
+        lrs.append(solver.optimizer.param_groups[0]["lr"])
+
+    hook = probe.head.register_forward_pre_hook(record_lr)
+    if cached:
+        cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+        result = solver.fit_cached(cache, batch_size=2, epochs=2, verbose=False)
+    else:
+        result = solver.fit(loader, epochs=2, verbose=False)
+    hook.remove()
+
+    assert result is None
+    assert solver.val_history == []
+    assert [*lrs, solver.optimizer.param_groups[0]["lr"]] == pytest.approx(expected_lrs)
+    assert not backbone.training
+    for name, value in backbone.state_dict().items():
+        torch.testing.assert_close(value, backbone_before[name], rtol=0, atol=0)
+    assert all(param.grad is None for param in backbone.parameters())
+    assert any(
+        not torch.equal(before, after)
+        for before, after in zip(head_before, probe.head.parameters(), strict=True)
+    )
 
 
 def test_solver_dict_batches(mock_backbone, dummy_data):
-    """fit and evaluate both handle dict-format batches {"image": ..., "mask": ...}."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks, as_dict=True)
     probe = make_probe(mock_backbone, ["layer1"])
@@ -477,11 +586,8 @@ def test_solver_fit_with_val_loader(mock_backbone, dummy_data):
     assert solver.val_history == [val_miou]
 
 
-# Probe: DPT head
-
-
 class MockBackbone4Layer(nn.Module):
-    """CNN backbone with 4 strided layers to provide multi-scale features for DPT."""
+    """Four feature scales, as required by DPT."""
 
     def __init__(self):
         super().__init__()
@@ -503,7 +609,6 @@ class MockBackbone4Layer(nn.Module):
 
 
 def test_probe_dpt_head_forward():
-    """DPT head with 4 coarse-to-fine layers produces correct output shape."""
     pytest.importorskip("transformers")
     from torchgeo_bench.models.segmentation_heads import DPTHead
 
@@ -529,20 +634,13 @@ def test_probe_dpt_head_forward():
 
 
 def test_probe_dpt_wrong_num_layers():
-    """DPT head raises ValueError when not exactly 4 layers are specified."""
-    backbone = MockBackbone()  # only has layer1, layer2
+    backbone = MockBackbone()
     with pytest.raises(ValueError, match="DPTHead requires exactly 4 feature layers"):
         make_probe(backbone, layers=["layer1", "layer2"], head_type="dpt", hidden_dim=16)
 
 
 def test_dpt_fusion_layer_shim_matches_reference():
-    """The SimpleNamespace shim still satisfies the reference fusion layer's config API.
-
-    ``DPTFeatureFusionLayer`` is a private ``transformers`` API with no stability
-    guarantee. This asserts the four structural properties we depend on, so a
-    breaking upstream bump fails loudly here instead of silently changing the
-    decoder's arithmetic.
-    """
+    """These checks protect decoder behavior when transformers changes its private fusion API."""
     pytest.importorskip("transformers")
     from transformers.models.dpt.modeling_dpt import DPTPreActResidualLayer
 
@@ -550,38 +648,30 @@ def test_dpt_fusion_layer_shim_matches_reference():
 
     layer = _dpt_fusion_layer(16)
 
-    # 1. Post-fusion 1x1 projection is present (absent from the old implementation).
     assert isinstance(layer.projection, nn.Conv2d)
     assert layer.projection.kernel_size == (1, 1)
 
-    # 2. Both residual units are pre-activation (relu -> conv -> relu -> conv).
+    # Residual blocks must use pre-activation: ReLU, conv, ReLU, conv.
     assert isinstance(layer.residual_layer1, DPTPreActResidualLayer)
     assert isinstance(layer.residual_layer2, DPTPreActResidualLayer)
 
-    # 3. Each fusion layer upsamples 2x internally.
+    # Each fusion stage doubles the spatial size.
     out = layer(torch.randn(1, 16, 7, 7))
     assert out.shape == (1, 16, 14, 14)
 
-    # 4. A mismatched skip is resized to the primary input, not the reverse.
+    # Resize the skip input to the main input, not the reverse.
     out = layer(torch.randn(1, 16, 7, 7), torch.randn(1, 16, 3, 3))
     assert out.shape == (1, 16, 14, 14)
 
 
 def test_dpt_head_upsamples_purely_through_fusion_cascade():
-    """Four fusion layers take a 14x14 ViT token grid to 224x224 exactly.
-
-    The faithful cascade supplies all upsampling itself, so the head no longer
-    needs the pre-projection 2x and terminal 4x interpolations. With input_h/w
-    already at 224 the trailing resize is a no-op, which is what makes this a
-    regression test on the schedule rather than on the final ``F.interpolate``.
-    """
+    """Four fusion stages must reach 224x224 from 14x14 without relying on the final resize."""
     pytest.importorskip("transformers")
     from torchgeo_bench.models.segmentation_heads import DPTHead
 
     head = DPTHead([32, 32, 32, 32], num_classes=NUM_CLASSES, hidden_dim=16)
     features = [torch.randn(1, 32, 14, 14) for _ in range(4)]
 
-    # Intercept the cascade output before out_conv / the final resize.
     projected = [
         conv(norm(f)) for norm, conv, f in zip(head.input_norms, head.convs, features, strict=True)
     ]
@@ -594,11 +684,7 @@ def test_dpt_head_upsamples_purely_through_fusion_cascade():
     assert logits.shape == (1, NUM_CLASSES, 224, 224)
 
 
-# Probe: PatchLinear head
-
-
 def test_patch_linear_head_output_shape():
-    """PatchLinearHead upsamples a 4x4 token grid back to 64x64."""
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
     head = PatchLinearHead([16], num_classes=5)
@@ -609,7 +695,7 @@ def test_patch_linear_head_output_shape():
 
 
 def test_patch_linear_head_small_patch():
-    """PatchLinearHead infers smaller patch sizes from denser token grids."""
+    """Infer patch size from the token grid rather than assuming 16-pixel patches."""
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
     head = PatchLinearHead([8], num_classes=3)
@@ -642,7 +728,6 @@ def test_patch_linear_head_ignores_extra_channels():
 
 
 def test_probe_patch_linear_head_vit():
-    """Patch-linear probe works end-to-end with ViT token features."""
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
     probe = make_probe(ViTBackbone(), ["blocks"], head_type="patch_linear")
@@ -654,7 +739,6 @@ def test_probe_patch_linear_head_vit():
 
 
 def test_probe_patch_linear_cached_features():
-    """fit_cached trains a patch-linear probe on ViT feature caches."""
     images = torch.randn(2, 3, 64, 64)
     masks = torch.randint(0, NUM_CLASSES, (2, 64, 64))
     loader = make_loader(images, masks)
@@ -668,11 +752,7 @@ def test_probe_patch_linear_cached_features():
     assert 0.0 <= val_miou <= 1.0
 
 
-# Feature caching: extract_segmentation_features + CachedFeaturesDataset
-
-
 def test_extract_segmentation_features_returns_cached_dataset(mock_backbone, dummy_data):
-    """Check the cached feature dataset's length and dtypes."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
@@ -682,13 +762,12 @@ def test_extract_segmentation_features_returns_cached_dataset(mock_backbone, dum
     assert isinstance(cache, CachedFeaturesDataset)
     assert len(cache) == len(images)
     feats, mask = cache[0]
-    assert len(feats) == 2  # two hooked layers
+    assert len(feats) == 2
     assert feats[0].dtype == torch.float16
     assert mask.dtype == torch.int64
 
 
 def test_solver_fit_cached(mock_backbone, dummy_data):
-    """fit_cached trains the head on cached features and evaluate_cached returns a valid mIoU."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
@@ -710,7 +789,6 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
 
 
 def test_extract_segmentation_features_dict_batches(mock_backbone, dummy_data):
-    """extract_segmentation_features handles dict-format batches {"image": ..., "mask": ...}."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks, as_dict=True)
     probe = make_probe(mock_backbone, ["layer1"])
@@ -730,13 +808,7 @@ def test_extract_segmentation_features_restores_backbone_mode(mock_backbone, dum
     assert probe.backbone.training
 
 
-# ---------------------------------------------------------------------------
-# GPUTensorCache
-# ---------------------------------------------------------------------------
-
-
 def _make_cpu_cache(mock_backbone, dummy_data):
-    """Helper: extract a CachedFeaturesDataset on CPU."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
@@ -744,27 +816,25 @@ def _make_cpu_cache(mock_backbone, dummy_data):
 
 
 def test_gpu_tensor_cache_from_cached_cpu(mock_backbone, dummy_data):
-    """GPUTensorCache.from_cached builds correct tensors on CPU device."""
+    """The device-cache path must also work without CUDA."""
     cache = _make_cpu_cache(mock_backbone, dummy_data)
     gpu_cache = GPUTensorCache.from_cached(cache, device="cpu")
 
     assert len(gpu_cache) == len(cache)
-    assert len(gpu_cache.layer_tensors) == 2  # two hooked layers
+    assert len(gpu_cache.layer_tensors) == 2
     assert gpu_cache.layer_tensors[0].dtype == torch.float32  # CPU path uses float32
     assert gpu_cache.masks.dtype == torch.long
-    # Spatial dims should match the mask dims in the original cache
     assert gpu_cache.masks.shape == (len(cache), 64, 64)
 
 
 def test_gpu_tensor_cache_shuffled_batches(mock_backbone, dummy_data):
-    """shuffled_batches yields all samples exactly once with correct shapes."""
     cache = _make_cpu_cache(mock_backbone, dummy_data)
     gpu_cache = GPUTensorCache.from_cached(cache, device="cpu")
 
     all_masks = []
     for feats, masks in gpu_cache.shuffled_batches(batch_size=1):
         assert len(feats) == 2
-        assert feats[0].shape[0] == masks.shape[0]  # batch dim matches
+        assert feats[0].shape[0] == masks.shape[0]
         all_masks.append(masks)
 
     total = sum(m.shape[0] for m in all_masks)
@@ -772,30 +842,46 @@ def test_gpu_tensor_cache_shuffled_batches(mock_backbone, dummy_data):
 
 
 def test_gpu_tensor_cache_ordered_batches(mock_backbone, dummy_data):
-    """ordered_batches yields samples in order with correct total count."""
     cache = _make_cpu_cache(mock_backbone, dummy_data)
     gpu_cache = GPUTensorCache.from_cached(cache, device="cpu")
 
-    total = 0
-    for _feats, masks in gpu_cache.ordered_batches(batch_size=1):
-        total += masks.shape[0]
-    assert total == len(cache)
+    batches = list(gpu_cache.ordered_batches(batch_size=1))
+    torch.testing.assert_close(torch.cat([masks for _, masks in batches]), cache.masks)
+    for layer, expected in enumerate(cache.layer_tensors):
+        actual = torch.cat([features[layer] for features, _ in batches])
+        torch.testing.assert_close(actual, expected.float())
 
 
-def test_solver_fit_cached_uses_gpu_cache_path(mock_backbone, dummy_data):
-    """fit_cached falls back gracefully to DataLoader path on CPU (no CUDA available in CI)."""
+def test_solver_fit_cached_reuses_device_caches(mock_backbone, dummy_data):
+    """Pre-built caches avoid both backbone calls and repeated device transfers."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
     solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
 
     train_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
-    val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    gpu_train = GPUTensorCache.from_cached(train_cache, device="cpu")
+    gpu_val = GPUTensorCache.from_cached(train_cache, device="cpu")
 
-    # On CPU, use_amp=False so GPUTensorCache path is skipped; DataLoader fallback runs.
-    val_miou = solver.fit_cached(
-        train_cache, val_cache=val_cache, batch_size=2, epochs=1, verbose=False
-    )
+    with (
+        mock.patch.object(
+            mock_backbone,
+            "forward",
+            side_effect=AssertionError("Cached training must bypass the backbone"),
+        ),
+        mock.patch.object(
+            GPUTensorCache,
+            "from_cached",
+            side_effect=AssertionError("Pre-built caches must not be transferred again"),
+        ),
+    ):
+        val_miou = solver.fit_cached(
+            gpu_train,
+            val_cache=gpu_val,
+            batch_size=2,
+            epochs=1,
+            verbose=False,
+        )
     assert isinstance(val_miou, float)
     assert 0.0 <= val_miou <= 1.0
 
@@ -822,12 +908,7 @@ def test_solver_fit_cached_builds_missing_validation_gpu_cache(mock_backbone, du
 
 
 def test_probe_pools_time_series_features(mock_backbone, dummy_data):
-    """A (B, T, C, H, W) input is encoded per date then pooled back to (B, ...).
-
-    PASTIS is multi-temporal and upstream hands back only the last acquisition
-    by default; crop type is phenological, so the probe has to accept a time
-    axis rather than the pipeline silently seeing one date.
-    """
+    """PASTIS needs every date encoded before temporal pooling to retain seasonal information."""
     probe = SegmentationProbe(mock_backbone, ["layer1", "layer2"], NUM_CLASSES, head_type="fpn")
     images = dummy_data["image"]
     single = probe(images)
@@ -838,7 +919,6 @@ def test_probe_pools_time_series_features(mock_backbone, dummy_data):
 
 
 def test_probe_temporal_pool_max_differs_from_mean(mock_backbone, dummy_data):
-    """max and mean pooling must not silently be the same reduction."""
     images = dummy_data["image"]
     series = torch.stack([images, images * 0.5], dim=1)
     mean_probe = SegmentationProbe(

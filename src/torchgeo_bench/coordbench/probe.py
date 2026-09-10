@@ -21,8 +21,7 @@ from torchgeo_bench.knn import KNNClassifier
 
 logger = logging.getLogger(__name__)
 
-# Half-decade L2 grid (1e-4..1e6), CV-selected per fold; spans high-dim embeddings
-# (strong reg) and near-linear targets (almost none).
+# Half-decade L2 grid (1e-4..1e6), selected by cross-validation.
 RIDGE_ALPHAS = tuple(float(10.0**e) for e in np.arange(-4.0, 6.5, 0.5))
 
 
@@ -163,7 +162,7 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
         features: Feature matrix ``(N, D)``.
         labels: Per-point labels ``(N,)``.
         task_type: ``"regression"`` or ``"classification"``.
-        folds: Number of CV folds (ignored under ``test_mask``).
+        folds: CV folds; with ``test_mask``, tune alpha on train data and score the holdout once.
         seed: RNG seed.
         device: Torch device for the solve.
         alphas: L2 grid to CV-select from.

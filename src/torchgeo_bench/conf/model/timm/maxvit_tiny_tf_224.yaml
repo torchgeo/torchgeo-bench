@@ -1,7 +1,3 @@
-# MaxViT-Tiny (30M params)
-# Feature dimension: 512
-# Model: maxvit_tiny_tf_224
-
 _target_: torchgeo_bench.models.TimmPatchBenchModel
 model_name: maxvit_tiny_tf_224
 pretrained: true

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a cross-model segmentation training-protocol sensitivity study."""
+"""Compare segmentation training settings across models and datasets."""
 
 import argparse
 import csv
@@ -30,7 +30,7 @@ VAL_PATTERN = re.compile(r"Epoch (\d+) Val mIoU: (\S+)")
 
 @dataclass(frozen=True)
 class Variant:
-    """Segmentation-head optimization configuration."""
+    """Head-training settings for one comparison."""
 
     name: str
     epochs: int
@@ -91,7 +91,7 @@ VARIANTS = [
 
 
 def build_jobs() -> list[Job]:
-    """Return the complete cross-model protocol-study matrix."""
+    """Create every model, dataset, and training-setting combination."""
     return [
         Job(model, dataset, variant)
         for model in MODELS
@@ -111,7 +111,7 @@ def _source_hash(root: Path) -> str:
 
 
 def study_metadata(root: Path, seed: int) -> dict[str, object]:
-    """Return the result-affecting study configuration."""
+    """Record the source and settings used to decide whether results can be resumed."""
     return {
         "schema_version": 1,
         "source_hash": _source_hash(root),
@@ -138,7 +138,7 @@ class StudyConfig(RunnerConfig):
 
 
 class StudyRunner(BaseGpuRunner):
-    """Dynamically schedule protocol-study jobs across GPUs."""
+    """Run training-setting comparisons across the selected GPUs."""
 
     config: StudyConfig
 
@@ -299,7 +299,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Run the protocol sensitivity study."""
+    """Compare segmentation training settings."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = _parse_args()
     root = Path(__file__).resolve().parents[1]

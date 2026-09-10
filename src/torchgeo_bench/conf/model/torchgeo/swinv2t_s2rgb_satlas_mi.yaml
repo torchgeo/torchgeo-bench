@@ -1,5 +1,4 @@
-# torchgeo Swin-V2-T — Sentinel-2 RGB SatlasPretrain (multi-image)
-# Feature dimension: 768
+# SatlasPretrain multi-image weights for Sentinel-2 RGB.
 
 _target_: torchgeo_bench.models.TorchGeoSwinBench
 factory: swin_v2_t

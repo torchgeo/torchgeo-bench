@@ -57,11 +57,9 @@ class PASTIS(_V2Dataset):
     ) -> Dataset:
         """Return a :class:`GeoBenchv2` split, optionally as a time series.
 
-        PASTIS is multi-temporal and upstream defaults to ``num_time_steps=1``,
-        i.e. the last acquisition only.  Crop type is a phenological signal, so
-        a single date discards most of what separates the classes; request more
-        dates and let the probe pool over them.  ``time_steps=None`` keeps the
-        single-date behaviour so existing results stay comparable.
+        Use more dates to capture crop seasonality.
+
+        ``time_steps=None`` keeps only the last acquisition, matching existing results.
         """
         del partition
         band_order = self.build_band_order(bands)

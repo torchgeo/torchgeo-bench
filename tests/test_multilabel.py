@@ -18,16 +18,14 @@ from torchgeo_bench.utils import FeatureSplit, FeatureSplits
 
 @pytest.fixture
 def multilabel_data():
-    """Synthetic multi-label dataset: 200 train, 50 val, 50 test, 10 classes."""
     rng = np.random.default_rng(42)
     n_train, n_val, n_test = 200, 50, 50
     n_features, n_classes = 32, 10
     n_total = n_train + n_val + n_test
 
     X = rng.standard_normal((n_total, n_features)).astype(np.float32)
-    # Generate multi-hot labels with ~3 active classes per sample
+    # About three positive labels per sample, with at least one on every sample.
     Y = (rng.random((n_total, n_classes)) > 0.7).astype(np.float32)
-    # Ensure at least one positive label per sample
     for i in range(n_total):
         if Y[i].sum() == 0:
             Y[i, rng.integers(0, n_classes)] = 1.0
@@ -45,7 +43,6 @@ def multilabel_data():
 
 @pytest.fixture
 def singlelabel_data():
-    """Synthetic single-label dataset for KNN tests."""
     rng = np.random.default_rng(99)
     n_train, n_test = 100, 30
     n_features, n_classes = 16, 4
@@ -62,9 +59,6 @@ def singlelabel_data():
         "y_test": y_test,
         "n_classes": n_classes,
     }
-
-
-# ---- KNNClassifier tests ----
 
 
 class TestKNNClassifierSingleLabel:
@@ -87,7 +81,6 @@ class TestKNNClassifierSingleLabel:
         np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-6)
 
     def test_k_clamped_to_train_size(self):
-        """k > n_train should not crash."""
         rng = np.random.default_rng(0)
         X = rng.standard_normal((3, 8)).astype(np.float32)
         y = np.array([0, 1, 2], dtype=np.int64)
@@ -152,9 +145,6 @@ class TestKNNClassifierMultiLabel:
         assert np.all(probs <= 1)
 
 
-# ---- LogisticRegression multi-label tests ----
-
-
 class TestMultiLabelLogisticRegression:
     def test_fit_and_predict_shapes(self, multilabel_data):
         d = multilabel_data
@@ -195,9 +185,6 @@ class TestMultiLabelLogisticRegression:
         assert clf._fitted
 
 
-# ---- Bootstrap mAP tests ----
-
-
 class TestBootstrapMAP:
     def test_bootstrap_map_basic(self):
         from torchgeo_bench import bootstrap_map
@@ -223,8 +210,6 @@ class TestBootstrapMAP:
         assert mean == pytest.approx(1.0)
 
 
-# ---- KNNClassifier metric / use_fp16 / GPU path tests ----
-
 _cuda_available = pytest.mark.skipif(
     not __import__("torch").cuda.is_available(), reason="CUDA not available"
 )
@@ -235,8 +220,6 @@ _faissknn_available = pytest.mark.skipif(
 
 
 class TestKNNMetricParam:
-    """CPU path: metric param is accepted; output shapes / value ranges hold."""
-
     @pytest.mark.parametrize("metric", ["l2", "ip", "cosine"])
     def test_metric_singlelabel_shapes(self, singlelabel_data, metric):
         d = singlelabel_data
@@ -260,7 +243,7 @@ class TestKNNMetricParam:
         assert np.all((probs >= 0) & (probs <= 1))
 
     def test_cosine_uses_normalized_distance(self, singlelabel_data):
-        """Cosine metric should give the same answer on L2-normalised inputs as l2."""
+        """On unit-length inputs, cosine and L2 have the same neighbor ordering."""
         d = singlelabel_data
         X_train = d["x_train"] / (np.linalg.norm(d["x_train"], axis=1, keepdims=True) + 1e-8)
         X_test = d["x_test"] / (np.linalg.norm(d["x_test"], axis=1, keepdims=True) + 1e-8)
@@ -268,18 +251,16 @@ class TestKNNMetricParam:
         clf_cos = KNNClassifier(n_neighbors=3, device="cpu", metric="cosine")
         clf_l2.fit(X_train, d["y_train"])
         clf_cos.fit(X_train, d["y_train"])
-        # Both operate on unit-norm inputs; predictions should agree
         np.testing.assert_array_equal(clf_l2.predict(X_test), clf_cos.predict(X_test))
 
 
 class TestKNNGPUPath:
-    """GPU / faissknn path: requires CUDA + faissknn."""
+    """Requires CUDA and GPU-enabled FAISS."""
 
     @_cuda_available
     @_faissknn_available
     @pytest.mark.slow
     def test_gpu_fp16_output_shapes(self, singlelabel_data):
-        """use_fp16=True should not change output shapes or value ranges."""
         d = singlelabel_data
         clf = KNNClassifier(n_neighbors=5, device="cuda", use_fp16=True)
         clf.fit(d["x_train"], d["y_train"])
@@ -293,7 +274,6 @@ class TestKNNGPUPath:
     @_faissknn_available
     @pytest.mark.slow
     def test_gpu_predict_returns_numpy(self, singlelabel_data):
-        """predict() and predict_proba() must always return np.ndarray, not torch.Tensor."""
         d = singlelabel_data
         clf = KNNClassifier(n_neighbors=5, device="cuda")
         clf.fit(d["x_train"], d["y_train"])
@@ -348,9 +328,6 @@ class TestResolveKNNDevice:
     def test_explicit_cpu_is_preserved(self, monkeypatch):
         monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
         assert resolve_knn_device("cpu", "cuda:0") == "cpu"
-
-
-# ---- Unified evaluate_knn / evaluate_logistic tests ----
 
 
 class TestUnifiedEvaluateKNN:

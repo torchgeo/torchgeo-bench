@@ -1,15 +1,8 @@
-"""Derive segmentation-probe layers for each model config by measurement.
+"""Choose segmentation-probe layers from their measured output sizes.
 
-``SegmentationProbe`` taps modules by ``named_modules()`` name and builds a
-multi-scale head from whatever those taps emit.  Choosing taps by name alone is
-unreliable: for a hierarchical CNN the deepest repeated container is the block
-list *inside one stage*, so all four taps come back at the same spatial
-resolution and the "multi-scale" probe is nothing of the sort.
+Layer names alone can select several outputs of the same size.
 
-This hooks every candidate module, runs one real forward pass, records the
-feature shape each module actually produces, and picks taps by measured
-resolution — falling back to evenly spaced blocks for isotropic ViTs, which
-genuinely have only one resolution.
+Prefer four distinct output grid sizes; otherwise choose layers at different depths.
 
 Usage:
     python experiments/scripts/introspect_seg_layers.py --out /tmp/seg_layers.json
@@ -23,54 +16,46 @@ from pathlib import Path
 
 import torch
 import yaml
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 
+from torchgeo_bench.config import CONF_DIR, compose_config, instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 
 logger = logging.getLogger(__name__)
 
-CONF = Path(__file__).resolve().parents[2] / "src" / "torchgeo_bench" / "conf" / "model"
+CONF = CONF_DIR / "model"
 
 CANDIDATE = re.compile(r"^(.*\b(?:blocks|encoder|layers|stages|features))\.(\d+)$|^(layer)(\d+)$")
 
-# Not segmentation-probe candidates: location encoders take (lon, lat), the
-# statistical baselines have no backbone, and SAM3 fetches its checkpoint from
-# HuggingFace at construction, which the compute nodes cannot reach.
+# Skip baselines without probe layers and SAM3, which needs a Hugging Face download at construction.
 SKIP_TARGETS = {"ImageStatsBench", "RCFBench", "SAM3Encoder"}
 
 
 def band_specs(dataset: str, bands: str):
     """Return the BandSpec list a model would receive for this dataset."""
-    cls = get_bench_dataset_class(dataset)
-    if bands == "rgb":
-        names = set(cls.rgb_bands)
-        return [b for b in cls.bands if b.name in names]
-    return list(cls.bands)
+    bench = get_bench_dataset_class(dataset)()
+    return bench.select_band_specs(tuple(bench.rgb_bands) if bands == "rgb" else None)
 
 
 class _Stub:
-    """Minimal stand-in so SegmentationProbe._process_feature can be reused."""
+    """Provide the backbone needed by the probe's feature reshaping."""
+
+    reshape_tokens = SegmentationProbe.reshape_tokens
 
     def __init__(self, backbone):
         self.backbone = backbone
 
 
 def feature_hw(feat, backbone) -> tuple[int, int] | None:
-    """Return the (H, W) the probe would see, using the probe's own reshape.
+    """Measure height and width using the probe's own reshaping rules.
 
-    Reimplementing the reshape here would measure something the probe does not
-    actually do, so call its method directly.  A feature it cannot reshape
-    raises there and is reported as an incompatibility rather than skipped.
+    Return ``None`` for non-tensors or unsupported shapes.
     """
     if not isinstance(feat, torch.Tensor):
         return None
     try:
         processed = SegmentationProbe._process_feature(_Stub(backbone), feat)
     except ValueError:  # allow-except: report tensors that the segmentation probe cannot reshape
-        # The probe itself refuses this tensor; record it as unusable so the
-        # model is reported rather than silently tapped somewhere else.
         return None
     return int(processed.shape[-2]), int(processed.shape[-1])
 
@@ -108,12 +93,12 @@ def measure(model, size: int = 224) -> dict[str, tuple[int, int]]:
 
 
 def choose(seen: dict[str, tuple[int, int]]) -> tuple[list[str], str]:
-    """Pick four taps, preferring distinct spatial resolutions."""
+    """Choose four layers, preferring different output grid sizes."""
     by_res: dict[tuple[int, int], list[str]] = {}
     for name, hw in seen.items():
         by_res.setdefault(hw, []).append(name)
     if len(by_res) >= 4:
-        # Deepest module at each resolution, coarsest grid first.
+        # Use the last layer at each size, starting with the smallest grid.
         resolutions = sorted(by_res, key=lambda hw: hw[0])[:4]
         return [sorted(by_res[r], key=_order_key)[-1] for r in resolutions], "multi-resolution"
     names = sorted(seen, key=_order_key)
@@ -125,7 +110,6 @@ def choose(seen: dict[str, tuple[int, int]]) -> tuple[list[str], str]:
 
 
 def main() -> None:
-    """Entry point."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)
@@ -145,16 +129,15 @@ def main() -> None:
             continue
         if only and name not in only:
             continue
-        cfg = OmegaConf.create({k: v for k, v in conf.items() if k != "eval"})
-        model = instantiate(cfg, bands=band_specs(args.dataset, args.bands), _convert_="object")
+        config_name = path.relative_to(CONF).with_suffix("").as_posix()
+        cfg = compose_config([f"model={config_name}"]).model
+        model = instantiate(cfg, bands=band_specs(args.dataset, args.bands))
         model.eval()
         seen = measure(model)
         if not seen:
-            # Every tap produced a tensor SegmentationProbe refuses to reshape
-            # (e.g. OlmoEarth v1's 2352 = 28^2 x 3 grouped tokens).  Record it
-            # as a real incompatibility and fail the run at the end.
+            # Record the incompatibility and fail after writing the report.
             results[name] = {
-                "config": str(path.relative_to(CONF).with_suffix("")),
+                "config": config_name,
                 "unusable": "no tap produced a feature map the probe can reshape",
             }
             logger.warning("%-38s UNUSABLE (probe cannot reshape its features)", name)
@@ -162,7 +145,7 @@ def main() -> None:
             continue
         picks, strategy = choose(seen)
         results[name] = {
-            "config": str(path.relative_to(CONF).with_suffix("")),
+            "config": config_name,
             "existing": ((conf.get("eval") or {}).get("segmentation") or {}).get("layers"),
             "strategy": strategy,
             "layers": picks,

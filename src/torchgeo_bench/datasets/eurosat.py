@@ -1,20 +1,12 @@
-"""EuroSAT (torchgeo) benchmark dataset template.
-
-Demonstrates how to wrap a non-GeoBench :class:`~torch.utils.data.Dataset`
-in a :class:`~torchgeo_bench.datasets.base.BenchDataset`.  The data and
-splits come from :class:`torchgeo.datasets.EuroSAT`; metadata and the
-``BenchDataset`` interface live here.
-"""
+"""EuroSAT and spatially disjoint EuroSAT splits from torchgeo."""
 
 from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
 
 from torch.utils.data import Dataset
-
-# Referenced through ``globals()[cls._tg_class]`` in ``get_dataset``.
-from torchgeo.datasets import EuroSAT as TGEuroSAT  # noqa: F401
-from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial  # noqa: F401
+from torchgeo.datasets import EuroSAT as TGEuroSAT
+from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial
 
 from .base import BandSpec, BenchDataset
 
@@ -28,9 +20,7 @@ class EuroSAT(BenchDataset):
     download behaviour are managed by torchgeo.
     """
 
-    # Name of the wrapped torchgeo class, resolved from this module's globals
-    # at call time so tests can monkeypatch ``TGEuroSAT``/``TGEuroSATSpatial``.
-    _tg_class: ClassVar[str] = "TGEuroSAT"
+    _tg_class: ClassVar[type[TGEuroSAT]] = TGEuroSAT
 
     name = "eurosat"
     task = "classification"
@@ -40,7 +30,7 @@ class EuroSAT(BenchDataset):
     split_sizes: ClassVar[dict[str, int]] = {"train": 16200, "val": 5400, "test": 5400}
     supports_partitions = False
 
-    # Band statistics mirror m-eurosat (computed from the same EuroSAT data).
+    # Raw EuroSAT pixel statistics, separate from the GeoBench V1 subset's statistics.
     # fmt: off
     bands: ClassVar[list[BandSpec]] = [
         BandSpec("s2", "coastal_aerosol", "B01", mean=1354.41, std=245.718, min=816, max=17720, wavelength_um=0.443),
@@ -63,9 +53,7 @@ class EuroSAT(BenchDataset):
     def data_root(cls) -> Path:
         """Return ``Path("data/eurosat")`` (torchgeo manages its own layout below).
 
-        Shared by :class:`EuroSATSpatial`: both use the same
-        ``EuroSATallBands.zip``, only the split txt files differ, so a shared
-        root avoids a second 2GB download.
+        :class:`EuroSATSpatial` shares the image archive; only split files differ.
         """
         return Path("data/eurosat")
 
@@ -79,8 +67,10 @@ class EuroSAT(BenchDataset):
     ) -> Dataset:
         """Return the wrapped torchgeo dataset (``_tg_class``) for the split."""
         del partition
+        if split not in ("train", "val", "test"):
+            raise ValueError(f"Unknown split {split!r}. Expected train, val, or test.")
         band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
-        return globals()[self._tg_class](
+        return self._tg_class(
             root=str(self.data_root()),
             split=split,
             bands=band_codes,
@@ -91,16 +81,10 @@ class EuroSAT(BenchDataset):
 class EuroSATSpatial(EuroSAT):
     """EuroSAT with longitude-based 60/20/20 train/val/test splits.
 
-    Uses :class:`torchgeo.datasets.EuroSATSpatial`, which partitions tiles
-    by longitude so train/val/test regions are spatially disjoint. Same
-    27000 images, classes, bands, and stats as :class:`EuroSAT`; only the
-    split assignment differs. Stronger generalization signal than the
-    default random split.
+    The same 27,000 images, classes, bands, and stats as :class:`EuroSAT`, with disjoint regions.
     """
 
-    _tg_class = "TGEuroSATSpatial"
+    _tg_class = TGEuroSATSpatial
 
     name = "eurosat-spatial"
-    # Longitude-based 60/20/20: same totals as the random split, just
-    # reassigned across regions.
     split_sizes: ClassVar[dict[str, int]] = {"train": 16200, "val": 5400, "test": 5400}

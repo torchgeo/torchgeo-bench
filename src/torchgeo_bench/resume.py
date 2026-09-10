@@ -1,8 +1,6 @@
-"""Resume-mode bookkeeping: canonical run keys and skip planning.
+"""Resume keys and plans for unfinished benchmark work.
 
-Resume keys are assembled from two sources that format values differently
-(the config vs. a re-read CSV), so every cell goes through
-:func:`_canonical_key_cell` before comparison.
+Use :func:`_canonical_key_cell` to make equivalent config and CSV values compare equal.
 """
 
 import hashlib
@@ -29,25 +27,19 @@ KEY_COLS = (
     "partition",
     "bands",
     "num_classes",
-    # Scale-MAE's dataset_overrides vary these per dataset (#215); without them
-    # two runs at different resolutions share a resume key and the second is
-    # silently skipped.
+    # Dataset overrides can change resolution or pooling under one model name (Scale-MAE, #215).
     "res",
     "pool",
-    # Fingerprint of the full config (seed, device, dataset, eval, model) so a
-    # changed setting that doesn't show up in the other key columns can't be
-    # mistaken for an already-completed run.
+    # Include result-affecting settings not represented by the other columns.
     "config_hash",
 )
 
 
 def _normalize_bands_value(bands: Iterable[object] | None) -> str:
-    """Canonicalize the ``cfg.dataset.bands`` value for logging/CSV/resume.
+    """Convert a band selection to a stable string for logs, CSVs, and resume keys.
 
-    The config hands us either ``"rgb"``/``"all"``, an explicit list
-    (``ListConfig`` or ``list[str]``), or ``None``.  Reduce all of those to a
-    stable string so that the resume key and the CSV column are comparable
-    across runs.
+    Accept ``"rgb"``/``"all"``, explicit lists (``ListConfig`` or ``list[str]``), or ``None``.
+    Lists become comma-separated names; ``None`` becomes ``"all"``.
     """
     if bands is None:
         return "all"
@@ -59,16 +51,8 @@ def _normalize_bands_value(bands: Iterable[object] | None) -> str:
 def _resume_config_hash(cfg: DictConfig) -> str:
     """Return a stable fingerprint of settings that can change a result row.
 
-    Resume must not treat a row from a different model/evaluation setup as
-    complete merely because its display metadata happens to match.
-
-    ``eval.profile`` and ``eval.intrinsic_dim`` are excluded: both are
-    additive, independently-gated passes (their own ``skip_profile``/
-    ``skip_id`` resume keys already track completion), not settings that
-    change what a knn/linear row measures. Hashing them would mean flipping
-    ``eval.profile.enabled=true`` for a follow-up profiling pass changes the
-    fingerprint and makes resume treat already-computed knn/linear rows as a
-    different config -- rerunning and duplicating them instead of skipping.
+    Excluding ``eval.profile`` and ``eval.intrinsic_dim`` preserves existing probe keys.
+    These passes have separate completion checks and do not change probe scores.
     """
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
     assert isinstance(dataset_cfg, dict)
@@ -77,6 +61,11 @@ def _resume_config_hash(cfg: DictConfig) -> str:
     assert isinstance(eval_cfg, dict)
     eval_cfg.pop("profile", None)
     eval_cfg.pop("intrinsic_dim", None)
+    # Keep removed defaults only in the hash payload so existing CSV keys remain valid.
+    if "segmentation" in eval_cfg:
+        eval_cfg["segmentation"].setdefault("save_viz", False)
+        eval_cfg["segmentation"].setdefault("viz_dir", "viz")
+        eval_cfg["segmentation"].setdefault("n_viz_samples", 8)
     payload = {
         "version": 1,
         "seed": cfg.seed,
@@ -90,14 +79,10 @@ def _resume_config_hash(cfg: DictConfig) -> str:
 
 
 def _canonical_key_cell(value: object) -> str:
-    """Canonicalize a single resume-key cell to a comparable string.
+    """Normalize a resume-key cell so config and CSV values compare equally.
 
-    The config formats ``image_size`` as the int ``224`` (→ ``"224"``) while
-    pandas types any CSV column containing a missing value as ``float64``, so
-    the same value round-trips as ``"224.0"``.  Without canonicalization those
-    never compare equal and ``resume=true`` silently appends duplicate rows.
-    Whole-number floats collapse to their integer form; non-numeric values
-    pass through unchanged.
+    Pandas may read ``224`` as ``224.0`` when a CSV column has missing values.
+    Convert whole-number floats to integers for comparison; leave non-numeric values unchanged.
     """
     if value is None:
         return ""
@@ -127,7 +112,6 @@ def _completed_run_keys(
 
 
 def _row_key(row: dict, key_cols: Sequence[str]) -> tuple[str, ...]:
-    """Build a normalized resume key tuple from a result row dict."""
     return tuple(_canonical_key_cell(row.get(col, "")) for col in key_cols)
 
 
@@ -244,9 +228,7 @@ def _plan_dataset_run(
             id_metric_names.extend(
                 f"spectrum_{metric}_{split}" for metric in FEATURE_SPECTRUM_METRICS
             )
-    # Per-metric, not just per-dataset: a run that already has its (expensive)
-    # torchid estimator rows but is missing only the (cheap) newer spectrum
-    # rows shouldn't have to redo the estimators just to backfill the rest.
+    # Track individual metrics so missing spectrum rows do not force expensive estimators to rerun.
     id_missing_metrics = frozenset(
         metric
         for metric in id_metric_names

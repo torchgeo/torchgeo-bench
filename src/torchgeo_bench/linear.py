@@ -30,12 +30,12 @@ class LogisticRegression:
         batch_size: int = 1024,
         solver: str = "lbfgs",
         tol: float = 1e-4,
-        patience: int = 1,  # only used by Adam path now
+        patience: int = 1,  # Adam only.
         random_state: int | None = None,
         device: str | torch.device | None = None,
         *,
         verbose: bool = False,
-        use_tf32: bool = True,  # enable TF32 on CUDA for speed
+        use_tf32: bool = True,  # Faster CUDA matrix multiplication.
         multi_label: bool = False,
     ) -> None:
         if C <= 0:
@@ -68,7 +68,6 @@ class LogisticRegression:
         if self.random_state is not None:
             torch.manual_seed(self.random_state)
 
-        # CUDA matmul speedup (TF32) if available & allowed
         if self.device.type == "cuda" and self.use_tf32:
             torch.set_float32_matmul_precision("high")
 
@@ -125,7 +124,7 @@ class LogisticRegression:
         else:
             criterion = torch.nn.CrossEntropyLoss(reduction="mean")
 
-        # BCE mean divides by n_samples * n_classes; scale regularization likewise.
+        # BCE averages over samples and labels; match sklearn's weight-penalty scaling.
         if self.multi_label:
             reg = 0.5 * (1.0 / self.C) / float(n_samples * n_classes)
         else:
@@ -294,7 +293,7 @@ class LogisticRegression:
         return probs
 
     def decision_function(self, X: Tensor) -> np.ndarray:
-        """Compute raw logits (decision function values).
+        """Compute unnormalized class scores.
 
         Args:
             X: Feature matrix of shape ``(n_samples, n_features)``.

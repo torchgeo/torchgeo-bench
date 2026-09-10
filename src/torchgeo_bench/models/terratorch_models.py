@@ -39,8 +39,7 @@ def _reduce_to_vec(out: torch.Tensor | list | tuple, pool: str) -> torch.Tensor:
     if isinstance(out, list | tuple):
         out = out[-1]
     if out.ndim == 4:
-        # Spatial feature maps: mean / cls both reduce to a GAP; "both" doubles
-        # the feature dim by concatenating GAP + max-pooled features.
+        # Spatial maps have no CLS token: "cls" uses the mean, and "both" concatenates mean and max.
         gap = out.mean(dim=(-2, -1))
         if pool == "both":
             mp = out.amax(dim=(-2, -1))
@@ -116,11 +115,7 @@ _PRITHVI_HLS_BANDS: dict[str, str] = {
 class TerraTorchPrithviBench(_TerraTorchBench):
     """IBM/NASA Prithvi-EO v1/v2 — maps dataset bands onto its HLS slots @ 224.
 
-    ``expected_input_unit = S2_DN``: under ``model_native`` the wrapper
-    rescales the input to S2 DN scale before band-mapping.  Per-version
-    pretraining mean/std are deliberately *not* applied here — they
-    correspond to the post-mapped layout, while strategy normalisation runs
-    on the dataset's raw channel count.
+    Under ``model_native``, inputs are rescaled to S2 DN before band mapping.
 
     Datasets that lack some of :data:`PRITHVI_BANDS` (RGB-only, for instance)
     use TerraTorch's ``model_bands=`` patch-embed selection, which keeps the
@@ -144,11 +139,8 @@ class TerraTorchPrithviBench(_TerraTorchBench):
         if len(selected) < len(PRITHVI_BANDS):
             backbone_kwargs["bands"] = [_PRITHVI_HLS_BANDS[name] for name in selected]
         self.backbone_name = backbone_name
-        # model_native standardises with the checkpoint's published statistics.
-        # normalize_inputs runs on the dataset's channels, before _prepare_input
-        # maps them onto Prithvi's band slots, so the arrays are laid out per
-        # dataset channel; bands Prithvi does not consume keep mean 0 / std 1
-        # and are dropped by the mapping anyway.
+        # model_native normalizes dataset channels before band mapping.
+        # Unused channels keep mean 0 / std 1 until mapping drops them.
         stats = PRITHVI_PRETRAIN_STATS["v1" if "eo_v1" in backbone_name else "v2"]
         mean = [0.0] * len(bands)
         std = [1.0] * len(bands)
@@ -176,15 +168,9 @@ class TerraTorchPrithviBench(_TerraTorchBench):
 
 CLAY_BANDS: list[str] = ["blue", "green", "red", "nir", "swir1", "swir2"]
 _CLAY_WAVELENGTHS_UM: list[float] = [0.493, 0.560, 0.665, 0.842, 1.610, 2.190]
-# Clay's pretrained band centres, keyed by canonical name.  `waves` conditions a
-# learned embedding that Clay was pretrained with at *these* values, so the
-# wavelength comes from Clay's own table rather than from BandSpec.wavelength_um
-# (which DOFA and Panopticon use).  The two differ only trivially — cloudsen12
-# records b02 = 0.49 against Clay's 0.493, well inside the band's width — but
-# Clay's table is total over CLAY_BANDS and so can never raise, whereas reading
-# the BandSpec would fail on any band whose wavelength is unset.
-# `strict=True` pins the positional pairing: a band added to one list without
-# the other raises at import rather than silently shifting every wavelength.
+# Use Clay's pretrained wavelengths, not dataset metadata.
+# For example, Clay uses 0.493 µm for blue; CloudSen12 records 0.49 µm.
+# The table also covers bands whose BandSpec.wavelength_um is missing.
 _CLAY_WAVELENGTH_BY_BAND: dict[str, float] = dict(
     zip(CLAY_BANDS, _CLAY_WAVELENGTHS_UM, strict=True)
 )
@@ -203,13 +189,8 @@ _CLAY_PRETRAIN_STD_BY_BAND: dict[str, float] = dict(
 class TerraTorchClayBench(_TerraTorchBench):
     """Clay v1.5 — S2 bands @ 256, conditioned on per-band ``waves`` (µm) and ``gsd``.
 
-    Band-agnostic: the subset of :data:`CLAY_BANDS` actually present in the
-    dataset is resolved once at construction, in Clay's pretrained channel
-    order, and both the input mapping and the ``waves`` vector are built over
-    that subset.  An RGB dataset therefore runs as a genuine 3-channel model
-    with 3 wavelengths instead of raising on the missing ``nir``.  A full 6-band
-    S2 dataset resolves to all of :data:`CLAY_BANDS`, leaving channel order and
-    ``waves`` values exactly as they were.
+    Input mapping and ``waves`` use available :data:`CLAY_BANDS` in pretrained order.
+    RGB inputs use three channels and wavelengths; full S2 inputs use all six.
     """
 
     # Clay's published mean/std (see _CLAY_PRETRAIN_MEAN_BY_BAND) are raw S2
@@ -227,14 +208,11 @@ class TerraTorchClayBench(_TerraTorchBench):
         gsd: float = 10.0,
         **kwargs: Any,
     ) -> None:
-        # Resolved before super().__init__ so a band set with no Clay band at
-        # all raises before the pretrained checkpoint is downloaded.
+        # Reject incompatible bands before downloading the checkpoint.
         indices, model_bands = select_src_bands(bands, CLAY_BANDS, preferred_sensors=("s2",))
         self.backbone_name = backbone_name
-        # model_native standardises with Clay's published per-band statistics.
-        # normalize_inputs runs on the dataset's raw channels, before
-        # _prepare_input maps them onto Clay's band slots; bands Clay does not
-        # consume keep mean 0 / std 1 and are dropped by the mapping anyway.
+        # model_native normalizes dataset channels before band mapping.
+        # Unused channels keep mean 0 / std 1 until mapping drops them.
         mean = [0.0] * len(bands)
         std = [1.0] * len(bands)
         for name, ds_idx in zip(model_bands, indices, strict=True):
