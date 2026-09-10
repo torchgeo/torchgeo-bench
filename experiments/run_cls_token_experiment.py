@@ -41,14 +41,16 @@ def build_jobs() -> list[Job]:
             short = model.removeprefix("timm/vit/")
             for use_cls in (False, True):
                 tag = "cls" if use_cls else "avg"
-                overrides = [
-                    f"model={model}",
-                    f"model.use_cls_token={'true' if use_cls else 'false'}",
-                    f"model.name={short}_{tag}",
-                    f"dataset.names=[{dataset}]",
-                    "dataset.partition=default",
+                run_args = [
+                    "--model",
+                    model,
+                    "--use-cls-token" if use_cls else "--no-use-cls-token",
+                    "--model-name",
+                    f"{short}_{tag}",
+                    "--datasets",
+                    dataset,
                 ]
-                jobs.append(Job(label=f"{dataset} {short} {tag}", overrides=overrides))
+                jobs.append(Job(label=f"{dataset} {short} {tag}", args=run_args))
     return jobs
 
 

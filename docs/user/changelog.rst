@@ -14,6 +14,17 @@ Added
 * ``scripts/compute_band_statistics.py`` computes the per-band ``BandSpec``
   statistics a new dataset needs, from its train split only.
 
+Changed
+^^^^^^^
+
+* Replaced the OmegaConf/Hydra ``key=value`` override syntax with a plain
+  ``argparse`` CLI: common settings are now flags (``--model``, ``--datasets``,
+  ``--bootstrap``, ``--resume``, ...; run ``torchgeo-bench run --help``), and
+  uncommon settings go in a YAML file passed via ``--config PATH``. CoordBench
+  moved from ``run mode=coord`` to its own ``torchgeo-bench coord`` subcommand;
+  the intrinsic-dimension and compute-profile passes moved to dedicated
+  ``torchgeo-bench intrinsic-dim`` / ``torchgeo-bench profile`` subcommands.
+
 0.5.0 (2026-08-10)
 ------------------
 
@@ -37,7 +48,7 @@ Changed
 * Image-benchmark result rows now record ``num_classes`` and include it in the
   resume key. Rows from an older label schema cannot be silently reused.
 * Linux x86_64 installs use the CUDA FAISS backend; other platforms use CPU
-  FAISS. CoordBench KNN remains CPU by default unless ``coord.knn_device`` is
+  FAISS. CoordBench KNN remains CPU by default unless ``--knn-device`` is
   overridden.
 * SpaceNet2 and SpaceNet7 now use their native two-class building masks instead
   of GeoBench's unused third background class.

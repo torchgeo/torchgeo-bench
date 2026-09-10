@@ -1,12 +1,13 @@
 """Runner for the CoordBench location-encoder track.
 
-Driven from ``torchgeo-bench run mode=coord``: instantiate a coordinate encoder
-from the Hydra ``model`` config, embed each benchmark's points once, then probe
-with KNN and/or a ridge linear head under random and/or spatial-block
-cross-validation. One CSV row per (benchmark, task, method, split) is appended
-to ``coord.output`` via the shared atomic writer, with resume support.
+Driven from ``torchgeo-bench coord``: instantiate a coordinate encoder from
+the ``model`` config, embed each benchmark's points once, then probe with KNN
+and/or a ridge linear head under random and/or spatial-block cross-validation.
+One CSV row per (benchmark, task, method, split) is appended to
+``coord.output`` via the shared atomic writer, with resume support.
 """
 
+import copy
 import logging
 import os
 from collections.abc import Sequence
@@ -14,8 +15,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from omegaconf import DictConfig, OmegaConf
-from rich.progress import track
 
 from torchgeo_bench.config import instantiate
 from torchgeo_bench.coordbench.datasets import CoordBenchmark, load_benchmarks
@@ -25,6 +24,7 @@ from torchgeo_bench.coordbench.probe import (
     linear_probe_score,
     spatial_fold_ids,
 )
+from torchgeo_bench.settings import RunSettings
 
 logger = logging.getLogger(__name__)
 
@@ -58,21 +58,21 @@ class CoordResult:
         return self.__dict__.copy()
 
 
-def _instantiate_encoder(model_cfg: DictConfig, device: str) -> tuple[LocationEncoder, str]:
-    """Build a :class:`LocationEncoder` from a Hydra model config.
+def _instantiate_encoder(model_cfg: dict, device: str) -> tuple[LocationEncoder, str]:
+    """Build a :class:`LocationEncoder` from a model config.
 
     Returns the encoder and the ``name`` recorded in result rows. ``name`` is a
     display field, not a constructor argument, so it is stripped before
     instantiation.
     """
-    cfg = model_cfg.copy()
-    OmegaConf.set_struct(cfg, False)
+    cfg = copy.deepcopy(model_cfg)
     name = cfg.pop("name", cfg.get("_target_", "model").split(".")[-1])
     encoder = instantiate(cfg, device=device)
     if not isinstance(encoder, LocationEncoder):
         raise TypeError(
-            f"mode=coord requires model._target_ to be a LocationEncoder subclass; "
-            f"got {type(encoder).__name__}. Pick a coord model, e.g. model=sincos."
+            f"the coord command requires model._target_ to be a LocationEncoder "
+            f"subclass; got {type(encoder).__name__}. Pick a coord model, e.g. "
+            f"`torchgeo-bench coord -m sincos`."
         )
     return encoder, str(name)
 
@@ -149,17 +149,20 @@ def _score_one(
     )
 
 
-def run_coordbench(cfg: DictConfig) -> None:
+def run_coordbench(cfg: RunSettings) -> None:
     """Run the CoordBench location-encoder benchmark for the configured model."""
-    from torchgeo_bench.main import append_rows_atomic  # lazy: avoids import cycle
+    from torchgeo_bench.main import (  # lazy: avoids import cycle
+        append_rows_atomic,
+        resolve_configured_device,
+    )
 
     coord = cfg.coord
-    device = str(cfg.device)
+    device = str(resolve_configured_device(str(cfg.device)))
     seed = int(cfg.seed)
     folds = int(coord.folds)
     cell_deg = float(coord.cell_deg)
     knn_k = int(coord.knn_k)
-    knn_device = str(coord.get("knn_device") or "cpu")
+    knn_device = str(coord.knn_device or "cpu")
     methods = list(coord.methods)
     splits = _resolve_splits(str(coord.split))
 
@@ -177,7 +180,8 @@ def run_coordbench(cfg: DictConfig) -> None:
     benchmarks = load_benchmarks(coord.names)
     logger.info("CoordBench: %d benchmarks selected", len(benchmarks))
 
-    for bench in track(benchmarks, description="CoordBench"):
+    for i, bench in enumerate(benchmarks, start=1):
+        logger.info("[%d/%d] CoordBench benchmark: %s", i, len(benchmarks), bench.name)
         rows = _evaluate_benchmark(
             bench,
             encoder,

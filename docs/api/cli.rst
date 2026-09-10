@@ -3,27 +3,45 @@ Command-line interface
 
 .. module:: torchgeo_bench.cli
 
-The ``torchgeo-bench`` console script exposes three subcommands:
+The ``torchgeo-bench`` console script exposes six subcommands:
 
-``torchgeo-bench run [flags] [key=value ...]``
-    Runs the benchmark pipeline. Common settings have flags (``--model``,
-    ``--datasets``, ``--device``, ``--resume``, ...; see ``run --help``), and
-    any value in :file:`src/torchgeo_bench/conf/config.yaml` (or any model
-    preset under :file:`conf/model/`) can be overridden with ``key=value``
-    pairs, e.g. ``model=timm/resnet50 dataset.names=[m-eurosat]``. Output is
-    quiet by default; pass ``-v``/``--verbose`` for INFO-level progress logs.
-    ``--list-models``/``--list-datasets`` list valid ``model=``/``dataset.names=``
-    values, and ``--model-help <name>`` prints that model config's YAML
-    (its available ``model.*`` overrides) without running anything.
+``torchgeo-bench run [flags]``
+    Runs the benchmark pipeline. Common settings are plain flags (``--model``,
+    ``--datasets``, ``--device``, ``--resume``, ...; see ``run --help`` for
+    the full list). Anything uncommon goes in a YAML file passed via
+    ``--config PATH``, merged under the built-in defaults but under explicit
+    CLI flags (flags always win); there is no ``key=value`` override syntax.
+    Output is quiet by default; pass ``-v``/``--verbose`` for INFO-level
+    progress logs. ``--list-models``/``--list-datasets`` list valid
+    ``--model``/``--datasets`` values, ``--model-help <name>`` prints that
+    model preset's YAML (its available ``model.*`` settings) without running
+    anything, and ``--print-config`` prints the fully merged settings and
+    exits.
 
-``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}``
+``torchgeo-bench profile [flags]``
+    A thin alias over ``run`` (same flags) that additionally enables the
+    compute-profile pass (throughput/latency/params), written to
+    ``results/profiles/``.
+
+``torchgeo-bench intrinsic-dim [flags]``
+    A thin alias over ``run`` (same flags) that additionally enables the
+    intrinsic-dimension pass, written to ``results/intrinsic_dim/``.
+
+``torchgeo-bench coord [flags]``
+    Runs the CoordBench location-encoder track (``--model``, ``--names``,
+    ``--methods``, ``--split``, ``--folds``, ...; see ``coord --help``).
+
+``torchgeo-bench flops [flags]``
+    Measures per-sample backbone, head, and probe compute (``--model``,
+    ``--device``, ``--output``).
+
+``torchgeo-bench download {geobench_v1|geobench_v2|eurosat|resisc45}``
     Downloads benchmark datasets into ``./data/`` (or a custom location with
     ``--output-dir``). For GeoBench V1 and V2, individual datasets can be
     selected with ``--datasets a,b,c``.
 
-``torchgeo-bench flops [flags] [key=value ...]``
-    Measures per-sample backbone, head, and probe compute. Overrides are
-    composed from :file:`src/torchgeo_bench/conf/flops_config.yaml`.
+Every subcommand above except ``download`` accepts ``--config PATH`` (a YAML
+file of uncommon settings) and ``--print-config``.
 
 Config composition
 ------------------
@@ -32,6 +50,15 @@ Config composition
 
 .. autofunction:: compose_config
 .. autofunction:: list_model_configs
+
+Configuration settings
+----------------------
+
+.. currentmodule:: torchgeo_bench.settings
+
+.. autoclass:: RunSettings
+.. autoclass:: FlopsSettings
+.. autoclass:: EvalSettings
 
 Benchmark entry point
 ---------------------

@@ -17,18 +17,18 @@ Designed for the post-WebDataset layout under
 """
 
 import argparse
+import logging
 import time
 from pathlib import Path
 
 import torch
-from hydra import compose, initialize_config_module
-from hydra.utils import instantiate
-from rich.console import Console
-from rich.table import Table
 from torch.utils.data import DataLoader
 
+from torchgeo_bench.config import compose_config, instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
+
+logger = logging.getLogger(__name__)
 
 
 def _build_dataset(name: str, bands: str, root: Path):
@@ -52,13 +52,11 @@ def _build_dataset(name: str, bands: str, root: Path):
 
 
 def _build_model(model_cfg: str, bands_list):
-    with initialize_config_module(config_module="torchgeo_bench.conf", version_base=None):
-        cfg = compose(config_name="config", overrides=[f"model={model_cfg}"])
+    cfg = compose_config(model=model_cfg)
     return instantiate(
         cfg.model,
         bands=bands_list,
         normalization="bandspec_zscore",
-        _convert_="object",
     )
 
 
@@ -119,15 +117,8 @@ def main() -> None:
     bands_list = bench_cls.select_band_specs(sel)
     model = _build_model(args.model, bands_list).to(device).eval()
 
-    console = Console()
-    console.rule(f"Tuning [bold]{args.model}[/] × {args.dataset}/{args.bands} on {device}")
-
-    table = Table(show_header=True, header_style="bold cyan")
-    table.add_column("bs", justify="right")
-    table.add_column("nw", justify="right")
-    table.add_column("samples/sec", justify="right")
-    table.add_column("peak GB", justify="right")
-    table.add_column("wall", justify="right")
+    print(f"Tuning {args.model} x {args.dataset}/{args.bands} on {device}")
+    print(f"{'bs':>6} {'nw':>6} {'samples/sec':>12} {'peak GB':>10} {'wall':>10}")
 
     results = []
     for bs in bs_list:
@@ -135,18 +126,17 @@ def main() -> None:
             try:
                 sps, peak, dt = _bench(model, dataset, bs, nw, device, args.max_batches)
                 results.append((sps, bs, nw, peak, dt))
-                table.add_row(str(bs), str(nw), f"{sps:.1f}", f"{peak:.2f}", f"{dt:.2f}s")
-            except Exception as e:
-                table.add_row(
-                    str(bs), str(nw), "[red]FAIL[/]", "", f"{type(e).__name__}: {str(e)[:40]}"
-                )
+                print(f"{bs:6d} {nw:6d} {sps:12.1f} {peak:10.2f} {dt:9.2f}s")
+            except torch.OutOfMemoryError as error:
+                logger.warning("batch_size=%d num_workers=%d: %s", bs, nw, error)
+                torch.cuda.empty_cache()
+                print(f"{bs:6d} {nw:6d} {'OOM':>12} {'':>10} {'':>10}")
 
-    console.print(table)
     if results:
         best = max(results, key=lambda r: r[0])
-        console.print(
-            f"\n[bold green]BEST:[/] batch_size={best[1]} num_workers={best[2]} "
-            f"→ [bold]{best[0]:.1f}[/] samples/sec ({best[3]:.2f} GB peak)"
+        print(
+            f"\nBEST: batch_size={best[1]} num_workers={best[2]} "
+            f"{best[0]:.1f} samples/sec ({best[3]:.2f} GB peak)"
         )
 
 

@@ -16,7 +16,7 @@ Docs:
 |-------|-------|
 | **Model name** | <!-- e.g. `new_model` as it appears in the results CSV --> |
 | **Class** | <!-- e.g. `torchgeo_bench.models.NewModel` --> |
-| **Hydra config** | <!-- e.g. `src/torchgeo_bench/conf/model/new_model.yaml` --> |
+| **Model preset** | <!-- e.g. `src/torchgeo_bench/conf/model/new_model.yaml` --> |
 | **Pretraining data** | <!-- e.g. Sentinel-2 global, fMoW, ImageNet, etc. --> |
 | **Sensor coverage** | <!-- e.g. S2 RGB, S2 all-bands, NAIP RGB, multi-sensor --> |
 | **Weights URL** | <!-- Hugging Face Hub repo, release asset, or equivalent public URL --> |
@@ -29,7 +29,7 @@ Follow the Stage 2 guide: [Contribute a model](https://torchgeo.org/torchgeo-ben
 
 - [ ] Class inherits `BenchModel` and implements `_forward_patch_features(images) -> (B, K)`.
 - [ ] Class is exported from `src/torchgeo_bench/models/__init__.py` and listed in `__all__`.
-- [ ] Hydra config exists at `src/torchgeo_bench/conf/model/<name>.yaml` with the correct `_target_`.
+- [ ] Model preset exists at `src/torchgeo_bench/conf/model/<name>.yaml` with the correct `_target_`.
 - [ ] Model weights are publicly accessible without authentication.
 - [ ] Optional dependencies are declared under `[project.optional-dependencies]` in `pyproject.toml`, if needed.
 - [ ] Tests cover all added code in `tests/test_<model>.py`.
@@ -56,15 +56,15 @@ uv run torchgeo-bench download geobench_v2
 uv run torchgeo-bench download eurosat
 ```
 
-Run `torchgeo-bench` with only this model selected. Use `resume=true` so an
-interrupted run can continue without duplicating completed rows. Set `device`
-explicitly so maintainers rerun on the same CPU/GPU path.
+Run `torchgeo-bench` with only this model selected. Use `--resume` so an
+interrupted run can continue without duplicating completed rows. Set
+`--device` explicitly so maintainers rerun on the same CPU/GPU path.
 
 ```bash
-uv run torchgeo-bench run model=<model_config_name> \
-  dataset.names=all \
-  resume=true \
-  device=<cuda:0|cpu>
+uv run torchgeo-bench run --model <model_config_name> \
+  --datasets all \
+  --resume \
+  --device <cuda:0|cpu>
 ```
 
 If a dataset cannot run because the model does not support that sensor or
@@ -94,10 +94,10 @@ Maintainers should be able to check out this PR and rerun the exact benchmark.
 ```bash
 git checkout <this-branch>
 uv sync --extra dev
-uv run torchgeo-bench run model=<model_config_name> \
-  dataset.names=all \
-  resume=true \
-  device=<cuda:0|cpu>
+uv run torchgeo-bench run --model <model_config_name> \
+  --datasets all \
+  --resume \
+  --device <cuda:0|cpu>
 ```
 
 Hardware and software used for submitted results:

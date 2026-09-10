@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 """Run every benchmark model across every dataset.
 
-Each model is one job that evaluates that model across all datasets
-(``dataset.names=all``).
+Each model is one job that evaluates that model across all datasets.
 
 Usage:
     python experiments/run_main_experiments.py
@@ -94,7 +93,7 @@ MODELS = [
 def build_jobs() -> list[Job]:
     """Build one job per model (each runs over all datasets)."""
     return [
-        Job(label=model.split("/")[-1], overrides=[f"model={model}", "dataset.names=all"])
+        Job(label=model.split("/")[-1], args=["--model", model, "--datasets", "all"])
         for model in MODELS
     ]
 

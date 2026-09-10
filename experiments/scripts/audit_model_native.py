@@ -15,11 +15,8 @@ import logging
 from pathlib import Path
 
 import torch
-import yaml
-from hydra.errors import InstantiationException
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 
+from torchgeo_bench.config import compose_config, instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 
 logger = logging.getLogger(__name__)
@@ -49,32 +46,23 @@ def main() -> None:
     results: dict[str, dict] = {}
     sample = torch.rand(2, 0, 8, 8)
     for path in sorted(CONF.rglob("*.yaml")):
-        conf = yaml.safe_load(path.read_text()) or {}
-        name, target = conf.get("name"), conf.get("_target_", "")
+        config_name = str(path.relative_to(CONF).with_suffix(""))
+        cfg = compose_config(model=config_name).model
+        name, target = cfg.get("name"), cfg.get("_target_", "")
         if not name or not target or "coordbench" in target:
             continue
         if target.rsplit(".", 1)[-1] in SKIP_TARGETS:
             continue
         bands = band_specs(args.dataset, args.bands)
-        # Model configs may interpolate root keys (rcf.yaml has `seed: ${seed}`),
-        # so compose under a root the way Hydra does rather than standalone.
-        root = OmegaConf.create(
-            {"seed": 0, "model": {k: v for k, v in conf.items() if k != "eval"}}
-        )
-        cfg = root.model
-        entry: dict = {"config": str(path.relative_to(CONF).with_suffix(""))}
+        entry: dict = {"config": config_name}
         try:
-            model = instantiate(cfg, bands=bands, normalization="model_native", _convert_="object")
+            model = instantiate(cfg, bands=bands, normalization="model_native")
             sample = torch.rand(2, len(bands), 32, 32) * 3000
             model.normalize_inputs(sample)
             entry["model_native"] = "supported"
-        except (ValueError, InstantiationException) as exc:
-            # Hydra wraps construction errors, so unwrap before deciding.  Only
-            # the "model cannot state its pretraining pipeline" case is a
-            # classification; anything else is a real bug and must surface.
-            cause = exc.__cause__ if isinstance(exc, InstantiationException) else exc
-            message = str(cause)
-            if not isinstance(cause, ValueError) or "model_native" not in message:
+        except ValueError as error:
+            message = str(error)
+            if "model_native" not in message:
                 raise
             entry["model_native"] = "unsupported"
             entry["reason"] = message[:160]

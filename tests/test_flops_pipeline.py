@@ -22,6 +22,7 @@ from torchgeo_bench.flops_pipeline import (
 )
 from torchgeo_bench.model_profile import _count_gflops, lenient_grad_hooks
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
+from torchgeo_bench.settings import SegmentationSettings
 
 CPU = torch.device("cpu")
 
@@ -245,20 +246,14 @@ _TAP_LAYERS = ["layer4", "layer3", "layer2", "layer1"]
 
 
 def _seg_cfg(layers: list[str], head_type: str):
-    from omegaconf import OmegaConf
-
-    return OmegaConf.create(
-        {
-            "segmentation": {
-                "layers": layers,
-                "head_type": head_type,
-                "lr_scheduler": "cosine",
-                "criterion": {
-                    "_target_": "torch.nn.CrossEntropyLoss",
-                    "ignore_index": 255,
-                },
-            }
-        }
+    return SegmentationSettings(
+        layers=layers,
+        head_type=head_type,
+        lr_scheduler="cosine",
+        criterion={
+            "_target_": "torch.nn.CrossEntropyLoss",
+            "ignore_index": 255,
+        },
     )
 
 
@@ -333,8 +328,8 @@ def test_terramind_modality_map_matches_shipped_configs():
         ("terratorch/terramind_v1_large", "s2"),
         ("terratorch/terramind_v1_large_rgb", "rgb"),
     ]:
-        cfg = compose_config([f"model={config_name}"])
-        assert str(cfg.model.modality) == _MODALITY_FOR_BAND_CONFIG[band_config]
+        cfg = compose_config(model=config_name)
+        assert str(cfg.model["modality"]) == _MODALITY_FOR_BAND_CONFIG[band_config]
 
 
 # ---------------------------------------------------------------------------
@@ -397,13 +392,8 @@ def test_band_incompatibility_matches_empty_intersection():
     assert _is_band_incompatibility(_wrap(inner)) is inner
 
 
-def test_interpolation_key_error_is_not_a_band_incompatibility():
-    """omegaconf's InterpolationKeyError subclasses ValueError, so an
-    unresolved ``${seed}`` must not be classified as a band incompatibility."""
-    from omegaconf.errors import InterpolationKeyError
-
-    assert issubclass(InterpolationKeyError, ValueError)  # why the narrowing is needed
-    exc = InterpolationKeyError("Interpolation key 'seed' not found")
+def test_config_value_error_is_not_a_band_incompatibility():
+    exc = ValueError("Unknown setting 'segmantation'")
     assert _is_band_incompatibility(_wrap(exc)) is None
 
 
@@ -491,13 +481,10 @@ def test_flops_config_resolves_every_shipped_model_config():
     """conf/model/rcf.yaml carries ``seed: ${seed}``, which raises
     InterpolationKeyError unless flops_config defines a top-level ``seed``,
     so the sweep's own config is checked here instead of in the job."""
-    from omegaconf import OmegaConf
-
     from torchgeo_bench.config import compose_config
 
-    cfg = compose_config(["model=rcf"], config_name="flops_config", default_model=None)
-    resolved = OmegaConf.to_container(cfg, resolve=True)  # raises if unresolvable
-    assert resolved["model"]["seed"] == resolved["seed"] == 0
+    cfg = compose_config(config_name="flops_config", model="rcf", default_model=None)
+    assert cfg.model["seed"] == cfg.seed == 0
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +498,7 @@ def test_panopticon_yields_finite_gflops():
     from torchgeo_bench.config import compose_config, instantiate
 
     bench = get_bench_dataset_class("cloudsen12")()
-    cfg = compose_config(["model=torchgeo/panopticon"])
+    cfg = compose_config(model="torchgeo/panopticon")
     model = instantiate(
         cfg.model,
         bands=bench.select_band_specs(None),
@@ -532,7 +519,7 @@ def test_vit_gflops_ordering_and_tokens():
     rgb = bench.select_band_specs(bench.rgb_bands)
 
     def build(name):
-        cfg = compose_config([f"model={name}"])
+        cfg = compose_config(model=name)
         return instantiate(cfg.model, bands=rgb, normalization="bandspec_zscore").eval()
 
     base = build("timm/vit/vit_base_patch16_224")

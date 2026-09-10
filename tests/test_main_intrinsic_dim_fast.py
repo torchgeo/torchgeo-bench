@@ -15,13 +15,17 @@ def test_intrinsic_dim_rows_emitted(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn,mle]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-        ],
+        overrides={
+            "eval": {
+                "skip_linear": True,
+                "intrinsic_dim": {
+                    "enabled": True,
+                    "estimators": ["twonn", "mle"],
+                    "splits": ["train"],
+                    "max_samples": 100,
+                },
+            },
+        },
     )
 
     def _mock_compute(*args, **kwargs):
@@ -58,13 +62,17 @@ def test_spectrum_rows_do_not_require_torchid_estimators(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-        ],
+        overrides={
+            "eval": {
+                "skip_linear": True,
+                "intrinsic_dim": {
+                    "enabled": True,
+                    "estimators": [],
+                    "splits": ["train"],
+                    "max_samples": 100,
+                },
+            },
+        },
     )
 
     with (
@@ -134,14 +142,18 @@ def test_intrinsic_dim_resume_per_estimator(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn,mle]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-        ],
+        overrides={
+            "resume": True,
+            "eval": {
+                "skip_linear": True,
+                "intrinsic_dim": {
+                    "enabled": True,
+                    "estimators": ["twonn", "mle"],
+                    "splits": ["train"],
+                    "max_samples": 100,
+                },
+            },
+        },
     )
 
     seed_rows = [
@@ -189,14 +201,18 @@ def test_resume_backfills_spectrum_without_rerunning_completed_estimators(tmp_pa
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn,mle]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-        ],
+        overrides={
+            "resume": True,
+            "eval": {
+                "skip_linear": True,
+                "intrinsic_dim": {
+                    "enabled": True,
+                    "estimators": ["twonn", "mle"],
+                    "splits": ["train"],
+                    "max_samples": 100,
+                },
+            },
+        },
     )
 
     seed_rows = [

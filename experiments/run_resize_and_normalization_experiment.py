@@ -31,20 +31,24 @@ def build_jobs() -> list[Job]:
                 if size == "null" and interp != "bilinear":
                     continue
 
-                overrides = [
-                    "model=timm/resnet18",
-                    f"++model.input_normalization={norm}",
-                    f"model.name=resnet18_{norm}",
-                    "dataset.names=[m-eurosat]",
-                    f"dataset.image_size={size}",
-                    "eval.merge_val=false",
-                    "verbose=false",
+                run_args = [
+                    "--model",
+                    "timm/resnet18",
+                    "--model-input-normalization",
+                    norm,
+                    "--model-name",
+                    f"resnet18_{norm}",
+                    "--datasets",
+                    "m-eurosat",
+                    "--no-merge-val",
                 ]
-                if size != "null":
-                    overrides.append(f"dataset.interpolation={interp}")
+                if size == "null":
+                    run_args.extend(["--config", "experiments/conf/no_resize.yaml"])
+                else:
+                    run_args.extend(["--image-size", size, "--interpolation", interp])
 
                 label = f"norm={norm} size={size} interp={interp}"
-                jobs.append(Job(label=label, overrides=overrides))
+                jobs.append(Job(label=label, args=run_args))
     return jobs
 
 

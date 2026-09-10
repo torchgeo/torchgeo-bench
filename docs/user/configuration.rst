@@ -1,33 +1,39 @@
 Configuration
 =============
 
-``torchgeo-bench`` is configured with `OmegaConf <https://omegaconf.readthedocs.io>`_
-YAML files.  The primary config lives at :file:`src/torchgeo_bench/conf/config.yaml`
-and is composed with a model preset selected from
-:file:`src/torchgeo_bench/conf/model/`.
+``torchgeo-bench`` is configured with a plain ``argparse`` CLI. Settings are
+composed in this order (each stage overrides the previous one):
 
-Every value in the config can be overridden on the command line using
-dotted-path ``key=value`` syntax (common settings also have flags — see
-``torchgeo-bench run --help``):
+#. built-in Python defaults (``torchgeo_bench.settings``),
+#. an optional ``--config PATH`` YAML file of uncommon settings,
+#. the selected model preset YAML (``--model``, from
+   :file:`src/torchgeo_bench/conf/model/`), and
+#. explicit CLI flags, which always win.
+
+There is no dotted-path ``key=value`` override syntax. Common settings have
+their own flags (see ``torchgeo-bench run --help``); anything else goes in
+the ``--config`` YAML:
 
 .. code-block:: console
 
    $ torchgeo-bench run \
-       model=timm/resnet50 \
-       dataset.names=[m-eurosat] \
-       eval.bootstrap=100 \
-       eval.skip_linear=true \
-       device=cuda:1
+       --model timm/resnet50 \
+       --datasets m-eurosat \
+       --bootstrap 100 \
+       --skip-linear \
+       --device cuda:1
 
-Config tree
------------
+Use ``--print-config`` to print the fully merged settings (in the same YAML
+shape ``--config`` expects) and exit without running anything.
 
-The packaged config tree is shipped inside the wheel:
+Model preset tree
+------------------
+
+The packaged preset tree is shipped inside the wheel:
 
 .. code-block:: text
 
    src/torchgeo_bench/conf/
-   ├── config.yaml          # primary config (defaults below)
    └── model/
        ├── rcf.yaml
        ├── imagestats.yaml
@@ -40,114 +46,92 @@ The packaged config tree is shipped inside the wheel:
        └── torchgeo/
            └── ...          # SSL backbones, ScaleMAE, DOFA, Satlas, EarthLoc, ...
 
-See :doc:`models` for an operator-facing tour of the available presets.
+Each preset is a YAML file with a ``_target_`` (a dotted import path) plus
+constructor kwargs; ``--model-help <name>`` prints one without running
+anything. See :doc:`models` for an operator-facing tour of the available
+presets.
 
-Top-level options
------------------
+Common flags (``torchgeo-bench run``)
+--------------------------------------
 
 ============================  ==================================================
-Key                           Meaning
+Flag                          Meaning
 ============================  ==================================================
-``seed``                      Global RNG seed (numpy + torch).
-``device``                    PyTorch device string (e.g. ``cuda:0``, ``cpu``).
-``mode``                      ``image`` for GeoBench or ``coord`` for CoordBench.
-``output``                    Image-benchmark results CSV; CoordBench uses ``coord.output``.
-``verbose``                   Toggle progress logging.
-``resume``                    Skip already-computed ``(dataset, method, model, config)`` combos.
+``-m``, ``--model``           Model preset, e.g. ``timm/resnet50`` (default ``rcf``).
+``-d``, ``--datasets``        Comma-separated dataset names, or ``all``.
+``--device``                  PyTorch device string (e.g. ``cuda:0``, ``cpu``; default: auto).
+``-o``, ``--output``          Results CSV path (default: ``results/models/<model name>.csv``).
+``--resume``                  Skip already-computed ``(dataset, method, model, config)`` combos.
+``--seed``                    Global RNG seed (numpy + torch).
+``-v``, ``--verbose``         Toggle INFO-level progress logging.
 ============================  ==================================================
 
-``dataset`` block
------------------
-
-.. code-block:: yaml
-
-   dataset:
-     names: all                    # or a list, e.g. [m-eurosat, m-pv4ger]
-     partition: default            # alternative GeoBench V1 partitions when supported
-     batch_size: 64
-     bands: rgb                    # rgb | all | [red, green, blue, nir]
-     image_size: 224               # null disables resizing
-     interpolation: bilinear       # bilinear | bicubic | nearest
+``torchgeo-bench run`` (and the ``profile``/``intrinsic-dim`` aliases) also
+accept ``--partition``, ``--bands``, ``--batch-size``, ``--num-workers``,
+``--image-size``, ``--time-steps``, ``--interpolation``, ``--normalization``,
+``--skip-linear``, ``--bootstrap``, ``--merge-val``/``--no-merge-val``,
+``--knn-device``, ``--seg-head``, ``--seg-epochs``, ``--seg-lr``,
+``--seg-scheduler``, ``--seg-batch-size``, ``--seg-cache``/``--no-seg-cache``,
+``--seg-cache-dtype``, ``--use-cls-token``/``--no-use-cls-token``,
+``--model-input-normalization``, and ``--model-name``. Run
+``torchgeo-bench run --help`` for the authoritative list with defaults.
 
 See :doc:`datasets` for the full list of available dataset names and band
 selection semantics.
 
-``eval`` block
---------------
+Uncommon settings (``--config`` YAML)
+--------------------------------------
+
+Settings without their own flag are set via a YAML file passed to
+``--config``, merged under the built-in defaults but under the model preset
+and any explicit flags. Its shape mirrors ``--print-config`` output, for
+example:
 
 .. code-block:: yaml
 
    eval:
-     bootstrap: 200                # bootstrap resamples for KNN/linear/segmentation CIs
      c_range: [-6, 4, 40]          # log10 sweep start, stop, num samples for linear probe
-     merge_val: true               # merge train+val before training the final logistic head
-     skip_linear: false            # skip the (slower) linear probe entirely
-     knn_device: null              # inherit device; fall back to CPU if FAISS lacks GPU support
-
      calibration:
-       n_bins_knn: null             # null = knn_k + 1
+       n_bins_knn: null            # null = knn_k + 1
        n_bins_linear: 15
-       temp_scale: false            # requires merge_val=false (held-out validation logits)
-
-     intrinsic_dim:                # optional ID metrics on extracted embeddings
-       enabled: false
-       estimators: [TwoNN, MLE, lPCA]
-       splits: [train]
-       max_samples: 10000
-       device: null                # null = auto (cuda if available)
-
-     segmentation:                 # used only for segmentation datasets
-       head_type: fpn              # linear | fpn | dpt | conv-block
-       layers: []                  # backbone layers to extract; [] = use defaults
-       lr: 1e-3
-       epochs: 10
+       temp_scale: false           # requires --no-merge-val (held-out validation logits)
+     segmentation:
        criterion:
          _target_: torch.nn.CrossEntropyLoss
          ignore_index: 255
-       lr_scheduler: cosine
-       cache_features: true
-       cache_dtype: float16
-       save_viz: false
+       save_viz: true
        viz_dir: viz
        n_viz_samples: 8
 
+The additive intrinsic-dimension and compute-profile passes are run via the
+dedicated ``torchgeo-bench intrinsic-dim`` / ``torchgeo-bench profile``
+subcommands (which set ``eval.intrinsic_dim.enabled`` /
+``eval.profile.enabled`` for you); their own sub-settings (estimators,
+splits, warmup/measure counts, ...) are set the same way, through
+``--config``.
+
 .. seealso::
 
-   :doc:`segmentation-layers` lists the verified ``layers`` values for
-   every supported timm backbone family, with spatial sizes and notes on
-   stages that share resolution (common in EfficientNet / MobileNet).
+   :doc:`segmentation-layers` lists the verified ``--seg-head``-compatible
+   layer names for every supported timm backbone family, with spatial sizes
+   and notes on stages that share resolution (common in EfficientNet /
+   MobileNet).
 
 Refer to :doc:`/api/eval` for the runtime functions that consume each
-sub-block.
+setting.
 
-``coord`` block
----------------
+CoordBench
+----------
 
-The coordinate-only track is selected with ``mode=coord`` and a compatible
-location-encoder model preset:
+The coordinate-only track is a dedicated subcommand,
+``torchgeo-bench coord``, with its own flags (``--model``, ``--names``,
+``--methods``, ``--split``, ``--folds``, ``--cell-deg``, ``--knn-k``,
+``--knn-device``, ``--output``, ``--resume``, ``--seed``, ``--config``,
+``--print-config``):
 
-.. code-block:: yaml
+.. code-block:: console
 
-   mode: coord
-   model: sincos
-   coord:
-     output: results/coordbench_results.csv
-     names: all                 # family names or individual benchmarks
-     methods: [knn, linear]     # KNN applies to classification only
-     split: random              # random | spatial | both
-     folds: 5
-     cell_deg: 10.0
-     knn_k: 5
-     knn_device: cpu
+   $ torchgeo-bench coord --model sincos --names all --methods knn,linear --split random
 
 See :doc:`coordbench` for benchmark families, included encoders, split
 semantics, and a custom-encoder example.
-
-``model`` block
----------------
-
-The default ``model: rcf`` selects Random Convolutional Features.  Browse
-:file:`src/torchgeo_bench/conf/model/` for the full list of presets.  Each
-preset can ship its own ``eval`` overrides (for example, segmentation
-backbones often pin ``head_type: fpn`` and bump the learning rate); these
-are merged on top of the global ``eval`` block per dataset.

@@ -20,11 +20,11 @@ import warnings
 from datetime import UTC
 
 import torch
-from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
 from torchgeo_bench.config import instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.main import resolve_configured_device
 from torchgeo_bench.model_profile import (
     _count_gflops,
     _count_params,
@@ -33,7 +33,7 @@ from torchgeo_bench.model_profile import (
 )
 from torchgeo_bench.results import append_rows_atomic
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
-from torchgeo_bench.utils import resolve_device
+from torchgeo_bench.settings import FlopsSettings, merge
 
 warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
@@ -79,16 +79,14 @@ def _load_completed(path: str) -> frozenset[tuple]:
         return frozenset()
 
 
-def _is_terramind(cfg_model: DictConfig) -> bool:
-    return "TerraMind" in str(cfg_model._target_)
+def _is_terramind(cfg_model: dict) -> bool:
+    return "TerraMind" in str(cfg_model["_target_"])
 
 
 # A band incompatibility is identified by message, not by exception type alone.
-# `isinstance(exc, ValueError)` is far too wide: omegaconf's
-# InterpolationKeyError, ValidationError, UnsupportedValueType and
-# ConfigValueError are *all* ValueError subclasses, so a broken model config —
-# a `${seed}` interpolation with no `seed` key, say — would be logged as
-# "incompatible with this band config" and silently dropped from the CSV.
+# `isinstance(exc, ValueError)` is too wide: configuration and model
+# constructors use ValueError for unrelated validation failures that must stay
+# visible instead of being silently classified as band incompatibilities.
 _BAND_INCOMPAT_MARKERS: tuple[str, ...] = (
     # torchgeo_bench.models._band_mapping
     "missing required model band",
@@ -132,7 +130,7 @@ def _is_band_incompatibility(exc: BaseException) -> BaseException | None:
 
 
 def _build_model(
-    cfg_model: DictConfig,
+    cfg_model: dict,
     band_specs: list,
     normalization: str,
     band_config: str,
@@ -168,7 +166,7 @@ def _build_model(
             raise
         logger.warning(
             "Skipping %s/%s: model is incompatible with this band config: %s",
-            cfg_model.get("name", cfg_model._target_),
+            cfg_model.get("name", cfg_model["_target_"]),
             band_config,
             cause,
         )
@@ -343,15 +341,15 @@ def _flops_row(
     return row
 
 
-def main(cfg: DictConfig) -> None:
+def main(cfg: FlopsSettings) -> None:
     """Measure per-sample compute cost for one model config."""
     output_path = str(cfg.output)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    device = resolve_device(str(cfg.device))
+    device = resolve_configured_device(cfg.device)
     image_size = int(cfg.image_size)
     normalization = str(cfg.normalization)
-    model_target = str(cfg.model._target_)
+    model_target = str(cfg.model["_target_"])
     config_name = str(cfg.model.get("name", model_target.split(".")[-1]))
     # TerraMind's _rgb / non-_rgb configs are the same model at two points on
     # the band axis, so they report under one merged name.
@@ -370,11 +368,13 @@ def main(cfg: DictConfig) -> None:
     # override `layers` / `head_type`). Struct mode comes off first: model
     # configs carry eval keys this pipeline ignores (e.g. `c_range`), which
     # would otherwise raise ConfigKeyError on merge.
-    seg_eval_cfg = OmegaConf.create(OmegaConf.to_container(cfg.eval, resolve=True))
-    OmegaConf.set_struct(seg_eval_cfg, False)
-    if "eval" in cfg.model and cfg.model.eval is not None:
-        seg_eval_cfg = OmegaConf.merge(seg_eval_cfg, cfg.model.eval)
-    seg_layers = list(seg_eval_cfg.segmentation.get("layers", []))
+    segmentation = cfg.eval.segmentation
+    model_eval = cfg.model.get("eval")
+    if isinstance(model_eval, dict):
+        model_segmentation = model_eval.get("segmentation")
+        if isinstance(model_segmentation, dict):
+            segmentation = merge(segmentation, model_segmentation)
+    seg_layers = list(segmentation.layers)
 
     rows: list[dict] = []
     n_skipped = 0
@@ -494,15 +494,12 @@ def main(cfg: DictConfig) -> None:
             if seg_key in completed:
                 logger.info("Skip (%s, %s, %s) — already done", model_name, band_config, head_type)
                 continue
-            head_cfg = OmegaConf.merge(
-                seg_eval_cfg,
-                OmegaConf.create({"segmentation": {"head_type": head_type}}),
-            )
+            head_settings = merge(segmentation, {"head_type": head_type})
             try:
                 # build_seg_probe_and_solver runs _dry_run_channels(), a real
                 # forward pass, so the model must already be on-device.
                 probe, _solver = build_seg_probe_and_solver(
-                    model, int(cfg.seg_num_classes), head_cfg, device, 1e-3
+                    model, int(cfg.seg_num_classes), head_settings, device, 1e-3
                 )
             except (ValueError, RuntimeError) as exc:
                 logger.warning(

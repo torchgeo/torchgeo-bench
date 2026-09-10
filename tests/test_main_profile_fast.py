@@ -14,12 +14,12 @@ def test_profile_rows_emitted(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "eval": {
+                "skip_linear": True,
+                "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+            },
+        },
     )
     metrics = {
         "params_m": 0.01,
@@ -49,13 +49,13 @@ def test_profile_resume_partial_does_not_skip(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "resume": True,
+            "eval": {
+                "skip_linear": True,
+                "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+            },
+        },
     )
     metrics = {
         "params_m": 0.01,
@@ -90,13 +90,13 @@ def test_profile_resume_complete_skips(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "resume": True,
+            "eval": {
+                "skip_linear": True,
+                "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+            },
+        },
     )
 
     seed_rows = [_resume_row(cfg, method="knn5", metric_name="accuracy")]

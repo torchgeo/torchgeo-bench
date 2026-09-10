@@ -4,7 +4,6 @@ import logging
 
 import numpy as np
 import torch
-from rich.progress import track
 from torch.utils.data import DataLoader
 
 logger = logging.getLogger(__name__)
@@ -43,11 +42,9 @@ def extract_features(
     x_all = []
     y_all = []
 
-    iterator = (
-        track(dataloader, total=len(dataloader), description=description) if verbose else dataloader
-    )
-
-    for batch in iterator:
+    if verbose:
+        logger.info("%s (%d batches)", description, len(dataloader))
+    for batch in dataloader:
         images = batch["image"].to(device)
         if "label" not in batch:
             raise KeyError(
@@ -60,7 +57,7 @@ def extract_features(
         if transforms is not None:
             images = transforms(images)
 
-        with torch.no_grad(), torch.inference_mode():
+        with torch.inference_mode():
             features = model(images)
             if isinstance(features, torch.Tensor):
                 features = features.cpu().numpy()
@@ -85,6 +82,8 @@ def extract_features(
         x_all.append(features)
         y_all.append(labels)
 
+    if verbose:
+        logger.info("%s complete", description)
     x_all = np.concatenate(x_all, axis=0)
     y_all = np.concatenate(y_all, axis=0)
 

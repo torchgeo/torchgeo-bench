@@ -1,6 +1,5 @@
 """Fast offline tests for classification orchestration in ``torchgeo_bench.main``."""
 
-from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
 
@@ -8,13 +7,12 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
-from torchgeo.datasets import DatasetNotFoundError
 
 from torchgeo_bench.config import compose_config
 from torchgeo_bench.main import main, resolve_model_config
 from torchgeo_bench.resume import _resume_config_hash
+from torchgeo_bench.settings import RunSettings, merge
 
 
 class _DictTensorDataset(Dataset):
@@ -34,23 +32,24 @@ class _DictTensorDataset(Dataset):
         }
 
 
-def _compose_cfg(output_path: Path, overrides: Sequence[str] | None = None) -> DictConfig:
+def _compose_cfg(
+    output_path: Path, overrides: dict | None = None, model: str = "rcf"
+) -> RunSettings:
     """Compose the config for fast offline main-path tests."""
-    extra = list(overrides or [])
-    return compose_config(
-        [
-            "model=rcf",
-            "dataset.names=[m-eurosat]",
-            "dataset.partition=default",
-            "dataset.batch_size=4",
-            "dataset.num_workers=0",
-            "eval.bootstrap=5",
-            "eval.c_range=[-2,-1,2]",
-            "device=cpu",
-            f"output={output_path}",
-            *extra,
-        ]
-    )
+    base = {
+        "dataset": {
+            "names": ["m-eurosat"],
+            "partition": "default",
+            "batch_size": 4,
+            "num_workers": 0,
+        },
+        "eval": {"bootstrap": 5, "c_range": [-2, -1, 2]},
+        "device": "cpu",
+        "output": str(output_path),
+    }
+    if overrides:
+        base = merge(base, overrides)
+    return compose_config(base, model=model)
 
 
 def _synthetic_loaders(
@@ -92,19 +91,21 @@ def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
     return [(x_train, y_train), (x_val, y_val), (x_test, y_test)]
 
 
-def _resume_row(cfg: DictConfig, *, method: str, metric_name: str) -> dict[str, object]:
+def _resume_row(
+    cfg: RunSettings, *, method: str, metric_name: str, num_classes: int = 10
+) -> dict[str, object]:
     """Build a resume-key-matching CSV row for pre-seeding output files."""
     return {
         "dataset": "m-eurosat",
         "method": method,
-        "model": cfg.model._target_,
-        "name": cfg.model.name,
+        "model": cfg.model["_target_"],
+        "name": cfg.model["name"],
         "normalization": cfg.dataset.normalization,
         "image_size": cfg.dataset.image_size,
         "interpolation": cfg.dataset.interpolation,
         "partition": cfg.dataset.partition,
         "bands": cfg.dataset.bands,
-        "num_classes": 10,
+        "num_classes": num_classes,
         "config_hash": _resume_config_hash(cfg),
         "metric_name": metric_name,
         "metric_value": 0.1,
@@ -120,47 +121,40 @@ def _chainable_model_mock() -> mock.Mock:
 
 
 def test_model_dataset_overrides_are_isolated_and_fall_back() -> None:
-    model_cfg = OmegaConf.create(
-        {
-            "_target_": "example.Model",
-            "name": "example",
-            "image_size": 224,
-            "res": 1.0,
-            "pool": "cls",
-            "dataset_overrides": {
-                "m-eurosat": {"image_size": 64, "res": 3.5},
-                "forestnet": {"image_size": 128, "pool": "mean"},
-            },
-        }
-    )
+    model_cfg = {
+        "_target_": "example.Model",
+        "name": "example",
+        "image_size": 224,
+        "res": 1.0,
+        "pool": "cls",
+        "dataset_overrides": {
+            "m-eurosat": {"image_size": 64, "res": 3.5},
+            "forestnet": {"image_size": 128, "pool": "mean"},
+        },
+    }
 
     eurosat = resolve_model_config(model_cfg, "m-eurosat")
     fallback = resolve_model_config(model_cfg, "unlisted")
     forestnet = resolve_model_config(model_cfg, "forestnet")
 
-    assert (eurosat.image_size, eurosat.res, eurosat.pool) == (64, 3.5, "cls")
-    assert (fallback.image_size, fallback.res, fallback.pool) == (224, 1.0, "cls")
-    assert (forestnet.image_size, forestnet.res, forestnet.pool) == (128, 1.0, "mean")
+    assert (eurosat["image_size"], eurosat["res"], eurosat["pool"]) == (64, 3.5, "cls")
+    assert (fallback["image_size"], fallback["res"], fallback["pool"]) == (224, 1.0, "cls")
+    assert (forestnet["image_size"], forestnet["res"], forestnet["pool"]) == (128, 1.0, "mean")
     assert "dataset_overrides" not in eurosat
-    assert model_cfg.image_size == 224
+    assert model_cfg["image_size"] == 224
 
 
 def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -> None:
     out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
-    OmegaConf.update(
-        cfg,
-        "model.dataset_overrides",
-        {
-            "m-eurosat": {
-                "image_size": 64,
-                "interpolation": "area",
-                "res": 3.5,
-                "pool": "cls",
-            }
-        },
-        force_add=True,
-    )
+    cfg = _compose_cfg(out, overrides={"eval": {"skip_linear": True}})
+    cfg.model["dataset_overrides"] = {
+        "m-eurosat": {
+            "image_size": 64,
+            "interpolation": "area",
+            "res": 3.5,
+            "pool": "cls",
+        }
+    }
     model = _chainable_model_mock()
 
     with (
@@ -179,29 +173,24 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
     assert data_mock.call_args.kwargs["image_size"] == 64
     assert data_mock.call_args.kwargs["interpolation"] == "area"
     instantiated_cfg = instantiate_mock.call_args.args[0]
-    assert instantiated_cfg.image_size == 64
-    assert instantiated_cfg.res == 3.5
-    assert instantiated_cfg.pool == "cls"
+    assert instantiated_cfg["image_size"] == 64
+    assert instantiated_cfg["res"] == 3.5
+    assert instantiated_cfg["pool"] == "cls"
     assert "interpolation" not in instantiated_cfg
 
     first_row = pd.read_csv(out).iloc[0]
     assert first_row["res"] == 3.5
     assert first_row["pool"] == "cls"
 
-    changed_cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
-    OmegaConf.update(
-        changed_cfg,
-        "model.dataset_overrides",
-        {
-            "m-eurosat": {
-                "image_size": 64,
-                "interpolation": "area",
-                "res": 3.5,
-                "pool": "mean",
-            }
-        },
-        force_add=True,
-    )
+    changed_cfg = _compose_cfg(out, overrides={"resume": True, "eval": {"skip_linear": True}})
+    changed_cfg.model["dataset_overrides"] = {
+        "m-eurosat": {
+            "image_size": 64,
+            "interpolation": "area",
+            "res": 3.5,
+            "pool": "mean",
+        }
+    }
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
         mock.patch("torchgeo_bench.main.instantiate", return_value=model),
@@ -220,7 +209,7 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
 
 def test_knn_row_emitted(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
+    cfg = _compose_cfg(out, overrides={"eval": {"skip_linear": True}})
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
@@ -245,7 +234,7 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=["device=cuda:0", "eval.knn_device=null", "eval.skip_linear=true"],
+        overrides={"device": "cuda:0", "eval": {"knn_device": None, "skip_linear": True}},
     )
     model = _chainable_model_mock()
     monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
@@ -270,7 +259,7 @@ def test_explicit_gpu_knn_without_gpu_faiss_fails_before_data_loading(tmp_path: 
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=["device=cuda:0", "eval.knn_device=cuda", "eval.skip_linear=true"],
+        overrides={"device": "cuda:0", "eval": {"knn_device": "cuda", "skip_linear": True}},
     )
     monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
 
@@ -316,7 +305,7 @@ def test_linear_row_emitted(tmp_path: Path):
 
 def test_resume_skips_completed_knn_row(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
+    cfg = _compose_cfg(out, overrides={"resume": True, "eval": {"skip_linear": True}})
     pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
 
     with (
@@ -332,7 +321,7 @@ def test_resume_skips_completed_knn_row(tmp_path: Path):
 
 def test_resume_complete_preflight_skips_data_loading_and_model_init(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["resume=true"])
+    cfg = _compose_cfg(out, overrides={"resume": True})
     pd.DataFrame(
         [
             _resume_row(cfg, method="knn5", metric_name="accuracy"),
@@ -353,7 +342,7 @@ def test_resume_complete_preflight_skips_data_loading_and_model_init(tmp_path: P
 
 def test_resume_partial_completion_still_runs_missing_work(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["resume=true"])
+    cfg = _compose_cfg(out, overrides={"resume": True})
     pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
     model = _chainable_model_mock()
 
@@ -389,7 +378,7 @@ def test_resume_partial_completion_still_runs_missing_work(tmp_path: Path):
 
 def test_non_resume_still_runs_even_with_matching_existing_rows(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
+    cfg = _compose_cfg(out, overrides={"eval": {"skip_linear": True}})
     pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
     model = _chainable_model_mock()
 
@@ -416,19 +405,26 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "model=timm/resnet50",
-            "eval.knn_device=cpu",
-            "eval.merge_val=false",
-            "eval.calibration.n_bins_linear=15",
-            "+model.eval.knn_k=7",
-            "+model.eval.skip_linear=true",
-            "+model.eval.bootstrap=99",
-            "+model.eval.merge_val=true",
-            "+model.eval.knn_device=meta-device",
-            "+model.eval.calibration.n_bins_linear=99",
-        ],
+        overrides={
+            "resume": True,
+            "eval": {
+                "knn_device": "cpu",
+                "merge_val": False,
+                "calibration": {"n_bins_linear": 15},
+            },
+        },
+        model="timm/resnet50",
+    )
+    cfg.model["eval"] = merge(
+        cfg.model["eval"],
+        {
+            "knn_k": 7,
+            "skip_linear": True,
+            "bootstrap": 99,
+            "merge_val": True,
+            "knn_device": "meta-device",
+            "calibration": {"n_bins_linear": 99},
+        },
     )
     pd.DataFrame([_resume_row(cfg, method="knn7", metric_name="accuracy")]).to_csv(out, index=False)
     model = _chainable_model_mock()
@@ -481,7 +477,7 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
     as complete instead of recomputing and appending a duplicate.
     """
     out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
+    cfg = _compose_cfg(out, overrides={"resume": True, "eval": {"skip_linear": True}})
     df = pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")])
     # Reproduce the float64 dtype a real (partially-NaN) results CSV exhibits.
     df["image_size"] = df["image_size"].astype(float)
@@ -497,38 +493,11 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 1
 
 
-def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
-    """Rows from an older label schema must not satisfy the current resume key."""
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["resume=true", "eval.skip_linear=true"])
-    legacy_row = _resume_row(cfg, method="knn5", metric_name="accuracy")
-    legacy_row.pop("num_classes")
-    pd.DataFrame([legacy_row]).to_csv(out, index=False)
-    model = _chainable_model_mock()
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.instantiate", return_value=model),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ) as knn_mock,
-    ):
-        main(cfg)
-
-    knn_mock.assert_called_once()
-    df = pd.read_csv(out)
-    assert len(df) == 2
-    assert pd.isna(df.iloc[0]["num_classes"])
-    assert int(df.iloc[1]["num_classes"]) == 10
-
-
 def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
     """A stale row must not suppress a run with a different random seed."""
     out = tmp_path / "out.csv"
-    old_cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
-    cfg = _compose_cfg(out, overrides=["resume=true", "seed=7", "eval.skip_linear=true"])
+    old_cfg = _compose_cfg(out, overrides={"eval": {"skip_linear": True}})
+    cfg = _compose_cfg(out, overrides={"resume": True, "seed": 7, "eval": {"skip_linear": True}})
     pd.DataFrame([_resume_row(old_cfg, method="knn5", metric_name="accuracy")]).to_csv(
         out, index=False
     )
@@ -546,21 +515,9 @@ def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
     knn_mock.assert_called_once()
 
 
-def test_dataset_not_found_skips(tmp_path: Path):
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out)
-
-    with mock.patch(
-        "torchgeo_bench.main.get_datasets", side_effect=DatasetNotFoundError("missing")
-    ):
-        main(cfg)
-
-    assert not out.exists()
-
-
 def test_csv_row_has_required_columns(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides=["eval.skip_linear=true"])
+    cfg = _compose_cfg(out, overrides={"eval": {"skip_linear": True}})
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),

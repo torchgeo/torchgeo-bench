@@ -11,7 +11,7 @@ Prerequisites
 * At least one GeoBench dataset under ``./data/``.  The lightest path is to
   skip the bulk download entirely and let the **single-dataset auto-download**
   run: the first time you benchmark a V1 dataset (e.g.
-  ``dataset.names=[m-eurosat]``) only that dataset is pulled.
+  ``--datasets m-eurosat``) only that dataset is pulled.
 
 Download data
 -------------
@@ -44,30 +44,31 @@ KNN-5 + linear probing + 200 bootstrap resamples:
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.names=[m-eurosat]
+   $ torchgeo-bench run --datasets m-eurosat
 
 Use a different backbone preset (anything in :file:`src/torchgeo_bench/conf/model/`):
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat,m-pv4ger]
+   $ torchgeo-bench run --model timm/resnet50 --datasets m-eurosat,m-pv4ger
 
 Skip the (slow) linear probe and reduce bootstrap noise to iterate quickly:
 
 .. code-block:: console
 
-   $ torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
+   $ torchgeo-bench run --skip-linear --bootstrap 100
 
-The default device is ``cuda:0``.  On a machine without a working CUDA GPU
-(or if a GPU run crashes — see :doc:`troubleshooting`), add ``device=cpu``:
+The default device is auto-detected (``cuda`` if available, else ``cpu``).
+On a machine without a working CUDA GPU (or if a GPU run crashes — see
+:doc:`troubleshooting`), force CPU with ``--device cpu``:
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.names=[m-eurosat] device=cpu
+   $ torchgeo-bench run --datasets m-eurosat --device cpu
 
 When the selected FAISS backend has no GPU resources, the runner evaluates KNN
 on CPU while keeping feature extraction on the configured accelerator. It logs
-this fallback; use ``eval.knn_device=cpu`` to select it explicitly.
+this fallback; use ``--knn-device cpu`` to select it explicitly.
 
 Benchmark a location encoder
 ----------------------------
@@ -77,9 +78,9 @@ location baseline on a single regression benchmark with:
 
 .. code-block:: console
 
-   $ torchgeo-bench run mode=coord model=sincos \
-       coord.names=california_housing coord.methods=[linear] \
-       coord.folds=2 device=cpu
+   $ torchgeo-bench coord --model sincos \
+       --names california_housing --methods linear \
+       --folds 2 --device cpu
 
 See :doc:`coordbench` for the pretrained MIND, SatCLIP, GeoCLIP, Climplicit,
 and SINR presets, spatial cross-validation, output schema, and a complete
@@ -88,13 +89,13 @@ custom-encoder example.
 Resume mode
 -----------
 
-If a previous run was interrupted, ``resume=true`` skips any
+If a previous run was interrupted, ``--resume`` skips any
 ``(dataset, method, model, config)`` combination that already exists in the
 output CSV:
 
 .. code-block:: console
 
-   $ torchgeo-bench run resume=true
+   $ torchgeo-bench run --resume
 
 See :doc:`results-format` for the exact key schema used by resume mode.
 
@@ -103,10 +104,11 @@ Inspect the results
 
 By default results land in ``results/models/<model name>.csv``.  Those files **ship
 pre-populated** with reference results, so to start from a clean slate write to
-your own file with ``output=results/my_run.csv``.  Profile/intrinsic-dim
+your own file with ``--output results/my_run.csv``.  Profile/intrinsic-dim
 measurements go to their own ``results/profiles/`` and
-``results/intrinsic_dim/`` files -- see :doc:`results-format` for why they're
-split out.  Each row is a flat
+``results/intrinsic_dim/`` files (produced by the ``torchgeo-bench profile`` /
+``torchgeo-bench intrinsic-dim`` subcommands) -- see :doc:`results-format` for
+why they're split out.  Each row is a flat
 :class:`~torchgeo_bench.main.EvaluationResult`, so you can read it directly with
 pandas:
 

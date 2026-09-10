@@ -30,26 +30,27 @@ CUDA out of memory
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.batch_size=32
+   $ torchgeo-bench run --batch-size 32
    $ # or run on CPU
-   $ torchgeo-bench run device=cpu
+   $ torchgeo-bench run --device cpu
 
 For segmentation, also try
 
 .. code-block:: console
 
    $ torchgeo-bench run \
-       eval.segmentation.cache_dtype=float32 \
-       eval.segmentation.cache_features=false
+       --seg-cache-dtype float32 \
+       --no-seg-cache
 
 if RAM (rather than GPU memory) is the bottleneck.
 
 GPU run crashes immediately
 ---------------------------
 
-The default config is ``device: cuda:0``, so the first documented run uses the
-GPU.  ``uv sync`` installs the latest ``torch``, whose bundled CUDA and kernel
-architectures may not match your GPU or driver.  Two distinct failures:
+The default device is auto-detected and picks the first CUDA GPU when one is
+available, so the first documented run uses the GPU.  ``uv sync`` installs
+the latest ``torch``, whose bundled CUDA and kernel architectures may not
+match your GPU or driver.  Two distinct failures:
 
 * ``RuntimeError: The NVIDIA driver on your system is too old`` — the installed
   ``torch`` was built against a newer CUDA than your driver supports.
@@ -64,7 +65,7 @@ Either way you can fall back to CPU (slower, but always works):
 
 .. code-block:: console
 
-   $ torchgeo-bench run dataset.names=[m-eurosat] device=cpu
+   $ torchgeo-bench run --datasets m-eurosat --device cpu
 
 CPU is fine for the small V1 splits, but large V2 datasets (e.g. ``benv2`` /
 BigEarthNet) can take far longer — prefer a working GPU for those.
@@ -74,7 +75,7 @@ BigEarthNet) can take far longer — prefer a working GPU for those.
 
 A known V2 issue: ``geobench_v2.rearrange_bands`` expects modality keys
 (``'s2'``, ``'s1'``, …) that aren't present when a flat band list is
-requested.  Workaround: use ``dataset.bands=all`` for affected V2
+requested.  Workaround: use ``--bands all`` for affected V2
 datasets.
 
 ``eurosat-spatial`` reports ``Dataset not found``
@@ -91,7 +92,7 @@ V1 slow tests skip after the auto-download
 ------------------------------------------
 
 The per-dataset auto-download (triggered by running a V1 dataset such as
-``dataset.names=[m-eurosat]``) writes the webdataset layout under
+``--datasets m-eurosat``) writes the webdataset layout under
 ``data/classification_v1.0_wds/``.  The V1 *slow* integration tests instead
 read the legacy HDF5 layout under ``data/classification_v1.0/`` and skip if only
 the ``_wds`` data is present.  Fetch the legacy bundle with

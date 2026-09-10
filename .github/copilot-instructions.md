@@ -13,13 +13,14 @@ For deeper context see [`AGENTS.md`](../AGENTS.md) (style + dataset list) and
 The Python package lives at **`src/torchgeo_bench/`**. Important pieces:
 
 - `cli.py` / `__main__.py` / `main.py` — `torchgeo-bench` console entry point.
-  `cli.py` calls Hydra's `main()` directly in-process (no subprocess); it also
-  hosts the `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`
-  subcommand.
+  `cli.py` is a plain `argparse` parser with subcommands (`run`, `profile`,
+  `intrinsic-dim`, `coord`, `flops`, `download`); it dispatches in-process (no
+  subprocess) and hosts the `torchgeo-bench download
+  {geobench_v1|geobench_v2|eurosat|resisc45}` subcommand.
 - `download.py` — fetches GeoBench V1 / V2 from Hugging Face via
   `snapshot_download`, plus a torchgeo-backed `download_eurosat` helper.
-- `conf/` — **Hydra configs are packaged inside the source tree**
-  (`src/torchgeo_bench/conf/{config.yaml, model/}`). Add new model configs
+- `conf/` — **model presets are packaged inside the source tree**
+  (`src/torchgeo_bench/conf/model/`). Add new model configs
   here. There is no `conf/dataset/` directory — every dataset's metadata
   (bands, normalization stats, num_classes, splits) lives in its Python
   wrapper class.
@@ -27,7 +28,7 @@ The Python package lives at **`src/torchgeo_bench/`**. Important pieces:
   implement `forward_patch_features(images, bboxes=None) -> (B, K)`**;
   `forward()` aliases it.
 - `models/{bench_models,timm,torchgeo_models,olmoearth}.py` — concrete model
-  wrappers registered via Hydra `_target_:` strings.
+  wrappers registered via `_target_:` strings in their preset YAML.
 - `datasets/` — per-dataset wrappers plus three family base classes:
   `_V1Dataset` (in `geobench_v1.py`), `_V2Dataset` (in `geobench_v2.py`), and
   the standalone `EuroSAT` (in `eurosat.py`). Each per-dataset file just
@@ -57,7 +58,7 @@ commands** (or use `conda run -n torchgeo-bench …`). The `Makefile` targets
 ```bash
 conda activate torchgeo-bench                                       # do this first
 conda run -n torchgeo-bench uv sync --extra dev                     # install deps + dev tools
-conda run -n torchgeo-bench torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
+conda run -n torchgeo-bench torchgeo-bench run --model timm/resnet50 --datasets m-eurosat
 conda run -n torchgeo-bench pytest                                  # full suite (skips `slow` by default)
 conda run -n torchgeo-bench pytest tests/test_geobench_dataset.py -v  # one file
 conda run -n torchgeo-bench pytest tests/test_geobench_dataset.py::TestClass::test_method -v
@@ -84,20 +85,22 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
 
 ## Architecture (the parts you can't see from one file)
 
-1. **Hydra-driven entry point.** `torchgeo-bench run …` mutates `sys.argv` and
-   calls the `@hydra.main`-decorated function in-process (no subprocess
-   re-launch). Hydra resolves `src/torchgeo_bench/conf/config.yaml`. The
-   default model is `rcf`. Override anything from the CLI: `model=timm/resnet50`,
-   `dataset.names=[m-eurosat]`, `eval.bootstrap=100`, `device=cuda:1`,
-   `resume=true`.
+1. **argparse-driven entry point.** `torchgeo-bench run …` parses flags with a
+   plain `argparse` parser (`cli.py`) and composes settings in-process:
+   built-in defaults -> optional `--config PATH` YAML (uncommon settings) ->
+   selected model preset YAML -> explicit CLI flags (flags win). There is no
+   `key=value` override syntax. The default model is `rcf`. Common settings
+   are flags: `--model timm/resnet50`, `--datasets m-eurosat`,
+   `--bootstrap 100`, `--device cuda:1`, `--resume`.
 2. **Per-dataset model reinitialization.** Models are instantiated once per
-   dataset because `num_channels` varies (RGB vs multispectral). The Hydra
-   `model:` config is a partial; `main.py` injects the right `num_channels`
-   when calling `instantiate(...)`.
+   dataset because `num_channels` varies (RGB vs multispectral). The
+   `model:` config is a partial dict; `main.py` injects the right
+   `num_channels` when calling `instantiate(...)`.
 3. **Classification path** (KNN-5 + linear probe): extract train/val/test
    embeddings once → KNN-5 with FAISS + bootstrap CIs → L-BFGS logistic
    regression sweep over `c_range` (log-spaced), pick best on val, refit on
-   train+val if `eval.merge_val=true`, evaluate on test with bootstrap CIs.
+   train+val if `--merge-val` (default true), evaluate on test with bootstrap
+   CIs.
 4. **Segmentation path** (`seg-linear` / `seg-conv_block`): `SegmentationProbe`
    registers forward hooks on configured backbone layers, reshapes features
    (2-D/3-D ViT/4-D), upsamples bilinearly, applies BN+1×1 conv head (or a
@@ -111,7 +114,7 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
    dataset name with hyphens → underscores. Class attributes carry every piece
    of metadata: `name`, `task`, `num_classes`, `multilabel`, `bands` (list of
    `BandSpec`), `rgb_bands`, `split_sizes`. Dispatch happens via
-   `_REGISTRY` in `datasets/loading.py`. `dataset.names=all` expands via
+   `_REGISTRY` in `datasets/loading.py`. `--datasets all` expands via
    `list_datasets()`.
 6. **Dataset taxonomy.** Authoritative facts:
    - V1 (`m-` prefix by convention): `m-eurosat` (10), `m-forestnet` (12),
@@ -130,8 +133,8 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
      / band counts.
 7. **`num_channels = len(bands)`**, so a model wrapper that hard-codes
    channel counts will break on multi-sensor datasets like `treesatai` (19),
-   `pastis` (16), or `m-so2sat` (18). When `dataset.bands=rgb`, the runner
-   picks `rgb_bands` by short name — those names differ across V1/V2
+   `pastis` (16), or `m-so2sat` (18). When `--bands rgb` (the default), the
+   runner picks `rgb_bands` by short name — those names differ across V1/V2
    (`red,green,blue` vs `b04,b03,b02` vs `gray` for caffe, `vv,vh` for
    kuro_siwo).
 8. **Multilabel path.** When a dataset's wrapper sets `multilabel = True`
@@ -148,7 +151,7 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
     remap upstream sample keys (collapsing temporal dims, picking
     `image_b` over `image_a`, etc.). The default is a no-op.
 11. **Resume + atomic writes.** Results append to a single CSV with `fcntl`
-    advisory locking so parallel jobs are safe. With `resume=true`, the
+    advisory locking so parallel jobs are safe. With `--resume`, the
     script reads the CSV and skips any
     `(dataset, method, model, name, normalization, image_size, interpolation, partition)`
     tuple already present.

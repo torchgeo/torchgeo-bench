@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.main import main
 from torchgeo_bench.resume import _resume_config_hash
+from torchgeo_bench.settings import merge
 
 from .test_main_fast import _chainable_model_mock, _compose_cfg
 
@@ -58,8 +59,8 @@ def _seg_resume_row(cfg, *, metric_name: str = "mIoU") -> dict[str, object]:
     return {
         "dataset": "burn_scars",
         "method": "seg-fpn",
-        "model": cfg.model._target_,
-        "name": cfg.model.name,
+        "model": cfg.model["_target_"],
+        "name": cfg.model["name"],
         "normalization": cfg.dataset.normalization,
         "image_size": cfg.dataset.image_size,
         "interpolation": cfg.dataset.interpolation,
@@ -72,17 +73,20 @@ def _seg_resume_row(cfg, *, metric_name: str = "mIoU") -> dict[str, object]:
     }
 
 
-def _cfg_for_segmentation(out: Path, overrides: list[str] | None = None):
-    return _compose_cfg(
-        out,
-        overrides=[
-            "dataset.names=[burn_scars]",
-            "eval.segmentation.cache_features=false",
-            "eval.segmentation.head_type=fpn",
-            "eval.segmentation.save_viz=false",
-            *(overrides or []),
-        ],
-    )
+def _cfg_for_segmentation(out: Path, overrides: dict | None = None):
+    base = {
+        "dataset": {"names": ["burn_scars"]},
+        "eval": {
+            "segmentation": {
+                "cache_features": False,
+                "head_type": "fpn",
+                "save_viz": False,
+            },
+        },
+    }
+    if overrides:
+        base = merge(base, overrides)
+    return _compose_cfg(out, overrides=base)
 
 
 def _mock_probe_and_solver():
@@ -141,7 +145,7 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _cfg_for_segmentation(
         out,
-        overrides=["eval.segmentation.cache_features=true", "eval.segmentation.batch_size=3"],
+        overrides={"eval": {"segmentation": {"cache_features": True, "batch_size": 3}}},
     )
     probe, solver = _mock_probe_and_solver()
     cache = mock.Mock()
@@ -182,7 +186,7 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
 
 def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _cfg_for_segmentation(out, overrides=["eval.segmentation.save_viz=false"])
+    cfg = _cfg_for_segmentation(out, overrides={"eval": {"segmentation": {"save_viz": False}}})
 
     with (
         mock.patch(
@@ -201,7 +205,7 @@ def test_segmentation_viz_not_called_when_disabled(tmp_path: Path):
 
 def test_segmentation_resume_skips_complete_run(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _cfg_for_segmentation(out, overrides=["resume=true"])
+    cfg = _cfg_for_segmentation(out, overrides={"resume": True})
     pd.DataFrame([_seg_resume_row(cfg)]).to_csv(out, index=False)
     model = _chainable_model_mock()
 
@@ -223,7 +227,7 @@ def test_segmentation_viz_called_when_enabled(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _cfg_for_segmentation(
         out,
-        overrides=["eval.segmentation.save_viz=true", "eval.segmentation.n_viz_samples=2"],
+        overrides={"eval": {"segmentation": {"save_viz": True, "n_viz_samples": 2}}},
     )
     probe, solver = _mock_probe_and_solver()
     preds = torch.zeros(4, 64, 64, dtype=torch.long)

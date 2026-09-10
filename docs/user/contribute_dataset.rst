@@ -79,7 +79,7 @@ Required class-level attributes:
   silently reports the wrong number.
 * ``supports_partitions`` — ``True`` only for V1 GeoBench datasets, which ship
   partition JSON files.  When ``False``, ``get_datasets`` warns and ignores a
-  non-default ``dataset.partition``.
+  non-default ``--partition``.
 
 The ``get_dataset`` method takes ``split`` (``"train"``, ``"val"``, or
 ``"test"``) plus the keyword-only arguments ``partition``, ``bands`` (the
@@ -171,10 +171,11 @@ its ``(submodule, class_name)``:
 
 This is the step that actually makes the dataset available — it backs
 ``get_bench_dataset_class``, :func:`~torchgeo_bench.datasets.list_datasets`,
-and the CLI.  There is no per-dataset Hydra config; datasets are selected by
-name on the command line. The registry is kept as module/class-name strings
-rather than imported classes so that importing ``loading`` stays cheap;
-``get_bench_dataset_class`` imports only the one module it needs.
+and the CLI.  There is no per-dataset config file; datasets are selected by
+name on the command line (``--datasets``). The registry is kept as
+module/class-name strings rather than imported classes so that importing
+``loading`` stays cheap; ``get_bench_dataset_class`` imports only the one
+module it needs.
 
 **2. Export the class** from :file:`src/torchgeo_bench/datasets/__init__.py`
 by adding an ``__all__`` entry and a matching ``_LAZY_CLASSES`` mapping:

@@ -4,7 +4,7 @@ Guidelines for AI coding agents working in the torchgeo-bench repository.
 
 ## Project Overview
 
-**torchgeo-bench** is a Python benchmarking framework for evaluating geospatial foundation models on GeoBench datasets (V1 and V2). Uses PyTorch and an OmegaConf-based config system (see `config.py` — replaces Hydra, same `model=…`/`key=value` override syntax), and provides KNN-5, Linear Probing, and Segmentation (mIoU) evaluation with bootstrapped confidence intervals.
+**torchgeo-bench** is a Python benchmarking framework for evaluating geospatial foundation models on GeoBench datasets (V1 and V2). Uses PyTorch and a plain argparse CLI (see `cli.py`/`config.py`; common settings are flags like `--model`/`--datasets`, uncommon settings go in an optional `--config PATH` YAML), and provides KNN-5, Linear Probing, and Segmentation (mIoU) evaluation with bootstrapped confidence intervals.
 
 ### Key Features
 - **Resume Mode**: Skip already-computed experiments when interrupted/restarted
@@ -17,7 +17,7 @@ Guidelines for AI coding agents working in the torchgeo-bench repository.
 src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
   ├── cli.py               # CLI entry point (torchgeo-bench command: run/flops/download)
   ├── main.py              # Benchmark runner (classification + segmentation)
-  ├── config.py            # OmegaConf config composition + _target_ instantiation
+  ├── config.py            # Settings composition (defaults -> --config YAML -> model preset -> flags) + _target_ instantiation
   ├── resume.py            # config_hash-based resume/skip logic
   ├── results.py            # EvaluationResult schema + atomic per-model CSV writes
   ├── download.py          # Dataset downloads (geobench_v1/v2 + torchgeo eurosat)
@@ -158,22 +158,22 @@ torchgeo-bench download resisc45                          # torchgeo RESISC45 ->
 
 ```bash
 # Basic usage
-torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
+torchgeo-bench run --model timm/resnet50 --datasets m-eurosat
 
 # Quick eval (skip linear probing, minimal bootstrap)
-torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
+torchgeo-bench run --skip-linear --bootstrap 100
 
 # Resume a previously interrupted run (skips completed experiments)
-torchgeo-bench run resume=true
+torchgeo-bench run --resume
 
 # Evaluate segmentation datasets (V2)
-torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
+torchgeo-bench run --datasets burn_scars,pastis,flair2
 
 # Select specific GPU device
-torchgeo-bench run device=cuda:1
+torchgeo-bench run --device cuda:1
 
 # Measure per-sample compute cost (GFLOPs, params, throughput) -> results/compute_cost.csv
-torchgeo-bench flops model=timm/resnet50
+torchgeo-bench flops --model timm/resnet50
 ```
 
 ## Results Layout & Resume
@@ -181,10 +181,11 @@ torchgeo-bench flops model=timm/resnet50
 - Each model writes to its own `results/models/<model name>.csv` (not one
   shared file), so re-running one model only touches that file. Rows are
   appended, never rewritten in place.
-- `resume=true` skips a (dataset, method, bands, normalization, ...) combo
+- `--resume` skips a (dataset, method, bands, normalization, ...) combo
   only if an existing row's `config_hash` matches the current run's config.
-  Changing any hashed config field (including additive passes like
-  `eval.profile`/`eval.intrinsic_dim`) invalidates the match and reruns.
+  Changing any hashed config field (including additive passes run via the
+  `torchgeo-bench profile` / `torchgeo-bench intrinsic-dim` subcommands)
+  invalidates the match and reruns.
 - One-time, hardware-dependent measurements (`torchgeo-bench flops`,
   intrinsic-dimension probes) live in their own side files —
   `results/compute_cost.csv` and `results/intrinsic_dim/<model name>.csv` —
@@ -355,9 +356,9 @@ class TestGeoBenchDatasetBasics:
 
 Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision>=0.15`,
 `numpy>=1.24`, `scikit-learn>=1.3`, `timm>=0.9`, `torchgeo>=0.9`, `torchmetrics>=1.4`,
-`omegaconf>=2.3`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform),
+`pyyaml>=6`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform),
 `huggingface-hub>=0.20`, `geobenchv2>=0.9`, `pandas>=2`, `pyarrow>=14`, `safetensors>=0.4`,
-`filelock>=3.12`, `rich>=13`.
+`filelock>=3.12`.
 
 Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everything):
 `cleanlab`, `coordbench`, `dev`, `docs`, `id` (intrinsic-dimension estimators),

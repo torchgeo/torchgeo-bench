@@ -19,17 +19,17 @@ small CPU example evaluates one regression benchmark with two random folds:
 
 .. code-block:: console
 
-   $ torchgeo-bench run \
-       mode=coord \
-       model=sincos \
-       coord.names=california_housing \
-       coord.methods=[linear] \
-       coord.folds=2 \
-       device=cpu \
-       coord.output=results/coordbench_quickstart.csv
+   $ torchgeo-bench coord \
+       --model sincos \
+       --names california_housing \
+       --methods linear \
+       --folds 2 \
+       --device cpu \
+       --output results/coordbench_quickstart.csv
 
-Results are appended to ``coord.output``. Set ``resume=true`` to skip rows that
-already match ``(dataset, task, method, model, split)``.
+Results are appended to ``--output`` (default: ``results/coordbench_results.csv``).
+Pass ``--resume`` to skip rows that already match
+``(dataset, task, method, model, split)``.
 
 Included encoders
 -----------------
@@ -57,11 +57,10 @@ spatial-block cross-validation:
 
 .. code-block:: console
 
-   $ torchgeo-bench run \
-       mode=coord \
-       model=satclip \
-       coord.names=satclip \
-       coord.split=both
+   $ torchgeo-bench coord \
+       --model satclip \
+       --names satclip \
+       --split both
 
 Benchmarks and probes
 ---------------------
@@ -74,31 +73,22 @@ name, or an individual benchmark name. Available families are ``pdfm``,
 
 Classification tasks report accuracy and support ``knn`` and ``linear``.
 Regression tasks report R2 and use ``linear``; requested KNN rows are skipped
-because this track does not define a KNN regressor. ``coord.split`` controls the
+because this track does not define a KNN regressor. ``--split`` controls the
 holdout:
 
 ``random``
    Seeded k-fold cross-validation.
 ``spatial``
-   K-fold cross-validation over geographic grid cells. ``coord.cell_deg`` sets
+   K-fold cross-validation over geographic grid cells. ``--cell-deg`` sets
    the cell width in degrees.
 ``both``
    Run both cross-validation protocols. Benchmarks with an official test mask
    use that fixed holdout once instead.
 
-The full block is:
-
-.. code-block:: yaml
-
-   coord:
-     output: results/coordbench_results.csv
-     names: all
-     methods: [knn, linear]
-     split: random
-     folds: 5
-     cell_deg: 10.0
-     knn_k: 5
-     knn_device: cpu
+``torchgeo-bench coord --help`` lists every flag with its default
+(``--output``, ``--names``, ``--methods``, ``--split``, ``--folds``,
+``--cell-deg``, ``--knn-k``, ``--knn-device``, plus the common ``--model``,
+``--device``, ``--resume``, ``--seed``, ``--config``, ``--print-config``).
 
 Add a location encoder
 ----------------------
@@ -108,27 +98,33 @@ and implements ``_encode(lon, lat, year)``. The method receives one batch of
 NumPy arrays and returns a finite ``(N, D)`` feature matrix.
 
 The repository includes a complete Fourier-feature example in
-:file:`examples/coordbench_location_encoder.py`. Run it from the repository
-root by replacing the built-in ``sincos`` target through a config override:
+:file:`examples/coordbench_location_encoder.py`. There is no ``key=value``
+override for an arbitrary ``_target_``, so trying it out means adding a small
+preset YAML that points at the example class, e.g.
+:file:`src/torchgeo_bench/conf/model/fourier.yaml`:
+
+.. code-block:: yaml
+
+   _target_: examples.coordbench_location_encoder.FourierLocationEncoder
+   name: fourier
+   num_frequencies: 8
+
+then running it from the repository root with ``--model fourier``:
 
 .. code-block:: console
 
-   $ PYTHONPATH=. uv run torchgeo-bench run \
-       mode=coord \
-       model=sincos \
-       model._target_=examples.coordbench_location_encoder.FourierLocationEncoder \
-       model.name=fourier \
-       +model.num_frequencies=8 \
-       coord.names=california_housing \
-       coord.methods=[linear] \
-       coord.folds=2 \
-       device=cpu \
-       coord.output=results/fourier_coordbench.csv
+   $ PYTHONPATH=. uv run torchgeo-bench coord \
+       --model fourier \
+       --names california_housing \
+       --methods linear \
+       --folds 2 \
+       --device cpu \
+       --output results/fourier_coordbench.csv
 
 For a reusable integration, place the class in an installed package and add a
-model YAML under :file:`src/torchgeo_bench/conf/model/` with its fully qualified
-``_target_``. See :doc:`/api/coordbench` for the public classes and probe
-functions.
+model preset under :file:`src/torchgeo_bench/conf/model/` with its fully
+qualified ``_target_``. See :doc:`/api/coordbench` for the public classes and
+probe functions.
 
 Aggregate results
 -----------------

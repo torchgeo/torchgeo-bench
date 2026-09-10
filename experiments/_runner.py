@@ -32,14 +32,14 @@ class Job:
 
     Attributes:
         label: Short human-readable identifier for log lines.
-        overrides: Hydra-style overrides forwarded to ``torchgeo-bench run``
-            (e.g. ``["model=timm/resnet18", "dataset.names=[m-eurosat]"]``).
+        args: Explicit arguments forwarded to ``torchgeo-bench run``
+            (e.g. ``["--model", "timm/resnet18", "--datasets", "m-eurosat"]``).
             ``device`` and ``output`` are appended automatically by the
             runner — do not include them here.
     """
 
     label: str
-    overrides: list[str] = field(default_factory=list)
+    args: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -84,10 +84,12 @@ def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResul
     cmd = [
         "torchgeo-bench",
         "run",
-        *job.overrides,
-        f"device=cuda:{gpu}",
-        f"output={output}",
-        "resume=true",
+        *job.args,
+        "--device",
+        f"cuda:{gpu}",
+        "--output",
+        output,
+        "--resume",
     ]
 
     print(f"[{idx}/{total}] START  {job.label} on cuda:{gpu}", flush=True)
@@ -173,8 +175,8 @@ def run_jobs(
             gpu = devices[(i - 1) % len(devices)]
             print(f"  [{i}/{total}] {job.label} -> cuda:{gpu}")
             print(
-                f"      torchgeo-bench run {' '.join(job.overrides)} "
-                f"device=cuda:{gpu} output={output} resume=true"
+                f"      torchgeo-bench run {' '.join(job.args)} "
+                f"--device cuda:{gpu} --output {output} --resume"
             )
         print(f"\n[DRY RUN] {total} job(s) across {len(devices)} device(s)")
         return 0

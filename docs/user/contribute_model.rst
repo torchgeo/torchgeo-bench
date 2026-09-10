@@ -179,17 +179,17 @@ coverage and write the results to :file:`results/contributed/<model_name>.csv`:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model \
-       dataset.names=[m-eurosat,m-so2sat,m-bigearthnet,m-brick-kiln,m-forestnet,m-pv4ger] \
-       output=results/contributed/new_model.csv
+   $ torchgeo-bench run --model new_model \
+       --datasets m-eurosat,m-so2sat,m-bigearthnet,m-brick-kiln,m-forestnet,m-pv4ger \
+       --output results/contributed/new_model.csv
 
 For V2 datasets:
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=new_model \
-       dataset.names=[benv2,treesatai,so2sat,forestnet] \
-       output=results/contributed/new_model.csv resume=true
+   $ torchgeo-bench run --model new_model \
+       --datasets benv2,treesatai,so2sat,forestnet \
+       --output results/contributed/new_model.csv --resume
 
 The CSV schema is identical to the per-model results files — see
 :doc:`results-format` for the full column reference.
