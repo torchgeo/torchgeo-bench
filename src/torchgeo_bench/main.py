@@ -751,16 +751,18 @@ def run_segmentation(
     yield [row]
 
 
-def run_classification(
+def run_classification(  # noqa: PLR0913 - keep the CLI failure policy explicit
     cfg: DictConfig,
     plan: DatasetRunPlan,
     model: BenchModel,
     loaders: LoaderSplits,
     common_meta: ResultMetadata,
+    *,
+    strict: bool = False,
 ) -> Iterator[tuple[list[dict], list[dict], list[dict]]]:
     """Yield each completed probe or feature measurement for immediate persistence."""
     train_loader, val_loader, test_loader = loaders.train, loaders.val, loaders.test
-    model_eval = cfg.model.get("eval") or {}
+    model_eval = {} if strict else cfg.model.get("eval") or {}
     knn_k = int(model_eval["knn_k"]) if "knn_k" in model_eval else int(cfg.eval.get("knn_k", 5))
     c_start, c_stop, c_num = model_eval.get("c_range") or cfg.eval.c_range
     c_values_list = (10 ** np.linspace(float(c_start), float(c_stop), int(c_num))).tolist()
@@ -809,6 +811,8 @@ def run_classification(
                 splits, c_values_list, cfg
             )
         except LinearProbeDivergedError as exc:  # allow-except: Other metrics remain usable.
+            if strict:
+                raise
             logger.warning(
                 "[linear] model=%s dataset=%s bands=%s norm=%s: skipping, no usable C found. Diagnostic: %s",
                 common_meta.get("model"),
@@ -934,14 +938,26 @@ def run_dataset(
     ds_name: str,
     config_hash: str,
     completed: ResumeState,
+    *,
+    strict: bool = False,
 ) -> Iterator[tuple[list[dict], list[dict], list[dict]]]:
     """Load and evaluate one dataset unless resume marks it complete."""
     ds_cls = get_bench_dataset_class(ds_name)
 
     model_cfg = resolve_model_config(cfg.model, ds_name)
     common_meta = dataset_metadata(cfg, ds_name, ds_cls, model_cfg, config_hash)
+    if strict:
+        c_start, c_stop, c_num = cfg.eval.c_range
+        common_meta.update(
+            c_range_start=float(c_start), c_range_stop=float(c_stop), c_range_num=int(c_num)
+        )
     model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
-    eval_cfg = cast(DictConfig, OmegaConf.merge(cfg.eval, model_eval or {}))
+    eval_cfg = cast(
+        DictConfig,
+        OmegaConf.merge(model_eval or {}, cfg.eval)
+        if strict
+        else OmegaConf.merge(cfg.eval, model_eval or {}),
+    )
     plan = _plan_dataset_run(cfg, ds_cls, common_meta, completed, eval_cfg)
     if plan.skip_dataset:
         if cfg.verbose:
@@ -971,7 +987,9 @@ def run_dataset(
         for rows in run_segmentation(cfg, eval_cfg, model, loaders, common_meta):
             yield rows, [], []
         return
-    for rows, id_rows, profile_rows in run_classification(cfg, plan, model, loaders, common_meta):
+    for rows, id_rows, profile_rows in run_classification(
+        cfg, plan, model, loaders, common_meta, strict=strict
+    ):
         if cfg.resume:
             id_rows = _filter_completed_metric_rows(id_rows, completed.completed_metrics, KEY_COLS)
             profile_rows = _filter_completed_metric_rows(
@@ -1003,7 +1021,7 @@ def load_completed_outputs(
     return completed_runs, completed_metrics
 
 
-def main(cfg: DictConfig) -> None:
+def main(cfg: DictConfig, *, strict: bool = False) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)
 
@@ -1036,7 +1054,7 @@ def main(cfg: DictConfig) -> None:
     completed = ResumeState(completed_runs, completed_metrics)
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         for all_rows, id_out_rows, profile_out_rows in run_dataset(
-            cfg, ds_name, config_hash, completed
+            cfg, ds_name, config_hash, completed, strict=strict
         ):
             append_rows_atomic(output_path, all_rows)
             append_rows_atomic(intrinsic_dim_output_path, id_out_rows)
