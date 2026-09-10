@@ -174,6 +174,8 @@ lint.ignore = [
   "TRY003", # allow concise messages at the raise site
 ]
 lint.per-file-ignores."experiments/scripts/**/*.py" = [ "D" ]
+lint.per-file-ignores."projects/cleanlab/**/*.py" = [ "D" ]
+lint.per-file-ignores."projects/cleanlab/tests/**/*.py" = [ "ARG", "D" ]
 lint.per-file-ignores."src/torchgeo_bench/cli.py" = [ "T201" ]  # CLI payloads go to stdout
 lint.per-file-ignores."tests/**/*.py" = [ "ARG", "D" ]
 lint.flake8-tidy-imports.banned-api."__future__.annotations".msg = "Use ordinary annotations or quoted forward references."

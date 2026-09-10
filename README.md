@@ -127,6 +127,7 @@ and the runnable
   workflow, and troubleshooting.
 - **[AGENTS.md](https://github.com/torchgeo/torchgeo-bench/blob/main/AGENTS.md)**
   — contributor guide and house style.
+- **[Cleanlab analysis](projects/cleanlab/README.md)** — standalone dataset auditing, probability extraction, and review galleries, with separate dependencies.
 
 <!-- skip-on-docs-landing-end -->
 
