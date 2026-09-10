@@ -23,7 +23,7 @@ def test_metadata_accepts_json_text_and_bytes() -> None:
 
 
 def test_metadata_rejects_python_expressions() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(json.JSONDecodeError):
         decode_metadata("dict(label=3, bands_order=['red'])")
 
 

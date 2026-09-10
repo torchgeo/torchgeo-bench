@@ -156,6 +156,7 @@ def run_jobs(
     devices: list[int],
     *,
     output: str,
+    dry_run: bool = False,
 ) -> int:
     """Run jobs on the selected GPUs and return an exit code.
 
@@ -163,6 +164,7 @@ def run_jobs(
         jobs: List of :class:`Job` instances to execute.
         devices: GPU indices, with at most one job running on each GPU.
         output: CSV path passed as ``output=<path>`` to every invocation.
+        dry_run: Log planned commands without starting jobs.
 
     Returns:
         ``0`` if every job succeeded, ``1`` otherwise (or if ``jobs`` is
@@ -174,6 +176,19 @@ def run_jobs(
 
     if total == 0:
         logger.warning("No jobs to run.")
+        return 0
+
+    if dry_run:
+        for index, job in enumerate(jobs, start=1):
+            gpu = devices[(index - 1) % len(devices)]
+            logger.info("[%d/%d] %s -> cuda:%d", index, total, job.label, gpu)
+            logger.info(
+                "torchgeo-bench run %s device=cuda:%d output=%s resume=true",
+                " ".join(job.overrides),
+                gpu,
+                output,
+            )
+        logger.info("Dry run complete: %d jobs across %d devices", total, len(devices))
         return 0
 
     job_queue: Queue[tuple[int, Job] | None] = Queue()

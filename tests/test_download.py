@@ -53,7 +53,7 @@ def v1_download(monkeypatch) -> Iterator[mock.MagicMock]:
             if not path.exists():
                 path.write_bytes(payload)
             (directory / "default_partition.json").write_text(
-                json.dumps(dict.fromkeys(("train", "valid", "test"), ["sample"]))
+                json.dumps({split: ["sample"] for split in ("train", "valid", "test")})
             )
 
     with mock.patch.object(v1, "snapshot_download", side_effect=download) as download_mock:
@@ -91,13 +91,13 @@ def test_v1_download_rejects_corrupt_cached_archives(tmp_path: Path, v1_download
 
 def test_v1_download_requires_every_expected_archive(tmp_path: Path, v1_download) -> None:
     v1_download.side_effect = None
-    with pytest.raises(FileNotFoundError, match="shard_00000.tar"):
+    with pytest.raises(FileNotFoundError, match=r"shard_00000\.tar"):
         download_geobench_v1(tmp_path, datasets=["m-eurosat"])
 
 
 @pytest.mark.parametrize("names", [[], ["unknown"], ["../m-eurosat"]])
 def test_v1_download_rejects_invalid_names(tmp_path: Path, v1_download, names) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"datasets must contain|Unknown GeoBench V1"):
         download_geobench_v1(tmp_path, datasets=names)
     v1_download.assert_not_called()
 

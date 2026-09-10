@@ -150,7 +150,7 @@ def _metadata_origin(meta: dict) -> tuple[float | None, float | None, str]:
         if transform is None or crs is None:
             continue
         if not isinstance(crs, str):
-            raise ValueError("GeoBench JSON metadata CRS must be a string.")
+            raise TypeError("GeoBench JSON metadata CRS must be a string.")
         if (
             not isinstance(transform, list)
             or len(transform) not in (6, 9)
@@ -195,10 +195,20 @@ def _v1_shard_origins(path: str) -> list[tuple[float | None, float | None, str]]
                 try:
                     stream = archive.extractfile(member)
                     if stream is None:
-                        raise ValueError(f"Not a metadata file: {member.name}")
+                        results[sample_id] = (
+                            None,
+                            None,
+                            f"ERR ValueError: Not a metadata file: {member.name}",
+                        )
+                        continue
                     with stream:
                         results[sample_id] = _metadata_origin(decode_metadata(stream.read()))
-                except (OSError, KeyError, TypeError, ValueError) as exc:
+                except (
+                    OSError,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                ) as exc:  # allow-except: report invalid sample metadata
                     results[sample_id] = (None, None, f"ERR {type(exc).__name__}: {exc}")
     if not results:
         raise ValueError(f"No GeoBench V1 sample metadata in {path}.")

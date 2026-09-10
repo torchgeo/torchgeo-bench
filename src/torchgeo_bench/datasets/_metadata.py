@@ -11,7 +11,7 @@ def decode_metadata(value: object) -> dict:
         raise TypeError(f"Expected JSON metadata text or bytes, got {type(value).__name__}.")
     metadata = json.loads(value)
     if not isinstance(metadata, dict):
-        raise ValueError("GeoBench metadata must be a JSON object.")
+        raise TypeError("GeoBench metadata must be a JSON object.")
 
     bands = metadata.get("bands_order")
     if (

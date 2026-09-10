@@ -180,7 +180,6 @@ def test_metadata_decoder_rejects_executable_representations(encoding) -> None:
 @pytest.mark.parametrize(
     "metadata",
     [
-        [],
         {"label": 1},
         {"label": 1, "bands_order": "red"},
         {"label": 1, "bands_order": []},
@@ -190,7 +189,13 @@ def test_metadata_decoder_rejects_executable_representations(encoding) -> None:
     ],
 )
 def test_metadata_decoder_rejects_invalid_fields(metadata) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="GeoBench metadata"):
+        decode_metadata(json.dumps(metadata))
+
+
+@pytest.mark.parametrize("metadata", [[], None, 1, "text"])
+def test_metadata_decoder_requires_json_object(metadata) -> None:
+    with pytest.raises(TypeError, match="must be a JSON object"):
         decode_metadata(json.dumps(metadata))
 
 
@@ -204,7 +209,8 @@ def test_hdf5_consumers_reject_non_json_metadata(tmp_path, attribute, encoding) 
     with pytest.raises((TypeError, ValueError)):
         GeoBenchv1(source.parent, source.name, "train", bands=("04 - Red",))[0]
     x, y, status = _v1_origin(str(path))
-    assert x is None and y is None
+    assert x is None
+    assert y is None
     assert status.startswith("ERR ")
     assert "ImportError" not in status
     with pytest.raises((TypeError, ValueError)):
@@ -220,7 +226,7 @@ def test_sharded_reader_rejects_executable_metadata(tmp_path, suffix, encoding, 
         payload = payload.encode()
     source = tmp_path / "source"
     _write_shard(source, payload, suffix)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"meta\.json|codec|Expecting value"):
         GeoBenchv1Sharded(source.parent, source.name, "train", bands=bands)[0]
 
 
@@ -240,7 +246,7 @@ def test_repack_validation_rejects_pickle_metadata(tmp_path, legacy_source) -> N
 
 
 @pytest.mark.parametrize("valid_json", [False, True])
-def test_sharded_reader_never_falls_back_to_pickle(tmp_path: Path, valid_json: bool) -> None:
+def test_sharded_reader_never_falls_back_to_pickle(tmp_path: Path, *, valid_json: bool) -> None:
     source = tmp_path / "source"
     payload = json.dumps(_metadata()).encode() if valid_json else b"{"
     _write_shard(source, payload)
@@ -290,6 +296,28 @@ def test_geography_reads_json_affine_and_crs(tmp_path, nine_coefficients) -> Non
 def test_geography_reports_missing_coordinates(tmp_path) -> None:
     path = _write_hdf5(tmp_path, json.dumps({"label": 1, "bands_order": [RED, GREEN]}))
     assert _v1_origin(str(path)) == (None, None, "NOGEO")
+
+
+def test_geography_reports_invalid_crs_type(tmp_path: Path) -> None:
+    metadata = _metadata()
+    metadata[RED]["crs"] = 32631
+    path = _write_hdf5(tmp_path, json.dumps(metadata))
+    assert _v1_origin(str(path)) == (
+        None,
+        None,
+        "ERR TypeError: GeoBench JSON metadata CRS must be a string.",
+    )
+
+
+def test_geography_reports_non_file_metadata_members(tmp_path: Path) -> None:
+    path = tmp_path / "shard_00000.tar"
+    member = tarfile.TarInfo("sample.meta.json")
+    member.type = tarfile.DIRTYPE
+    with tarfile.open(path, "w") as archive:
+        archive.addfile(member)
+    assert _v1_shard_origins(str(path)) == [
+        (None, None, "ERR ValueError: Not a metadata file: sample.meta.json")
+    ]
 
 
 def test_geography_prefers_the_json_sharded_cache(tmp_path: Path, monkeypatch) -> None:
