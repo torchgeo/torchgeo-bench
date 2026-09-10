@@ -240,11 +240,41 @@ def _sub_once(pattern: str, repl: str, text: str) -> str:
     return out
 
 
+def _replace_snapshot_data(
+    text: str, rows: list[dict], snapshot_meta: list[dict], latest_label: str
+) -> str:
+    """Replace generated rows while preserving page-owned cost reference data."""
+    js_columns = "const COLUMNS = " + json.dumps(COLUMNS) + ";"
+    js_numeric = "const NUMERIC_COLS = " + json.dumps(sorted(NUMERIC)) + ";"
+    js_snaps = "const SNAPSHOTS = " + json.dumps(snapshot_meta) + ";"
+    js_default = "const DEFAULT_SNAPSHOT = " + json.dumps(latest_label) + ";"
+    js_data = "const DATA = " + json.dumps(rows, separators=(",", ":")) + ";"
+
+    pattern = re.compile(
+        r"const COLUMNS = \[.*?\];\s*const NUMERIC_COLS = \[.*?\];"
+        r"(?:\s*const SNAPSHOTS = \[.*?\];)?(?:\s*const DEFAULT_SNAPSHOT = \"[^\"]*\";)?"
+        r"\s*const DATA = \[.*?\];"
+        r"(?:\s*const GPU_PRICES = \[.*?\];)?(?:\s*const CARBON_INTENSITY = \[.*?\];)?",
+        re.DOTALL,
+    )
+    carried = re.search(REFERENCE_DATA_RE, text, re.DOTALL)
+    if not carried:
+        raise SystemExit(
+            "Could not locate GPU_PRICES/CARBON_INTENSITY in "
+            f"{HTML_PATH.name}; the efficiency figure needs both."
+        )
+    new_block = "\n".join([js_columns, js_numeric, js_snaps, js_default, js_data, carried.group()])
+    if not pattern.search(text):
+        raise SystemExit("Could not locate COLUMNS/NUMERIC_COLS/DATA block in HTML.")
+    return pattern.sub(lambda _: new_block, text, count=1)
+
+
 def main() -> None:
+    today = date.today()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--label",
-        default=date.today().isoformat(),
+        default=today.isoformat(),
         help="Label for the snapshot generated from the current CSV (default: today).",
     )
     args = parser.parse_args()
@@ -282,36 +312,7 @@ def main() -> None:
     n_seg_models = len({r["name"] for r in seg_rows if r["name"]})
     best = max(accuracy_rows or latest_rows, key=lambda r: r["metric_value"] or 0)
 
-    js_columns = "const COLUMNS = " + json.dumps(COLUMNS) + ";"
-    js_numeric = "const NUMERIC_COLS = " + json.dumps(sorted(NUMERIC)) + ";"
-    js_snaps = "const SNAPSHOTS = " + json.dumps(snapshot_meta) + ";"
-    js_default = "const DEFAULT_SNAPSHOT = " + json.dumps(latest_label) + ";"
-    js_data = "const DATA = " + json.dumps(flat_rows, separators=(",", ":")) + ";"
-
-    text = HTML_PATH.read_text()
-    pattern = re.compile(
-        r"const COLUMNS = \[.*?\];\s*const NUMERIC_COLS = \[.*?\];"
-        r"(?:\s*const SNAPSHOTS = \[.*?\];)?(?:\s*const DEFAULT_SNAPSHOT = \"[^\"]*\";)?"
-        r"\s*const DATA = \[.*?\];"
-        r"(?:\s*const GPU_PRICES = \[.*?\];)?(?:\s*const CARBON_INTENSITY = \[.*?\];)?",
-        re.DOTALL,
-    )
-    # GPU_PRICES / CARBON_INTENSITY are static reference data owned by the page
-    # rather than derived from results/, but they sit inside the span this
-    # substitution replaces.  Carry them across verbatim: dropping them leaves
-    # the Compute & efficiency figure with no region to price against, and it
-    # bails out and renders nothing.
-    carried = re.search(REFERENCE_DATA_RE, text, re.DOTALL)
-    if not carried:
-        raise SystemExit(
-            "Could not locate GPU_PRICES/CARBON_INTENSITY in "
-            f"{HTML_PATH.name}; the efficiency figure needs both."
-        )
-
-    new_block = "\n".join([js_columns, js_numeric, js_snaps, js_default, js_data, carried.group()])
-    if not pattern.search(text):
-        raise SystemExit("Could not locate COLUMNS/NUMERIC_COLS/DATA block in HTML.")
-    text = pattern.sub(new_block, text, count=1)
+    text = _replace_snapshot_data(HTML_PATH.read_text(), flat_rows, snapshot_meta, latest_label)
 
     knn_leader = _mean_rank_leader(accuracy_rows, "knn5")
     linear_leader = _mean_rank_leader(accuracy_rows, "linear")
@@ -374,7 +375,7 @@ def main() -> None:
     )
     text = _sub_once(
         r"Published <b>[^<]*</b>",
-        f"Published <b>{date.today().strftime('%-d %B %Y')}</b>",
+        f"Published <b>{today.day} {today:%B %Y}</b>",
         text,
     )
     text = _sub_once(
