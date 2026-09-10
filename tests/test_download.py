@@ -110,7 +110,7 @@ def test_v1_requires_explicit_download_before_loading(
     monkeypatch.setattr(geobench_v1, "V1_ROOT", tmp_path / "hdf5")
     monkeypatch.setattr(geobench_v1, "V1_SHARDED_ROOT", root)
     bench = get_bench_dataset_class("m-eurosat")()
-    with pytest.raises(FileNotFoundError, match="download geobench_v1"):
+    with pytest.raises(FileNotFoundError, match="download m-eurosat"):
         bench.get_dataset("train", bands=tuple(bench.rgb_bands))
     v1_download.assert_not_called()
 
@@ -131,6 +131,21 @@ def test_v1_archive_checksums_cover_the_published_suite() -> None:
     assert len(checksums) == 89
     assert {name.split("/", 1)[0] for name in checksums} == datasets
     assert all(name.endswith(".tar") and len(value) == 64 for name, value in checksums.items())
+
+
+def test_named_v1_downloads_use_the_verified_json_backend(tmp_path: Path, v1_download) -> None:
+    from torchgeo_bench.cli import main
+
+    arguments = ["download", "m-eurosat", "--output-dir", str(tmp_path)]
+    main(arguments)
+    assert v1_download.call_args.kwargs["repo_id"] == v1.V1_HF_REPO_ID
+    assert v1_download.call_args.kwargs["revision"] == v1.V1_HF_REVISION
+    assert v1_download.call_args.kwargs["allow_patterns"] == ["m-eurosat/*"]
+
+    path = tmp_path / "classification_v1.0_wds/m-eurosat/shard_00000.tar"
+    path.write_bytes(b"corrupt cached download")
+    with pytest.raises(SystemExit, match="archive checksum mismatch"):
+        main(arguments)
 
 
 def test_download_geobench_v2_subset(tmp_path: Path) -> None:

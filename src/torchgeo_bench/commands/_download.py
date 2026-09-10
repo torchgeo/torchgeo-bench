@@ -14,20 +14,18 @@ def download(args: argparse.Namespace) -> None:
     """Download named datasets or one GeoBench collection."""
     setup_logging(verbose=True)
     targets = list(args.target)
-    collections = {'geobench_v1', 'geobench_v2'}
+    collections = {"geobench_v1", "geobench_v2"}
     if any(target in collections for target in targets):
         if len(targets) != 1:
-            raise SystemExit(
-                'error: collection targets cannot be mixed with dataset names'
-            )
+            raise SystemExit("error: collection targets cannot be mixed with dataset names")
         target = targets[0]
     else:
         if args.datasets is not None:
-            raise SystemExit('error: --datasets is only supported for GeoBench downloads')
+            raise SystemExit("error: --datasets is only supported for GeoBench downloads")
         try:
             commands.download_module.download_datasets(targets, Path(args.output_dir))
         except ValueError as err:  # allow-except: report invalid download selections
-            raise SystemExit(f'error: {err}') from err
+            raise SystemExit(f"error: {err}") from err
         return
     names = None
     if args.datasets is not None:
