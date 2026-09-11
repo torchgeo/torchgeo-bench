@@ -1,7 +1,7 @@
 # Copyright (c) TorchGeo Contributors. All rights reserved.
 # Licensed under the MIT License.
 
-"""Tests for the standalone profile command."""
+"""Offline regression tests for standalone real-batch profiling."""
 
 import argparse
 import hashlib
@@ -11,28 +11,19 @@ from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.utils.data import Dataset
 
 from torchgeo_bench import commands
 from torchgeo_bench.commands import _profile_runtime
 from torchgeo_bench.commands._profile import profile
-from torchgeo_bench.main import resolve_model_config
-
-
-class _Band:
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-
-class _Dataset:
-    rgb_bands = (_Band("red"), _Band("green"), _Band("blue"))
-
-    def select_band_specs(self, bands: tuple[_Band, ...] | None) -> tuple[_Band, ...]:
-        return self.rgb_bands if bands is None else tuple(bands)
+from torchgeo_bench.commands.profile_arguments import load_profile_config
+from torchgeo_bench.config_schema import ModelConfig
+from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset
+from torchgeo_bench.profile_config import ProfileConfig
 
 
 class _Loader:
@@ -57,8 +48,8 @@ class _ImageDataset(Dataset):
 @pytest.fixture
 def profile_args() -> argparse.Namespace:
     return argparse.Namespace(
-        model="toy",
-        dataset="toy-dataset",
+        model="rcf",
+        dataset="m-eurosat",
         partition="default",
         device="cpu",
         bands="rgb",
@@ -74,230 +65,353 @@ def profile_args() -> argparse.Namespace:
     )
 
 
-@pytest.mark.parametrize(
-    (
-        "model_data",
-        "image_size",
-        "interpolation",
-        "expected_size",
-        "expected_interpolation",
-    ),
-    [
-        (
-            {"dataset_overrides": {"toy": {"image_size": 96}}},
-            None,
-            None,
-            96,
-            "bilinear",
-        ),
-        ({}, None, None, 224, "bilinear"),
-        (
-            {"dataset_overrides": {"toy": {"image_size": 96}}},
-            128,
-            "nearest",
-            128,
-            "nearest",
-        ),
-    ],
-)
-def test_input_settings_precedence(
-    model_data: dict[str, object],
-    image_size: int | None,
-    interpolation: str | None,
-    expected_size: int,
-    expected_interpolation: str,
-) -> None:
-    cfg = OmegaConf.create({"dataset": {"image_size": 224, "interpolation": "bilinear"}})
-    model_cfg = resolve_model_config(OmegaConf.create(model_data), "toy")
-    args = argparse.Namespace(
-        image_size=image_size, interpolation=interpolation, normalization=None
-    )
-
-    effective = _profile_runtime._resolve_input_settings(args, cfg, model_cfg)
-
-    assert effective[:2] == (expected_size, expected_interpolation)
+@pytest.fixture
+def profile_config(profile_args: argparse.Namespace) -> ProfileConfig:
+    return load_profile_config(profile_args)
 
 
-def test_input_settings_preserve_model_normalization() -> None:
-    cfg = OmegaConf.create({"dataset": {"image_size": 224, "interpolation": "bilinear"}})
-    model_cfg = resolve_model_config(OmegaConf.create({"input_normalization": "imagenet"}), "toy")
-    args = argparse.Namespace(image_size=None, interpolation=None, normalization=None)
-
-    effective = _profile_runtime._resolve_input_settings(args, cfg, model_cfg)
-
-    assert effective[2:] == ("bandspec_zscore", "imagenet")
-
-
-def test_profile_emits_real_batch_metadata(
-    profile_args: argparse.Namespace,
+@pytest.mark.parametrize("count_flops", [False, True])
+def test_profile_emits_fixed_real_batch_metadata(
+    profile_config: ProfileConfig,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    *,
+    count_flops: bool,
 ) -> None:
-    monkeypatch.setattr(_profile_runtime, "get_bench_dataset_class", lambda _: _Dataset)
-    monkeypatch.setattr(_profile_runtime, "list_model_configs", lambda: ["toy"])
-    monkeypatch.setattr(_profile_runtime, "list_datasets", lambda: ["toy-dataset"])
-    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
+    profile_config.count_flops = count_flops
+    profile_config.warmup = 2
+    profile_config.measurements = 3
+    batch = torch.arange(4 * 3 * 8 * 8, dtype=torch.float32).reshape(4, 3, 8, 8)
+    calls: list[torch.Tensor] = []
+
+    class CountingModel(nn.Conv2d):
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            calls.append(images)
+            return super().forward(images)
+
     monkeypatch.setattr(
-        _profile_runtime, "compose_config", lambda _: OmegaConf.create({"model": {}})
+        _profile_runtime, "get_datasets", lambda **_: (None, _Loader(batch), None, None)
     )
-    monkeypatch.setattr(
-        _profile_runtime,
-        "resolve_model_config",
-        lambda model, dataset: OmegaConf.create({}),
-    )
-    monkeypatch.setattr(_profile_runtime, "instantiate", lambda *_, **__: nn.Conv2d(3, 3, 1))
-    _profile_runtime.run(profile_args)
+    monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: CountingModel(3, 3, 1))
+
+    _profile_runtime.run(profile_config)
+
     record = json.loads(capsys.readouterr().out)
-    assert record["model"] == "toy"
+    assert record["model"] == "rcf"
+    assert record["dataset"] == "m-eurosat"
     assert record["bands"] == ["red", "green", "blue"]
-    assert record["input_shape"] == [4, 3, 8, 8]
+    assert record["input_shape"] == record["profile"]["input_shape"] == [4, 3, 8, 8]
     assert record["profile"]["batch_size"] == 4
-    assert record["profile"]["flops"]["status"] == "disabled"
+    assert record["profile"]["warmup"] == 2
+    assert record["profile"]["measurements"] == 3
+    assert record["profile"]["throughput_samples_per_sec"] > 0
+    assert record["profile"]["flops"]["status"] == ("measured" if count_flops else "disabled")
+    assert record["sample_sha256"] == hashlib.sha256(batch.numpy().tobytes()).hexdigest()
+    assert (
+        record["model_config_hash"]
+        == hashlib.sha256(json.dumps(record["model_config"], sort_keys=True).encode()).hexdigest()
+    )
+    assert record["device"] == "cpu"
+    assert record["device_index"] is None
+    assert record["hardware"]
+    assert record["torch_version"]
+    assert record["python_version"]
+    assert record["timestamp_utc"].endswith("+00:00")
     assert record["scope"].startswith("encoder inference")
+    assert len(calls) == 5 + count_flops
+    assert all(images is batch for images in calls[:5])
+    if count_flops:
+        assert calls[-1].shape == (1, 3, 8, 8)
 
 
-@pytest.mark.parametrize("image_size", [None, 32])
-def test_profile_applies_image_size_to_model_and_loader(
+@pytest.mark.parametrize(
+    ("image_size", "explicit", "expected_size", "loader_size"),
+    [(None, False, 64, 64), (32, True, 32, 32), (None, True, 64, None)],
+)
+def test_profile_applies_image_size_to_model_and_loader(  # noqa: PLR0913 - fixtures and resize-precedence cases
     profile_args: argparse.Namespace,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     image_size: int | None,
+    *,
+    explicit: bool,
+    expected_size: int,
+    loader_size: int | None,
 ) -> None:
     profile_args.model = "torchgeo/scalemae_large_fmow"
-    profile_args.dataset = "m-eurosat"
     profile_args.image_size = image_size
-    profile_args.interpolation = None
+    del profile_args.interpolation
     profile_args.normalization = "identity"
-    expected_size = 64 if image_size is None else image_size
+    profile_args._profile_explicit = explicit
     inputs: dict[str, Any] = {}
     construction: dict[str, Any] = {}
 
     def load(**kwargs: Any) -> tuple:
         inputs.update(kwargs)
-        size = kwargs["image_size"]
+        size = kwargs["image_size"] or 64
         batch = torch.ones(kwargs["batch_size"], 3, size, size)
         return _ImageDataset(batch), _Loader(batch), None, None
 
-    def build(model_cfg: DictConfig, **kwargs: Any) -> nn.Module:
-        construction["config"] = OmegaConf.to_container(model_cfg, resolve=True)
+    def build(preset: ModelPreset, **kwargs: Any) -> nn.Module:
+        construction["preset"] = preset
         construction["options"] = kwargs
         return nn.Conv2d(3, 2, 1)
 
     monkeypatch.setattr(_profile_runtime, "get_datasets", load)
-    monkeypatch.setattr(_profile_runtime, "instantiate", build)
+    monkeypatch.setattr(_profile_runtime, "build_model", build)
 
-    _profile_runtime.run(profile_args)
+    _profile_runtime.run(load_profile_config(profile_args))
 
     record = json.loads(capsys.readouterr().out)
-    assert inputs["image_size"] == construction["config"]["image_size"] == expected_size
-    assert record["image_size"] == record["model_config"]["image_size"] == expected_size
+    model_kwargs = record["model_config"]["kwargs"]
+    assert inputs["image_size"] == record["image_size"] == loader_size
+    assert (
+        construction["preset"].kwargs["image_size"] == model_kwargs["image_size"] == expected_size
+    )
+    assert record["model_config"]["input"]["image_size"] == loader_size
     assert record["input_shape"] == [4, 3, expected_size, expected_size]
-    assert record["profile"]["input_shape"] == record["input_shape"]
     assert inputs["interpolation"] == record["interpolation"] == "area"
     assert inputs["partition_name"] == profile_args.partition
-    assert construction["config"]["res"] == record["model_config"]["res"] == 3.5
-    assert construction["config"]["pool"] == record["model_config"]["pool"] == "cls"
-    assert construction["config"]["auto_resize"] is False
+    assert model_kwargs["res"] == 3.5
+    assert model_kwargs["pool"] == "cls"
+    assert model_kwargs["auto_resize"] is False
     assert construction["options"]["normalization"] == record["normalization"] == "identity"
     assert record["input_normalization"] == "identity"
     assert [band.name for band in construction["options"]["bands"]] == record["bands"]
     assert "dataset" not in construction["options"]
     assert "dataset_overrides" not in record["model_config"]
-    assert (
-        record["model_config_hash"]
-        == hashlib.sha256(json.dumps(record["model_config"], sort_keys=True).encode()).hexdigest()
-    )
+    assert "segmentation" not in model_kwargs
 
 
 @pytest.mark.parametrize("seed", [7, 19])
 def test_profile_resolves_requested_seed_before_building_rcf(
-    profile_args: argparse.Namespace,
+    profile_config: ProfileConfig,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     seed: int,
 ) -> None:
-    profile_args.model = "rcf"
-    profile_args.dataset = "m-eurosat"
-    profile_args.seed = seed
-    models: list[nn.Module] = []
-    instantiate = _profile_runtime.instantiate
+    profile_config.runtime.seed = seed
+    models: list[Any] = []
+    build_model = _profile_runtime.build_model
 
-    def build(model_cfg: DictConfig, **kwargs: Any) -> nn.Module:
-        model = instantiate(model_cfg, **kwargs)
+    def build(preset: ModelPreset, **kwargs: Any) -> nn.Module:
+        model = build_model(preset, **kwargs)
         models.append(model)
         return model
 
-    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
-    monkeypatch.setattr(_profile_runtime, "instantiate", build)
+    def load(**_: Any) -> tuple:
+        offset = np.random.random()  # noqa: NPY002 - Verify the seeded dataset-transform RNG.
+        return None, _Loader(torch.randn(4, 3, 8, 8) + offset), None, None
 
-    _profile_runtime.run(profile_args)
+    monkeypatch.setattr(_profile_runtime, "get_datasets", load)
+    monkeypatch.setattr(_profile_runtime, "build_model", build)
 
+    _profile_runtime.run(profile_config)
     record = json.loads(capsys.readouterr().out)
-    assert record["seed"] == record["model_config"]["seed"] == seed
-    assert "image_size" not in record["model_config"]
+    _profile_runtime.run(profile_config)
+    repeated = json.loads(capsys.readouterr().out)
+
+    assert record["seed"] == record["model_config"]["kwargs"]["seed"] == seed
+    assert "image_size" not in record["model_config"]["kwargs"]
+    assert record["sample_sha256"] == repeated["sample_sha256"]
+    assert record["model_config_hash"] == repeated["model_config_hash"]
     expected_filters = torch.randn(256, 3, 3, 3, generator=torch.Generator().manual_seed(seed))
     torch.testing.assert_close(models[0].rcf.weights, expected_filters, rtol=0, atol=0)
 
 
 def test_profile_supplies_selected_training_dataset_to_empirical_rcf(
-    profile_args: argparse.Namespace,
+    profile_config: ProfileConfig,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    profile_args.model = "rcf"
-    profile_args.dataset = "m-eurosat"
-    profile_args.seed = 23
+    profile_config.model = ModelConfig(name="rcf", kwargs={"mode": "empirical", "features": 8})
+    profile_config.runtime.seed = 23
     batch = torch.arange(4 * 3 * 8 * 8, dtype=torch.float32).reshape(4, 3, 8, 8)
     train_dataset = _ImageDataset(batch)
-    compose_config = _profile_runtime.compose_config
-    instantiate = _profile_runtime.instantiate
+    build_model = _profile_runtime.build_model
     construction: dict[str, Any] = {}
 
-    def empirical_config(overrides: list[str]) -> DictConfig:
-        cfg = compose_config(overrides)
-        cfg.model.mode = "empirical"
-        cfg.model.features = 8
-        return cfg
-
-    def build(model_cfg: DictConfig, **kwargs: Any) -> nn.Module:
+    def build(preset: ModelPreset, **kwargs: Any) -> nn.Module:
         construction.update(kwargs)
-        return instantiate(model_cfg, **kwargs)
+        return build_model(preset, **kwargs)
 
-    monkeypatch.setattr(_profile_runtime, "compose_config", empirical_config)
     monkeypatch.setattr(
         _profile_runtime,
         "get_datasets",
         lambda **_: (train_dataset, _Loader(batch), None, None),
     )
-    monkeypatch.setattr(_profile_runtime, "instantiate", build)
+    monkeypatch.setattr(_profile_runtime, "build_model", build)
 
-    _profile_runtime.run(profile_args)
+    _profile_runtime.run(profile_config)
 
     record = json.loads(capsys.readouterr().out)
     assert construction["dataset"] is train_dataset
-    assert record["model_config"]["mode"] == "empirical"
-    assert record["model_config"]["features"] == 8
-    assert record["model_config"]["seed"] == 23
+    assert record["model_config"]["kwargs"]["mode"] == "empirical"
+    assert record["model_config"]["kwargs"]["features"] == 8
+    assert record["model_config"]["kwargs"]["seed"] == 23
+    assert "dataset" not in record["model_config"]["kwargs"]
     assert record["profile"]["throughput_samples_per_sec"] > 0
 
 
-def test_profile_dispatches_shared_lazy_runtime(
+@pytest.mark.parametrize("normalization", list(NORMALIZATIONS))
+def test_profile_preserves_custom_constructor_and_normalization_metadata(
+    profile_config: ProfileConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    normalization: str,
+) -> None:
+    profile_config.model = ModelConfig(
+        name="custom",
+        target="custom.Model",
+        kwargs={"input_normalization": "imagenet", "options": {"_target_": "ordinary.mapping"}},
+    )
+    profile_config.input = profile_config.input.model_copy(update={"normalization": normalization})
+    construction: dict[str, Any] = {}
+
+    def build(preset: ModelPreset, **kwargs: Any) -> nn.Module:
+        construction.update(kwargs)
+        assert preset.target == "custom.Model"
+        assert preset.kwargs == profile_config.model.kwargs
+        return nn.Identity()
+
+    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
+    monkeypatch.setattr(_profile_runtime, "build_model", build)
+
+    _profile_runtime.run(profile_config)
+
+    record = json.loads(capsys.readouterr().out)
+    assert construction["normalization"] == record["normalization"] == NORMALIZATIONS[normalization]
+    assert record["input_normalization"] == "imagenet"
+    assert record["model_config"]["kwargs"] == profile_config.model.kwargs
+    assert record["model_config"]["input"]["normalization"] == normalization
+
+
+@pytest.mark.parametrize("bands", ["all", ["nir", "red"]])
+def test_profile_passes_input_options_and_band_order(
+    profile_config: ProfileConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    bands: str | list[str],
+) -> None:
+    profile_config.input.bands = bands
+    profile_config.input.partition = "0.01x_train"
+    profile_config.input.time_steps = 2
+    profile_config.runtime.workers = 1
+    options: dict[str, Any] = {}
+
+    def load(**kwargs: Any) -> tuple:
+        options.update(kwargs)
+        channels = 13 if bands == "all" else len(bands)
+        return None, _Loader(torch.ones(4, channels, 8, 8)), None, None
+
+    monkeypatch.setattr(_profile_runtime, "get_datasets", load)
+    monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: nn.Identity())
+
+    _profile_runtime.run(profile_config)
+
+    record = json.loads(capsys.readouterr().out)
+    assert options["bands"] == bands
+    assert options["partition_name"] == record["dataset_partition"] == "0.01x_train"
+    assert options["time_steps"] == 2
+    assert options["num_workers"] == 1
+    if isinstance(bands, list):
+        assert record["bands"] == bands
+    else:
+        assert len(record["bands"]) == 13
+        assert record["bands"][0] == "coastal_aerosol"
+
+
+def test_profile_rejects_short_batches_before_construction(
+    profile_config: ProfileConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        _profile_runtime,
+        "get_datasets",
+        lambda **_: (None, _Loader(torch.ones(2, 3, 8, 8)), None, None),
+    )
+    with pytest.raises(RuntimeError, match="dataset returned batch size 2, requested 4"):
+        _profile_runtime.run(profile_config)
+
+
+def test_profile_keeps_upstream_diagnostics_off_json_stdout(
+    profile_config: ProfileConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class NoisyModel(nn.Identity):
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            sys.stdout.write("upstream forward\n")
+            return images
+
+    def load(**_: Any) -> tuple:
+        sys.stdout.write("upstream dataset\n")
+        return None, _Loader(), None, None
+
+    def build(*_: Any, **__: Any) -> nn.Module:
+        sys.stdout.write("upstream model\n")
+        return NoisyModel()
+
+    monkeypatch.setattr(_profile_runtime, "get_datasets", load)
+    monkeypatch.setattr(_profile_runtime, "build_model", build)
+
+    _profile_runtime.run(profile_config)
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["input_shape"] == [4, 3, 8, 8]
+    assert captured.err == "upstream dataset\nupstream model\nupstream forward\n"
+
+
+def test_profile_rejects_unavailable_cuda_before_loading_data(
+    profile_config: ProfileConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile_config.runtime.device = "cuda:0"
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with pytest.raises(SystemExit, match="CUDA is unavailable"):
+        _profile_runtime.run(profile_config)
+    assert _profile_runtime._resolve_device("auto") == torch.device("cpu")
+
+
+def test_profile_validates_cuda_indices(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    assert _profile_runtime._resolve_device("auto") == torch.device("cuda:1")
+    assert _profile_runtime._resolve_device("cuda:0") == torch.device("cuda:0")
+    with pytest.raises(ValueError, match="CUDA index 2"):
+        _profile_runtime._resolve_device("cuda:2")
+
+
+def test_profile_propagates_model_failures(
+    profile_config: ProfileConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def build(*_: Any, **__: Any) -> nn.Module:
+        raise RuntimeError("unexpected model failure")
+
+    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
+    monkeypatch.setattr(_profile_runtime, "build_model", build)
+    with pytest.raises(RuntimeError, match="unexpected model failure"):
+        _profile_runtime.run(profile_config)
+
+
+def test_profile_dispatches_typed_config_through_lazy_runtime(
     profile_args: argparse.Namespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[argparse.Namespace] = []
+    calls: list[ProfileConfig] = []
     monkeypatch.setattr(commands, "_profile_runtime", SimpleNamespace(run=calls.append))
 
     profile(profile_args)
 
-    assert calls == [profile_args]
+    assert len(calls) == 1
+    assert isinstance(calls[0], ProfileConfig)
+    assert calls[0].model.name == "rcf"
+    assert calls[0].input.normalization == "dataset"
 
 
-def test_profile_dispatches_without_a_runtime_stub_export(
+def test_profile_reports_validation_errors_without_loading_runtime(
     profile_args: argparse.Namespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delattr(commands, "_profile_runtime")
-    monkeypatch.delitem(sys.modules, "torchgeo_bench.commands._profile_runtime")
     profile_args.batch_size = 0
 
-    with pytest.raises(SystemExit, match="batch-size must be positive"):
+    with pytest.raises(SystemExit, match="batch_size"):
         profile(profile_args)
