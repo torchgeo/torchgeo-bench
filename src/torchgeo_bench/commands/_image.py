@@ -10,6 +10,7 @@ import yaml
 
 from .. import commands
 from ..config_schema import RunConfig, load_yaml, validate_run_config
+from ..presets import load_model_preset
 
 
 def _set(overrides: dict[str, Any], section: str, key: str, value: Any) -> None:
@@ -86,7 +87,7 @@ def _load_run(
         print(yaml.safe_dump(RunConfig.model_json_schema(), sort_keys=False), end="")
         raise SystemExit(0)
     config = validate_run_config(values)
-    unknown_model = config.model.name not in model_names
+    unknown_model = config.model.target is None and config.model.name not in model_names
     unknown_datasets = [name for name in config.datasets if name not in datasets]
     if unknown_model or unknown_datasets:
         raise ValueError(
@@ -96,6 +97,8 @@ def _load_run(
         raise ValueError("this draft supports methods [knn, linear] or [knn]")
     if isinstance(config.input.bands, str) and config.input.bands not in {"rgb", "all"}:
         raise ValueError("input.bands must be rgb, all, or a YAML list of band names")
+    if load_model_preset(config.model).track != "image":
+        raise ValueError(f"{config.model.name!r} is a coordinate encoder; use 'coord'")
     return config
 
 

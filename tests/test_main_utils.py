@@ -5,15 +5,15 @@ from unittest import mock
 import pandas as pd
 import pytest
 import torch
-from omegaconf import OmegaConf
+from pydantic import ValidationError
 from torch.utils.data import DataLoader, Dataset
 
+from torchgeo_bench.config_schema import RunConfig, SegmentationConfig
 from torchgeo_bench.main import (
     _completed_run_keys,
     _expand_dataset_list,
     _filter_completed_metric_rows,
     _normalize_bands_value,
-    _resolve_segmentation_runtime_config,
     evaluate_profile,
 )
 from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput
@@ -34,9 +34,9 @@ def test_expand_dataset_list_all(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _expand_dataset_list("all") == ["m-eurosat", "benv2"]
 
 
-def test_normalize_bands_value_none_and_listconfig() -> None:
+def test_normalize_bands_value_none_and_list() -> None:
     assert _normalize_bands_value(None) == "all"
-    cfg_list = OmegaConf.create(["red", "green"])
+    cfg_list = ["red", "green"]
     assert _normalize_bands_value(cfg_list) == "red,green"
 
 
@@ -56,52 +56,31 @@ def test_filter_completed_metric_rows_partial_filtering() -> None:
 
 
 def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
-    eval_cfg = OmegaConf.create(
-        {
-            "segmentation": {
-                "layers": [],
-                "head_type": "fpn",
-                "criterion": {"_target_": "torch.nn.CrossEntropyLoss"},
-            }
-        }
-    )
-    with pytest.raises(ValueError, match=r"requires eval\.segmentation\.layers"):
+    config = SegmentationConfig(layers=[])
+    with pytest.raises(ValueError, match=r"requires segmentation\.layers"):
         build_seg_probe_and_solver(
             model=torch.nn.Identity(),
             num_classes=2,
-            eval_cfg=eval_cfg,
+            config=config,
             device=torch.device("cpu"),
-            lr=1e-3,
         )
 
 
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("epochs", 0, "positive integer"),
-        ("batch_size", 0, "positive integer"),
-        ("lr", 0.0, "finite positive number"),
-        ("cache_features", "true", "must be a boolean"),
-        ("cache_dtype", "bfloat16", "must be one of"),
+        ("epochs", 0, "greater than 0"),
+        ("batch_size", 0, "greater than 0"),
+        ("learning_rate", 0.0, "greater than 0"),
+        ("cache_features", "true", "valid boolean"),
+        ("cache_dtype", "bfloat16", "Input should be"),
     ],
 )
 def test_segmentation_runtime_config_rejects_invalid_values(
     field: str, value: object, message: str
 ) -> None:
-    cfg = OmegaConf.create(
-        {
-            "epochs": 1,
-            "batch_size": 2,
-            "lr": 1e-3,
-            "cache_features": True,
-            "cache_dtype": "float16",
-            field: value,
-        }
-    )
-
-    error = TypeError if field == "cache_features" else ValueError
-    with pytest.raises(error, match=message):
-        _resolve_segmentation_runtime_config(cfg)
+    with pytest.raises(ValidationError, match=message):
+        SegmentationConfig.model_validate({field: value})
 
 
 def test_measure_cpu_throughput_budget_exceeded_returns_none_metrics() -> None:
@@ -142,11 +121,11 @@ def test_evaluate_profile_adds_cpu_metrics_branch() -> None:
 
     with (
         mock.patch(
-            "torchgeo_bench.model_profile.measure_profile",
+            "torchgeo_bench.main.measure_profile",
             return_value={"params_m": 0.1, "throughput_samples_per_sec": 20.0},
         ),
         mock.patch(
-            "torchgeo_bench.model_profile.measure_cpu_throughput",
+            "torchgeo_bench.main.measure_cpu_throughput",
             return_value={
                 "throughput_samples_per_sec_cpu": 3.0,
                 "latency_ms_per_batch_p50_cpu": 12.0,
@@ -157,21 +136,21 @@ def test_evaluate_profile_adds_cpu_metrics_branch() -> None:
         rows = evaluate_profile(
             model=torch.nn.Identity(),
             sample_loader=loader,
-            cfg=OmegaConf.create(
+            cfg=RunConfig.model_validate(
                 {
-                    "device": "cpu",
-                    "eval": {
-                        "profile": {
+                    "model": {"name": "rcf"},
+                    "datasets": ["m-eurosat"],
+                    "runtime": {"device": "cpu"},
+                    "profile": {
+                        "n_warmup": 0,
+                        "n_measure": 1,
+                        "cpu_throughput": {
+                            "enabled": True,
+                            "batch_size": 2,
                             "n_warmup": 0,
                             "n_measure": 1,
-                            "cpu_throughput": {
-                                "enabled": True,
-                                "batch_size": 2,
-                                "n_warmup": 0,
-                                "n_measure": 1,
-                                "time_budget_s": 1.0,
-                            },
-                        }
+                            "time_budget_s": 1.0,
+                        },
                     },
                 }
             ),

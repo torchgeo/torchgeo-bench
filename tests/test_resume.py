@@ -1,45 +1,41 @@
-"""Regression tests for resume-mode config fingerprinting."""
+"""Regression tests for compatible typed image fingerprints."""
 
-from torchgeo_bench.config import compose_config
+from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.image_hash import _historical_payload, _resume_config_payload
 from torchgeo_bench.resume import _resume_config_hash
 
 
-def _cfg(overrides):
-    return compose_config(["model=rcf", "dataset.names=[m-eurosat]", *overrides])
+def _cfg(**sections) -> RunConfig:
+    return RunConfig.model_validate(
+        {"model": {"name": "rcf"}, "datasets": ["m-eurosat"], **sections}
+    )
 
 
 def test_config_hash_ignores_profile_toggle():
-    """Adding profile rows must not rerun completed probes."""
-    without_profile = _cfg([])
-    with_profile = _cfg(["eval.profile.enabled=true", "eval.profile.cpu_throughput.enabled=true"])
-
-    assert _resume_config_hash(without_profile) == _resume_config_hash(with_profile)
+    assert _resume_config_hash(_cfg()) == _resume_config_hash(
+        _cfg(profile={"enabled": True, "cpu_throughput": {"enabled": True}})
+    )
 
 
 def test_config_hash_ignores_intrinsic_dim_toggle():
-    """Adding intrinsic-dimension rows must not rerun completed probes."""
-    without_id = _cfg([])
-    with_id = _cfg(["eval.intrinsic_dim.enabled=true"])
-
-    assert _resume_config_hash(without_id) == _resume_config_hash(with_id)
+    assert _resume_config_hash(_cfg()) == _resume_config_hash(_cfg(intrinsic_dim={"enabled": True}))
 
 
 def test_config_hash_changes_with_normalization():
-    """Normalization changes the evaluated inputs, so it must change the resume key."""
-    zscore = _cfg(["dataset.normalization=bandspec_zscore"])
-    minmax = _cfg(["dataset.normalization=minmax"])
-
-    assert _resume_config_hash(zscore) != _resume_config_hash(minmax)
-
-
-def test_removed_plot_defaults_keep_existing_resume_keys() -> None:
-    current = _cfg([])
-    previous = _cfg(
-        [
-            "+eval.segmentation.save_viz=false",
-            "+eval.segmentation.viz_dir=viz",
-            "+eval.segmentation.n_viz_samples=8",
-        ]
+    assert _resume_config_hash(_cfg(input={"normalization": "dataset"})) != _resume_config_hash(
+        _cfg(input={"normalization": "minmax"})
     )
-    assert _resume_config_hash(current) == _resume_config_hash(previous)
-    assert not {"save_viz", "viz_dir", "n_viz_samples"} & set(current.eval.segmentation)
+
+
+def test_removed_plot_defaults_keep_existing_resume_keys():
+    payload = _resume_config_payload(_cfg())
+    assert payload == _historical_payload(_cfg(), "legacy")
+    segmentation = payload["eval"]["segmentation"]
+    assert segmentation["save_viz"] is False
+    assert segmentation["viz_dir"] == "viz"
+    assert segmentation["n_viz_samples"] == 8
+    assert not {"save_viz", "viz_dir", "n_viz_samples"} & _cfg().segmentation.model_fields_set
+
+
+def test_dataset_selection_does_not_change_hash():
+    assert _resume_config_hash(_cfg()) == _resume_config_hash(_cfg(datasets=["m-forestnet"]))
