@@ -8,10 +8,10 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
+from tests.support.runner import _compose_cfg, _DictTensorDataset, _resume_row
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import LinearProbeDivergedError, main
 from torchgeo_bench.presets import merge_settings
-
-from .test_main_fast import _compose_cfg, _DictTensorDataset, _resume_row
 
 
 def _synthetic_multilabel_loaders(
@@ -22,9 +22,9 @@ def _synthetic_multilabel_loaders(
     n_classes: int = 8,
 ) -> tuple[_DictTensorDataset, DataLoader, DataLoader, DataLoader]:
     rng = torch.Generator().manual_seed(2)
-    train_images = torch.rand(n_train, channels, 64, 64, generator=rng) * 3000.0
-    val_images = torch.rand(n_val, channels, 64, 64, generator=rng) * 3000.0
-    test_images = torch.rand(n_test, channels, 64, 64, generator=rng) * 3000.0
+    train_images = torch.rand(n_train, channels, 8, 8, generator=rng) * 3000.0
+    val_images = torch.rand(n_val, channels, 8, 8, generator=rng) * 3000.0
+    test_images = torch.rand(n_test, channels, 8, 8, generator=rng) * 3000.0
 
     train_labels = torch.randint(
         0, 2, (n_train, n_classes), generator=rng, dtype=torch.int64
@@ -36,7 +36,9 @@ def _synthetic_multilabel_loaders(
     val_dataset = _DictTensorDataset(val_images, val_labels)
     test_dataset = _DictTensorDataset(test_images, test_labels)
 
-    train_loader = DataLoader(train_dataset, batch_size=3, shuffle=True, num_workers=0)
+    train_loader = DataLoader(
+        train_dataset, batch_size=3, shuffle=True, generator=rng, num_workers=0
+    )
     val_loader = DataLoader(val_dataset, batch_size=3, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=3, shuffle=False, num_workers=0)
     return train_dataset, train_loader, val_loader, test_loader
@@ -54,16 +56,7 @@ def _synthetic_multilabel_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
     return [(x_train, y_train), (x_val, y_val), (x_test, y_test)]
 
 
-def _multilabel_resume_row(cfg) -> dict[str, object]:
-    return {
-        **_resume_row(cfg, method="knn5", metric_name="micro_mAP"),
-        "dataset": "m-bigearthnet",
-        "num_classes": 43,
-        "metric_value": 0.2,
-    }
-
-
-def _cfg_for_multilabel(out: Path, overrides: dict | None = None):
+def _cfg_for_multilabel(out: Path, overrides: dict | None = None) -> RunConfig:
     return _compose_cfg(
         out,
         overrides=merge_settings({"datasets": ["m-bigearthnet"]}, overrides or {}),
@@ -160,7 +153,9 @@ def test_multilabel_resume_key_stable(tmp_path: Path):
     cfg = _cfg_for_multilabel(
         out, overrides={"output": {"resume": True}, "classification": {"methods": ["knn"]}}
     )
-    pd.DataFrame([_multilabel_resume_row(cfg)]).to_csv(out, index=False)
+    pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="micro_mAP")]).to_csv(
+        out, index=False
+    )
 
     with (
         mock.patch(

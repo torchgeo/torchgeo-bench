@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.config_schema import RunConfig, SegmentationConfig
 from torchgeo_bench.main import _expand_dataset_list, evaluate_profile
-from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput
 from torchgeo_bench.resume import (
     _completed_run_keys,
     filter_completed_metric_rows,
@@ -81,21 +80,6 @@ def test_segmentation_runtime_config_rejects_invalid_values(
 ) -> None:
     with pytest.raises(ValidationError, match=message):
         SegmentationConfig.model_validate({field: value})
-
-
-def test_measure_cpu_throughput_budget_exceeded_returns_none_metrics() -> None:
-    model = torch.nn.Sequential(torch.nn.Conv2d(3, 4, kernel_size=1), torch.nn.ReLU())
-    sample = torch.rand(4, 3, 8, 8)
-    metrics = measure_cpu_throughput(
-        model,
-        sample,
-        timing=ProfileTiming(batch_size=2, n_warmup=1, n_measure=1),
-        time_budget_s=0.0,
-    )
-    assert metrics == {
-        "throughput_samples_per_sec_cpu": None,
-        "latency_ms_per_batch_p50_cpu": None,
-    }
 
 
 def test_evaluate_profile_adds_cpu_metrics_branch() -> None:

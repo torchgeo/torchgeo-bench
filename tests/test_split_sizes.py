@@ -1,11 +1,9 @@
 """Check reference split sizes against available datasets; skip missing data."""
 
 import pytest
-from torchgeo.datasets import DatasetNotFoundError
 
-from torchgeo_bench.datasets import (
-    get_bench_dataset_class,
-)
+from tests.support.data import require_dataset_data
+from torchgeo_bench.datasets import get_bench_dataset_class
 
 # V1 counts come from data/classification_v1.0/<name>/default_partition.json.
 # V2 counts come from len(...) on each upstream geobench_v2.datasets.GeoBench<X> split.
@@ -40,22 +38,18 @@ EXPECTED_SIZES: dict[str, dict[str, int]] = {
 
 @pytest.mark.slow
 @pytest.mark.parametrize("dataset_name", sorted(EXPECTED_SIZES))
-def test_split_sizes(dataset_name):
+def test_split_sizes(dataset_name: str) -> None:
+    require_dataset_data(dataset_name)
     bench_cls = get_bench_dataset_class(dataset_name)
     bench = bench_cls()
     expected = EXPECTED_SIZES[dataset_name]
 
-    actual: dict[str, int] = {}
-    try:
-        for split in ("train", "val", "test"):
-            ds = bench.get_dataset(split, bands=tuple(bench.rgb_bands))
-            actual[split] = len(ds)
-    except (
-        FileNotFoundError,
-        DatasetNotFoundError,
-    ) as exc:  # allow-except: real-data tests are optional
-        pytest.skip(f"{dataset_name}: data not found on disk ({exc})")
+    actual = {
+        split: len(bench.get_dataset(split, bands=tuple(bench.rgb_bands)))
+        for split in ("train", "val", "test")
+    }
 
+    assert bench.split_sizes == expected
     assert actual == expected, (
         f"{dataset_name}: split sizes diverge from reference. expected={expected}, got={actual}"
     )

@@ -447,3 +447,38 @@ def test_profile_reports_validation_errors_without_loading_runtime(
         profile(profile_args)
     assert error.value.code == 2
     assert "batch_size" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "invalid_request",
+    [
+        ("batch_size", 0, "batch_size"),
+        ("warmup", -1, "warmup"),
+        ("measurements", 0, "measurements"),
+        ("seed", -1, "seed"),
+        ("image_size", 0, "image_size"),
+        ("model", "missing-model", "Unknown model config"),
+        ("dataset", "missing-dataset", "unknown dataset"),
+        ("bands", "red,,blue", "bands must contain non-empty names"),
+    ],
+)
+def test_invalid_profile_request_fails_before_loading(
+    profile_args: argparse.Namespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    invalid_request: tuple[str, object, str],
+) -> None:
+    field, value, message = invalid_request
+    profile_args.model = "rcf"
+    profile_args.dataset = "m-eurosat"
+    setattr(profile_args, field, value)
+
+    def unexpected_load(**_kwargs: object) -> None:
+        pytest.fail("Invalid profile request reached dataset loading")
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(_profile_runtime, "get_datasets", unexpected_load)
+    with pytest.raises(SystemExit) as error:
+        profile(profile_args)
+    assert error.value.code == 2
+    assert message in capsys.readouterr().err

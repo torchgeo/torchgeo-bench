@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 import torch
-from torchmetrics.classification import MulticlassCalibrationError
+from torchmetrics.classification import BinaryCalibrationError, MulticlassCalibrationError
 
 from torchgeo_bench.calibration import (
     apply_temperature,
@@ -93,15 +93,32 @@ def test_temperature_rejects_unseen_validation_classes() -> None:
         )
 
 
-def test_multilabel_shapes_and_range():
-    rng = np.random.default_rng(0)
-    n, c = 100, 5
-    y_true = rng.integers(0, 2, size=(n, c))
-    y_proba = rng.uniform(0.0, 1.0, size=(n, c)).astype(np.float32)
-    out = compute_calibration_metrics(y_true, y_proba, multi_label=True)
+@pytest.mark.parametrize("n_bins", [2, 15])
+def test_multilabel_macro_average_excludes_constant_labels(n_bins: int) -> None:
+    targets = torch.tensor([[0, 1, 0, 1], [1, 0, 0, 1], [1, 0, 0, 1], [0, 0, 0, 1]])
+    probabilities = torch.tensor(
+        [[0.1, 0.8, 1.0, 0.0], [0.6, 0.3, 1.0, 0.0], [0.2, 0.9, 1.0, 0.0], [0.4, 0.6, 1.0, 0.0]]
+    )
+    out = compute_calibration_metrics(
+        targets.numpy(), probabilities.numpy(), multi_label=True, n_bins=n_bins
+    )
+    for key, norm in (("ece", "l1"), ("rms_ce", "l2"), ("mce", "max")):
+        expected = np.mean(
+            [
+                BinaryCalibrationError(n_bins=n_bins, norm=norm)(
+                    probabilities[:, column], targets[:, column]
+                ).item()
+                for column in (0, 1)
+            ]
+        )
+        assert out[key] == pytest.approx(expected)
+
+
+def test_multilabel_without_varying_labels_reports_undefined_calibration() -> None:
+    targets = np.array([[0, 1], [0, 1]])
+    out = compute_calibration_metrics(targets, targets.astype(np.float32), multi_label=True)
     assert set(out) == {"ece", "rms_ce", "mce"}
-    for v in out.values():
-        assert 0.0 <= v <= 1.0
+    assert all(np.isnan(value) for value in out.values())
 
 
 def test_multilabel_perfect_calibration():
@@ -163,14 +180,29 @@ def test_temperature_scaling_reduces_ece():
     assert ts_cal["ece"] < raw_cal["ece"]
 
 
-def test_temperature_multilabel_runs():
+def test_temperature_multilabel_reduces_negative_log_likelihood() -> None:
     rng = np.random.default_rng(0)
     n, c = 200, 5
     y_true = rng.integers(0, 2, size=(n, c))
     logits = rng.normal(size=(n, c)).astype(np.float32) * 3.0
     t = fit_temperature(logits, y_true, multi_label=True)
-    assert t > 0
+    assert t > 1
     probs = apply_temperature(logits, t, multi_label=True)
-    out = compute_calibration_metrics(y_true, probs, multi_label=True)
-    for v in out.values():
-        assert 0.0 <= v <= 1.0
+    raw_loss = np.mean(np.logaddexp(0, logits) - y_true * logits)
+    scaled_loss = np.mean(np.logaddexp(0, logits / t) - y_true * logits / t)
+    assert scaled_loss < raw_loss
+    np.testing.assert_allclose(probs, 1 / (1 + np.exp(-logits / t)), rtol=1e-6)
+
+
+@pytest.mark.parametrize("multi_label", [False, True])
+def test_apply_temperature_matches_probability_definition(*, multi_label: bool) -> None:
+    logits = np.array([[0.0, 2.0], [-4.0, 1.0]], dtype=np.float32)
+    scaled = logits / 2.0
+    expected = (
+        1 / (1 + np.exp(-scaled))
+        if multi_label
+        else np.exp(scaled) / np.exp(scaled).sum(axis=1, keepdims=True)
+    )
+    np.testing.assert_allclose(
+        apply_temperature(logits, 2.0, multi_label=multi_label), expected, rtol=1e-6
+    )

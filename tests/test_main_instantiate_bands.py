@@ -4,44 +4,13 @@ from unittest import mock
 
 import torch
 
-from torchgeo_bench.config_schema import ModelConfig, RunConfig
+from tests.support.runner import _DictTensorDataset, _synthetic_loaders
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.main import instantiate_dataset_model
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.presets import build_model, load_model_preset, resolve_run_config
-
-from .test_main_fast import _DictTensorDataset, _synthetic_loaders
-
-
-def _bands() -> list[BandSpec]:
-    return [
-        BandSpec(
-            sensor="s2",
-            name=f"b{i}",
-            source_name=f"B{i}",
-            mean=10.0,
-            std=2.0,
-            min=0.0,
-            max=255.0,
-        )
-        for i in range(3)
-    ]
-
-
-def test_instantiate_preserves_bandspec_objects():
-    """BandSpec dataclasses reach the constructor intact."""
-    preset = load_model_preset(ModelConfig(name="rcf"))
-
-    bands = _bands()
-    model = build_model(preset, bands=bands)
-
-    assert isinstance(model, BenchModel)
-    assert isinstance(model.bands, list)
-    assert all(isinstance(b, BandSpec) for b in model.bands), (
-        f"BandSpec identity lost; got types {[type(b).__name__ for b in model.bands]}"
-    )
-    assert model.num_channels == len(bands)
+from torchgeo_bench.presets import resolve_run_config
 
 
 def test_empirical_rcf_receives_run_seed_and_actual_dataset(monkeypatch) -> None:

@@ -3,121 +3,21 @@
 from pathlib import Path
 from unittest import mock
 
-import numpy as np
 import pandas as pd
 import pytest
 import torch
-from torch.utils.data import DataLoader, Dataset
 from torchgeo.datasets import DatasetNotFoundError
 
-from torchgeo_bench.config_schema import RunConfig
+from tests.support.runner import (
+    _chainable_model_mock,
+    _compose_cfg,
+    _hash_for,
+    _resume_row,
+    _synthetic_embeddings,
+    _synthetic_loaders,
+)
 from torchgeo_bench.main import LinearProbeDivergedError, main
-from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset, merge_settings, resolve_run_config
-from torchgeo_bench.resume import resume_config_hash
-
-
-class _DictTensorDataset(Dataset):
-    def __init__(self, images: torch.Tensor, labels: torch.Tensor) -> None:
-        self._images = images
-        self._labels = labels
-
-    def __len__(self) -> int:
-        return int(self._images.shape[0])
-
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        return {
-            "image": self._images[index],
-            "label": self._labels[index],
-        }
-
-
-def _compose_cfg(output_path: Path, overrides: dict | None = None) -> RunConfig:
-    return RunConfig.model_validate(
-        merge_settings(
-            {
-                "model": {"name": "rcf"},
-                "datasets": ["m-eurosat"],
-                "runtime": {"batch_size": 4, "workers": 0, "device": "cpu"},
-                "classification": {
-                    "bootstrap_samples": 5,
-                    "linear": {"c_log10_start": -2.0, "c_log10_stop": -1.0, "c_count": 2},
-                },
-                "output": {"file": str(output_path)},
-            },
-            overrides or {},
-        )
-    )
-
-
-def _synthetic_loaders(
-    n_train: int = 16,
-    n_val: int = 8,
-    n_test: int = 8,
-    n_classes: int = 10,
-    channels: int = 3,
-) -> tuple[_DictTensorDataset, DataLoader, DataLoader, DataLoader]:
-    rng = torch.Generator().manual_seed(0)
-    train_images = torch.rand(n_train, channels, 64, 64, generator=rng) * 3000.0
-    val_images = torch.rand(n_val, channels, 64, 64, generator=rng) * 3000.0
-    test_images = torch.rand(n_test, channels, 64, 64, generator=rng) * 3000.0
-
-    train_labels = torch.randint(0, n_classes, (n_train,), generator=rng)
-    val_labels = torch.randint(0, n_classes, (n_val,), generator=rng)
-    test_labels = torch.randint(0, n_classes, (n_test,), generator=rng)
-
-    train_dataset = _DictTensorDataset(train_images, train_labels)
-    val_dataset = _DictTensorDataset(val_images, val_labels)
-    test_dataset = _DictTensorDataset(test_images, test_labels)
-
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=0)
-    return train_dataset, train_loader, val_loader, test_loader
-
-
-def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
-    """Embeddings in the order of the train, validation, and test calls."""
-    rng = np.random.default_rng(0)
-    x_train = rng.standard_normal((16, 8), dtype=np.float32)
-    y_train = rng.integers(0, 10, size=(16,), dtype=np.int64)
-    x_val = rng.standard_normal((8, 8), dtype=np.float32)
-    y_val = rng.integers(0, 10, size=(8,), dtype=np.int64)
-    x_test = rng.standard_normal((8, 8), dtype=np.float32)
-    y_test = rng.integers(0, 10, size=(8,), dtype=np.int64)
-    return [(x_train, y_train), (x_val, y_val), (x_test, y_test)]
-
-
-def _hash_for(cfg: RunConfig, ds_name: str = "m-eurosat") -> str:
-    """Return the resume hash for a dataset-resolved config."""
-    resolved_cfg, preset = resolve_run_config(cfg, ds_name)
-    return resume_config_hash(resolved_cfg, preset)
-
-
-def _resume_row(cfg: RunConfig, *, method: str, metric_name: str) -> dict[str, object]:
-    """Seed the CSV with a row matching this configuration."""
-    cfg, preset = resolve_run_config(cfg, "m-eurosat")
-    return {
-        "dataset": "m-eurosat",
-        "method": method,
-        "model": preset.target,
-        "name": preset.name,
-        "normalization": NORMALIZATIONS[cfg.input.normalization],
-        "image_size": cfg.input.image_size,
-        "interpolation": cfg.input.interpolation,
-        "partition": cfg.input.partition,
-        "bands": cfg.input.bands,
-        "num_classes": 10,
-        "config_hash": resume_config_hash(cfg, preset),
-        "metric_name": metric_name,
-        "metric_value": 0.1,
-    }
-
-
-def _chainable_model_mock() -> mock.Mock:
-    model = mock.Mock()
-    model.to.return_value = model
-    model.eval.return_value = model
-    return model
+from torchgeo_bench.presets import ModelPreset, resolve_run_config
 
 
 def test_model_dataset_overrides_are_isolated_and_fall_back() -> None:
@@ -216,7 +116,7 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
     assert set(rows["pool"]) == {"cls", "mean"}
 
 
-def test_knn_row_emitted(tmp_path: Path):
+def test_knn_row_preserves_metrics_and_metadata(tmp_path: Path) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out, overrides={"classification": {"methods": ["knn"]}})
 
@@ -231,10 +131,19 @@ def test_knn_row_emitted(tmp_path: Path):
         main(cfg)
 
     df = pd.read_csv(out)
-    assert "knn5" in df["method"].values
-    row = df[df["method"] == "knn5"].iloc[0]
+    assert list(df["method"]) == ["knn5"]
+    row = df.iloc[0]
     assert row["metric_name"] == "accuracy"
     assert row["dataset"] == "m-eurosat"
+    assert (row["metric_value"], row["ci_lower"], row["ci_upper"]) == (0.5, 0.45, 0.55)
+    assert row["ece"] == 0.05
+    resolved, preset = resolve_run_config(cfg, "m-eurosat")
+    assert row["model"] == preset.target
+    assert row["name"] == preset.name
+    assert row["num_classes"] == 10
+    assert row["partition"] == resolved.input.partition
+    assert row["bands"] == resolved.input.bands
+    assert row["config_hash"] == _hash_for(cfg)
 
 
 def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monkeypatch):
@@ -619,31 +528,3 @@ def test_unknown_dataset_raises(tmp_path: Path) -> None:
     cfg = _compose_cfg(tmp_path / "out.csv", overrides={"datasets": ["unknown-dataset"]})
     with pytest.raises(KeyError, match="unknown-dataset"):
         main(cfg)
-
-
-def test_csv_row_has_required_columns(tmp_path: Path):
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out, overrides={"classification": {"methods": ["knn"]}})
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ),
-    ):
-        main(cfg)
-
-    df = pd.read_csv(out)
-    required = {
-        "dataset",
-        "method",
-        "model",
-        "metric_name",
-        "metric_value",
-        "partition",
-        "bands",
-        "num_classes",
-    }
-    assert required.issubset(set(df.columns))

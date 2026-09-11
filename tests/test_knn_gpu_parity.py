@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 N_TRAIN, N_TEST, DIM, K, N_CLASSES = 2000, 500, 64, 5, 10
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def features() -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(0)
     x_train = rng.standard_normal((N_TRAIN, DIM)).astype(np.float32)

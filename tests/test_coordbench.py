@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 import torch
 
+from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench.coordbench import (
     CoordBenchmark,
     SinCosLocationEncoder,
@@ -22,6 +23,8 @@ from torchgeo_bench.coordbench.config import CoordConfig
 from torchgeo_bench.coordbench.run import _instantiate_encoder
 from torchgeo_bench.presets import ModelPreset
 
+pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
+
 
 @pytest.fixture
 def rng() -> np.random.Generator:
@@ -35,12 +38,16 @@ def points(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
     return lon, lat
 
 
-def test_sincos_encode_shape(points: tuple[np.ndarray, np.ndarray]) -> None:
+@pytest.mark.parametrize("batch_size", [1, 137, 8192])
+def test_sincos_encode_preserves_coordinate_order_across_batches(
+    points: tuple[np.ndarray, np.ndarray], batch_size: int
+) -> None:
     lon, lat = points
-    feats = SinCosLocationEncoder(device="cpu").encode(lon, lat)
-    assert feats.shape == (len(lon), 4)
+    feats = SinCosLocationEncoder(device="cpu", batch_size=batch_size).encode(lon, lat)
     assert feats.dtype == np.float32
-    assert np.isfinite(feats).all()
+    lat_r, lon_r = np.deg2rad(lat), np.deg2rad(lon)
+    expected = np.column_stack([np.sin(lat_r), np.cos(lat_r), np.sin(lon_r), np.cos(lon_r)])
+    np.testing.assert_allclose(feats, expected, rtol=1e-6, atol=1e-7)
 
 
 def test_documented_fourier_encoder_example(points: tuple[np.ndarray, np.ndarray]) -> None:
@@ -117,7 +124,7 @@ def _synthetic_benchmarks() -> list[CoordBenchmark]:
     return [reg, clf]
 
 
-def _coord_cfg(tmp_path, **coord_overrides) -> CoordConfig:
+def _coord_cfg(tmp_path: Path, **coord_overrides: object) -> CoordConfig:
     coord = {
         "methods": ["knn", "linear"],
         "split": "random",
@@ -136,7 +143,7 @@ def _coord_cfg(tmp_path, **coord_overrides) -> CoordConfig:
     )
 
 
-def test_run_coordbench_end_to_end(tmp_path, monkeypatch) -> None:
+def test_run_coordbench_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
     )
@@ -156,20 +163,27 @@ def test_run_coordbench_end_to_end(tmp_path, monkeypatch) -> None:
     assert (df.metric_value.abs() <= 1.5).all()
 
 
-def test_run_coordbench_resume_skips(tmp_path, monkeypatch) -> None:
+def test_run_coordbench_resume_skips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
     )
     cfg = _coord_cfg(tmp_path)
     run_coordbench(cfg)
-    n_first = len(pd.read_csv(cfg.output.file))
+    before = Path(cfg.output.file).read_bytes()
+
+    def unexpected_probe(*args: object, **kwargs: object) -> None:
+        pytest.fail("Completed coordinate probes must not be recomputed")
 
     cfg.output.resume = True
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", unexpected_probe)
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.knn_probe_score", unexpected_probe)
     run_coordbench(cfg)
-    assert len(pd.read_csv(cfg.output.file)) == n_first
+    assert Path(cfg.output.file).read_bytes() == before
 
 
-def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> None:
+def test_run_coordbench_reports_official_test_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     bench = _synthetic_benchmarks()[0]
     test_mask = np.zeros(len(bench.lat), dtype=bool)
     test_mask[::3] = True
@@ -184,7 +198,7 @@ def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> No
     assert set(df.n_test) == {int(test_mask.sum())}
 
 
-def test_load_benchmarks_selection(monkeypatch) -> None:
+def test_load_benchmarks_selection(monkeypatch: pytest.MonkeyPatch) -> None:
     # Use local tables instead of downloading Parquet files.
     tables = {
         "country": pd.DataFrame(
@@ -205,16 +219,15 @@ def test_load_benchmarks_selection(monkeypatch) -> None:
     single = load_benchmarks("worldclim-bio1")
     assert [b.name for b in single] == ["worldclim-bio1"]
 
-    assert "pdfm" in cb_datasets.list_families()
+    np.testing.assert_array_equal(single[0].tasks["bio1"], [10.0, 20.0])
 
 
-def test_mind_load_roundtrip(tmp_path) -> None:
+def test_mind_load_roundtrip(tmp_path: Path) -> None:
     from safetensors.torch import save_file
 
     from torchgeo_bench.coordbench.mind import ReSIRENLocationEncoder, load_mind
 
-    torch.manual_seed(0)
-    model = ReSIRENLocationEncoder(embed_dim=16, out_dim=8, depth=2)
+    model = ReSIRENLocationEncoder(embed_dim=16, out_dim=8, depth=2).eval()
     path = tmp_path / "m.safetensors"
     save_file(model.state_dict(), str(path))
 
@@ -224,15 +237,17 @@ def test_mind_load_roundtrip(tmp_path) -> None:
     assert not loaded.use_year  # A two-input checkpoint has coordinates but no year.
 
     latlon = torch.tensor([[37.77, -122.42], [51.51, -0.13]], dtype=torch.float32)
-    assert loaded(latlon, return_features=True).shape == (2, 16)
-    assert loaded(latlon).shape == (2, 8)
+    with torch.no_grad():
+        torch.testing.assert_close(
+            loaded(latlon, return_features=True), model(latlon, return_features=True)
+        )
+        torch.testing.assert_close(loaded(latlon), model(latlon))
 
 
-def test_mind_encoder_dim_slice(monkeypatch) -> None:
+def test_mind_encoder_dim_slice(monkeypatch: pytest.MonkeyPatch) -> None:
     from torchgeo_bench.coordbench import mind as mind_mod
     from torchgeo_bench.coordbench.models import MINDLocationEncoder
 
-    torch.manual_seed(0)
     model = mind_mod.ReSIRENLocationEncoder(embed_dim=32, out_dim=32, depth=2).eval()
     monkeypatch.setattr(mind_mod, "load_mind", lambda path, device="cpu": model)
     monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda *a, **k: "dummy")
@@ -241,6 +256,9 @@ def test_mind_encoder_dim_slice(monkeypatch) -> None:
     out = enc.encode(np.array([1.0, 2.0]), np.array([37.0, 51.0]))
     assert out.shape == (2, 8)  # MIND's training permits using a prefix of the 32 features.
     assert out.dtype == np.float32
+    with torch.no_grad():
+        expected = model(torch.tensor([[37.0, 1.0], [51.0, 2.0]]), return_features=True)
+    np.testing.assert_allclose(out, expected[:, :8].numpy())
 
 
 def test_family_index_matches_loaders() -> None:
@@ -248,6 +266,9 @@ def test_family_index_matches_loaders() -> None:
     assert set(cb_datasets.FAMILY_BENCHMARKS) == set(cb_datasets.FAMILY_LOADERS)
     all_names = cb_datasets.list_benchmarks()
     assert len(all_names) == len(set(all_names))
+    assert set(all_names) == {
+        name for family_names in cb_datasets.FAMILY_BENCHMARKS.values() for name in family_names
+    }
     assert "pdfm-conus27" in all_names
     assert sum(n.startswith("dm-") for n in all_names) == 15
 

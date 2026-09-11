@@ -1,5 +1,6 @@
 """Tests for the high-level get_datasets API for GeoBench V2 datasets."""
 
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -7,15 +8,22 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
+from tests.support.data import require_dataset_data
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 
 
 class MockV2Dataset:
     """Stand-in for ``geobench_v2.datasets.GeoBench<X>`` upstream classes."""
 
-    def __init__(self, root, split, transforms=None, band_order=None, **kwargs):
-        del kwargs
-        self.root = root
+    def __init__(
+        self,
+        root: Path,
+        split: str,
+        transforms: Callable | None = None,
+        band_order: dict[str, list[str]] | list[str] | None = None,
+        **kwargs: object,
+    ) -> None:
+        self.root = Path(root)
         self.split = split
         self.transforms = transforms
         self.band_order = band_order
@@ -28,37 +36,27 @@ class MockV2Dataset:
             self.c = 3
         self.h, self.w = 32, 32
 
-    def __len__(self):
+    def __len__(self) -> int:
         return 10
 
-    def __getitem__(self, idx):
-        img = torch.randn(self.c, self.h, self.w)
-        sample = {"image": img}
-        if self.transforms:
-            sample = self.transforms(sample)
-        # One fixture serves classification and segmentation tests.
-        sample.setdefault("label", torch.tensor(1))
-        sample.setdefault("mask", torch.randint(0, 2, (self.h, self.w)))
-        return sample
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        channels = torch.arange(1, self.c + 1, dtype=torch.float32) * 1000
+        image = channels[:, None, None].expand(self.c, self.h, self.w).clone()
+        sample = {"image": image}
+        if self.root.name == "burn_scars":
+            sample["mask"] = torch.arange(self.h * self.w).reshape(self.h, self.w) % 2
+        else:
+            sample["label"] = torch.tensor(idx % 2)
+        return self.transforms(sample) if self.transforms is not None else sample
 
 
 @pytest.fixture
-def mock_v2_env():
-    with (
-        patch(
-            "geobench_v2.datasets.GeoBenchBENV2",
-            MagicMock(side_effect=MockV2Dataset),
-        ),
-        patch(
-            "geobench_v2.datasets.GeoBenchBurnScars",
-            MagicMock(side_effect=MockV2Dataset),
-        ),
-        patch(
-            "geobench_v2.datasets.GeoBenchSo2Sat",
-            MagicMock(side_effect=MockV2Dataset),
-        ),
-    ):
-        yield
+def mock_v2_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
+    upstream = {}
+    for dataset, name in {"benv2": "GeoBenchBENV2", "burn_scars": "GeoBenchBurnScars"}.items():
+        upstream[dataset] = MagicMock(side_effect=MockV2Dataset)
+        monkeypatch.setattr(f"geobench_v2.datasets.{name}", upstream[dataset])
+    return upstream
 
 
 class TestV2Loading:
@@ -71,7 +69,13 @@ class TestV2Loading:
             ("resisc45", "resisc45"),
         ],
     )
-    def test_missing_data_requires_download(self, tmp_path, monkeypatch, dataset_name, download):
+    def test_missing_data_requires_download(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        dataset_name: str,
+        download: str,
+    ) -> None:
         monkeypatch.chdir(tmp_path)
         with (
             patch("huggingface_hub.snapshot_download") as snapshot,
@@ -84,8 +88,7 @@ class TestV2Loading:
         snapshot.assert_not_called()
         download_url.assert_not_called()
 
-    def test_benv2_classification(self, mock_v2_env):
-        del mock_v2_env
+    def test_benv2_classification(self, mock_v2_env: dict[str, MagicMock]) -> None:
         ds, train_dl, _, _ = get_datasets(
             dataset_name="benv2",
             return_val=True,
@@ -99,10 +102,13 @@ class TestV2Loading:
 
         batch = next(iter(train_dl))
         assert batch["image"].shape == (4, 3, 32, 32)
-        assert "label" in batch
+        assert batch["label"].shape == (4,)
+        assert batch["label"].dtype == torch.long
+        torch.testing.assert_close(
+            batch["image"][0, :, 0, 0], torch.tensor([1000.0, 2000.0, 3000.0])
+        )
 
-    def test_burn_scars_segmentation(self, mock_v2_env):
-        del mock_v2_env
+    def test_burn_scars_segmentation(self, mock_v2_env: dict[str, MagicMock]) -> None:
         _, train_dl, _ = get_datasets(
             dataset_name="burn_scars",
             batch_size=2,
@@ -112,11 +118,11 @@ class TestV2Loading:
 
         assert get_bench_dataset_class("burn_scars").task == "segmentation"
         batch = next(iter(train_dl))
-        assert "mask" in batch
-        assert batch["image"].shape[0] == 2
+        assert batch["image"].shape == (2, 3, 32, 32)
+        assert batch["mask"].shape == (2, 32, 32)
+        assert batch["mask"].dtype == torch.long
 
-    def test_partition_warning(self, mock_v2_env):
-        del mock_v2_env
+    def test_partition_warning(self, mock_v2_env: dict[str, MagicMock]) -> None:
         with pytest.warns(UserWarning, match="does not support custom partitions"):
             get_datasets(
                 dataset_name="benv2",
@@ -124,79 +130,55 @@ class TestV2Loading:
                 num_workers=0,
             )
 
-    def test_resize_transform(self, mock_v2_env):
-        del mock_v2_env
+    @pytest.mark.parametrize("dataset_name", ["benv2", "burn_scars"])
+    def test_resize_preserves_raw_images_and_categorical_masks(
+        self, mock_v2_env: dict[str, MagicMock], dataset_name: str
+    ) -> None:
         target = 64
         ds, _, _ = get_datasets(
-            dataset_name="benv2",
+            dataset_name=dataset_name,
             image_size=target,
             batch_size=4,
             num_workers=0,
         )
 
-        assert ds._inner.transforms is not None
+        sample = ds[0]
+        assert sample["image"].shape == (3, target, target)
+        expected = torch.tensor([1000.0, 2000.0, 3000.0])[:, None, None].expand(3, target, target)
+        torch.testing.assert_close(sample["image"], expected)
+        if dataset_name == "burn_scars":
+            source_mask = torch.arange(32 * 32).reshape(32, 32) % 2
+            expected_mask = source_mask.repeat_interleave(2, 0).repeat_interleave(2, 1)
+            torch.testing.assert_close(sample["mask"], expected_mask)
 
-        dl = DataLoader(ds, batch_size=1)
-        batch = next(iter(dl))
-        assert batch["image"].shape[-1] == target
-
-    def test_bad_dataset_name(self):
+    def test_bad_dataset_name(self) -> None:
         with pytest.raises(KeyError, match="Unknown dataset 'phantom_dataset'"):
             get_datasets(dataset_name="phantom_dataset")
 
-    def test_no_double_root_join(self, mock_v2_env):
-        """Upstream expects a dataset-specific root, not the collection root."""
-        with patch(
-            "geobench_v2.datasets.GeoBenchBENV2",
-            MagicMock(side_effect=MockV2Dataset),
-        ) as mocked:
-            del mock_v2_env
-            get_datasets(
-                dataset_name="benv2",
-                batch_size=2,
-                num_workers=0,
-            )
-            assert mocked.call_count == 3  # train, val, test
-            for call in mocked.call_args_list:
-                kwargs = call.kwargs
-                assert Path(kwargs["root"]) == Path("data/geobenchv2/benv2"), kwargs
-                assert kwargs["download"] is False
-
-    def test_band_order_shape_dict(self, mock_v2_env):
-        """Upstream multi-modality loaders require bands grouped by sensor."""
-        with patch(
-            "geobench_v2.datasets.GeoBenchBENV2",
-            MagicMock(side_effect=MockV2Dataset),
-        ) as mocked:
-            del mock_v2_env
-            get_datasets(
-                dataset_name="benv2",
-                bands="rgb",
-                batch_size=2,
-                num_workers=0,
-            )
-            for call in mocked.call_args_list:
-                bo = call.kwargs["band_order"]
-                assert isinstance(bo, dict), bo
-                assert bo == {"s2": ["B04", "B03", "B02"]}, bo
-
-    def test_band_order_shape_flat(self, mock_v2_env):
-        """Upstream single-modality loaders require a flat band list."""
-        with patch(
-            "geobench_v2.datasets.GeoBenchBurnScars",
-            MagicMock(side_effect=MockV2Dataset),
-        ) as mocked:
-            del mock_v2_env
-            get_datasets(
-                dataset_name="burn_scars",
-                bands="rgb",
-                batch_size=2,
-                num_workers=0,
-            )
-            for call in mocked.call_args_list:
-                bo = call.kwargs["band_order"]
-                assert isinstance(bo, list), bo
-                assert bo == ["B04", "B03", "B02"], bo
+    @pytest.mark.parametrize(
+        ("dataset_name", "expected_bands"),
+        [
+            ("benv2", {"s2": ["B04", "B03", "B02"]}),
+            ("burn_scars", ["B04", "B03", "B02"]),
+        ],
+    )
+    def test_upstream_receives_fixed_root_splits_and_sensor_band_order(
+        self,
+        mock_v2_env: dict[str, MagicMock],
+        dataset_name: str,
+        expected_bands: dict[str, list[str]] | list[str],
+    ) -> None:
+        get_datasets(dataset_name=dataset_name, bands="rgb", batch_size=2, num_workers=0)
+        calls = mock_v2_env[dataset_name].call_args_list
+        assert [call.kwargs["split"] for call in calls] == ["train", "validation", "test"]
+        for call in calls:
+            kwargs = call.kwargs
+            assert Path(kwargs["root"]) == Path("data/geobenchv2") / dataset_name
+            assert kwargs["band_order"] == expected_bands
+            assert kwargs["download"] is False
+            assert kwargs["data_normalizer"] is torch.nn.Identity
+            if dataset_name == "benv2":
+                assert kwargs["return_stacked_image"] is True
 
 
 class MockKuroSiwo:
@@ -207,16 +189,15 @@ class MockKuroSiwo:
 
     def __init__(  # noqa: PLR0913 - matches the upstream dataset constructor.
         self,
-        root,
-        split,
+        root: Path,
+        split: str,
         *,
-        band_order=None,
-        time_step=("pre_1", "pre_2", "post"),
-        transforms=None,
-        return_stacked_image=False,
-        **kwargs,
-    ):
-        del kwargs
+        band_order: dict[str, list[str]] | None = None,
+        time_step: tuple[str, ...] = ("pre_1", "pre_2", "post"),
+        transforms: Callable | None = None,
+        return_stacked_image: bool = False,
+        **kwargs: object,
+    ) -> None:
         self.root = root
         self.split = split
         self.band_order = band_order or {}
@@ -225,11 +206,10 @@ class MockKuroSiwo:
         self.return_stacked_image = return_stacked_image
         self.h, self.w = 16, 16
 
-    def __len__(self):
+    def __len__(self) -> int:
         return 4
 
-    def __getitem__(self, idx):
-        del idx
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         sample: dict[str, torch.Tensor] = {
             "invalid_data": torch.ones(1, self.h, self.w, dtype=torch.long),
             "mask": torch.zeros(self.h, self.w, dtype=torch.long),
@@ -249,7 +229,7 @@ class MockKuroSiwo:
 
 class TestKuroSiwoCanonicalization:
     @pytest.fixture
-    def mocked_kuro_siwo(self):
+    def mocked_kuro_siwo(self) -> Iterator[MagicMock]:
         with patch(
             "geobench_v2.datasets.GeoBenchKuroSiwo",
             MagicMock(side_effect=MockKuroSiwo),
@@ -257,59 +237,39 @@ class TestKuroSiwoCanonicalization:
             yield mocked
 
     @pytest.mark.parametrize(
-        ("bands", "expected_channels"),
+        ("bands", "expected_values"),
         [
-            (("vv", "vh"), 2),
-            (("vv",), 1),
-            (("dem",), 1),
-            (("vv", "dem"), 2),
-            (("vv", "vh", "dem"), 3),
-            (None, 3),  # all bands
+            (("vv", "vh"), [3.0, 3.0]),
+            (("vv",), [3.0]),
+            (("dem",), [99.0]),
+            (("vv", "dem"), [3.0, 99.0]),
+            (("vv", "vh", "dem"), [3.0, 3.0, 99.0]),
+            (None, [3.0, 3.0, 99.0]),
         ],
     )
-    def test_image_is_3d_with_correct_channel_count(
-        self, mocked_kuro_siwo, bands, expected_channels
-    ):
+    def test_image_combines_post_event_sar_and_dem_in_order(
+        self,
+        mocked_kuro_siwo: MagicMock,
+        bands: tuple[str, ...] | None,
+        expected_values: list[float],
+    ) -> None:
         bench = get_bench_dataset_class("kuro_siwo")()
         ds = bench.get_dataset("train", bands=bands)
         sample = ds[0]
-        assert "image" in sample
         img = sample["image"]
-        assert img.dim() == 3, f"expected 3-D image, got shape {tuple(img.shape)} for bands={bands}"
-        assert img.shape[0] == expected_channels, (
-            f"expected {expected_channels} channels, got {img.shape[0]} for bands={bands}"
+        torch.testing.assert_close(
+            img, torch.tensor(expected_values)[:, None, None].expand(len(expected_values), 16, 16)
         )
 
         for stale in ("image_pre_1", "image_pre_2", "image_post", "image_dem"):
             assert stale not in sample, f"per-modality key {stale!r} should be folded into 'image'"
 
-        assert mocked_kuro_siwo.called
+        mocked_kuro_siwo.assert_called_once()
+        assert mocked_kuro_siwo.call_args.kwargs["time_step"] == ["post"]
+        assert mocked_kuro_siwo.call_args.kwargs["return_stacked_image"] is False
 
-    def test_uses_post_event_sar_only(self, mocked_kuro_siwo):
-        bench = get_bench_dataset_class("kuro_siwo")()
-        bench.get_dataset("train", bands=("vv", "vh"))
-        for call in mocked_kuro_siwo.call_args_list:
-            assert call.kwargs["time_step"] == ["post"], call.kwargs
-
-    def test_does_not_request_stacked_image(self, mocked_kuro_siwo):
-        """Upstream stacking adds a time axis and fails when SAR and DEM channel counts differ."""
-        bench = get_bench_dataset_class("kuro_siwo")()
-        bench.get_dataset("train", bands=None)
-        for call in mocked_kuro_siwo.call_args_list:
-            assert call.kwargs.get("return_stacked_image", False) is False, call.kwargs
-
-    def test_dem_concatenated_after_sar(self, mocked_kuro_siwo):
-        del mocked_kuro_siwo
-        bench = get_bench_dataset_class("kuro_siwo")()
-        ds = bench.get_dataset("train", bands=("vv", "vh", "dem"))
-        img = ds[0]["image"]
-        # Distinct values identify post-event SAR (3) and DEM (99).
-        assert torch.allclose(img[:2], torch.full_like(img[:2], 3.0))
-        assert torch.allclose(img[2:], torch.full_like(img[2:], 99.0))
-
-    def test_resize_runs_after_canonicalization(self, mocked_kuro_siwo):
+    def test_resize_runs_after_canonicalization(self, mocked_kuro_siwo: MagicMock) -> None:
         """Resize needs a single image tensor, not separate modality keys."""
-        del mocked_kuro_siwo
         _, train_dl, _ = get_datasets(
             dataset_name="kuro_siwo",
             bands=("vv", "vh"),
@@ -320,6 +280,11 @@ class TestKuroSiwoCanonicalization:
         batch = next(iter(train_dl))
         assert batch["image"].shape[-2:] == (32, 32)
         assert batch["mask"].shape[-2:] == (32, 32)
+        assert [call.kwargs["split"] for call in mocked_kuro_siwo.call_args_list] == [
+            "train",
+            "val",
+            "test",
+        ]
 
 
 @pytest.mark.slow
@@ -334,8 +299,8 @@ class TestKuroSiwoLive:
             (("vv", "dem"), 2),
         ],
     )
-    def test_real_sample_is_3d(self, geobench_v2_root, bands, expected_channels):
-        del geobench_v2_root
+    def test_real_sample_is_3d(self, bands: tuple[str, ...] | None, expected_channels: int) -> None:
+        require_dataset_data("kuro_siwo")
         bench = get_bench_dataset_class("kuro_siwo")()
         ds = bench.get_dataset("train", bands=bands)
         sample = ds[0]

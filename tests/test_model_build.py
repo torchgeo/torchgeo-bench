@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 import torch
 
+from tests.support.models import bands as _bands
 from torchgeo_bench.config_schema import ModelConfig
 from torchgeo_bench.models.build import (
     RCFModelConfig,
@@ -19,28 +20,25 @@ from torchgeo_bench.models.rcf import RCFBench
 from torchgeo_bench.models.timm import TimmPatchBenchModel
 from torchgeo_bench.presets import build_model, load_model_preset
 
-from .test_bench_model import _bands
-
 
 def test_timm_builder_matches_direct_constructor() -> None:
     bands = _bands(3)
     config = TimmModelConfig(model_name="resnet18", pretrained=False)
-    torch.manual_seed(7)
-    expected = TimmPatchBenchModel(
-        bands=bands,
-        model_name="resnet18",
-        pretrained=False,
-        global_pool="avg",
-        normalization="identity",
-    )
-    torch.manual_seed(7)
-    actual = build_timm_model(config, bands, normalization="identity")
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(7)
+        expected = TimmPatchBenchModel(
+            bands=bands,
+            model_name="resnet18",
+            pretrained=False,
+            global_pool="avg",
+            normalization="identity",
+        ).eval()
+        torch.manual_seed(7)
+        actual = build_timm_model(config, bands, normalization="identity").eval()
 
     assert isinstance(actual, TimmPatchBenchModel)
-    assert all(
-        torch.equal(expected.state_dict()[key], value) for key, value in actual.state_dict().items()
-    )
-    inputs = torch.rand(2, 3, 32, 32)
+    torch.testing.assert_close(actual.state_dict(), expected.state_dict(), rtol=0, atol=0)
+    inputs = torch.rand(2, 3, 32, 32, generator=torch.Generator().manual_seed(8))
     with torch.inference_mode():
         assert torch.equal(expected(inputs), actual(inputs))
 
@@ -53,20 +51,21 @@ def test_timm_transformer_builder_constructs_without_checkpoint() -> None:
         target_size=224,
     )
     bands = _bands(3)
-    torch.manual_seed(13)
-    expected = TimmPatchBenchModel(
-        bands=bands,
-        model_name="vit_tiny_patch16_224",
-        pretrained=False,
-        auto_resize=True,
-        target_size=224,
-        normalization="identity",
-    ).eval()
-    torch.manual_seed(13)
-    model = build_timm_model(config, bands, normalization="identity").eval()
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(13)
+        expected = TimmPatchBenchModel(
+            bands=bands,
+            model_name="vit_tiny_patch16_224",
+            pretrained=False,
+            auto_resize=True,
+            target_size=224,
+            normalization="identity",
+        ).eval()
+        torch.manual_seed(13)
+        model = build_timm_model(config, bands, normalization="identity").eval()
 
     with torch.inference_mode():
-        inputs = torch.rand(2, 3, 32, 32)
+        inputs = torch.rand(2, 3, 32, 32, generator=torch.Generator().manual_seed(14))
         features = model(inputs)
         expected_features = expected(inputs)
 
@@ -94,9 +93,7 @@ def test_instantiate_routes_rcf_preset_to_explicit_builder() -> None:
 def test_rcf_builder_matches_direct_constructor() -> None:
     bands = _bands(3)
     config = RCFModelConfig(features=16, kernel_size=3, seed=7)
-    torch.manual_seed(11)
     expected = RCFBench(bands=bands, features=16, kernel_size=3, seed=7, normalization="identity")
-    torch.manual_seed(11)
     actual = build_rcf_model(config, bands, normalization="identity")
 
     assert isinstance(actual, RCFBench)

@@ -53,7 +53,7 @@ Train probabilities are in-sample, so their flag rates underestimate train noise
 With the core development dependencies installed:
 
 ```bash
-python -m pytest projects/cleanlab/tests
+python -m pytest tests/projects/cleanlab
 ```
 
 Artifact-safety and configuration tests do not require Cleanlab. Tests that exercise its actual issue-finding algorithms skip when it is not installed.

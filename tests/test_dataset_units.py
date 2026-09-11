@@ -1,106 +1,54 @@
 """Unit tests for dataset classes that don't require real data on disk."""
 
-import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import torch
 
-from torchgeo_bench.datasets._metadata import decode_metadata
 from torchgeo_bench.datasets.eurosat import EuroSAT, EuroSATSpatial
 from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
-from torchgeo_bench.datasets.geobench_v2 import _V2Dataset
 from torchgeo_bench.datasets.spacenet2 import SpaceNet2
 from torchgeo_bench.datasets.spacenet7 import SpaceNet7
 
 
-def test_metadata_accepts_json_text_and_bytes() -> None:
-    metadata = {"label": 3, "bands_order": ["red", "green", "blue"]}
-    payload = json.dumps(metadata)
-
-    assert decode_metadata(payload) == metadata
-    assert decode_metadata(payload.encode()) == metadata
-
-
-def test_metadata_rejects_python_expressions() -> None:
-    with pytest.raises(json.JSONDecodeError):
-        decode_metadata("dict(label=3, bands_order=['red'])")
-
-
-def test_v2_data_root_is_fixed() -> None:
-    assert _V2Dataset.data_root() == Path("data/geobenchv2")
-
-
 class TestFOTWCanonicalize:
-    def test_image_already_present(self):
-        ds = FOTW.__new__(FOTW)
-        sample = {"image": torch.zeros(3, 8, 8), "label": 0}
-        result = ds.canonicalize_sample(sample)
-        assert "image" in result
+    def test_existing_canonical_image_is_preserved(self) -> None:
+        image = torch.zeros(3, 8, 8)
+        image_b = torch.ones_like(image)
+        sample = {"image": image, "image_b": image_b, "label": 0}
+        result = FOTW().canonicalize_sample(sample)
+        assert result["image"] is image
+        assert result["label"] == 0
 
-    def test_image_b_becomes_image(self):
-        """Use the later acquisition for single-image segmentation."""
-        ds = FOTW.__new__(FOTW)
+    @pytest.mark.parametrize("has_image_a", [False, True])
+    def test_image_b_becomes_image(self, *, has_image_a: bool) -> None:
         img_b = torch.ones(3, 8, 8)
-        sample = {"image_b": img_b, "image_a": torch.zeros(3, 8, 8), "label": 1}
-        result = ds.canonicalize_sample(sample)
-        assert "image" in result
-        assert torch.equal(result["image"], img_b)
+        sample = {"image_b": img_b, "label": 1}
+        if has_image_a:
+            sample["image_a"] = torch.zeros_like(img_b)
+        result = FOTW().canonicalize_sample(sample)
+        assert result["image"] is img_b
+        assert result["label"] == 1
         assert "image_a" not in result
         assert "image_b" not in result
 
-    def test_image_b_only_no_image_a(self):
-        ds = FOTW.__new__(FOTW)
-        img_b = torch.full((3, 4, 4), 5.0)
-        sample = {"image_b": img_b, "label": 2}
-        result = ds.canonicalize_sample(sample)
-        assert torch.equal(result["image"], img_b)
 
+@pytest.mark.parametrize("dataset_cls", [SpaceNet2, SpaceNet7])
+class TestSpaceNetCanonicalize:
+    def test_mask_offset_and_reserved_zero(self, dataset_cls: type[SpaceNet2]) -> None:
+        mask = torch.tensor([[0, 1, 2], [2, 1, 0]])
+        image = torch.zeros(3, 2, 3)
+        result = dataset_cls().canonicalize_sample({"image": image, "mask": mask})
+        torch.testing.assert_close(result["mask"], torch.tensor([[0, 0, 1], [1, 0, 0]]))
+        assert result["image"] is image
+        assert int(result["mask"].max()) < dataset_cls.num_classes
 
-class TestSpaceNet2Canonicalize:
-    def test_mask_offset_reversed(self):
-        """Upstream ``{1: no-building, 2: building}`` maps to native ``{0, 1}``."""
-        ds = SpaceNet2.__new__(SpaceNet2)
-        mask = torch.tensor([[1, 2], [2, 1]])
-        result = ds.canonicalize_sample({"image": torch.zeros(3, 2, 2), "mask": mask})
-        assert torch.equal(result["mask"], torch.tensor([[0, 1], [1, 0]]))
-        assert int(result["mask"].max()) < SpaceNet2.num_classes
-
-    def test_reserved_zero_folds_into_no_building(self):
-        """Reserved class 0 must stay no-building, not become -1."""
-        ds = SpaceNet2.__new__(SpaceNet2)
-        mask = torch.tensor([[0, 1, 2]])
-        result = ds.canonicalize_sample({"image": torch.zeros(3, 1, 3), "mask": mask})
-        assert torch.equal(result["mask"], torch.tensor([[0, 0, 1]]))
-
-    def test_missing_mask_is_noop(self):
-        """Inference samples may have no mask."""
-        ds = SpaceNet2.__new__(SpaceNet2)
-        sample = {"image": torch.zeros(3, 4, 4)}
-        assert ds.canonicalize_sample(sample) == sample
-
-
-class TestSpaceNet7Canonicalize:
-    def test_mask_offset_reversed(self):
-        """Upstream ``{1: no-building, 2: building}`` maps to native ``{0, 1}``."""
-        ds = SpaceNet7.__new__(SpaceNet7)
-        mask = torch.tensor([[1, 2], [2, 1]])
-        result = ds.canonicalize_sample({"image": torch.zeros(3, 2, 2), "mask": mask})
-        assert torch.equal(result["mask"], torch.tensor([[0, 1], [1, 0]]))
-        assert int(result["mask"].max()) < SpaceNet7.num_classes
-
-    def test_reserved_zero_folds_into_no_building(self):
-        """Reserved class 0 must stay no-building, not become -1."""
-        ds = SpaceNet7.__new__(SpaceNet7)
-        mask = torch.tensor([[0, 1, 2]])
-        result = ds.canonicalize_sample({"image": torch.zeros(3, 1, 3), "mask": mask})
-        assert torch.equal(result["mask"], torch.tensor([[0, 0, 1]]))
-
-    def test_missing_mask_is_noop(self):
-        """Inference samples may have no mask."""
-        ds = SpaceNet7.__new__(SpaceNet7)
-        sample = {"image": torch.zeros(3, 4, 4)}
-        assert ds.canonicalize_sample(sample) == sample
+    def test_inference_sample_without_mask(self, dataset_cls: type[SpaceNet2]) -> None:
+        image = torch.zeros(3, 4, 4)
+        result = dataset_cls().canonicalize_sample({"image": image})
+        assert set(result) == {"image"}
+        assert result["image"] is image
 
 
 @pytest.mark.parametrize("dataset_cls", [EuroSAT, EuroSATSpatial])
@@ -109,35 +57,44 @@ def test_eurosat_rejects_unknown_split(dataset_cls: type[EuroSAT]) -> None:
         dataset_cls().get_dataset("invalid")
 
 
-class TestEuroSATMeta:
-    def test_get_dataset_mocked(self, monkeypatch):
-        captured = {}
-
-        class _FakeDS:
-            def __init__(self, **kwargs):
-                captured.update(kwargs)
-
-        monkeypatch.setattr(EuroSAT, "_tg_class", _FakeDS)
-        ds_inst = EuroSAT.__new__(EuroSAT)
-        ds_inst.get_dataset("train", bands=("red", "green", "blue"))
-        assert "split" in captured
-        assert captured["split"] == "train"
-        assert isinstance(captured["bands"], tuple)
-
-
-class TestEuroSATSpatialMeta:
-    def test_data_root_shared(self):
-        assert EuroSAT.data_root() == EuroSATSpatial.data_root()
-
-    def test_get_dataset_mocked(self, monkeypatch):
-
-        captured = {}
-
-        class _FakeDS:
-            def __init__(self, **kwargs):
-                captured.update(kwargs)
-
-        monkeypatch.setattr(EuroSATSpatial, "_tg_class", _FakeDS)
-        ds_inst = EuroSATSpatial.__new__(EuroSATSpatial)
-        ds_inst.get_dataset("test", bands=None)
-        assert captured["split"] == "test"
+@pytest.mark.parametrize("dataset_cls", [EuroSAT, EuroSATSpatial])
+@pytest.mark.parametrize("split", ["train", "val", "test"])
+@pytest.mark.parametrize(
+    ("bands", "expected_codes"),
+    [
+        (("blue", "red", "green"), ("B02", "B04", "B03")),
+        (
+            None,
+            (
+                "B01",
+                "B02",
+                "B03",
+                "B04",
+                "B05",
+                "B06",
+                "B07",
+                "B08",
+                "B09",
+                "B10",
+                "B11",
+                "B12",
+                "B8A",
+            ),
+        ),
+    ],
+)
+def test_eurosat_forwards_bands_split_and_transform(
+    monkeypatch: pytest.MonkeyPatch,
+    dataset_cls: type[EuroSAT],
+    split: str,
+    bands: tuple[str, ...] | None,
+    expected_codes: tuple[str, ...],
+) -> None:
+    upstream = MagicMock()
+    transform = torch.nn.Identity()
+    monkeypatch.setattr(dataset_cls, "_tg_class", upstream)
+    result = dataset_cls().get_dataset(split, bands=bands, partition="unused", transform=transform)
+    upstream.assert_called_once_with(
+        root=str(Path("data/eurosat")), split=split, bands=expected_codes, transforms=transform
+    )
+    assert result is upstream.return_value
