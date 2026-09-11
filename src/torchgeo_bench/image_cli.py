@@ -137,11 +137,7 @@ def main(argv: list[str] | None = None) -> None:
     """Run image, coordinate, download, and compute commands."""
     args = _parse_args(argv)
     if args.command == "run":
-        try:
-            _run(args)
-        except ValueError as error:  # allow-except: report configuration errors to the CLI user
-            print(f"error: {error}", file=sys.stderr)
-            raise SystemExit(2) from error
+        _run(args)
     elif args.command == "models":
         _show_catalog(args.name, _model_names(), _model_detail, "model")
     elif args.command == "datasets":

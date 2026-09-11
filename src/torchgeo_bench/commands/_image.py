@@ -5,6 +5,7 @@
 
 import argparse
 import json
+import sys
 from typing import Any
 
 import yaml
@@ -65,16 +66,20 @@ def _apply_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> dict[st
     """Apply known CLI fields with explicit section handling."""
     result = dict(base)
     for key, value in overrides.items():
-        if key == "model":
-            result[key] = value
-            continue
         if key in {"model", "input", "classification", "runtime", "output"}:
-            section = dict(result.get(key, {}))
+            original = result.get(key, {})
+            if not isinstance(original, dict):
+                raise ValueError(f"{key} must be a YAML mapping")
+            if key == "model":
+                result[key] = value
+                continue
+            section = dict(original)
             for nested_key, nested_value in value.items():
-                if isinstance(nested_value, dict) and isinstance(section.get(nested_key), dict):
-                    merged = dict(section[nested_key])
-                    merged.update(nested_value)
-                    section[nested_key] = merged
+                if isinstance(nested_value, dict):
+                    original_nested = section.get(nested_key, {})
+                    if not isinstance(original_nested, dict):
+                        raise ValueError(f"{key}.{nested_key} must be a YAML mapping")  # noqa: TRY004 - preserve the CLI configuration-error contract
+                    section[nested_key] = {**original_nested, **nested_value}
                 else:
                     section[nested_key] = nested_value
             result[key] = section
@@ -111,7 +116,17 @@ def _load_run(
 
 def run(args: argparse.Namespace, model_names: list[str], datasets: tuple[str, ...]) -> None:
     """Validate and execute one image benchmark."""
-    config = _load_run(args, model_names, datasets)
+    try:
+        config = _load_run(args, model_names, datasets)
+    except (
+        OSError,
+        ValueError,
+        yaml.YAMLError,
+    ) as error:  # allow-except: report config input failures before entering the benchmark runtime
+        path = getattr(args, "config", None)
+        source = f"{path}: " if path is not None else ""
+        print(f"error: {source}{error}", file=sys.stderr)
+        raise SystemExit(2) from error
     if getattr(args, "dry_run", False):
         print(yaml.safe_dump(config.model_dump_yaml(), sort_keys=False), end="")
         return
