@@ -41,6 +41,14 @@ cd torchgeo-bench
 uv sync --extra dev
 ```
 
+On a host limited to CUDA 12.8, install the matching runtime after syncing:
+
+```bash
+uv pip install --python .venv/bin/python -r requirements-cu128.txt
+```
+
+Use `.venv/bin/python` and `.venv/bin/torchgeo-bench` directly with this overlay; another `uv sync` restores the locked default PyTorch build.
+
 Requires Python 3.12+ and runs on **Linux**, **macOS**, and **Windows**. On
 Linux x86_64 the install automatically includes GPU-accelerated FAISS KNN
 (CUDA 12, driver R525+, also works on GPU-less machines); other platforms get
@@ -90,6 +98,32 @@ Results are appended to `results/models/<model name>.csv`, which **ship pre-popu
 See `examples/image-run.yaml` for a complete config and `run --config-help` for its schema. The standalone `profile` command writes JSON to stdout; redirect it to a separate file when needed.
 
 The previous interface remains available through `python -m torchgeo_bench.cli` for existing `key=value` scripts, `flops`, and coordinate workflows. Without an explicit `output=`, its profile and intrinsic-dimension rows retain their separate per-model files.
+
+## Handcrafted classification baseline
+
+The handcrafted model adds deterministic spectral and spatial measurements to the ImageStats baseline. `model.level=1`, `2`, and `3` select cumulative feature sets; the feature width depends on the input bands and available spectral indices.
+
+Download the classification datasets and run the level sweep from this checkout:
+
+```bash
+.venv/bin/python -m torchgeo_bench.cli download \
+  m-eurosat m-forestnet m-so2sat m-pv4ger m-brick-kiln m-bigearthnet \
+  benv2 treesatai so2sat forestnet eurosat eurosat-spatial resisc45
+.venv/bin/python -m experiments.run_handcrafted
+```
+
+The sweep includes ImageStats as level 0 and all 13 registered classification protocols, including multilabel datasets and EuroSAT's spatial split. It uses all bands with identity input normalization, otherwise retaining the normal 224px resize, KNN-5, validation-selected C, train-plus-validation final refit, and 200 bootstrap draws.
+
+Results go to separate `results/models/handcrafted_level*.csv` files and `imagestats_handcrafted_control.csv`. Feature lists and completion status are saved under `outputs/handcrafted/`. Resume skips matching completed rows; a missing linear or KNN result is still reported as a failure.
+
+Use `--levels 1 2`, `--datasets eurosat resisc45`, or `--dry-run` for a smaller run. The extractor also works through the normal CLI:
+
+```bash
+.venv/bin/python -m torchgeo_bench.image_cli run --model handcrafted_level2 \
+  --dataset eurosat --bands all --normalization none
+```
+
+The presets `handcrafted_level1`, `handcrafted_level2`, and `handcrafted_level3` work with the current image CLI and the experiment runner. The legacy config API also accepts `model=handcrafted model.level=1|2|3` through `python -m torchgeo_bench.cli run`.
 
 ## CoordBench — location encoders
 

@@ -1,0 +1,3 @@
+_target_: torchgeo_bench.models.HandcraftedBench
+name: handcrafted_level1
+level: 1
