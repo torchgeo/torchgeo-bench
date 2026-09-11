@@ -10,46 +10,7 @@ from collections.abc import Callable, Sequence
 
 from . import commands
 from .cli import add_profile_arguments
-
-_DATASETS = (
-    "m-eurosat",
-    "m-forestnet",
-    "m-so2sat",
-    "m-pv4ger",
-    "m-brick-kiln",
-    "m-bigearthnet",
-    "benv2",
-    "treesatai",
-    "so2sat",
-    "forestnet",
-    "caffe",
-    "burn_scars",
-    "cloudsen12",
-    "dynamic_earthnet",
-    "flair2",
-    "fotw",
-    "kuro_siwo",
-    "pastis",
-    "spacenet2",
-    "spacenet7",
-    "eurosat",
-    "eurosat-spatial",
-    "resisc45",
-)
-_SEGMENTATION_DATASETS = frozenset(
-    {
-        "caffe",
-        "burn_scars",
-        "cloudsen12",
-        "dynamic_earthnet",
-        "flair2",
-        "fotw",
-        "kuro_siwo",
-        "pastis",
-        "spacenet2",
-        "spacenet7",
-    }
-)
+from .datasets import get_dataset_task, list_datasets
 
 
 def _model_names() -> list[str]:
@@ -68,7 +29,7 @@ def _model_detail(name: str) -> str:
 
 def _dataset_detail(name: str) -> str:
     """Return lightweight metadata for a dataset catalog detail request."""
-    task = "segmentation" if name in _SEGMENTATION_DATASETS else "classification"
+    task = get_dataset_task(name)
     return f"name: {name}\ntask: {task}\n"
 
 
@@ -131,7 +92,7 @@ def _image_size(value: str) -> int | None:
 
 def _run(args: argparse.Namespace) -> None:
     """Validate and execute one image benchmark."""
-    commands._image.run(args, _model_names(), _DATASETS)
+    commands._image.run(args, _model_names(), tuple(list_datasets()))
 
 
 def _show_catalog(
@@ -158,7 +119,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "models":
         _show_catalog(args.name, _model_names(), _model_detail, "model")
     elif args.command == "datasets":
-        _show_catalog(args.name, _DATASETS, _dataset_detail, "dataset")
+        _show_catalog(args.name, list_datasets(), _dataset_detail, "dataset")
     elif args.command == "download":
         commands.download(args)
     elif args.command == "profile":
