@@ -7,6 +7,7 @@ import pytest
 import torch
 from torch import nn
 
+from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench import model_profile
 from torchgeo_bench.model_profile import (
     ProfileTiming,
@@ -16,6 +17,8 @@ from torchgeo_bench.model_profile import (
     measure_profile,
     profile_inference,
 )
+
+pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 
 
 def test_count_params_correct() -> None:
@@ -252,6 +255,26 @@ def test_cpu_budget_can_expire_during_warmup(monkeypatch: pytest.MonkeyPatch) ->
     assert model.training
 
 
+def test_cpu_zero_budget_disables_measurement(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = nn.Linear(2, 2)
+
+    def unexpected_forward(sample: torch.Tensor) -> torch.Tensor:
+        pytest.fail("A zero profiling budget must not execute the model")
+
+    monkeypatch.setattr(model, "forward", unexpected_forward)
+    result = measure_cpu_throughput(
+        model,
+        torch.ones(4, 2),
+        ProfileTiming(batch_size=2, n_warmup=1, n_measure=1),
+        time_budget_s=0.0,
+    )
+    assert result == {
+        "throughput_samples_per_sec_cpu": None,
+        "latency_ms_per_batch_p50_cpu": None,
+    }
+    assert model.training
+
+
 def test_cpu_invalid_settings() -> None:
     with pytest.raises(ValueError, match="non-empty batch"):
         profile_inference(nn.Identity(), torch.empty(0, 2), device=torch.device("cpu"))
@@ -296,16 +319,6 @@ def test_count_gflops_uses_one_frozen_no_grad_forward(*, outer_inference: bool) 
     assert gflops == pytest.approx(2 * 4 * 3 * 8 * 8 / 1e9)
 
 
-def test_count_gflops_propagates_execution_error() -> None:
-    class AssertionChainModel(nn.Module):
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            del x
-            raise RuntimeError("model execution failed")
-
-    with pytest.raises(RuntimeError, match="model execution failed"):
-        _count_gflops(AssertionChainModel(), torch.rand(1, 3, 8, 8))
-
-
 def test_profile_records_fixed_batch_and_precision() -> None:
     result = profile_inference(
         nn.Linear(4, 2),
@@ -321,26 +334,19 @@ def test_profile_records_fixed_batch_and_precision() -> None:
     assert result.input_shape == (3, 4)
     assert result.flops.status == "disabled"
     assert result.flops.gflops is None
+    assert result.throughput_samples_per_sec > 0
+    assert result.latency_ms_per_batch_p50 > 0
+    assert result.peak_gpu_mem_gb is None
+    assert result.reserved_gpu_mem_gb is None
+    values = result.as_dict()
+    assert values["gflops_status"] == "disabled"
+    assert values["gflops_convention"] == "one multiply-add is two operations"
+    assert values["gflops_coverage"] == "registered operators only; total coverage unverified"
 
 
 def test_profile_rejects_batch_on_wrong_device() -> None:
     with pytest.raises(ValueError, match="device must be"):
         profile_inference(nn.Linear(4, 2), torch.rand(2, 4), device=torch.device("meta"))
-
-
-def test_profile_cpu_reports_timing_and_memory_semantics() -> None:
-    result = profile_inference(
-        nn.Linear(4, 2),
-        torch.rand(2, 4),
-        device=torch.device("cpu"),
-        n_warmup=0,
-        n_measure=2,
-        count_flops=False,
-    )
-    assert result.throughput_samples_per_sec > 0
-    assert result.latency_ms_per_batch_p50 > 0
-    assert result.peak_gpu_mem_gb is None
-    assert result.reserved_gpu_mem_gb is None
 
 
 def test_profile_propagates_unsupported_model_flops() -> None:
@@ -448,21 +454,6 @@ def test_profile_rejects_invalid_settings() -> None:
         profile_inference(model, sample, device=torch.device("cpu"), n_measure=0)
     with pytest.raises(ValueError, match="precision"):
         profile_inference(model, sample, device=torch.device("cpu"), precision="int8")
-
-
-def test_profile_as_dict_includes_flop_metadata() -> None:
-    result = profile_inference(
-        nn.Linear(2, 2),
-        torch.rand(1, 2),
-        device=torch.device("cpu"),
-        n_warmup=0,
-        n_measure=1,
-        count_flops=False,
-    )
-    values = result.as_dict()
-    assert values["gflops_status"] == "disabled"
-    assert values["gflops_convention"] == "one multiply-add is two operations"
-    assert values["gflops_coverage"] == "registered operators only; total coverage unverified"
 
 
 def test_cpu_profile_restores_model_and_reports_metrics() -> None:

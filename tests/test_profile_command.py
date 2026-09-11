@@ -6,9 +6,7 @@
 import argparse
 import hashlib
 import json
-import sys
 from collections.abc import Iterator
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,9 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.utils.data import Dataset
 
-from torchgeo_bench import commands
 from torchgeo_bench.commands import _profile_runtime
-from torchgeo_bench.commands._profile import profile
 from torchgeo_bench.main import resolve_model_config
 
 
@@ -281,23 +277,49 @@ def test_profile_supplies_selected_training_dataset_to_empirical_rcf(
     assert record["profile"]["throughput_samples_per_sec"] > 0
 
 
-def test_profile_dispatches_shared_lazy_runtime(
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("batch_size", 0, "batch-size must be positive"),
+        ("warmup", -1, "warmup non-negative"),
+        ("measurements", 0, "measurements positive"),
+        ("seed", -1, "seed must be non-negative"),
+        ("image_size", 0, "image-size positive"),
+        ("model", "missing-model", "unknown model"),
+        ("dataset", "missing-dataset", "unknown dataset"),
+        ("device", "cuda:0", "CUDA is unavailable"),
+        ("bands", "red,,blue", "bands must be non-empty names"),
+    ],
+)
+def test_invalid_profile_request_fails_before_loading(
+    profile_args: argparse.Namespace,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    profile_args.model = "rcf"
+    profile_args.dataset = "m-eurosat"
+    setattr(profile_args, field, value)
+
+    def unexpected_load(**_kwargs: object) -> None:
+        pytest.fail("Invalid profile request reached dataset loading")
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(_profile_runtime, "get_datasets", unexpected_load)
+    with pytest.raises(SystemExit, match=message):
+        _profile_runtime.run(profile_args)
+
+
+def test_profile_rejects_an_incomplete_batch(
     profile_args: argparse.Namespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[argparse.Namespace] = []
-    monkeypatch.setattr(commands, "_profile_runtime", SimpleNamespace(run=calls.append))
-
-    profile(profile_args)
-
-    assert calls == [profile_args]
-
-
-def test_profile_dispatches_without_a_runtime_stub_export(
-    profile_args: argparse.Namespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delattr(commands, "_profile_runtime")
-    monkeypatch.delitem(sys.modules, "torchgeo_bench.commands._profile_runtime")
-    profile_args.batch_size = 0
-
-    with pytest.raises(SystemExit, match="batch-size must be positive"):
-        profile(profile_args)
+    profile_args.model = "rcf"
+    profile_args.dataset = "m-eurosat"
+    monkeypatch.setattr(
+        _profile_runtime,
+        "get_datasets",
+        lambda **_: (None, _Loader(torch.ones(1, 3, 8, 8)), None, None),
+    )
+    with pytest.raises(RuntimeError, match="batch size 1, requested 4"):
+        _profile_runtime.run(profile_args)

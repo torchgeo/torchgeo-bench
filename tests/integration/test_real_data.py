@@ -1,6 +1,6 @@
 """CPU-capable program smoke tests using real data under the invocation's data/ directory.
 
-Run with ``pytest -m slow tests/test_integration.py`` after downloading the datasets.
+Run with ``pytest -m slow tests/integration/test_real_data.py`` after downloading data.
 Missing datasets skip individually; present but incompatible or incomplete data must fail.
 """
 
@@ -10,26 +10,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests.support.cli import cli_output, run_cli
+from tests.support.data import require_dataset_data
 from torchgeo_bench.datasets import get_bench_dataset_class
 
-from .test_cli_program import run_cli
-
 pytestmark = pytest.mark.slow
-
-
-def require_dataset_data(name: str) -> None:
-    """Skip only when the requested dataset has not been supplied."""
-    if name.startswith("m-"):
-        paths = [
-            Path("data/classification_v1.0") / name,
-            Path("data/classification_v1.0_wds") / name,
-        ]
-    elif name in ("eurosat", "eurosat-spatial"):
-        paths = [Path("data/eurosat")]
-    else:
-        paths = [Path("data/geobenchv2") / name]
-    if not any(path.exists() for path in paths):
-        pytest.skip(f"{name} data not supplied; expected one of {paths}")
 
 
 @pytest.mark.parametrize(
@@ -62,8 +47,8 @@ def test_real_classification_program(
         f"output={output}",
     ]
     result = run_cli(*arguments, cwd=Path.cwd(), timeout=600)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert output.is_file(), result.stdout + result.stderr
+    assert result.returncode == 0, cli_output(result)
+    assert output.is_file(), cli_output(result)
     rows = pd.read_csv(output)
     assert set(rows["method"]) == {"knn5", "linear"}
     assert (rows["dataset"] == dataset).all()
@@ -77,7 +62,7 @@ def test_real_classification_program(
 
     before = output.read_bytes()
     resumed = run_cli(*arguments, "resume=true", cwd=Path.cwd(), timeout=120)
-    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert resumed.returncode == 0, cli_output(resumed)
     assert output.read_bytes() == before
 
 
@@ -103,8 +88,8 @@ def test_real_segmentation_program(tmp_path: Path, *, cached: bool) -> None:
         f"output={output}",
     ]
     result = run_cli(*arguments, cwd=Path.cwd(), timeout=600)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert output.is_file(), result.stdout + result.stderr
+    assert result.returncode == 0, cli_output(result)
+    assert output.is_file(), cli_output(result)
     rows = pd.read_csv(output)
     assert len(rows) == 1
     row = rows.iloc[0]
@@ -118,5 +103,5 @@ def test_real_segmentation_program(tmp_path: Path, *, cached: bool) -> None:
 
     before = output.read_bytes()
     resumed = run_cli(*arguments, "resume=true", cwd=Path.cwd(), timeout=120)
-    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert resumed.returncode == 0, cli_output(resumed)
     assert output.read_bytes() == before

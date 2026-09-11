@@ -16,8 +16,6 @@ from torchgeo_bench.main import (
     _resolve_segmentation_runtime_config,
     evaluate_profile,
 )
-from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput
-from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 
 class _ImageOnlyDataset(Dataset):
@@ -55,26 +53,6 @@ def test_filter_completed_metric_rows_partial_filtering() -> None:
     assert filtered == [{"dataset": "m-eurosat", "method": "knn5", "metric_name": "f1"}]
 
 
-def test_build_seg_probe_and_solver_rejects_empty_layers() -> None:
-    eval_cfg = OmegaConf.create(
-        {
-            "segmentation": {
-                "layers": [],
-                "head_type": "fpn",
-                "criterion": {"_target_": "torch.nn.CrossEntropyLoss"},
-            }
-        }
-    )
-    with pytest.raises(ValueError, match=r"requires eval\.segmentation\.layers"):
-        build_seg_probe_and_solver(
-            model=torch.nn.Identity(),
-            num_classes=2,
-            eval_cfg=eval_cfg,
-            device=torch.device("cpu"),
-            lr=1e-3,
-        )
-
-
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
@@ -102,21 +80,6 @@ def test_segmentation_runtime_config_rejects_invalid_values(
     error = TypeError if field == "cache_features" else ValueError
     with pytest.raises(error, match=message):
         _resolve_segmentation_runtime_config(cfg)
-
-
-def test_measure_cpu_throughput_budget_exceeded_returns_none_metrics() -> None:
-    model = torch.nn.Sequential(torch.nn.Conv2d(3, 4, kernel_size=1), torch.nn.ReLU())
-    sample = torch.rand(4, 3, 8, 8)
-    metrics = measure_cpu_throughput(
-        model,
-        sample,
-        timing=ProfileTiming(batch_size=2, n_warmup=1, n_measure=1),
-        time_budget_s=0.0,
-    )
-    assert metrics == {
-        "throughput_samples_per_sec_cpu": None,
-        "latency_ms_per_batch_p50_cpu": None,
-    }
 
 
 def test_evaluate_profile_adds_cpu_metrics_branch() -> None:

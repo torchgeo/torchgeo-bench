@@ -117,19 +117,21 @@ pip install -e ".[dev]"
 ### Running Tests
 
 ```bash
-pytest                                    # Run the fast suite (excludes `slow`)
-pytest tests/test_geobench_dataset.py -v  # Run a SINGLE test file
-pytest tests/test_geobench_dataset.py::TestClass::test_method -v  # Single function
+pytest                                    # Unit + offline toy integrations, with coverage
+pytest -m integration                     # Only offline integration tests
+pytest tests/test_config.py -v            # Run a single test file
+pytest tests/test_config.py::test_instantiate_preserves_bandspec_objects -v
 pytest -k "m-eurosat" -v                  # Run tests matching a pattern
 pytest --no-cov                           # Skip coverage for faster iteration
-pytest -m slow                            # Include the slow integration suite
+pytest -m slow                            # Only downloaded-data/weight tests
+pytest -m accuracy_check                  # Only model accuracy baselines
 ```
 
-The default `addopts` include `-m "not slow"`, so a bare `pytest` runs only the
-fast subset; use `-m slow` (or `-m ""` for everything) to run the integration
-tests, which load real data and run models.
+The default selection excludes `slow` and `accuracy_check`, not `integration`. Offline integration tests run real algorithms on small, disjoint on-disk splits and exercise both CLI interfaces without downloading data or weights. All tests live under `tests/`; shared helpers go in `tests/support/`, never another test module. Optional Cleanlab tests live in `tests/projects/cleanlab/`.
 
-Tests skip gracefully if GeoBench data is missing. V1 slow tests use the JSON shards under `./data/classification_v1.0_wds`; V2 and EuroSAT use `./data/geobenchv2` and `./data/eurosat`. Present legacy pickle caches must be replaced, not skipped or unpickled.
+Pytest-cov measures line and branch coverage, including Python subprocesses. `pytest` displays missing coverage and writes `coverage.xml`; `pytest --cov-report=html` also produces `htmlcov/`. Use `--no-cov` for targeted iteration. Tests all use the regular Ruff profile.
+
+Only optional real-data tests skip for missing datasets. V1 slow tests use the JSON shards under `./data/classification_v1.0_wds`; V2 and EuroSAT use `./data/geobenchv2` and `./data/eurosat`. Present legacy pickle caches must be replaced, not skipped or unpickled.
 
 ### Linting and Formatting
 

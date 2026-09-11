@@ -78,6 +78,20 @@ def explorer_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 "name": "tgeo_model",
                 "bands": "gray",
             },
+            {
+                "dataset": "m-eurosat",
+                "method": "unpublished",
+                "metric_name": "accuracy",
+                "metric_value": 1.0,
+                "name": "unsupported-method",
+            },
+            {
+                "dataset": "m-eurosat",
+                "method": "knn5",
+                "metric_name": "accuracy",
+                "metric_value": "",
+                "name": "unfinished",
+            },
         ],
     )
     _write_csv(
@@ -203,6 +217,15 @@ def test_mean_rank_leader_requires_complete_dataset_coverage() -> None:
     ]
     assert explorer._mean_rank_leader(rows, "linear") == "full"
     assert explorer._mean_rank_leader(rows, "knn5") is None
+
+
+def test_leader_uses_dataset_ranks_not_average_metric_values() -> None:
+    rows = [
+        {"dataset": dataset, "name": name, "method": "linear", "metric_value": score}
+        for dataset, first, second in [("a", 0.6, 0.5), ("b", 0.6, 0.5), ("c", 0.0, 1.0)]
+        for name, score in [("wins-most-datasets", first), ("higher-average-score", second)]
+    ]
+    assert explorer._mean_rank_leader(rows, "linear") == "wins-most-datasets"
 
 
 def test_backbone_display_does_not_strip_other_prefixes() -> None:

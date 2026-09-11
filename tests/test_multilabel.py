@@ -9,11 +9,14 @@ import numpy as np
 import pytest
 import torch
 from omegaconf import OmegaConf
+from sklearn.metrics import average_precision_score
 
 import torchgeo_bench.knn as knn
+from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
-from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits
+
+pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 
 
 @pytest.fixture
@@ -61,35 +64,40 @@ def singlelabel_data():
     }
 
 
-class TestKNNClassifierSingleLabel:
-    def test_fit_predict_shapes(self, singlelabel_data):
-        d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=5)
-        clf.fit(d["x_train"], d["y_train"])
+@pytest.mark.parametrize("metric", ["l2", "ip", "cosine"])
+@pytest.mark.parametrize("multi_label", [False, True])
+def test_cpu_knn_uses_l2_neighbor_votes(metric: str, *, multi_label: bool) -> None:
+    """The CPU contract is L2 even when GPU-only metric options are supplied."""
+    train = np.array([[0.0], [1.0], [3.0], [10.0]], dtype=np.float32)
+    queries = np.array([[0.2], [9.0]], dtype=np.float32)
+    labels = np.array([[1, 0], [1, 1], [0, 1], [0, 1]]) if multi_label else np.array([2, 2, 5, 5])
+    classifier = KNNClassifier(n_neighbors=3, metric=metric).fit(train, labels)
+    distances = ((queries[:, None] - train[None]) ** 2).sum(axis=2)
+    neighbors = np.argsort(distances, axis=1)[:, :3]
+    votes = labels[neighbors] if multi_label else np.eye(6)[labels[neighbors]]
+    probabilities = votes.mean(axis=1)
+    np.testing.assert_allclose(classifier.predict_proba(queries), probabilities, rtol=1e-6)
+    np.testing.assert_array_equal(
+        classifier.predict(queries),
+        probabilities > 0.5 if multi_label else probabilities.argmax(axis=1),
+    )
+    assert classifier.multi_label is multi_label
 
-        preds = clf.predict(d["x_test"])
-        assert preds.shape == (len(d["x_test"]),)
-        assert all(0 <= p < d["n_classes"] for p in preds)
 
-    def test_predict_proba_shapes(self, singlelabel_data):
-        d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=5)
-        clf.fit(d["x_train"], d["y_train"])
-
-        probs = clf.predict_proba(d["x_test"])
-        assert probs.shape == (len(d["x_test"]), d["n_classes"])
-        np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-6)
-
+class TestKNNClassifier:
     def test_k_clamped_to_train_size(self):
         rng = np.random.default_rng(0)
         X = rng.standard_normal((3, 8)).astype(np.float32)
         y = np.array([0, 1, 2], dtype=np.int64)
         clf = KNNClassifier(n_neighbors=10)
         clf.fit(X, y)
-        preds = clf.predict(X)
-        assert preds.shape == (3,)
+        np.testing.assert_allclose(clf.predict_proba(X), np.full((3, 3), 1 / 3), rtol=1e-6)
+        np.testing.assert_array_equal(clf.predict(X), np.zeros(3))
 
-    def test_gpu_k_is_clamped_before_faissknn_construction(self, monkeypatch: pytest.MonkeyPatch):
+    @pytest.mark.parametrize("multi_label", [False, True])
+    def test_gpu_backend_receives_clamped_k_and_options(
+        self, monkeypatch: pytest.MonkeyPatch, *, multi_label: bool
+    ) -> None:
         """FAISS GPU uses -1 neighbor IDs when asked for k > n_train."""
         constructed: list[object] = []
 
@@ -111,78 +119,20 @@ class TestKNNClassifierSingleLabel:
             ),
         )
         X = np.zeros((3, 2), dtype=np.float32)
-        y = np.array([0, 1, 2], dtype=np.int64)
+        y = np.array([[1, 0], [0, 1], [1, 1]]) if multi_label else np.array([2, 4, 2])
 
-        KNNClassifier(n_neighbors=10, device="cuda").fit(X, y)
+        KNNClassifier(n_neighbors=10, device="cuda:1", metric="cosine", use_fp16=True).fit(X, y)
 
         assert len(constructed) == 1
-        assert constructed[0].kwargs["n_neighbors"] == 3
+        expected = {"n_neighbors": 3, "device": "cuda:1", "metric": "cosine", "use_fp16": True}
+        if not multi_label:
+            expected["n_classes"] = 5
+        assert constructed[0].kwargs == expected
 
     @pytest.mark.parametrize("n_neighbors", [0, -1, True, 1.5])
     def test_rejects_invalid_neighbor_count(self, n_neighbors):
         with pytest.raises(ValueError, match="positive integer"):
             KNNClassifier(n_neighbors=n_neighbors)
-
-
-class TestKNNClassifierMultiLabel:
-    def test_fit_predict_shapes(self, multilabel_data):
-        d = multilabel_data
-        clf = KNNClassifier(n_neighbors=5)
-        clf.fit(d["x_train"], d["y_train"])
-
-        preds = clf.predict(d["x_test"])
-        assert preds.shape == (len(d["x_test"]), d["n_classes"])
-        assert set(np.unique(preds)).issubset({0, 1})
-
-    def test_predict_proba_shapes(self, multilabel_data):
-        d = multilabel_data
-        clf = KNNClassifier(n_neighbors=5)
-        clf.fit(d["x_train"], d["y_train"])
-
-        probs = clf.predict_proba(d["x_test"])
-        assert probs.shape == (len(d["x_test"]), d["n_classes"])
-        assert np.all(probs >= 0)
-        assert np.all(probs <= 1)
-
-
-class TestMultiLabelLogisticRegression:
-    def test_fit_and_predict_shapes(self, multilabel_data):
-        d = multilabel_data
-        X_t = torch.from_numpy(d["x_train"])
-        Y_t = torch.from_numpy(d["y_train"])
-        X_test = torch.from_numpy(d["x_test"])
-
-        clf = LogisticRegression(C=1.0, max_iter=100, multi_label=True, device="cpu")
-        clf.fit(X_t, Y_t)
-
-        preds = clf.predict(X_test)
-        assert preds.shape == (len(d["x_test"]), d["n_classes"])
-        assert set(np.unique(preds)).issubset({0, 1})
-
-        probs = clf.predict_proba(X_test)
-        assert probs.shape == (len(d["x_test"]), d["n_classes"])
-        assert np.all(probs >= 0)
-        assert np.all(probs <= 1)
-
-    def test_lbfgs_solver(self, multilabel_data):
-        d = multilabel_data
-        X_t = torch.from_numpy(d["x_train"])
-        Y_t = torch.from_numpy(d["y_train"])
-
-        clf = LogisticRegression(
-            C=1.0, max_iter=200, solver="lbfgs", multi_label=True, device="cpu"
-        )
-        clf.fit(X_t, Y_t)
-        assert clf._fitted
-
-    def test_adam_solver(self, multilabel_data):
-        d = multilabel_data
-        X_t = torch.from_numpy(d["x_train"])
-        Y_t = torch.from_numpy(d["y_train"])
-
-        clf = LogisticRegression(C=1.0, max_iter=50, solver="adam", multi_label=True, device="cpu")
-        clf.fit(X_t, Y_t)
-        assert clf._fitted
 
 
 class TestBootstrapMAP:
@@ -198,7 +148,13 @@ class TestBootstrapMAP:
         y_scores = rng.random((n, c)).astype(np.float32)
 
         mean, lo, hi = bootstrap_map(y_true, y_scores, n_boot=100, seed=42)
-        assert 0 <= lo <= mean <= hi <= 1.0
+        draws = np.random.default_rng(42).integers(0, n, size=(100, n))
+        reference = np.array(
+            [average_precision_score(y_true[idx], y_scores[idx], average="micro") for idx in draws],
+            dtype=np.float32,
+        )
+        assert mean == pytest.approx(average_precision_score(y_true, y_scores, average="micro"))
+        np.testing.assert_allclose([lo, hi], np.percentile(reference, [2.5, 97.5]))
 
     def test_perfect_scores(self):
         from torchgeo_bench import bootstrap_map
@@ -206,52 +162,14 @@ class TestBootstrapMAP:
         y_true = np.eye(5, dtype=np.float32)
         y_scores = np.eye(5, dtype=np.float32)
 
-        mean, _lo, _hi = bootstrap_map(y_true, y_scores, n_boot=50, seed=0)
-        assert mean == pytest.approx(1.0)
+        assert bootstrap_map(y_true, y_scores, n_boot=50, seed=0) == pytest.approx((1.0, 1.0, 1.0))
 
 
-_cuda_available = pytest.mark.skipif(
-    not __import__("torch").cuda.is_available(), reason="CUDA not available"
-)
+_cuda_available = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 _faissknn_available = pytest.mark.skipif(
     not knn.gpu_faiss_available(),
     reason="GPU-enabled FAISS is not installed",
 )
-
-
-class TestKNNMetricParam:
-    @pytest.mark.parametrize("metric", ["l2", "ip", "cosine"])
-    def test_metric_singlelabel_shapes(self, singlelabel_data, metric):
-        d = singlelabel_data
-        clf = KNNClassifier(n_neighbors=3, device="cpu", metric=metric)
-        clf.fit(d["x_train"], d["y_train"])
-        preds = clf.predict(d["x_test"])
-        probs = clf.predict_proba(d["x_test"])
-        assert preds.shape == (len(d["x_test"]),)
-        assert probs.shape == (len(d["x_test"]), d["n_classes"])
-        np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-5)
-
-    @pytest.mark.parametrize("metric", ["l2", "ip", "cosine"])
-    def test_metric_multilabel_shapes(self, multilabel_data, metric):
-        d = multilabel_data
-        clf = KNNClassifier(n_neighbors=3, device="cpu", metric=metric)
-        clf.fit(d["x_train"], d["y_train"])
-        preds = clf.predict(d["x_test"])
-        probs = clf.predict_proba(d["x_test"])
-        assert preds.shape == (len(d["x_test"]), d["n_classes"])
-        assert probs.shape == (len(d["x_test"]), d["n_classes"])
-        assert np.all((probs >= 0) & (probs <= 1))
-
-    def test_cosine_uses_normalized_distance(self, singlelabel_data):
-        """On unit-length inputs, cosine and L2 have the same neighbor ordering."""
-        d = singlelabel_data
-        X_train = d["x_train"] / (np.linalg.norm(d["x_train"], axis=1, keepdims=True) + 1e-8)
-        X_test = d["x_test"] / (np.linalg.norm(d["x_test"], axis=1, keepdims=True) + 1e-8)
-        clf_l2 = KNNClassifier(n_neighbors=3, device="cpu", metric="l2")
-        clf_cos = KNNClassifier(n_neighbors=3, device="cpu", metric="cosine")
-        clf_l2.fit(X_train, d["y_train"])
-        clf_cos.fit(X_train, d["y_train"])
-        np.testing.assert_array_equal(clf_l2.predict(X_test), clf_cos.predict(X_test))
 
 
 class TestKNNGPUPath:

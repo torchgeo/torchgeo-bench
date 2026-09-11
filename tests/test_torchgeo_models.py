@@ -1,6 +1,7 @@
 """Tests for torchgeo model wrappers and preprocessing."""
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import torch
@@ -14,7 +15,6 @@ from torchgeo_bench.datasets.m_so2sat import MSo2Sat
 from torchgeo_bench.datasets.resisc45 import RESISC45
 from torchgeo_bench.models._input_units import InputUnit
 from torchgeo_bench.models.torchgeo_models import (
-    _DOFA_SAR_WAVELENGTH_UM,
     TorchGeoCromaBench,
     TorchGeoDOFABench,
     TorchGeoPanopticonBench,
@@ -76,12 +76,12 @@ def _s2_multispectral_bands() -> list[BandSpec]:
     ]
 
 
-def test_factory_resolution_failure():
+def test_factory_resolution_failure() -> None:
     with pytest.raises(ValueError, match="factory function"):
         _resolve_torchgeo_factory("torchgeo.models.NotARealModel")
 
 
-def test_weights_resolution_failure(monkeypatch):
+def test_weights_resolution_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     class _FakeWeights:
         REAL = object()
 
@@ -93,16 +93,29 @@ def test_weights_resolution_failure(monkeypatch):
 
 
 @pytest.mark.parametrize("in_chans", [1, 12])
-def test_first_conv_adaptation(in_chans: int):
-    model = nn.Sequential(nn.Conv2d(3, 16, 3))
+def test_first_conv_adaptation(in_chans: int) -> None:
+    model = nn.Sequential(nn.Conv2d(3, 16, 3, stride=2, padding=1))
+    original = model[0]
+    with torch.no_grad():
+        original.weight.copy_(torch.arange(original.weight.numel()).reshape_as(original.weight))
+        original.bias.copy_(torch.arange(16))
     _adapt_first_conv(model, "0", in_chans=in_chans)
     assert model[0].in_channels == in_chans
+    expected = (
+        original.weight.sum(dim=1, keepdim=True)
+        if in_chans == 1
+        else original.weight.repeat(1, 4, 1, 1) / 4
+    )
+    torch.testing.assert_close(model[0].weight, expected)
+    torch.testing.assert_close(model[0].bias, original.bias)
+    assert model[0].stride == (2, 2)
+    assert model[0].padding == (1, 1)
 
 
 @pytest.mark.parametrize("normalize_cls", [Normalize, NormalizeV2])
 def test_normalize_transform_extraction(normalize_cls: type[nn.Module]) -> None:
     class _Weights:
-        def transforms(self):
+        def transforms(self) -> nn.Sequential:
             return nn.Sequential(
                 nn.Identity(),
                 normalize_cls(mean=[0.1, 0.2, 0.3], std=[0.4, 0.5, 0.6]),
@@ -117,15 +130,17 @@ def test_normalize_transform_extraction(normalize_cls: type[nn.Module]) -> None:
     assert tuple(norm.std) == pytest.approx((0.4, 0.5, 0.6))
 
 
-def test_normalize_transform_none_when_absent():
+def test_normalize_transform_none_when_absent() -> None:
     class _Weights:
-        def transforms(self):
+        def transforms(self) -> nn.Sequential:
             return nn.Sequential(nn.Identity())
 
     assert _extract_normalize_transforms(_Weights()) is None
 
 
-def install_tiny_scalemae_factory(monkeypatch, transforms: nn.Module | None = None):
+def install_tiny_scalemae_factory(
+    monkeypatch: pytest.MonkeyPatch, transforms: nn.Module | None = None
+) -> list[tuple[dict[str, Any], nn.Module]]:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _PatchEmbed(nn.Module):
@@ -146,9 +161,9 @@ def install_tiny_scalemae_factory(monkeypatch, transforms: nn.Module | None = No
             patches = torch.ones(batch, 4, 8, device=images.device)
             return torch.cat([cls, patches], dim=1)
 
-    calls: list[tuple[dict, _TinyScaleMAE]] = []
+    calls: list[tuple[dict[str, Any], nn.Module]] = []
 
-    def factory(*, weights, **kwargs):
+    def factory(*, weights: object, **kwargs: Any) -> _TinyScaleMAE:
         del weights
         backbone = _TinyScaleMAE(**kwargs)
         calls.append((kwargs, backbone))
@@ -165,7 +180,7 @@ def install_tiny_scalemae_factory(monkeypatch, transforms: nn.Module | None = No
     return calls
 
 
-def test_scalemae_pooling_cls_and_mean(monkeypatch):
+def test_scalemae_pooling_cls_and_mean(monkeypatch: pytest.MonkeyPatch) -> None:
     install_tiny_scalemae_factory(monkeypatch)
 
     bands = _rgb_bands()
@@ -179,7 +194,7 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
         normalization="identity",
         pool="mean",
     )
-    sample = torch.rand(2, 3, 64, 64)
+    sample = torch.zeros(2, 3, 64, 64)
     cls_out = cls_model.forward_patch_features(sample)
     mean_out = mean_model.forward_patch_features(sample)
     assert cls_out.shape == (2, 8)
@@ -188,7 +203,9 @@ def test_scalemae_pooling_cls_and_mean(monkeypatch):
     assert torch.allclose(mean_out, torch.full_like(mean_out, 1.0))
 
 
-def test_scalemae_constructs_selected_grid_without_adapting_rgb_projection(monkeypatch):
+def test_scalemae_constructs_selected_grid_without_adapting_rgb_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     calls = install_tiny_scalemae_factory(monkeypatch)
@@ -215,7 +232,9 @@ def test_scalemae_rejects_non_rgb_order() -> None:
         TorchGeoScaleMAEBench(bands=list(reversed(_rgb_bands())))
 
 
-def test_scalemae_uses_bandspec_zscore_instead_of_checkpoint_transform(monkeypatch):
+def test_scalemae_uses_bandspec_zscore_instead_of_checkpoint_transform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     checkpoint_transform = nn.Sequential(
         Normalize(mean=[0.0], std=[10000.0]),
         Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -228,7 +247,7 @@ def test_scalemae_uses_bandspec_zscore_instead_of_checkpoint_transform(monkeypat
     assert torch.allclose(normalized, torch.zeros_like(normalized))
 
 
-def test_torchgeo_resnet_forward_shape(monkeypatch):
+def test_torchgeo_resnet_removes_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _TinyResNet(nn.Module):
@@ -236,11 +255,11 @@ def test_torchgeo_resnet_forward_shape(monkeypatch):
             super().__init__()
             self.conv1 = nn.Conv2d(3, 8, 3, padding=1)
             self.pool = nn.AdaptiveAvgPool2d(1)
-            self.fc = nn.Identity()
+            self.fc = nn.Linear(8, 3)
 
         def forward(self, images: torch.Tensor) -> torch.Tensor:
             feats = self.pool(self.conv1(images))
-            return feats.flatten(1)
+            return self.fc(feats.flatten(1))
 
     monkeypatch.setattr(
         tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
@@ -252,9 +271,10 @@ def test_torchgeo_resnet_forward_shape(monkeypatch):
     )
 
     model = TorchGeoResNetBench(bands=_rgb_bands(), normalization="identity")
-    out = model.forward_patch_features(torch.rand(2, 3, 64, 64))
-    assert out.ndim == 2
-    assert out.shape[0] == 2
+    out = model.forward_patch_features(
+        torch.rand(2, 3, 64, 64, generator=torch.Generator().manual_seed(0))
+    )
+    assert out.shape == (2, 8)
     assert torch.isfinite(out).all()
 
 
@@ -271,7 +291,7 @@ def test_dofa_wavelengths_default_sar_bands_to_zhu_xlab_placeholder() -> None:
     """
     bands = [*_s2_multispectral_bands()[:3], _sar_band("vh"), _sar_band("vv")]
     wavelengths = _resolve_dofa_wavelengths(bands, None)
-    assert wavelengths[-2:] == [_DOFA_SAR_WAVELENGTH_UM, _DOFA_SAR_WAVELENGTH_UM]
+    assert wavelengths[-2:] == [3.75, 3.75]
     assert wavelengths[:3] == [b.wavelength_um for b in bands[:3]]
 
 
@@ -327,13 +347,27 @@ def test_dofa_wavelengths_fall_back_to_s2_table_for_landsat_bands() -> None:
     assert wavelengths == [S2_WAVELENGTHS_UM["nir"], S2_WAVELENGTHS_UM["swir1"]]
 
 
-def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_torchgeo_dofa_forwards_wavelengths_and_resizes(monkeypatch: pytest.MonkeyPatch) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _TinyDOFA(nn.Module):
         def forward_features(self, images: torch.Tensor, wavelengths: list[float]) -> torch.Tensor:
-            assert len(wavelengths) == images.shape[1]
-            return torch.ones(images.shape[0], 8, device=images.device)
+            assert images.shape == (2, 12, 224, 224)
+            assert wavelengths == [
+                0.443,
+                0.490,
+                0.560,
+                0.665,
+                0.705,
+                0.740,
+                0.783,
+                0.842,
+                0.865,
+                0.945,
+                1.61,
+                2.19,
+            ]
+            return images.mean(dim=(2, 3))
 
     monkeypatch.setattr(
         tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyDOFA()
@@ -348,13 +382,14 @@ def test_torchgeo_dofa_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
         bands=_s2_multispectral_bands(),
         normalization="identity",
     )
-    out = model.forward_patch_features(torch.rand(2, 12, 64, 64))
-    assert out.ndim == 2
-    assert out.shape == (2, 8)
-    assert torch.isfinite(out).all()
+    images = torch.arange(24, dtype=torch.float32).reshape(2, 12, 1, 1).expand(2, 12, 64, 64)
+    out = model.forward_patch_features(images)
+    torch.testing.assert_close(out, torch.arange(24, dtype=torch.float32).reshape(2, 12))
 
 
-def test_torchgeo_croma_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_torchgeo_croma_pools_optical_tokens_then_applies_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _TinyCroma(nn.Module):
@@ -363,12 +398,16 @@ def test_torchgeo_croma_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
             self.attn_bias = torch.zeros(1)
 
         def s2_encoder(self, imgs: torch.Tensor, attn_bias: torch.Tensor) -> torch.Tensor:
-            del attn_bias
+            assert attn_bias is self.attn_bias
+            assert imgs.shape == (2, 12, 120, 120)
+            torch.testing.assert_close(
+                imgs[:, :, 0, 0], torch.arange(12, dtype=torch.float32).expand(2, 12)
+            )
             batch = imgs.shape[0]
-            return torch.ones(batch, 4, 8, device=imgs.device)
+            return torch.arange(32, dtype=torch.float32).reshape(1, 4, 8).expand(batch, 4, 8)
 
         def s2_GAP_FFN(self, x: torch.Tensor) -> torch.Tensor:
-            return x
+            return x + 3
 
     monkeypatch.setattr(
         tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyCroma()
@@ -380,23 +419,28 @@ def test_torchgeo_croma_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     model = TorchGeoCromaBench(
-        bands=_s2_multispectral_bands(),
+        bands=list(reversed(_s2_multispectral_bands())),
         normalization="identity",
     )
-    out = model.forward_patch_features(torch.rand(2, 12, 64, 64))
-    assert out.ndim == 2
-    assert out.shape == (2, 8)
-    assert torch.isfinite(out).all()
+    images = torch.arange(11, -1, -1, dtype=torch.float32).view(1, 12, 1, 1).expand(2, 12, 64, 64)
+    out = model.forward_patch_features(images)
+    torch.testing.assert_close(out, torch.arange(15, 23, dtype=torch.float32).expand(2, 8))
 
 
-def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_torchgeo_panopticon_forwards_batched_wavelength_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
 
     class _TinyPanopticon(nn.Module):
         def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
             imgs = batch["imgs"]
             chn_ids = batch["chn_ids"]
-            assert chn_ids.shape[0] == imgs.shape[0]
+            assert imgs.shape == (2, 12, 224, 224)
+            expected_ids = torch.tensor(
+                [443, 490, 560, 665, 705, 740, 783, 842, 865, 945, 1610, 2190.0]
+            ).expand(2, 12)
+            torch.testing.assert_close(chn_ids, expected_ids)
             return imgs.mean(dim=(2, 3))
 
     monkeypatch.setattr(
@@ -412,10 +456,9 @@ def test_torchgeo_panopticon_forward_shape(monkeypatch: pytest.MonkeyPatch) -> N
         bands=_s2_multispectral_bands(),
         normalization="identity",
     )
-    out = model.forward_patch_features(torch.rand(2, 12, 64, 64))
-    assert out.ndim == 2
-    assert out.shape == (2, 12)
-    assert torch.isfinite(out).all()
+    images = torch.arange(24, dtype=torch.float32).view(2, 12, 1, 1).expand(2, 12, 64, 64)
+    out = model.forward_patch_features(images)
+    torch.testing.assert_close(out, torch.arange(24, dtype=torch.float32).reshape(2, 12))
 
 
 def test_resolve_panopticon_chn_ids_sar_and_optical() -> None:
@@ -449,7 +492,7 @@ def test_torchgeo_panopticon_model_native_raises(monkeypatch: pytest.MonkeyPatch
     native = TorchGeoPanopticonBench(bands=bands, normalization="model_native")
 
     with pytest.raises(ValueError, match="model_native normalisation is undefined"):
-        native.normalize_inputs(torch.rand(2, len(bands), 32, 32) * 5000)
+        native.normalize_inputs(torch.full((2, len(bands), 32, 32), 5000.0))
 
 
 @pytest.mark.parametrize("normalize_cls", [Normalize, NormalizeV2])
@@ -605,7 +648,9 @@ def _dn_bands() -> list[BandSpec]:
     ]
 
 
-def test_adapt_first_conv_fallback_on_timm_not_implemented(monkeypatch):
+def test_adapt_first_conv_fallback_on_timm_not_implemented(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Use averaging when timm cannot adapt a multispectral checkpoint."""
     from timm.models import _manipulate
 
@@ -615,44 +660,22 @@ def test_adapt_first_conv_fallback_on_timm_not_implemented(monkeypatch):
         lambda *a, **kw: (_ for _ in ()).throw(NotImplementedError()),
     )
     model = nn.Sequential(nn.Conv2d(13, 16, 3))
+    with torch.no_grad():
+        model[0].weight.copy_(torch.arange(model[0].weight.numel()).reshape_as(model[0].weight))
+    weights = model[0].weight.detach().clone()
+    bias = model[0].bias.detach().clone()
     _adapt_first_conv(model, "0", in_chans=3)
     assert model[0].in_channels == 3
+    expected = weights.mean(dim=1, keepdim=True).expand(-1, 3, -1, -1) * (13 / 3)
+    torch.testing.assert_close(model[0].weight, expected)
+    torch.testing.assert_close(model[0].bias, bias)
 
 
-def test_adapt_first_conv_noop_same_channels():
+def test_adapt_first_conv_noop_same_channels() -> None:
     model = nn.Sequential(nn.Conv2d(3, 16, 3))
-    original_weight = model[0].weight.data.clone()
+    original = model[0]
     _adapt_first_conv(model, "0", in_chans=3)
-    assert torch.equal(model[0].weight.data, original_weight)
-
-
-def test_normalize_inputs_bandspec_zscore_no_unit_conversion(monkeypatch):
-    """Z-score raw sensor values directly; unit conversion would invalidate BandSpec statistics."""
-    import torchgeo_bench.models.torchgeo_models as tg_models
-
-    class _TinyResNet(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.conv1 = nn.Conv2d(3, 4, 1)
-            self.pool = nn.AdaptiveAvgPool2d(1)
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            return self.pool(self.conv1(x)).flatten(1)
-
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _: lambda weights: _TinyResNet()
-    )
-    monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_weights", lambda *_: SimpleNamespace(transforms=nn.Identity())
-    )
-
-    bands = _dn_bands()
-    model = TorchGeoResNetBench(bands=bands, normalization="bandspec_zscore")
-
-    # Use the raw band mean so any extra unit conversion breaks the zero z-score.
-    x = torch.full((1, 3, 8, 8), 1200.0)
-    normed = model.normalize_inputs(x)
-    assert torch.allclose(normed, torch.zeros_like(normed), atol=1e-4)
+    assert model[0] is original
 
 
 def test_weights_normalize_only_applies_under_model_native(

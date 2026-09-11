@@ -4,7 +4,10 @@ import numpy as np
 import pytest
 import torch
 
+from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench.linear import LogisticRegression
+
+pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 
 
 def _xy(
@@ -86,40 +89,45 @@ def test_fit_xy_length_mismatch_raises():
         model.fit(torch.randn(10, 4), torch.zeros(5, dtype=torch.long))
 
 
-def test_fit_and_predict_singlelabel():
-    X, y = _xy()
-    model = LogisticRegression(C=1.0, max_iter=50, random_state=0)
-    model.fit(X, y)
-    preds = model.predict(X)
-    assert preds.shape == (len(X),)
-    assert set(preds).issubset({0, 1, 2})
+@pytest.mark.parametrize("solver", ["lbfgs", "adam"])
+@pytest.mark.parametrize("multi_label", [False, True])
+def test_fitted_model_probabilities_follow_learned_coefficients(
+    solver: str, *, multi_label: bool
+) -> None:
+    X, y = _xy_ml() if multi_label else _xy()
+    if not multi_label:
+        y = torch.tensor([2, 7, 11])[y]
+    model = LogisticRegression(
+        C=1.0, solver=solver, lr=0.1, max_iter=50, random_state=0, multi_label=multi_label
+    )
+    assert model.fit(X, y) is model
+    classes = np.arange(y.shape[1]) if multi_label else np.array([2, 7, 11])
+    np.testing.assert_array_equal(model.classes_, classes)
+    assert model.coef_.shape == (len(classes), X.shape[1])
+    assert model.intercept_.shape == (len(classes),)
+    assert np.any(model.coef_ != 0)
+    assert model.n_iter_ > 0
 
-
-def test_predict_proba_shape_and_range():
-    X, y = _xy()
-    model = LogisticRegression(C=1.0, max_iter=30, random_state=0)
-    model.fit(X, y)
-    proba = model.predict_proba(X)
-    assert proba.shape == (len(X), 3)
-    assert np.all(proba >= 0)
-    assert np.all(proba <= 1)
-    assert np.allclose(proba.sum(axis=1), 1.0, atol=1e-5)
-
-
-def test_decision_function_shape():
-    X, y = _xy()
-    model = LogisticRegression(C=1.0, max_iter=30, random_state=0)
-    model.fit(X, y)
     logits = model.decision_function(X)
-    assert logits.shape == (len(X), 3)
-
-
-def test_coef_intercept_shapes():
-    X, y = _xy(d=8, n_classes=3)
-    model = LogisticRegression(C=1.0, max_iter=10, random_state=0)
-    model.fit(X, y)
-    assert model.coef_.shape == (3, 8)
-    assert model.intercept_.shape == (3,)
+    np.testing.assert_allclose(
+        logits, X.numpy() @ model.coef_.T + model.intercept_, rtol=1e-5, atol=1e-6
+    )
+    if multi_label:
+        expected = 1 / (1 + np.exp(-logits))
+    else:
+        shifted = logits - logits.max(axis=1, keepdims=True)
+        expected = np.exp(shifted) / np.exp(shifted).sum(axis=1, keepdims=True)
+    np.testing.assert_allclose(model.predict_proba(X), expected, rtol=1e-6)
+    np.testing.assert_array_equal(
+        model.predict(X), expected > 0.5 if multi_label else classes[expected.argmax(axis=1)]
+    )
+    if multi_label:
+        loss = np.mean(np.logaddexp(0, logits) - y.numpy() * logits)
+        assert loss < np.log(2)
+    else:
+        target_columns = np.searchsorted(classes, y.numpy())
+        loss = -np.log(expected[np.arange(len(y)), target_columns]).mean()
+        assert loss < np.log(len(classes))
 
 
 def test_coef_before_fit_raises():
@@ -128,29 +136,11 @@ def test_coef_before_fit_raises():
         _ = model.coef_
 
 
-def test_fit_and_predict_multilabel():
-    X, y = _xy_ml()
-    model = LogisticRegression(C=1.0, max_iter=50, random_state=0, multi_label=True)
-    model.fit(X, y)
-    preds = model.predict(X)
-    assert preds.shape == (len(X), 4)
-    assert set(preds.flatten()).issubset({0, 1})
-
-
-def test_predict_proba_multilabel_range():
-    X, y = _xy_ml()
-    model = LogisticRegression(C=1.0, max_iter=30, random_state=0, multi_label=True)
-    model.fit(X, y)
-    proba = model.predict_proba(X)
-    assert proba.shape == (len(X), 4)
-    assert np.all(proba >= 0)
-    assert np.all(proba <= 1)
-
-
-def test_predict_proba_before_fit_raises():
+@pytest.mark.parametrize("method", ["predict", "predict_proba", "decision_function"])
+def test_inference_before_fit_raises(method: str) -> None:
     model = LogisticRegression()
     with pytest.raises(RuntimeError, match="not been fit"):
-        model.predict_proba(torch.randn(5, 4))
+        getattr(model, method)(torch.zeros(5, 4))
 
 
 def test_predict_proba_non_tensor_raises():
@@ -167,20 +157,6 @@ def test_predict_proba_wrong_ndim_raises():
     model.fit(X, y)
     with pytest.raises(ValueError, match="X must be 2D"):
         model.predict_proba(torch.randn(5, 4, 4))
-
-
-def test_decision_function_before_fit_raises():
-    model = LogisticRegression()
-    with pytest.raises(RuntimeError, match="not been fit"):
-        model.decision_function(torch.randn(5, 4))
-
-
-def test_lbfgs_solver_fits():
-    X, y = _xy(n=40, d=6, n_classes=2)
-    model = LogisticRegression(C=1.0, solver="lbfgs", max_iter=20, random_state=0)
-    model.fit(X, y)
-    preds = model.predict(X)
-    assert preds.shape == (40,)
 
 
 @pytest.mark.parametrize("multi_label", [False, True])

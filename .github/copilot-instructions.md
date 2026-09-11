@@ -56,11 +56,13 @@ commands** (or use `conda run -n torchgeo-bench …`). The `Makefile` targets
 conda activate torchgeo-bench                                       # do this first
 conda run -n torchgeo-bench uv sync --extra dev                     # install deps + dev tools
 conda run -n torchgeo-bench torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
-conda run -n torchgeo-bench pytest                                  # full suite (skips `slow` by default)
-conda run -n torchgeo-bench pytest tests/test_geobench_dataset.py -v  # one file
-conda run -n torchgeo-bench pytest tests/test_geobench_dataset.py::TestClass::test_method -v
+conda run -n torchgeo-bench pytest                                  # unit + toy integration suite with coverage
+conda run -n torchgeo-bench pytest -m integration                  # offline toy workflows only
+conda run -n torchgeo-bench pytest tests/test_config.py -v           # one file
+conda run -n torchgeo-bench pytest tests/test_config.py::test_instantiate_preserves_bandspec_objects -v
 conda run -n torchgeo-bench pytest -k "m-eurosat" -v                # by keyword
-conda run -n torchgeo-bench pytest -m slow                          # include integration tests (load real data)
+conda run -n torchgeo-bench pytest -m slow                          # optional real-data/weight tests
+conda run -n torchgeo-bench pytest -m accuracy_check                # optional model accuracy baselines
 conda run -n torchgeo-bench pytest --no-cov                         # faster iteration (skip coverage)
 conda run -n torchgeo-bench ruff check . --fix                      # lint + autofix
 conda run -n torchgeo-bench ruff format .                           # format
@@ -69,11 +71,11 @@ conda run -n torchgeo-bench ruff format .                           # format
 If the env is already activated you can drop the `conda run -n torchgeo-bench`
 prefix and call the tools directly (`pytest`, `ruff …`, `torchgeo-bench run …`).
 
-`pyproject.toml` configures pytest with `--cov=torchgeo_bench` and
-`-m "not slow"` by default; the `slow` marker is for integration tests that
-load real datasets.
+All test cases live in `tests/`, including `tests/projects/cleanlab/`; shared fixtures and helpers belong in `tests/support/`, not another test module. Every test uses the normal Ruff profile. The default suite includes offline `integration` tests on small, disjoint on-disk splits and excludes `slow` and `accuracy_check`.
 
-Tests skip gracefully if data is missing — they look under `data/` from CWD:
+Pytest-cov measures lines and branches, including Python subprocesses, and writes `coverage.xml`. Use `pytest --cov-report=html` for `htmlcov/`, or `--no-cov` for targeted iteration. CI saves coverage artifacts and uploads to Codecov.
+
+Optional real-data tests skip if data is missing and look under `data/` from CWD:
 - V1 → `data/classification_v1.0_wds/`
 - V2 → `data/geobenchv2/<dataset>/`
 - EuroSAT → `data/eurosat/`

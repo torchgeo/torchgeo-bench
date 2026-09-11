@@ -6,16 +6,12 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-import torch
 
-from .test_cli_program import run_cli
-from .test_integration import require_dataset_data
-
-_DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
+from tests.support.cli import run_cli
+from tests.support.data import require_dataset_data
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_PATH = Path(__file__).parent / "fixtures" / "accuracy_baselines.csv"
-_RESULTS_DIR = _REPO_ROOT / "results" / "models"
 
 _FIXTURE_COLS = {
     "model_config",
@@ -31,56 +27,78 @@ _FIXTURE_COLS = {
 _TOL = 0.02
 
 
-def test_accuracy_check_marker_is_registered() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "--markers"],
-        capture_output=True,
-        text=True,
-        cwd=str(_REPO_ROOT),
-    )
-    assert result.returncode == 0
-    assert "accuracy_check" in result.stdout, (
-        f"accuracy_check marker not registered; got markers:\n{result.stdout}"
-    )
-
-
-@pytest.mark.skipif(
-    not list(_RESULTS_DIR.glob("*.csv")), reason="no per-model results in results/models"
-)
-def test_update_baselines_script_runs(tmp_path: Path) -> None:
+def test_update_baselines_script_filters_and_deduplicates(tmp_path: Path) -> None:
+    row = {
+        "name": "rcf",
+        "dataset": "m-eurosat",
+        "method": "knn5",
+        "metric_name": "accuracy",
+        "bands": "all",
+        "partition": "default",
+        "metric_value": 0.75,
+    }
+    source = tmp_path / "results.csv"
+    pd.DataFrame(
+        [
+            row,
+            {**row, "metric_value": 0.80},
+            {**row, "method": "linear", "metric_value": 0.85},
+            {**row, "bands": "rgb"},
+            {**row, "metric_name": "micro_mAP"},
+            {**row, "partition": "tiny"},
+            {**row, "name": "unregistered-model"},
+            {**row, "dataset": "unselected-dataset"},
+            {**row, "method": "seg-linear"},
+        ]
+    ).to_csv(source, index=False)
     out = tmp_path / "out.csv"
     result = subprocess.run(
-        [sys.executable, str(_REPO_ROOT / "scripts" / "update_baselines.py"), "--output", str(out)],
+        [
+            sys.executable,
+            str(_REPO_ROOT / "scripts" / "update_baselines.py"),
+            "--input",
+            str(source),
+            "--output",
+            str(out),
+        ],
         capture_output=True,
         text=True,
-        cwd=str(_REPO_ROOT),
+        cwd=tmp_path,
+        timeout=120,
     )
     assert result.returncode == 0, f"Script failed:\n{result.stderr}"
-    assert out.exists()
     df = pd.read_csv(out)
-    assert _FIXTURE_COLS.issubset(set(df.columns))
+    assert set(df.columns) == _FIXTURE_COLS
+    assert df.to_dict("records") == [
+        {
+            "model_config": "rcf",
+            "name": "rcf",
+            "dataset": "m-eurosat",
+            "method": method,
+            "metric_name": "accuracy",
+            "bands": "all",
+            "partition": "default",
+            "expected_value": expected,
+        }
+        for method, expected in [("knn5", 0.75), ("linear", 0.85)]
+    ]
 
 
-# Missing baseline CSVs leave no accuracy cases to collect.
-_fixture_df: pd.DataFrame
-if _FIXTURE_PATH.exists():
-    _fixture_df = pd.read_csv(_FIXTURE_PATH)
-else:
-    _fixture_df = pd.DataFrame(columns=list(_FIXTURE_COLS))
+_fixture_df = pd.read_csv(_FIXTURE_PATH)
 
 _COMBOS = (
     _fixture_df[["model_config", "name", "dataset", "bands"]].drop_duplicates().to_dict("records")
 )
 
 
-def _combo_id(combo: dict) -> str:
+def _combo_id(combo: dict[str, str]) -> str:
     config = combo["model_config"].replace("/", "_")
     return f"{config}__{combo['dataset']}__{combo['bands']}"
 
 
 @pytest.mark.accuracy_check
 @pytest.mark.parametrize("combo", _COMBOS, ids=[_combo_id(c) for c in _COMBOS])
-def test_accuracy(combo: dict, tmp_path: Path) -> None:
+def test_accuracy(combo: dict[str, str], tmp_path: Path) -> None:
     model_config = combo["model_config"]
     dataset = combo["dataset"]
     bands = combo["bands"]
@@ -95,7 +113,7 @@ def test_accuracy(combo: dict, tmp_path: Path) -> None:
         f"dataset.bands={bands}",
         f"output={out}",
         "eval.bootstrap=10",
-        f"device={_DEVICE}",
+        "device=cpu",
         cwd=Path.cwd(),
         timeout=600,
         offline=False,
@@ -105,13 +123,19 @@ def test_accuracy(combo: dict, tmp_path: Path) -> None:
     actual_df = pd.read_csv(out)
     fixture_rows = _fixture_df[
         (_fixture_df["model_config"] == model_config)
+        & (_fixture_df["name"] == combo["name"])
         & (_fixture_df["dataset"] == dataset)
         & (_fixture_df["bands"] == bands)
     ]
     for _, row in fixture_rows.iterrows():
         method = row["method"]
-        match = actual_df[actual_df["method"] == method]
-        assert len(match) > 0, f"Method {method} not found in output for {model_config} x {dataset}"
+        match = actual_df[
+            (actual_df["method"] == method)
+            & (actual_df["name"] == row["name"])
+            & (actual_df["metric_name"] == row["metric_name"])
+            & (actual_df["partition"] == row["partition"])
+        ]
+        assert len(match) == 1, f"Expected one {method} result for {model_config} x {dataset}"
         actual = match.iloc[0]["metric_value"]
         expected = row["expected_value"]
         assert actual == pytest.approx(expected, abs=_TOL), (

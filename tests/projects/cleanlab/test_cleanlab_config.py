@@ -2,11 +2,11 @@
 
 from pathlib import Path
 
-import cleanlab_extract_probs
 import pandas as pd
 import pytest
 import torch
 
+from projects.cleanlab import cleanlab_extract_probs
 from torchgeo_bench.config import compose_config, instantiate
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.main import resolve_model_config
@@ -47,17 +47,18 @@ def test_cleanlab_selects_top_linear_result_from_file_or_directory(
     rows = pd.DataFrame(
         [
             {
-                "dataset": "m-eurosat",
+                "dataset": dataset,
                 "name": name,
                 "method": method,
                 "normalization": normalization,
                 "metric_value": score,
             }
-            for name, method, normalization, score in [
-                ("lower", "linear", "identity", 0.7),
-                ("best", "linear", "bandspec_zscore", 0.9),
-                ("legacy", "linear", "raw", 1.0),
-                ("knn", "knn5", "identity", 1.0),
+            for dataset, name, method, normalization, score in [
+                ("m-eurosat", "lower", "linear", "identity", 0.7),
+                ("m-eurosat", "best", "linear", "bandspec_zscore", 0.9),
+                ("m-eurosat", "legacy", "linear", "raw", 1.0),
+                ("m-eurosat", "knn", "knn5", "identity", 1.0),
+                ("m-pv4ger", "other-dataset", "linear", "identity", 1.0),
             ]
         ]
     )

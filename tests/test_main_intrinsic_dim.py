@@ -1,4 +1,4 @@
-"""Fast offline tests for the intrinsic-dimension branch in ``torchgeo_bench.main``."""
+"""Tests for intrinsic-dimension results and resumability in the runner."""
 
 from pathlib import Path
 from unittest import mock
@@ -7,9 +7,13 @@ import numpy as np
 import pandas as pd
 from omegaconf import OmegaConf
 
+from tests.support.runner import (
+    _compose_cfg,
+    _resume_row,
+    _synthetic_embeddings,
+    _synthetic_loaders,
+)
 from torchgeo_bench.main import evaluate_intrinsic_dim, main
-
-from .test_main_fast import _compose_cfg, _resume_row, _synthetic_embeddings, _synthetic_loaders
 
 
 def test_intrinsic_dim_rows_emitted(tmp_path: Path):

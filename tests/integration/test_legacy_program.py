@@ -1,75 +1,16 @@
-"""Run the installed program against tiny on-disk inputs without mocking its internals."""
+"""Exercise the legacy module interface against isolated, real on-disk inputs."""
 
-import json
-import os
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 
-import h5py
 import numpy as np
 import pandas as pd
 import pytest
 
-from torchgeo_bench.datasets import get_bench_dataset_class
+from tests.support.cli import cli_output, run_cli
+from tests.support.data import write_classification_files
 
-
-def run_cli(
-    *arguments: str, cwd: Path, timeout: int = 120, offline: bool = True
-) -> subprocess.CompletedProcess[str]:
-    """Invoke the same entry point used by the console command."""
-    env = {
-        **os.environ,
-        "OMP_NUM_THREADS": "1",
-        "MKL_NUM_THREADS": "1",
-        "OPENBLAS_NUM_THREADS": "1",
-    }
-    if offline:
-        env["HF_HUB_OFFLINE"] = "1"
-    return subprocess.run(
-        [sys.executable, "-m", "torchgeo_bench", *arguments],
-        cwd=cwd,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-
-
-def write_classification_files(
-    root: Path,
-    dataset_name: str,
-    labels: tuple[int | list[int], ...],
-    *,
-    all_bands: bool = False,
-) -> Path:
-    """Write small separable samples in the reader's actual on-disk format."""
-    directory = root / "data" / "classification_v1.0" / dataset_name
-    directory.mkdir(parents=True)
-    bench = get_bench_dataset_class(dataset_name)()
-    specs = bench.select_band_specs(None if all_bands else tuple(bench.rgb_bands))
-    bands = [band.source_name for band in specs]
-    partition: dict[str, list[str]] = {}
-    for split, per_class in (("train", 12), ("valid", 4), ("test", 4)):
-        partition[split] = []
-        for class_index, label in enumerate(labels):
-            for index in range(per_class):
-                sample_id = f"{split}-{class_index}-{index}"
-                partition[split].append(sample_id)
-                with h5py.File(directory / f"{sample_id}.hdf5", "w") as sample:
-                    for band in specs:
-                        pixels = np.full(
-                            (16, 16),
-                            band.mean + band.std * (0.5 + 2.5 * class_index + 0.001 * index),
-                            dtype=np.float32,
-                        )
-                        sample.create_dataset(band.source_name, data=pixels)
-                    sample.attrs["metadata_json"] = json.dumps(
-                        {"label": label, "bands_order": bands}
-                    )
-    (directory / "default_partition.json").write_text(json.dumps(partition))
-    return directory
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
@@ -103,8 +44,8 @@ def test_classification_program_handles_noncontiguous_labels(
     if temperature_scaling:
         arguments.extend(["eval.merge_val=false", "eval.calibration.temp_scale=true"])
     completed = run_cli(*arguments, cwd=tmp_path)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert output.is_file(), completed.stdout + completed.stderr
+    assert completed.returncode == 0, cli_output(completed)
+    assert output.is_file(), cli_output(completed)
 
     rows = pd.read_csv(output).set_index("method")
     assert set(rows.index) == {"knn5", "linear"}
@@ -132,8 +73,8 @@ def test_program_profiles_features_and_resumes_without_input_files(
         "eval.profile.n_measure=1",
     ]
     completed = run_cli(*arguments, cwd=tmp_path)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert output.is_file(), completed.stdout + completed.stderr
+    assert completed.returncode == 0, cli_output(completed)
+    assert output.is_file(), cli_output(completed)
     rows = pd.read_csv(output)
     assert set(rows["method"]) == {"knn5", "linear", "profile", "intrinsic_dim"}
     assert np.isfinite(rows["metric_value"]).all()
@@ -145,7 +86,7 @@ def test_program_profiles_features_and_resumes_without_input_files(
     before = output.read_bytes()
     shutil.rmtree(classification_files)
     resumed = run_cli(*arguments, "resume=true", cwd=tmp_path)
-    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert resumed.returncode == 0, cli_output(resumed)
     assert output.read_bytes() == before
 
 
@@ -160,8 +101,8 @@ def test_program_reinitializes_for_multispectral_and_multilabel_datasets(tmp_pat
         "dataset.bands=all",
         cwd=tmp_path,
     )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert output.is_file(), completed.stdout + completed.stderr
+    assert completed.returncode == 0, cli_output(completed)
+    assert output.is_file(), cli_output(completed)
     rows = pd.read_csv(output)
     assert len(rows) == 4
     for dataset, metric in (("m-eurosat", "accuracy"), ("m-bigearthnet", "micro_mAP")):
@@ -190,7 +131,7 @@ def test_program_fails_when_any_requested_data_is_unavailable(
         f"dataset.names=[{','.join(dataset_names)}]",
         cwd=tmp_path,
     )
-    assert completed.returncode != 0
+    assert completed.returncode != 0, cli_output(completed)
     assert "Required files for 'm-forestnet' are missing" in completed.stderr
     assert "torchgeo-bench download geobench_v1 --datasets m-forestnet" in completed.stderr
     if dataset_names[0] == "m-eurosat":
@@ -216,8 +157,8 @@ def test_flops_program_writes_both_band_configurations_and_resumes(tmp_path: Pat
         f"output={output}",
     ]
     completed = run_cli(*arguments, cwd=tmp_path)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert output.is_file(), completed.stdout + completed.stderr
+    assert completed.returncode == 0, cli_output(completed)
+    assert output.is_file(), cli_output(completed)
     rows = pd.read_csv(output).set_index("band_config")
     assert set(rows.index) == {"rgb", "s2"}
     assert (rows["task"] == "classification").all()
@@ -226,5 +167,5 @@ def test_flops_program_writes_both_band_configurations_and_resumes(tmp_path: Pat
     assert (rows["throughput_samples_per_sec"] > 0).all()
     before = output.read_bytes()
     resumed = run_cli(*arguments, "resume=true", cwd=tmp_path)
-    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert resumed.returncode == 0, cli_output(resumed)
     assert output.read_bytes() == before

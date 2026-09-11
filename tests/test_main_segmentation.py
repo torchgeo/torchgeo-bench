@@ -9,10 +9,9 @@ import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader, Dataset
 
+from tests.support.runner import _chainable_model_mock, _compose_cfg
 from torchgeo_bench.main import main, run_dataset
 from torchgeo_bench.resume import ResumeState, _resume_config_hash
-
-from .test_main_fast import _chainable_model_mock, _compose_cfg
 
 
 class _SegmentationDataset(Dataset):
@@ -35,19 +34,21 @@ def _synthetic_segmentation_loaders(
     n_classes: int = 3,
 ) -> tuple[_SegmentationDataset, DataLoader, DataLoader, DataLoader]:
     rng = torch.Generator().manual_seed(1)
-    train_images = torch.rand(n_train, channels, 64, 64, generator=rng)
-    val_images = torch.rand(n_val, channels, 64, 64, generator=rng)
-    test_images = torch.rand(n_test, channels, 64, 64, generator=rng)
+    train_images = torch.rand(n_train, channels, 8, 8, generator=rng)
+    val_images = torch.rand(n_val, channels, 8, 8, generator=rng)
+    test_images = torch.rand(n_test, channels, 8, 8, generator=rng)
 
-    train_masks = torch.randint(0, n_classes, (n_train, 64, 64), generator=rng)
-    val_masks = torch.randint(0, n_classes, (n_val, 64, 64), generator=rng)
-    test_masks = torch.randint(0, n_classes, (n_test, 64, 64), generator=rng)
+    train_masks = torch.randint(0, n_classes, (n_train, 8, 8), generator=rng)
+    val_masks = torch.randint(0, n_classes, (n_val, 8, 8), generator=rng)
+    test_masks = torch.randint(0, n_classes, (n_test, 8, 8), generator=rng)
 
     train_dataset = _SegmentationDataset(train_images, train_masks)
     val_dataset = _SegmentationDataset(val_images, val_masks)
     test_dataset = _SegmentationDataset(test_images, test_masks)
 
-    train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=0)
+    train_loader = DataLoader(
+        train_dataset, batch_size=2, shuffle=True, generator=rng, num_workers=0
+    )
     val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False, num_workers=0)
     return train_dataset, train_loader, val_loader, test_loader

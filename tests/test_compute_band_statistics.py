@@ -1,8 +1,13 @@
 """Tests for the band-statistics contributor utility."""
 
-import pytest
+from math import sqrt
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-from scripts.compute_band_statistics import _format_stat
+import pytest
+import torch
+
+from scripts import compute_band_statistics as statistics
 
 
 @pytest.mark.parametrize(
@@ -17,4 +22,39 @@ from scripts.compute_band_statistics import _format_stat
     ],
 )
 def test_format_stat_preserves_fractional_extrema(value: float, expected: str) -> None:
-    assert _format_stat(value) == expected
+    assert statistics._format_stat(value) == expected
+
+
+@pytest.fixture
+def two_band_dataset(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    pixels = torch.stack(
+        (torch.arange(6).reshape(3, 1, 2) - 0.5, torch.full((3, 1, 2), 10.0)), dim=1
+    )
+    bench = MagicMock()
+    bench.bands = [SimpleNamespace(name="varying"), SimpleNamespace(name="constant")]
+    bench.get_dataset.return_value = [{"image": image} for image in pixels]
+    monkeypatch.setattr(statistics, "get_bench_dataset_class", lambda _: lambda: bench)
+    return bench
+
+
+def test_statistics_weight_pixels_not_batches_and_use_only_training_data(
+    two_band_dataset: MagicMock,
+) -> None:
+    result = statistics.compute_statistics("toy", batch_size=2, num_workers=0)
+    assert result == [
+        {
+            "name": "varying",
+            "mean": 2.0,
+            "std": pytest.approx(sqrt(35 / 12)),
+            "min": -0.5,
+            "max": 4.5,
+        },
+        {"name": "constant", "mean": 10.0, "std": 0.0, "min": 10.0, "max": 10.0},
+    ]
+    two_band_dataset.get_dataset.assert_called_once_with("train", bands=None)
+
+
+def test_statistics_reject_inconsistent_channel_metadata(two_band_dataset: MagicMock) -> None:
+    two_band_dataset.bands.append(SimpleNamespace(name="missing"))
+    with pytest.raises(ValueError, match=r"2 channels.*3 BandSpec"):
+        statistics.compute_statistics("toy", batch_size=2, num_workers=0)
