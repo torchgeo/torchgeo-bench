@@ -163,3 +163,23 @@ Config: `layers: ["s4", "s3", "s2", "s1"]`
 3. Run the discovery script above to confirm spatial sizes
 4. Add to the model config in coarse-to-fine order (deepest first)
 5. Note any stages that share spatial size (common in EfficientNet/MobileNet)
+
+## Comparing optimization and layer connections
+
+The standalone study scripts run from a development checkout, discover all visible GPUs by default, and schedule one process per GPU. They use frozen FP32 features, full dataset splits, and training-loss stopping criteria rather than a wall-clock budget. Run `--dry-run` to inspect the grid without downloading data or starting jobs.
+
+```bash
+# Sweep Adam learning rates to a training-loss plateau, then compare full-batch L-BFGS.
+python scripts/run_segmentation_optimizer_study.py --gpus all --resume
+
+# Compare equally sized layer sets across three decoder families.
+python scripts/run_segmentation_layer_study.py --gpus all --resume \
+    --heads linear conv_block fpn \
+    --layer-groups late_four spread_four early_four
+```
+
+Both scripts default to Burn Scars with a pretrained ViT-Small/16 backbone and RGB inputs at 224 pixels. Adam and L-BFGS use the same fixed minibatch membership so training-mode BatchNorm sees a shared objective; Adam shuffles batch order, not the images within batches. The layer study extracts the union of the requested intermediate features once, then selects the appropriate tensors for each decoder. Four-layer comparisons keep the number of connections fixed; comparing one layer with four also changes decoder capacity. Parameter counts and exact layer names are included in the results.
+
+Each output directory contains `combined.csv` with raw outcomes and timings, `validation_selected.csv` with learning rates selected by mean validation mIoU across seeds, and per-trial learning curves, checkpoints, and logs. Optimization-only time is separate from convergence checks, validation, and checkpoint I/O. Test data never selects learning rates or checkpoints. Convergence requires a flat recent training-loss window, not merely failure to beat a historical minimum. A plateau is an operational stopping rule, not proof of stationarity; unsuccessful learning rates, numerical stalls, and optional `--max-iterations` safety limits are labeled as nonconvergence.
+
+Use `--gpus 0,2` to restrict resources, `--seeds` and `--adam-lrs` to change the sweep, and `--help` for convergence controls or custom layer groups. DPT requires four connections and the patch-linear decoder uses one. DPT also requires the optional `transformers` dependency, available through `pip install "torchgeo-bench[sam3]"`. Resume only a compatible configuration; scientific changes require a new output directory.
