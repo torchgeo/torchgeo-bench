@@ -7,7 +7,7 @@ import pytest
 
 from torchgeo_bench.config import list_model_configs
 from torchgeo_bench.config_schema import ModelConfig, RunConfig
-from torchgeo_bench.presets import ModelPreset, load_model_preset, resolve_run_config
+from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset, resolve_run_config
 
 
 @pytest.mark.parametrize("name", list_model_configs())
@@ -70,6 +70,53 @@ for name in list_model_configs():
 assert not set(('omegaconf', 'torch', 'torchgeo', 'numpy', 'pandas')) & sys.modules.keys()
 """
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+@pytest.mark.parametrize("image_size", [None, 96])
+def test_scalemae_constructor_uses_resolved_dataset_grid(
+    monkeypatch: pytest.MonkeyPatch, image_size: int | None
+) -> None:
+    config = RunConfig.model_validate(
+        {
+            "model": {"name": "torchgeo/scalemae_large_fmow"},
+            "datasets": ["m-eurosat"],
+            **({"input": {"image_size": image_size}} if image_size is not None else {}),
+        }
+    )
+    effective, preset = resolve_run_config(config, "m-eurosat")
+    received = {}
+
+    def constructor(**kwargs: object) -> object:
+        received.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("torchgeo_bench.models.TorchGeoScaleMAEBench", constructor)
+    build_model(preset, bands=[], normalization="identity")
+    assert received["image_size"] == effective.input.image_size == (image_size or 64)
+    assert received["res"] == 3.5
+
+
+def test_flops_scalemae_constructor_grid_follows_explicit_synthetic_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from torchgeo_bench.flops_config import FlopsConfig
+
+    config = FlopsConfig.model_validate(
+        {
+            "model": {"name": "torchgeo/scalemae_large_fmow"},
+            "input": {"band_source": "m-eurosat", "image_size": 96},
+        }
+    )
+    effective, preset = config.resolve()
+    received = {}
+
+    def constructor(**kwargs: object) -> object:
+        received.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("torchgeo_bench.models.TorchGeoScaleMAEBench", constructor)
+    build_model(preset, bands=[], normalization="identity")
+    assert received["image_size"] == effective.input.image_size == 96
 
 
 def test_explicit_constructor_options_override_dataset_defaults() -> None:
