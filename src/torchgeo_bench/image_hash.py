@@ -4,7 +4,9 @@ Version 1 hashed the model recipe *and* the user evaluation section, including
 obsolete visualization defaults. Preserve that representation, not a Pydantic
 dump. Legacy composition used integer C endpoints; the image adapter used floats
 and copied preset layers. Both are accepted only when their effective settings
-match the current run. Additive profile/ID passes and dataset selection stay out.
+match the current run. New rows retain the public image CLI's fingerprint when
+its effective recipe is unchanged. Additive profile/ID passes and dataset
+selection stay out.
 """
 
 import hashlib
@@ -128,8 +130,8 @@ def _historical_payload(config: RunConfig, style: Literal["legacy", "image"]) ->
     }
 
 
-def _resume_config_payload(config: RunConfig) -> dict[str, Any]:
-    """Return canonical version-1 settings, with explicit values above preset defaults."""
+def _legacy_canonical_payload(config: RunConfig) -> dict[str, Any]:
+    """Retain the first typed runner's precedence-aware version-1 representation."""
     payload = _historical_payload(config, "legacy")
     if config.model.target is not None:
         # Custom kwargs are opaque constructor data, including names such as "eval".
@@ -148,6 +150,26 @@ def _resume_config_payload(config: RunConfig) -> dict[str, Any]:
                 recipe[key] = value
         _override_evaluation_defaults(recipe.get("eval", {}), config, evaluation)
     return payload
+
+
+def _resume_config_payload(config: RunConfig) -> dict[str, Any]:
+    """Retain the public CLI fingerprint unless effective preset behavior changed."""
+    legacy = _legacy_canonical_payload(config)
+    if config.model.target is not None:
+        return legacy
+    preset = load_model_preset(config.model, seed=config.runtime.seed)
+    if preset.track != "image":
+        return legacy
+    image = _historical_payload(config, "image")
+    # Consider every recipe, not the selected datasets: selection is not a hash input.
+    recipes = ("", *preset.dataset_overrides)
+    if all(
+        _matches_effective(image, config, dataset, segmentation=segmentation, image=True)
+        for dataset in recipes
+        for segmentation in (False, True)
+    ):
+        return image
+    return legacy
 
 
 def _override_evaluation_defaults(
@@ -210,7 +232,7 @@ def _matches_effective(
 
 def compatible_hashes(config: RunConfig, dataset: str, *, segmentation: bool) -> set[str]:
     """Return only historical keys whose effective recipe matches this dataset's run."""
-    hashes = {_resume_config_hash(config)}
+    hashes = {_resume_config_hash(config), _hash_payload(_legacy_canonical_payload(config))}
     if config.model.target is not None:
         return hashes
     for style in ("legacy", "image"):
