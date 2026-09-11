@@ -227,7 +227,9 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
   `task`, `num_classes`, `multilabel`, `bands`, `rgb_bands`, `split_sizes`).
   For multi-modality V2 datasets also set `band_order_strategy = "by_sensor"`.
   Wire it through `datasets/__init__.py` and add an entry to
-  `_REGISTRY` in `datasets/loading.py`. For new V2 datasets that need
+  `_REGISTRY_SPEC` in `datasets/loading.py` as `(submodule, class_name, task)`.
+  The lightweight `list_datasets()` and `get_dataset_task(name)` helpers power
+  CLI discovery; do not duplicate the dataset catalog. For new V2 datasets that need
   downloads, also add the name to `DEFAULT_V2_DATASETS` in `download.py` and
   add an entry to `_V2_REGISTRY` in `geobench_v2.py`.
 - **No `from geobench import …`.** That dependency was removed; use
