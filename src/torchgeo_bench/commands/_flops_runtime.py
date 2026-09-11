@@ -3,12 +3,11 @@
 
 """Heavy runtime for the flops command."""
 
-from omegaconf import DictConfig
-
 import torchgeo_bench.flops_pipeline as flops_pipeline
+from torchgeo_bench.flops_config import FlopsConfig
 
 
-def run(config: DictConfig) -> None:
+def run(config: FlopsConfig) -> None:
     """Execute the FLOP profiling runtime."""
     flops_pipeline.main(config)
 

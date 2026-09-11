@@ -1,45 +1,33 @@
-# Per-sample compute cost (GFLOPs) split into backbone / head / probe.
-# The model group is selected by the CLI (model=<name> / --model, required).
-# Synthetic inputs avoid dataset downloads. Use cloudsen12's 12 Sentinel-2 bands, not so2sat's mix of 10 S2 and 2 SAR bands.
+# Synthetic compute measurements: select a preset with --model, or add
+# model: {name: custom, target: my_package.MyModel, kwargs: {...}}.
+# Explicit flags override this YAML; omitted input size and probe layers inherit
+# model/dataset defaults. Native-size presets use 224 for synthetic measurements.
+schema_version: 1
+runtime:
+  device: cuda
+  seed: 0
+  verbose: true
 
-device: cuda
-resume: true
+input:
+  band_source: cloudsen12
+  band_configs: [rgb, s2]  # s2 means all source bands: twelve optical S2 bands here.
+  normalization: dataset
 
-# conf/model/rcf.yaml uses `seed: ${seed}` to define its random features; match config.yaml so compute and accuracy runs measure the same model.
-seed: 0
+classification:
+  head: linear  # mlp adds a D-by-D projection before the classifier.
+  num_classes: 10
 
-output: results/compute_cost.csv
+segmentation:
+  heads: [fpn, dpt]  # Also linear, conv_block, patch_linear; [] disables this sweep.
+  band_configs: [rgb, s2]
+  num_classes: 4
+  # Set probe.layers explicitly to override a preset; [] disables segmentation.
 
-band_configs: [rgb, s2]      # rgb = 3ch, s2 = 12ch, both sourced from cloudsen12
-band_source: cloudsen12
-normalization: bandspec_zscore
-image_size: 224
+timing:
+  batch_size: 64  # Timing and memory use this batch; FLOPs counts one sample.
+  n_warmup: 3
+  n_measure: 20
 
-# Keep class count fixed: FPNHead uses hidden_dim=256 throughout, and only its final 1x1 convolution depends on num_classes. That layer's FLOPs are:
-#   delta = 2 * hidden_dim * n_taps * num_classes * H_f * W_f
-# Most head cost comes from the backbone's feature-map resolution.
-seg_head_types: [fpn, dpt]
-seg_num_classes: 4
-# Include RGB to compare with RGB segmentation accuracy; S2 measures the extra head cost of multispectral inputs.
-seg_band_configs: [rgb, s2]
-
-# Each model's eval.segmentation overrides this block, just as in the benchmark.
-# Nothing is trained; lr, scheduler, and criterion only satisfy the shared probe/solver builder.
-eval:
-  segmentation:
-    layers: []
-    head_type: fpn
-    lr: 1.0e-3
-    lr_scheduler: cosine
-    criterion:
-      _target_: torch.nn.CrossEntropyLoss
-      ignore_index: 255
-
-# "mlp" adds a Linear(D, D, bias=False) projection, so its cost grows with the square of the embedding width.
-probe_head: linear           # linear | mlp
-probe_num_classes: 10
-
-# Match the benchmark batch size for comparable throughput, latency, and peak memory. GFLOPs remains per-sample (the counter slices sample[:1]).
-timing_batch_size: 64
-n_warmup: 3
-n_measure: 20
+output:
+  file: results/compute_cost.csv
+  resume: true
