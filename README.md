@@ -116,7 +116,7 @@ The sweep includes ImageStats as level 0 and all 13 registered classification pr
 
 Results go to separate `results/models/handcrafted_level*.csv` files and `imagestats_handcrafted_control.csv`. Feature lists and completion status are saved under `outputs/handcrafted/`. Resume skips matching completed rows; a missing linear or KNN result is still reported as a failure.
 
-The [completed sweep](docs/handcrafted-results.md) contains all 104 result rows. Each handcrafted level improves the linear-probe point estimate on 11 of 13 protocols; the largest level is not always the best.
+The [completed sweep](docs/handcrafted-results.md) contains all 104 result rows. Levels 1 and 2 improve the linear-probe point estimate on 12 of 13 protocols; level 3 improves 11 of 13. The largest level is not always the best.
 
 Use `--levels 1 2`, `--datasets eurosat resisc45`, or `--dry-run` for a smaller run. The extractor also works through the normal CLI:
 
@@ -125,7 +125,7 @@ Use `--levels 1 2`, `--datasets eurosat resisc45`, or `--dry-run` for a smaller 
   --dataset eurosat --bands all --normalization none
 ```
 
-The presets `handcrafted_level1`, `handcrafted_level2`, and `handcrafted_level3` work with the current image CLI. The legacy config API also accepts `model=handcrafted model.level=1|2|3` through `python -m torchgeo_bench.cli run`, as used by the experiment runner.
+The presets `handcrafted_level1`, `handcrafted_level2`, and `handcrafted_level3` work with the current image CLI and the experiment runner. The legacy config API also accepts `model=handcrafted model.level=1|2|3` through `python -m torchgeo_bench.cli run`.
 
 ## CoordBench — location encoders
 

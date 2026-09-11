@@ -32,14 +32,13 @@ class HandcraftedBench(BenchModel):
         level: Cumulative complexity, one of 1, 2 or 3.
         normalization: Base-class input normalization. Defaults to identity.
             Physical spectral indices require raw, consistently scaled optical
-            bands; explicitly pass ``dataset.normalization=identity`` in CLI runs.
+            bands; pass ``--normalization none`` with the image CLI or
+            ``dataset.normalization=identity`` with the legacy CLI.
             Other strategies are honored, not silently recorded as identity.
         **kwargs: Additional benchmark arguments forwarded to :class:`BenchModel`.
 
     Attributes:
         feature_names: Ordered, sensor-prefixed output column names.
-        num_features: Output width for the configured bands and level.
-        feature_metadata: Source mappings and explicitly skipped spectral indices.
 
     Raises:
         ValueError: If the level is not an integer in 1..3 or bands is empty.
