@@ -106,12 +106,9 @@ The handcrafted model adds deterministic spectral and spatial measurements to th
 Download the classification datasets and run the level sweep from this checkout:
 
 ```bash
-.venv/bin/torchgeo-bench download geobench_v1 \
-  --datasets m-eurosat,m-forestnet,m-so2sat,m-pv4ger,m-brick-kiln,m-bigearthnet
-.venv/bin/torchgeo-bench download geobench_v2 \
-  --datasets benv2,treesatai,so2sat,forestnet
-.venv/bin/torchgeo-bench download eurosat
-.venv/bin/torchgeo-bench download resisc45
+.venv/bin/python -m torchgeo_bench.cli download \
+  m-eurosat m-forestnet m-so2sat m-pv4ger m-brick-kiln m-bigearthnet \
+  benv2 treesatai so2sat forestnet eurosat eurosat-spatial resisc45
 .venv/bin/python -m experiments.run_handcrafted
 ```
 
@@ -124,9 +121,11 @@ The [completed sweep](docs/handcrafted-results.md) contains all 104 result rows.
 Use `--levels 1 2`, `--datasets eurosat resisc45`, or `--dry-run` for a smaller run. The extractor also works through the normal CLI:
 
 ```bash
-.venv/bin/torchgeo-bench run model=handcrafted model.level=2 \
-  dataset.names=[eurosat] dataset.bands=all dataset.normalization=identity
+.venv/bin/python -m torchgeo_bench.image_cli run --model handcrafted_level2 \
+  --dataset eurosat --bands all --normalization none
 ```
+
+The presets `handcrafted_level1`, `handcrafted_level2`, and `handcrafted_level3` work with the current image CLI. The legacy config API also accepts `model=handcrafted model.level=1|2|3` through `python -m torchgeo_bench.cli run`, as used by the experiment runner.
 
 ## CoordBench — location encoders
 

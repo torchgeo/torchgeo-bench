@@ -47,8 +47,8 @@ feature selection, random initialization, image gradients or training state.
 
 .. code-block:: console
 
-   $ torchgeo-bench run model=handcrafted dataset.names=[eurosat] dataset.bands=all dataset.normalization=identity
-   $ torchgeo-bench run model=handcrafted model.level=3 dataset.names=[resisc45] dataset.bands=all dataset.normalization=identity
+   $ torchgeo-bench run --model handcrafted_level2 --dataset eurosat --bands all --normalization none
+   $ torchgeo-bench run --model handcrafted_level3 --dataset resisc45 --bands all --normalization none
    $ python -m experiments.run_handcrafted --levels 1 2 3
 
 The sweep script selects classification datasets only. ``dataset.names=all``
@@ -104,7 +104,8 @@ mixing: aerial RGB never borrows Sentinel-2 NIR. SAR produces raw
 statistics/texture but no optical indices; missing roles simply omit maps.
 
 The constructor defaults to identity normalization, but the CLI passes its
-global strategy, so explicitly use ``dataset.normalization=identity``.
+global strategy, so explicitly use ``--normalization none`` with the image CLI,
+or ``dataset.normalization=identity`` with ``python -m torchgeo_bench.cli run``.
 Other base-class strategies are honored and recorded, not secretly bypassed;
 z-scored bands do not produce physically meaningful normalized-difference
 indices. No fitted input or downstream scaler is added. The ratio calculation
