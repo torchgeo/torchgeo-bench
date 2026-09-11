@@ -93,8 +93,6 @@ def _load_run(
         raise ValueError(
             f"unknown model or dataset: model={config.model.name}, datasets={unknown_datasets}"
         )
-    if set(config.classification.methods) not in ({"knn", "linear"}, {"knn"}):
-        raise ValueError("this draft supports methods [knn, linear] or [knn]")
     if isinstance(config.input.bands, str) and config.input.bands not in {"rgb", "all"}:
         raise ValueError("input.bands must be rgb, all, or a YAML list of band names")
     if load_model_preset(config.model).track != "image":

@@ -30,7 +30,6 @@ from torchgeo_bench.intrinsic_dim import (
     compute_feature_spectrum,
     compute_intrinsic_dim,
 )
-from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.legacy_config import (  # noqa: F401 - transitional recipe-helper export
     accept_legacy_config,
     resolve_model_config,
@@ -160,6 +159,8 @@ def evaluate_knn(
         Primary metric and bootstrap bounds, calibration (ECE/RMS-CE/MCE), and bin count.
         The default bin count is ``n_neighbors + 1``.
     """
+    from torchgeo_bench.knn import KNNClassifier
+
     x_train, y_train = train.features, train.labels
     x_test, y_test = test.features, test.labels
     seed = cfg.runtime.seed
@@ -916,6 +917,8 @@ def run_dataset(
         return
 
     if ds_cls.task != "segmentation" and not plan.skip_knn:
+        from torchgeo_bench.knn import resolve_knn_device
+
         plan = replace(
             plan,
             knn_device=resolve_knn_device(cfg.classification.knn_device, cfg.runtime.device),
