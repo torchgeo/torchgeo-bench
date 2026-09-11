@@ -2,12 +2,15 @@
 
 from collections.abc import Callable
 from functools import wraps
-from typing import Any
+from typing import TYPE_CHECKING
 
 from torchgeo_bench.coordbench.config import CoordConfig
 
+if TYPE_CHECKING:
+    import omegaconf.dictconfig
 
-def legacy_coord_config(config: Any) -> CoordConfig:
+
+def legacy_coord_config(config: object) -> CoordConfig:
     """Translate only the legacy coordinate fields to the typed runtime schema."""
     from omegaconf import DictConfig, OmegaConf
 
@@ -38,11 +41,11 @@ def legacy_coord_config(config: Any) -> CoordConfig:
 
 def accepts_legacy_config(
     function: Callable[[CoordConfig], None],
-) -> Callable[[CoordConfig], None]:
+) -> "Callable[[CoordConfig | omegaconf.dictconfig.DictConfig], None]":
     """Keep the legacy caller outside the strictly typed coordinate runtime."""
 
     @wraps(function)
-    def wrapped(config: CoordConfig) -> None:
+    def wrapped(config: "CoordConfig | omegaconf.dictconfig.DictConfig") -> None:
         if not isinstance(config, CoordConfig):
             config = legacy_coord_config(config)
         function(config)
