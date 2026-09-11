@@ -146,10 +146,7 @@ Once your class is registered with placeholder statistics and loads, run:
 
    $ uv run python scripts/compute_band_statistics.py --dataset my_dataset
 
-It accumulates in float64 over the train split and prints a paste-ready
-``bands = [...]`` block.  Record in a comment that the numbers came from this
-script, so the next person knows they are measured rather than copied from a
-paper.
+It accumulates in float64 over the train split and prints a ``bands = [...]`` block. Copy the generated values into your wrapper while retaining the ``bands: ClassVar[list[BandSpec]]`` annotation required for mutable class metadata. Record in a comment that the numbers came from this script, so the next person knows they are measured rather than copied from a paper.
 
 Register and configure
 ----------------------
