@@ -13,43 +13,6 @@ Public API
 .. autofunction:: run_coordbench
 """
 
-from torchgeo_bench.coordbench.datasets import (
-    CoordBenchmark,
-    list_benchmarks,
-    list_families,
-    load_benchmarks,
-)
-from torchgeo_bench.coordbench.models import (
-    ClimplicitLocationEncoder,
-    GeoCLIPLocationEncoder,
-    LocationEncoder,
-    MINDLocationEncoder,
-    SatCLIPLocationEncoder,
-    SinCosLocationEncoder,
-    SINRLocationEncoder,
-)
-from torchgeo_bench.coordbench.probe import (
-    knn_probe_score,
-    linear_probe_score,
-    spatial_fold_ids,
-)
-from torchgeo_bench.coordbench.run import CoordResult, run_coordbench
+import lazy_loader as lazy
 
-__all__ = [
-    "ClimplicitLocationEncoder",
-    "CoordBenchmark",
-    "CoordResult",
-    "GeoCLIPLocationEncoder",
-    "LocationEncoder",
-    "MINDLocationEncoder",
-    "SINRLocationEncoder",
-    "SatCLIPLocationEncoder",
-    "SinCosLocationEncoder",
-    "knn_probe_score",
-    "linear_probe_score",
-    "list_benchmarks",
-    "list_families",
-    "load_benchmarks",
-    "run_coordbench",
-    "spatial_fold_ids",
-]
+__getattr__, __dir__, __all__ = lazy.attach_stub(__name__, __file__)
