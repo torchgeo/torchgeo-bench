@@ -169,4 +169,6 @@ class FlopsConfig(StrictModel):
             },
             "segmentation": {"probe": preset.segmentation.model_dump(exclude_unset=True)},
         }
-        return self.model_validate(merge_settings(defaults, self.model_dump_yaml())), preset
+        effective = self.model_validate(merge_settings(defaults, self.model_dump_yaml()))
+        preset_input = preset.input.model_copy(update={"image_size": effective.input.image_size})
+        return effective, preset.model_copy(update={"input": preset_input})
