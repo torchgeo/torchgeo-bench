@@ -156,21 +156,15 @@ Register and configure
 
 **1. Register the class** by adding an entry to ``_REGISTRY_SPEC`` in
 :file:`src/torchgeo_bench/datasets/loading.py`, mapping the dataset name to
-its ``(submodule, class_name)``:
+its ``(submodule, class_name, task)``:
 
 .. code-block:: python
 
-   _REGISTRY_SPEC: dict[str, tuple[str, str]] = {
-       # Keep the existing registrations.
-       "my_dataset": ("my_dataset", "MyDataset"),
-   }
+   "my_dataset": ("my_dataset", "MyDataset", "classification"),
 
-This is the step that actually makes the dataset available — it backs
-``get_bench_dataset_class``, :func:`~torchgeo_bench.datasets.list_datasets`,
-and the CLI. There is no per-dataset YAML config; datasets are selected by
-name on the command line. The registry is kept as module/class-name strings
-rather than imported classes so that importing ``loading`` stays cheap;
-``get_bench_dataset_class`` imports only the one module it needs.
+This entry enables loading, CLI listing/details, and run selection. Its task must be ``"classification"`` or ``"segmentation"`` and match the wrapper's ``task``. ``list_datasets()`` and ``get_dataset_task(name)`` read the registry without importing dataset wrappers. There is no second list to update in ``image_cli.py`` and no per-dataset YAML config.
+
+The registry stores strings rather than imported classes so metadata queries stay cheap. ``get_bench_dataset_class`` imports only the requested wrapper.
 
 **2. Export the class** from :file:`src/torchgeo_bench/datasets/__init__.py`
 by adding an ``__all__`` entry and a matching ``_LAZY_CLASSES`` mapping:
