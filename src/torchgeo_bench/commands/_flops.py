@@ -58,6 +58,8 @@ def load_config(args: argparse.Namespace) -> FlopsConfig:
     """Load strict YAML, apply supplied flags, and validate preset resolution."""
     path = getattr(args, "config", None)
     base = load_yaml(path) if path else {}
+    if hasattr(args, "model"):
+        base.pop("model", None)
     config = FlopsConfig.model_validate(merge_settings(base, _flag_values(args)))
     config.resolve()
     return config
