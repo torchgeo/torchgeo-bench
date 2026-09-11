@@ -185,7 +185,7 @@ parent directory to ``PYTHONPATH`` before running:
 Run the benchmark
 -----------------
 
-Select the preset with ``--model`` and repeat ``--dataset`` for each applicable dataset. Use the canonical CLI and its Pydantic-validated YAML interface, not the retired ``key=value`` syntax:
+Select the preset with ``--model`` and repeat ``--dataset`` for each applicable dataset. Use the canonical CLI and its Pydantic-validated YAML interface rather than the separate legacy ``key=value`` interface:
 
 .. code-block:: console
 
