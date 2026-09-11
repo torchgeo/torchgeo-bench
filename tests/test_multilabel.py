@@ -3,6 +3,7 @@
 import builtins
 import logging
 import sys
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import numpy as np
@@ -102,6 +103,7 @@ class TestKNNClassifierSingleLabel:
                 del X, y
 
         monkeypatch.setattr(knn, "gpu_faiss_available", lambda: True)
+        monkeypatch.setattr(knn.torch.cuda, "device", lambda _device: nullcontext())
         monkeypatch.setitem(
             sys.modules,
             "faissknn",
