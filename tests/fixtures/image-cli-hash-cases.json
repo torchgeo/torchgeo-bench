@@ -1,62 +1,120 @@
 [
   {
+    "first_typed_hash": "3f107d7f31ff0094",
+    "hash": "9f565bb8c0a2099f",
     "id": "rcf-default",
     "input": {
-      "model": {"name": "rcf"},
-      "datasets": ["m-eurosat"],
-      "runtime": {"device": "cpu"}
-    },
-    "hash": "9f565bb8c0a2099f",
-    "first_typed_hash": "3f107d7f31ff0094"
+      "datasets": [
+        "m-eurosat"
+      ],
+      "model": {
+        "name": "rcf"
+      },
+      "runtime": {
+        "device": "cpu"
+      }
+    }
   },
   {
+    "first_typed_hash": "89c042e627d06a70",
+    "hash": "ec230ab4ab4a9f64",
     "id": "real-imagestats",
     "input": {
-      "model": {"name": "imagestats"},
-      "datasets": ["m-eurosat"],
-      "input": {"partition": "0.01x_train", "image_size": 32},
       "classification": {
         "bootstrap_samples": 2,
         "knn_device": "cpu",
-        "linear": {"c_log10_start": 0.0, "c_log10_stop": 1.0, "c_count": 2}
+        "linear": {
+          "c_count": 2,
+          "c_log10_start": 0.0,
+          "c_log10_stop": 1.0
+        }
       },
-      "runtime": {"device": "cpu", "batch_size": 64, "workers": 0}
-    },
-    "hash": "ec230ab4ab4a9f64",
-    "first_typed_hash": "89c042e627d06a70"
+      "datasets": [
+        "m-eurosat"
+      ],
+      "input": {
+        "image_size": 32,
+        "partition": "0.01x_train"
+      },
+      "model": {
+        "name": "imagestats"
+      },
+      "runtime": {
+        "batch_size": 64,
+        "device": "cpu",
+        "workers": 0
+      }
+    }
   },
   {
+    "first_typed_hash": "89485fa0cc4f459c",
+    "hash": "6f8be61c367c780a",
     "id": "scalemae-overrides",
     "input": {
-      "model": {"name": "torchgeo/scalemae_large_fmow"},
-      "datasets": ["m-eurosat", "caffe"],
-      "runtime": {"device": "cpu", "seed": 7}
-    },
-    "hash": "6f8be61c367c780a",
-    "first_typed_hash": "89485fa0cc4f459c"
+      "datasets": [
+        "m-eurosat",
+        "caffe"
+      ],
+      "model": {
+        "name": "torchgeo/scalemae_large_fmow"
+      },
+      "runtime": {
+        "device": "cpu",
+        "seed": 7
+      }
+    }
   },
   {
+    "first_typed_hash": "efbcb152c690e75a",
+    "hash": "30874c86a82a81bd",
     "id": "explicit-null-and-empty-layers",
     "input": {
-      "model": {"name": "timm/resnet18"},
-      "datasets": ["caffe"],
-      "input": {"image_size": null, "interpolation": "nearest", "normalization": "none"},
-      "segmentation": {"layers": [], "head": "linear", "epochs": 1, "learning_rate": 0.01},
-      "runtime": {"device": "cpu", "workers": 0}
-    },
-    "hash": "30874c86a82a81bd",
-    "first_typed_hash": "efbcb152c690e75a"
+      "datasets": [
+        "caffe"
+      ],
+      "input": {
+        "image_size": null,
+        "interpolation": "nearest",
+        "normalization": "none"
+      },
+      "model": {
+        "name": "timm/resnet18"
+      },
+      "runtime": {
+        "device": "cpu",
+        "workers": 0
+      },
+      "segmentation": {
+        "epochs": 1,
+        "head": "linear",
+        "layers": [],
+        "learning_rate": 0.01
+      }
+    }
   },
   {
+    "first_typed_hash": "74c0cc662eba8cd6",
+    "hash": "0f1b5d856a8ea089",
     "id": "all-band-multilabel-knn",
     "input": {
-      "model": {"name": "rcf"},
-      "datasets": ["m-bigearthnet"],
-      "input": {"bands": "all"},
-      "classification": {"methods": ["knn"]},
-      "runtime": {"device": "cpu", "seed": 42}
-    },
-    "hash": "0f1b5d856a8ea089",
-    "first_typed_hash": "74c0cc662eba8cd6"
+      "classification": {
+        "methods": [
+          "knn"
+        ]
+      },
+      "datasets": [
+        "m-bigearthnet"
+      ],
+      "input": {
+        "bands": "all"
+      },
+      "model": {
+        "name": "rcf"
+      },
+      "runtime": {
+        "device": "cpu",
+        "seed": 42
+      }
+    }
   }
 ]
