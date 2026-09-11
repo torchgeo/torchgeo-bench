@@ -14,12 +14,10 @@ def test_profile_rows_emitted(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "classification": {"methods": ["knn"]},
+            "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+        },
     )
     metrics = {
         "params_m": 0.01,
@@ -49,13 +47,11 @@ def test_profile_resume_partial_does_not_skip(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "output": {"resume": True},
+            "classification": {"methods": ["knn"]},
+            "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+        },
     )
     metrics = {
         "params_m": 0.01,
@@ -90,19 +86,17 @@ def test_profile_resume_complete_skips(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "output": {"resume": True},
+            "classification": {"methods": ["knn"]},
+            "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+        },
     )
 
     seed_rows = [_resume_row(cfg, method="knn5", metric_name="accuracy")]
     seed_rows.extend(
         _resume_row(cfg, method="profile", metric_name=name)
-        for name in _profile_metric_names(cfg.eval.profile)
+        for name in _profile_metric_names(cfg.profile)
     )
     pd.DataFrame(seed_rows).to_csv(out, index=False)
 

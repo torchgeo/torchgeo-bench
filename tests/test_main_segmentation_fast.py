@@ -6,13 +6,14 @@ from unittest import mock
 import pandas as pd
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader, Dataset
 
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import main, run_dataset
-from torchgeo_bench.resume import ResumeState, _resume_config_hash
+from torchgeo_bench.presets import merge_settings
+from torchgeo_bench.resume import ResumeState
 
-from .test_main_fast import _chainable_model_mock, _compose_cfg
+from .test_main_fast import _chainable_model_mock, _compose_cfg, _resume_row
 
 
 class _SegmentationDataset(Dataset):
@@ -55,31 +56,23 @@ def _synthetic_segmentation_loaders(
 
 def _seg_resume_row(cfg, *, metric_name: str = "mIoU") -> dict[str, object]:
     return {
+        **_resume_row(cfg, method="seg-fpn", metric_name=metric_name),
         "dataset": "burn_scars",
-        "method": "seg-fpn",
-        "model": cfg.model._target_,
-        "name": cfg.model.name,
-        "normalization": cfg.dataset.normalization,
-        "image_size": cfg.dataset.image_size,
-        "interpolation": cfg.dataset.interpolation,
-        "partition": cfg.dataset.partition,
-        "bands": cfg.dataset.bands,
         "num_classes": 3,
-        "config_hash": _resume_config_hash(cfg),
-        "metric_name": metric_name,
         "metric_value": 0.42,
     }
 
 
-def _cfg_for_segmentation(out: Path, overrides: list[str] | None = None):
+def _cfg_for_segmentation(out: Path, overrides: dict | None = None) -> RunConfig:
     return _compose_cfg(
         out,
-        overrides=[
-            "dataset.names=[burn_scars]",
-            "eval.segmentation.cache_features=false",
-            "eval.segmentation.head_type=fpn",
-            *(overrides or []),
-        ],
+        overrides=merge_settings(
+            {
+                "datasets": ["burn_scars"],
+                "segmentation": {"cache_features": False, "head": "fpn"},
+            },
+            overrides or {},
+        ),
     )
 
 
@@ -106,21 +99,18 @@ def _mock_probe_and_solver():
     return probe, solver
 
 
-def test_dataset_eval_merge_preserves_interpolation_context(
+def test_dataset_eval_resolution_preserves_explicit_values_and_original_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cfg = _cfg_for_segmentation(tmp_path / "out.csv")
-    with open_dict(cfg):
-        cfg.rate = 0.002
-        cfg.eval.epochs = 3
-        cfg.eval.segmentation.lr = "${rate}"
-        cfg.eval.segmentation.epochs = "${..epochs}"
-        cfg.model.eval = {"segmentation": {"batch_size": 6}}
-    original = OmegaConf.to_container(cfg, resolve=False)
-    captured: list[DictConfig] = []
+    cfg.segmentation.learning_rate = 0.002
+    cfg.segmentation.epochs = 3
+    cfg.segmentation.batch_size = 6
+    original = cfg.model_dump()
+    captured: list[RunConfig] = []
 
-    def capture_eval(_cfg: DictConfig, eval_cfg: DictConfig, *_args: object) -> list[dict]:
-        captured.append(eval_cfg)
+    def capture_eval(config: RunConfig, *_args: object) -> list[dict]:
+        captured.append(config)
         return []
 
     loaders = _synthetic_segmentation_loaders()
@@ -132,10 +122,10 @@ def test_dataset_eval_merge_preserves_interpolation_context(
 
     assert list(run_dataset(cfg, "burn_scars", "test", ResumeState(set(), {}))) == []
 
-    assert captured[0].segmentation.lr == 0.002
+    assert captured[0].segmentation.learning_rate == 0.002
     assert captured[0].segmentation.epochs == 3
     assert captured[0].segmentation.batch_size == 6
-    assert OmegaConf.to_container(cfg, resolve=False) == original
+    assert cfg.model_dump() == original
 
 
 def test_segmentation_row_emitted(tmp_path: Path):
@@ -167,7 +157,7 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _cfg_for_segmentation(
         out,
-        overrides=["eval.segmentation.cache_features=true", "eval.segmentation.batch_size=3"],
+        overrides={"segmentation": {"cache_features": True, "batch_size": 3}},
     )
     probe, solver = _mock_probe_and_solver()
     cache = mock.Mock()
@@ -199,8 +189,8 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
         train_cache=cache,
         val_cache=cache,
         batch_size=3,
-        epochs=cfg.eval.segmentation.epochs,
-        verbose=cfg.verbose,
+        epochs=cfg.segmentation.epochs,
+        verbose=cfg.runtime.verbose,
     )
     df = pd.read_csv(out)
     assert df.loc[0, "best_batch_size"] == 3
@@ -208,13 +198,13 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
 
 def test_segmentation_resume_skips_complete_run(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _cfg_for_segmentation(out, overrides=["resume=true"])
+    cfg = _cfg_for_segmentation(out, overrides={"output": {"resume": True}})
     pd.DataFrame([_seg_resume_row(cfg)]).to_csv(out, index=False)
     model = _chainable_model_mock()
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
-        mock.patch("torchgeo_bench.main.instantiate", return_value=model) as instantiate_mock,
+        mock.patch("torchgeo_bench.main.build_model", return_value=model) as instantiate_mock,
         mock.patch("torchgeo_bench.segmentation_task.build_seg_probe_and_solver") as build_mock,
     ):
         main(cfg)

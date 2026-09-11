@@ -133,6 +133,7 @@ def load_model_preset(selection: ModelConfig, *, seed: int = 0) -> ModelPreset:
 def resolve_run_config(config: RunConfig, dataset: str) -> tuple[RunConfig, ModelPreset]:
     """Resolve preset and dataset defaults beneath explicitly supplied settings."""
     preset = load_model_preset(config.model, seed=config.runtime.seed).for_dataset(dataset)
+    preset = preset.model_copy(update={"kwargs": {**preset.kwargs, **config.model.kwargs}})
     if preset.track != "image":
         raise ValueError(f"{config.model.name!r} is a coordinate encoder; use 'coord'")
     defaults = {
@@ -140,12 +141,18 @@ def resolve_run_config(config: RunConfig, dataset: str) -> tuple[RunConfig, Mode
         for key in ("input", "classification", "segmentation")
     }
     effective = RunConfig.model_validate(merge_settings(defaults, config.model_dump_yaml()))
-    return effective, preset
+    return effective, preset.model_copy(update={"input": effective.input})
 
 
 def build_model(preset: ModelPreset, **runtime_options: Any) -> Any:
     """Construct one model; nested target-like kwargs remain ordinary mappings."""
     options = {**preset.kwargs, **runtime_options}
+    if preset.target in {
+        "torchgeo_bench.models.TorchGeoScaleMAEBench",
+        "torchgeo_bench.models.torchgeo_models.TorchGeoScaleMAEBench",
+    }:
+        # Scale-MAE's positional grid must match the dataset's resolved resize.
+        options.setdefault("image_size", preset.input.image_size)
     if preset.target in {
         "torchgeo_bench.models.TimmPatchBenchModel",
         "torchgeo_bench.models.RCFBench",

@@ -7,7 +7,7 @@ import pytest
 
 from torchgeo_bench.config import list_model_configs
 from torchgeo_bench.config_schema import ModelConfig, RunConfig
-from torchgeo_bench.presets import ModelPreset, load_model_preset, resolve_run_config
+from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset, resolve_run_config
 
 
 @pytest.mark.parametrize("name", list_model_configs())
@@ -70,3 +70,109 @@ for name in list_model_configs():
 assert not set(('omegaconf', 'torch', 'torchgeo', 'numpy', 'pandas')) & sys.modules.keys()
 """
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+@pytest.mark.parametrize("image_size", [None, 96])
+def test_scalemae_constructor_uses_resolved_dataset_grid(
+    monkeypatch: pytest.MonkeyPatch, image_size: int | None
+) -> None:
+    config = RunConfig.model_validate(
+        {
+            "model": {"name": "torchgeo/scalemae_large_fmow"},
+            "datasets": ["m-eurosat"],
+            **({"input": {"image_size": image_size}} if image_size is not None else {}),
+        }
+    )
+    effective, preset = resolve_run_config(config, "m-eurosat")
+    received = {}
+
+    def constructor(**kwargs: object) -> object:
+        received.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("torchgeo_bench.models.TorchGeoScaleMAEBench", constructor)
+    build_model(preset, bands=[], normalization="identity")
+    assert received["image_size"] == effective.input.image_size == (image_size or 64)
+    assert received["res"] == 3.5
+
+
+def test_flops_scalemae_constructor_grid_follows_explicit_synthetic_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from torchgeo_bench.flops_config import FlopsConfig
+
+    config = FlopsConfig.model_validate(
+        {
+            "model": {"name": "torchgeo/scalemae_large_fmow"},
+            "input": {"band_source": "m-eurosat", "image_size": 96},
+        }
+    )
+    effective, preset = config.resolve()
+    received = {}
+
+    def constructor(**kwargs: object) -> object:
+        received.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("torchgeo_bench.models.TorchGeoScaleMAEBench", constructor)
+    build_model(preset, bands=[], normalization="identity")
+    assert received["image_size"] == effective.input.image_size == 96
+
+
+def test_explicit_constructor_options_override_dataset_defaults() -> None:
+    config = RunConfig.model_validate(
+        {
+            "model": {"name": "torchgeo/scalemae_large_fmow", "kwargs": {"res": 1.25}},
+            "datasets": ["m-eurosat", "m-forestnet"],
+        }
+    )
+    for dataset in config.datasets:
+        _, preset = resolve_run_config(config, dataset)
+        assert preset.kwargs["res"] == 1.25
+
+
+def test_explicit_default_values_override_preset_lr_layers_and_range() -> None:
+    omitted = RunConfig.model_validate(
+        {"model": {"name": "torchgeo/croma_large"}, "datasets": ["m-eurosat"]}
+    )
+    effective, _ = resolve_run_config(omitted, "m-eurosat")
+    assert effective.classification.linear.c_log10_stop != 4.0
+    explicit = RunConfig.model_validate(
+        {
+            **omitted.model_dump_yaml(),
+            "classification": {"linear": {"c_log10_stop": 4.0}},
+            "segmentation": {"learning_rate": 0.001, "layers": [], "cache_features": False},
+            "input": {"image_size": None},
+        }
+    )
+    effective, _ = resolve_run_config(explicit, "m-eurosat")
+    assert effective.classification.linear.c_log10_stop == 4.0
+    assert effective.segmentation.learning_rate == 0.001
+    assert effective.segmentation.layers == []
+    assert effective.segmentation.cache_features is False
+    assert effective.input.image_size is None
+
+
+def test_typed_preset_learning_rate_and_head_defaults_have_lower_precedence(monkeypatch) -> None:
+    preset = ModelPreset.model_validate(
+        {
+            "name": "custom",
+            "target": "custom_model.Model",
+            "segmentation": {"learning_rate": 0.02, "head": "linear", "layers": ["backbone"]},
+        }
+    )
+    monkeypatch.setattr("torchgeo_bench.presets.load_model_preset", lambda *args, **kwargs: preset)
+    config = RunConfig.model_validate({"model": {"name": "custom"}, "datasets": ["caffe"]})
+    effective, _ = resolve_run_config(config, "caffe")
+    assert effective.segmentation.learning_rate == 0.02
+    assert effective.segmentation.head == "linear"
+    config = RunConfig.model_validate(
+        {
+            **config.model_dump_yaml(),
+            "segmentation": {"learning_rate": 0.001, "head": "fpn", "layers": []},
+        }
+    )
+    effective, _ = resolve_run_config(config, "caffe")
+    assert effective.segmentation.learning_rate == 0.001
+    assert effective.segmentation.head == "fpn"
+    assert effective.segmentation.layers == []

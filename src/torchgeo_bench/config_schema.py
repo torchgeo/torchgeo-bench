@@ -278,7 +278,9 @@ class IntrinsicDimensionConfig(StrictModel):
 
     enabled: StrictBool = False
     estimators: list[StrictStr] = Field(default_factory=lambda: ["TwoNN", "MLE", "lPCA"])
-    splits: list[Literal["train", "val", "test"]] = Field(default_factory=_default_splits)
+    splits: list[Literal["train", "val", "test"]] = Field(
+        default_factory=_default_splits, min_length=1
+    )
     max_samples: StrictInt | None = Field(default=10000, gt=0)
     device: StrictStr | None = None
 
@@ -286,11 +288,7 @@ class IntrinsicDimensionConfig(StrictModel):
     @classmethod
     def validate_selections(cls, values: list[str]) -> list[str]:
         """Require distinct non-empty selections."""
-        if (
-            not values
-            or any(not value.strip() for value in values)
-            or len(set(values)) != len(values)
-        ):
+        if any(not value.strip() for value in values) or len(set(values)) != len(values):
             raise ValueError("selections must contain distinct non-empty names")
         return values
 

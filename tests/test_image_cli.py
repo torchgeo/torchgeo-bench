@@ -7,18 +7,17 @@ import argparse
 import runpy
 import subprocess
 import sys
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 import yaml
 from _pytest.capture import CaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
-from omegaconf import DictConfig, OmegaConf, open_dict
 
 from torchgeo_bench.commands._image import _set
 from torchgeo_bench.config_schema import validate_run_config
 from torchgeo_bench.image_cli import _image_size, _model_names, main
+from torchgeo_bench.presets import resolve_run_config
 
 
 def test_dry_run_applies_explicit_flags_and_preserves_false_values(
@@ -103,14 +102,14 @@ def test_missing_model_or_dataset_fails_before_execution() -> None:
         main(["run", "--model", "rcf", "--dry-run"])
 
 
-def test_non_dry_run_calls_legacy_adapter(monkeypatch: MonkeyPatch) -> None:
+def test_non_dry_run_calls_typed_runtime(monkeypatch: MonkeyPatch) -> None:
     received = []
     monkeypatch.setattr("torchgeo_bench.commands._image_runtime.run", received.append)
     main(["run", "--model", "rcf", "--dataset", "m-eurosat"])
     assert received[0].model.name == "rcf"
 
 
-def test_legacy_adapter_composes_and_translates_schema(
+def test_runtime_preserves_typed_schema(
     monkeypatch: MonkeyPatch,
 ) -> None:
     received = []
@@ -137,12 +136,13 @@ def test_legacy_adapter_composes_and_translates_schema(
     from torchgeo_bench.commands._image_runtime import run
 
     run(config)
-    assert received[0].device == "cpu"
-    assert received[0].dataset.normalization == "identity"
-    assert received[0].eval.skip_linear is True
+    assert received[0].runtime.device == "cpu"
+    assert received[0].input.normalization == "none"
+    assert received[0].classification.methods == ["knn"]
+    assert received[0] == config
 
 
-def test_legacy_adapter_rejects_unavailable_cuda(monkeypatch: MonkeyPatch) -> None:
+def test_runtime_rejects_unavailable_cuda(monkeypatch: MonkeyPatch) -> None:
     import torch
 
     config = validate_run_config(
@@ -159,12 +159,9 @@ def test_legacy_adapter_rejects_unavailable_cuda(monkeypatch: MonkeyPatch) -> No
         run(config)
 
 
-def test_legacy_adapter_preserves_model_and_segmentation_overrides(
+def test_runtime_preserves_model_and_segmentation_overrides(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    from torchgeo_bench import config as config_module
-    from torchgeo_bench.commands import _image_runtime as legacy_run
-
     received = []
 
     def capture(config: object, *, strict: bool = False) -> None:
@@ -172,29 +169,9 @@ def test_legacy_adapter_preserves_model_and_segmentation_overrides(
         received.append(config)
 
     monkeypatch.setattr("torchgeo_bench.commands._image_runtime.main", capture)
-    original_compose = config_module.compose_config
-
-    def compose_with_optional_sections(
-        overrides: Sequence[str] = (),
-        *,
-        config_name: str = "config",
-        default_model: str | None = "rcf",
-    ) -> DictConfig:
-        legacy = original_compose(overrides, config_name=config_name, default_model=default_model)
-        with open_dict(legacy.model):
-            legacy.model.eval = {}
-            legacy.model.dataset_overrides = {
-                "m-eurosat": {"image_size": 16, "interpolation": "bicubic"}
-            }
-        with open_dict(legacy.eval.segmentation):
-            legacy.eval.segmentation.layers = ["layer1"]
-        return legacy
-
-    monkeypatch.setattr(config_module, "compose_config", compose_with_optional_sections)
-    monkeypatch.setattr(legacy_run, "compose_config", compose_with_optional_sections)
     config = validate_run_config(
         {
-            "model": {"name": "rcf"},
+            "model": {"name": "torchgeo/scalemae_large_fmow", "kwargs": {"res": 1.0}},
             "datasets": ["m-eurosat"],
             "runtime": {"device": "cpu"},
             "input": {"image_size": 8, "interpolation": "nearest"},
@@ -204,11 +181,14 @@ def test_legacy_adapter_preserves_model_and_segmentation_overrides(
     from torchgeo_bench.commands._image_runtime import run
 
     run(config)
-    assert received[0].model.eval == {}
-    assert received[0].eval.segmentation.layers == ["layer1"]
+    effective, preset = resolve_run_config(received[0], "m-eurosat")
+    assert preset.kwargs["res"] == 1.0
+    assert effective.input.image_size == 8
+    assert effective.input.interpolation == "nearest"
+    assert effective.segmentation.layers == ["layer1"]
 
 
-def test_legacy_adapter_preserves_preset_layers_when_schema_omits_them(
+def test_runtime_preserves_preset_layers_when_schema_omits_them(
     monkeypatch: MonkeyPatch,
 ) -> None:
     received = []
@@ -228,7 +208,8 @@ def test_legacy_adapter_preserves_preset_layers_when_schema_omits_them(
     from torchgeo_bench.commands._image_runtime import run
 
     run(config)
-    assert received[0].model.eval.segmentation.layers == [
+    effective, _ = resolve_run_config(received[0], "burn_scars")
+    assert effective.segmentation.layers == [
         "layer4",
         "layer3",
         "layer2",
@@ -236,7 +217,7 @@ def test_legacy_adapter_preserves_preset_layers_when_schema_omits_them(
     ]
 
 
-def test_legacy_adapter_explicit_empty_layers_clear_preset(
+def test_runtime_explicit_empty_layers_clear_preset(
     monkeypatch: MonkeyPatch,
 ) -> None:
     received = []
@@ -257,7 +238,8 @@ def test_legacy_adapter_explicit_empty_layers_clear_preset(
     from torchgeo_bench.commands._image_runtime import run
 
     run(config)
-    assert received[0].eval.segmentation.layers == []
+    effective, _ = resolve_run_config(received[0], "burn_scars")
+    assert effective.segmentation.layers == []
 
 
 def test_linear_only_is_rejected_by_legacy_adapter() -> None:
@@ -412,13 +394,15 @@ def test_public_download_and_profile_dispatch(monkeypatch: MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(("available", "expected"), [(False, "cpu"), (True, "cuda:0")])
-def test_auto_device_resolves_before_legacy_execution(
+def test_auto_device_resolves_before_typed_execution(
     monkeypatch: MonkeyPatch, *, available: bool, expected: str
 ) -> None:
+    import torch
+
     from torchgeo_bench.commands import _image_runtime
 
     received = []
-    monkeypatch.setattr(_image_runtime.torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
     monkeypatch.setattr(_image_runtime, "main", lambda cfg, **kwargs: received.append(cfg))
     config = validate_run_config(
         {
@@ -428,7 +412,7 @@ def test_auto_device_resolves_before_legacy_execution(
         }
     )
     _image_runtime.run(config)
-    assert received[0].device == expected
+    assert received[0].runtime.device == expected
 
 
 @pytest.mark.parametrize(
@@ -443,7 +427,7 @@ def test_dry_run_reload_preserves_preset_settings(
     monkeypatch.setattr(
         _image_runtime,
         "main",
-        lambda cfg, **kwargs: received.append(OmegaConf.to_container(cfg, resolve=True)),
+        lambda cfg, **kwargs: received.append(cfg.model_dump_yaml()),
     )
     arguments = ["run", "--model", model, "--dataset", "m-eurosat", "--device", "cpu"]
     main(arguments)
@@ -457,7 +441,6 @@ def test_dry_run_reload_preserves_preset_settings(
 
 def test_image_size_override_reaches_model_construction(monkeypatch: MonkeyPatch) -> None:
     from torchgeo_bench.commands import _image_runtime
-    from torchgeo_bench.main import resolve_model_config
 
     received = []
     monkeypatch.setattr(_image_runtime, "main", lambda cfg, **kwargs: received.append(cfg))
@@ -475,5 +458,5 @@ def test_image_size_override_reaches_model_construction(monkeypatch: MonkeyPatch
         ]
     )
     config = received[0]
-    assert config.dataset.image_size == 32
-    assert resolve_model_config(config.model, "m-eurosat").image_size == 32
+    assert config.input.image_size == 32
+    assert resolve_run_config(config, "m-eurosat")[0].input.image_size == 32

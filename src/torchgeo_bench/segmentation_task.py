@@ -3,14 +3,10 @@
 import logging
 import math
 from collections.abc import Iterator
-from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-
-if TYPE_CHECKING:
-    from omegaconf import DictConfig
 from torchmetrics.classification import (
     MulticlassF1Score,
     MulticlassJaccardIndex,
@@ -19,6 +15,7 @@ from torchmetrics.classification import (
 )
 from tqdm.auto import tqdm
 
+from .config_schema import SegmentationConfig
 from .segmentation_probe import (
     CachedFeaturesDataset,
     GPUTensorCache,
@@ -392,36 +389,32 @@ class SegmentationSolver:
 def build_seg_probe_and_solver(
     model: nn.Module,
     num_classes: int,
-    eval_cfg: "DictConfig",
+    config: SegmentationConfig,
     device: torch.device,
-    lr: float,
 ) -> tuple[SegmentationProbe, SegmentationSolver]:
-    """Build the frozen-backbone probe and its solver from the merged eval config."""
-    from torchgeo_bench.config import instantiate
-
-    layer_names = list(eval_cfg.segmentation.layers)
+    """Build the frozen-backbone probe and solver from validated segmentation settings."""
+    layer_names = config.layers
     if not layer_names:
         raise ValueError(
-            "Segmentation evaluation requires eval.segmentation.layers to name "
+            "Segmentation evaluation requires segmentation.layers to name "
             "spatial backbone layers. Refusing to probe the global backbone output."
         )
     probe = SegmentationProbe(
         backbone=model,
         layer_names=layer_names,
         num_classes=num_classes,
-        head_type=eval_cfg.segmentation.head_type,
+        head_type=config.head,
         freeze_backbone=True,
-        temporal_pool=str(eval_cfg.segmentation.get("temporal_pool", "mean")),
+        temporal_pool=config.temporal_pool,
     )
-    criterion = instantiate(eval_cfg.segmentation.criterion)
-    criterion_ignore = getattr(criterion, "ignore_index", None)
+    criterion = nn.CrossEntropyLoss(ignore_index=config.ignore_index)
     solver = SegmentationSolver(
         model=probe,
         num_classes=num_classes,
-        lr=lr,
+        lr=config.learning_rate,
         device=str(device),
         criterion=criterion,
-        lr_scheduler=eval_cfg.segmentation.get("lr_scheduler", "cosine"),
-        ignore_index=int(criterion_ignore) if criterion_ignore is not None else 255,
+        lr_scheduler=config.scheduler,
+        ignore_index=config.ignore_index,
     )
     return probe, solver
