@@ -1,8 +1,8 @@
 """Benchmark ImageStats and three cumulative handcrafted feature levels.
 
 Run from the repository root:
-    .venv/bin/python -m experiments.run_handcrafted
-    .venv/bin/python -m experiments.run_handcrafted --levels 1 --datasets eurosat
+    python experiments/run_handcrafted.py
+    python experiments/run_handcrafted.py --levels 1 --datasets eurosat
 
 Level zero is the existing ImageStats control. The other levels use the new
 handcrafted model. All runs use raw, all-band inputs and the normal benchmark
@@ -14,19 +14,18 @@ import csv
 import json
 import logging
 import math
-import os
-import sys
 from dataclasses import asdict
 from pathlib import Path
 
 import torch
+from _runner import Job, add_devices_argument, run_jobs
 
-from torchgeo_bench.config import compose_config, instantiate
+from torchgeo_bench.config.presets import NORMALIZATIONS, build_model, resolve_run_config
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import InputConfig, ModelConfig
 from torchgeo_bench.datasets import get_bench_dataset_class, list_datasets
-from torchgeo_bench.main import resolve_model_config
-from torchgeo_bench.resume import _resume_config_hash
-
-from ._runner import Job, add_devices_argument, run_jobs
+from torchgeo_bench.datasets.loading import get_dataset_task
+from torchgeo_bench.resume import resume_config_hash
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,9 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def classification_datasets() -> list[str]:
     """Return registered image-classification datasets, including multilabel tasks."""
-    return [
-        name for name in list_datasets() if get_bench_dataset_class(name).task == "classification"
-    ]
+    return [name for name in list_datasets() if get_dataset_task(name) == "classification"]
 
 
 def model_name(level: int) -> str:
@@ -44,24 +41,24 @@ def model_name(level: int) -> str:
     return "imagestats_handcrafted_control" if level == 0 else f"handcrafted_level{level}"
 
 
-def overrides(level: int, dataset: str) -> list[str]:
-    """Build benchmark overrides without replacing its evaluation methods."""
-    values = [
-        f"model={'imagestats' if level == 0 else f'handcrafted_level{level}'}",
-        f"model.name={model_name(level)}",
-        f"dataset.names=[{dataset}]",
-        "dataset.bands=all",
-        "dataset.normalization=identity",
-    ]
-    if level:
-        values.append(f"model.level={level}")
-    return values
+def run_config(level: int, dataset: str) -> RunConfig:
+    """Build typed study settings without replacing benchmark evaluation defaults."""
+    if level not in (0, 1, 2, 3):
+        raise ValueError("The study level must be 0, 1, 2 or 3.")
+    model = ModelConfig(name=model_name(level))
+    if level == 0:
+        model = ModelConfig(name=model_name(level), target="torchgeo_bench.models.ImageStatsBench")
+    return RunConfig(
+        model=model,
+        datasets=[dataset],
+        input=InputConfig(bands="all", normalization="none"),
+    )
 
 
 def build_jobs(level: int, datasets: list[str]) -> list[Job]:
     """Create independent, resumable jobs for one model's classification sweep."""
     return [
-        Job(label=f"{model_name(level)}/{name}", overrides=overrides(level, name))
+        Job(label=f"{model_name(level)}/{name}", config=run_config(level, name))
         for name in datasets
     ]
 
@@ -72,9 +69,10 @@ def feature_manifest(level: int, datasets: list[str], devices: list[int]) -> dic
     for name in datasets:
         bench = get_bench_dataset_class(name)()
         bands = bench.select_band_specs(None)
-        cfg = compose_config(overrides(level, name))
-        model_cfg = resolve_model_config(cfg.model, name)
-        model = instantiate(model_cfg, bands=bands, normalization="identity")
+        cfg, preset = resolve_run_config(run_config(level, name), name)
+        model = build_model(
+            preset, bands=bands, normalization=NORMALIZATIONS[cfg.input.normalization]
+        )
         if level:
             names = list(model.feature_names)
             metadata = model.feature_metadata
@@ -94,8 +92,13 @@ def feature_manifest(level: int, datasets: list[str], devices: list[int]) -> dic
             "multilabel": bench.multilabel,
             "split_sizes": bench.split_sizes,
             "config_hashes": {
-                _resume_config_hash(
-                    compose_config([*overrides(level, name), f"device=cuda:{device}"])
+                resume_config_hash(
+                    cfg.model_copy(
+                        update={
+                            "runtime": cfg.runtime.model_copy(update={"device": f"cuda:{device}"})
+                        }
+                    ),
+                    preset,
                 ): f"cuda:{device}"
                 for device in devices
             },
@@ -192,17 +195,25 @@ def run_level(args: argparse.Namespace, level: int) -> bool:
     return code == 0 and not failures
 
 
+def _current_rows(args: argparse.Namespace, level: int) -> list[dict]:
+    manifest = feature_manifest(level, args.datasets, args.devices)
+    return [
+        row
+        for row in completed_rows(args.output_dir / f"{model_name(level)}.csv")
+        if row["dataset"] in manifest
+        and row["config_hash"] in manifest[row["dataset"]]["config_hashes"]
+    ]
+
+
 def summarize(args: argparse.Namespace) -> None:
-    """Write scores by dataset and level without averaging different task metrics."""
+    """Summarize current configurations without mixing in historical measurements."""
     baseline = {
         (row["dataset"], row["method"]): float(row["metric_value"])
-        for row in completed_rows(args.output_dir / f"{model_name(0)}.csv")
+        for row in _current_rows(args, 0)
     }
     summary = []
     for level in args.levels:
-        for row in completed_rows(args.output_dir / f"{model_name(level)}.csv"):
-            if row["dataset"] not in args.datasets:
-                continue
+        for row in _current_rows(args, level):
             control = baseline.get((row["dataset"], row["method"]))
             score = float(row["metric_value"])
             summary.append(
@@ -221,7 +232,7 @@ def summarize(args: argparse.Namespace) -> None:
                 }
             )
     if not summary:
-        raise ValueError("No result rows are available for the requested sweep.")
+        raise ValueError("No result rows match the current configuration of the requested sweep.")
     name = f"summary_level{args.levels[0]}.csv" if len(args.levels) == 1 else "summary.csv"
     with (args.run_dir / name).open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(summary[0]), lineterminator="\n")
@@ -254,7 +265,6 @@ def main() -> int:
         and (not torch.cuda.is_available() or max(args.devices) >= torch.cuda.device_count())
     ):
         parser.error("a requested CUDA device is unavailable")
-    os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.run_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(message)s")

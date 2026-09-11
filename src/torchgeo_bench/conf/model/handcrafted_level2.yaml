@@ -1,3 +1,7 @@
-_target_: torchgeo_bench.models.HandcraftedBench
 name: handcrafted_level2
-level: 2
+target: torchgeo_bench.models.HandcraftedBench
+kwargs:
+  level: 2
+input:
+  bands: all
+  normalization: none

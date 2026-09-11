@@ -55,13 +55,11 @@ feature selection, random initialization, image gradients or training state.
 
    $ torchgeo-bench run --model handcrafted_level2 --dataset eurosat --bands all --normalization none
    $ torchgeo-bench run --model handcrafted_level3 --dataset resisc45 --bands all --normalization none
-   $ python -m experiments.run_handcrafted --levels 1 2 3
+   $ python experiments/run_handcrafted.py --levels 1 2 3
 
-The sweep script selects classification datasets only. ``dataset.names=all``
-also includes segmentation tasks, which this patch-feature baseline does not
-support.
+The sweep script selects classification datasets from the current catalog, including AID. ``--dataset all`` also includes segmentation tasks, which this patch-feature baseline does not support.
 
-See :doc:`../handcrafted-results` for the completed classification sweep.
+The checked-in result CSVs preserve the original study's measurements and hashes for 13 classification protocols; they contain no AID measurements and were not regenerated on the current runner. New runs use the current configuration and resume hashes. Use ``--output-dir results/handcrafted-current`` for a separate sweep.
 
 Levels are cumulative and their feature vectors are strict prefixes:
 
@@ -109,9 +107,7 @@ There is no nearest-band fallback, zero-filled source, or cross-sensor
 mixing: aerial RGB never borrows Sentinel-2 NIR. SAR produces raw
 statistics/texture but no optical indices; missing roles simply omit maps.
 
-The constructor defaults to identity normalization, but the CLI passes its
-global strategy, so explicitly use ``--normalization none`` with the image CLI,
-or ``dataset.normalization=identity`` with ``python -m torchgeo_bench.cli run``.
+The constructor and all four presets default to identity normalization; the presets also select all bands. Explicit ``--normalization`` and ``--bands`` flags override these input defaults. The ``handcrafted`` preset defaults to level 2; custom YAML can set ``model: {name: handcrafted, kwargs: {level: 3}}``. Preprocessing and evaluation settings belong under ``input`` and ``classification``, not constructor kwargs.
 Other base-class strategies are honored and recorded, not secretly bypassed;
 z-scored bands do not produce physically meaningful normalized-difference
 indices. No fitted input or downstream scaler is added. The ratio calculation
@@ -151,7 +147,7 @@ two-map chunks to bound intermediate memory. Outputs stay on the input
 device and can train an attached head through ordinary ``no_grad`` feature
 extraction. Nonfinite inputs are rejected, and float32 overflow raises a
 descriptive error. The model never resizes inputs: normal benchmark runs
-inherit ``dataset.image_size=224`` and bilinear interpolation.
+inherit ``input.image_size: 224`` and bilinear interpolation.
 
 timm — ImageNet-pretrained CNNs and ViTs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

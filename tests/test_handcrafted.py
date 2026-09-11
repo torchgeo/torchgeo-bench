@@ -9,8 +9,11 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from torchgeo_bench.bands import BandSpec
-from torchgeo_bench.config import compose_config, instantiate
-from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.config.presets import NORMALIZATIONS, build_model, resolve_run_config
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import ModelConfig
+from torchgeo_bench.datasets import get_bench_dataset_class, list_datasets
+from torchgeo_bench.datasets.loading import get_dataset_task
 from torchgeo_bench.models import BenchModel, HandcraftedBench, ImageStatsBench
 from torchgeo_bench.models._handcrafted_bands import normalized_difference
 from torchgeo_bench.models._handcrafted_structure import (
@@ -28,13 +31,45 @@ DEVICES = [
 ]
 
 
-@pytest.mark.parametrize("level", [1, 2, 3])
-def test_level_presets_select_the_matching_model(level):
-    config = compose_config([f"model=handcrafted_level{level}"])
-    model = instantiate(config.model, bands=_bands(3), normalization="identity")
+@pytest.mark.parametrize(
+    ("name", "level"),
+    [("handcrafted", 2), *((f"handcrafted_level{level}", level) for level in (1, 2, 3))],
+)
+def test_level_presets_select_the_matching_model(name, level):
+    config, preset = resolve_run_config(
+        RunConfig(model=ModelConfig(name=name), datasets=["m-eurosat"]), "m-eurosat"
+    )
+    model = build_model(
+        preset, bands=_bands(3), normalization=NORMALIZATIONS[config.input.normalization]
+    )
     assert isinstance(model, HandcraftedBench)
     assert model.level == level
-    assert config.model.name == f"handcrafted_level{level}"
+    assert preset.name == name
+    assert preset.kwargs == {"level": level}
+    assert preset.track == "image"
+    assert model.normalization == "identity"
+    assert config.input.bands == "all"
+    assert config.input.image_size == 224
+    assert config.input.interpolation == "bilinear"
+    assert config.classification.methods == ["knn", "linear"]
+    assert config.classification.linear.refit_train_val is True
+
+
+def test_explicit_input_settings_override_handcrafted_defaults():
+    config, preset = resolve_run_config(
+        RunConfig.model_validate(
+            {
+                "model": {"name": "handcrafted", "kwargs": {"level": 1}},
+                "datasets": ["m-eurosat"],
+                "input": {"normalization": "dataset", "bands": "rgb", "image_size": None},
+            }
+        ),
+        "m-eurosat",
+    )
+    assert preset.kwargs == {"level": 1}
+    assert config.input.normalization == "dataset"
+    assert config.input.bands == "rgb"
+    assert config.input.image_size is None
 
 
 def _band(name: str, sensor: str = "s2") -> BandSpec:
@@ -372,10 +407,15 @@ def test_float32_overflow_is_reported():
 
 @pytest.mark.parametrize("device", DEVICES)
 def test_config_and_benchmark_extraction_path(device):
-    config = compose_config(
-        ["model=handcrafted", "model.level=3", "dataset.normalization=identity"]
+    config, preset = resolve_run_config(
+        RunConfig(
+            model=ModelConfig(name="handcrafted", kwargs={"level": 3}), datasets=["m-eurosat"]
+        ),
+        "m-eurosat",
     )
-    model = instantiate(config.model, bands=_bands(3), normalization=config.dataset.normalization)
+    model = build_model(
+        preset, bands=_bands(3), normalization=NORMALIZATIONS[config.input.normalization]
+    )
     assert isinstance(model, HandcraftedBench)
     samples = [
         {"image": torch.full((3, 5, 7), float(index)), "label": index % 2} for index in range(5)
@@ -391,21 +431,7 @@ def test_config_and_benchmark_extraction_path(device):
 
 @pytest.mark.parametrize(
     "dataset",
-    [
-        "m-eurosat",
-        "m-forestnet",
-        "m-so2sat",
-        "m-pv4ger",
-        "m-brick-kiln",
-        "m-bigearthnet",
-        "benv2",
-        "treesatai",
-        "so2sat",
-        "forestnet",
-        "eurosat",
-        "eurosat-spatial",
-        "resisc45",
-    ],
+    [name for name in list_datasets() if get_dataset_task(name) == "classification"],
 )
 def test_all_classification_band_schemas_without_datasets(dataset):
     bands = get_bench_dataset_class(dataset).bands
