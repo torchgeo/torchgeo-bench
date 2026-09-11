@@ -55,8 +55,6 @@ The sweep script selects classification datasets only. ``dataset.names=all``
 also includes segmentation tasks, which this patch-feature baseline does not
 support.
 
-See :doc:`../handcrafted-results` for the completed classification sweep.
-
 Levels are cumulative and their feature vectors are strict prefixes:
 
 .. list-table::
