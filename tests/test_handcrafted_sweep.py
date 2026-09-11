@@ -26,6 +26,7 @@ def test_four_levels_produce_52_independent_classification_jobs():
         assert not any("merge_val" in value or "image_size" in value for value in job.overrides)
     assert model_name(0) == "imagestats_handcrafted_control"
     assert "model.level=3" in build_jobs(3, ["eurosat"])[0].overrides
+    assert "model=handcrafted_level3" in build_jobs(3, ["eurosat"])[0].overrides
 
 
 def _row(method):

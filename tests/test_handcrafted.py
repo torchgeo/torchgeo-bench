@@ -28,6 +28,15 @@ DEVICES = [
 ]
 
 
+@pytest.mark.parametrize("level", [1, 2, 3])
+def test_level_presets_select_the_matching_model(level):
+    config = compose_config([f"model=handcrafted_level{level}"])
+    model = instantiate(config.model, bands=_bands(3), normalization="identity")
+    assert isinstance(model, HandcraftedBench)
+    assert model.level == level
+    assert config.model.name == f"handcrafted_level{level}"
+
+
 def _band(name: str, sensor: str = "s2") -> BandSpec:
     return BandSpec(sensor, name, name.upper(), mean=10, std=2, min=0, max=100)
 

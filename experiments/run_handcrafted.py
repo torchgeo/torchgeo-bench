@@ -47,7 +47,7 @@ def model_name(level: int) -> str:
 def overrides(level: int, dataset: str) -> list[str]:
     """Build benchmark overrides without replacing its evaluation methods."""
     values = [
-        f"model={'imagestats' if level == 0 else 'handcrafted'}",
+        f"model={'imagestats' if level == 0 else f'handcrafted_level{level}'}",
         f"model.name={model_name(level)}",
         f"dataset.names=[{dataset}]",
         "dataset.bands=all",
