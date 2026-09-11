@@ -25,7 +25,9 @@ def test_packaged_preset_is_typed_without_loading_weights(name: str) -> None:
 
 def test_rcf_seed_is_explicit_and_overridable() -> None:
     assert load_model_preset(ModelConfig(name="rcf"), seed=17).kwargs["seed"] == 17
-    assert load_model_preset(ModelConfig(name="rcf", kwargs={"seed": 9}), seed=17).kwargs["seed"] == 9
+    assert (
+        load_model_preset(ModelConfig(name="rcf", kwargs={"seed": 9}), seed=17).kwargs["seed"] == 9
+    )
 
 
 def test_preset_layers_do_not_override_an_explicit_empty_selection() -> None:

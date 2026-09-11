@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from omegaconf import DictConfig
+    import omegaconf.dictconfig
 
 CONF_DIR = Path(str(files("torchgeo_bench") / "conf"))
 
@@ -54,7 +54,7 @@ def compose_config(
     *,
     config_name: str = "config",
     default_model: str | None = "rcf",
-) -> "DictConfig":
+) -> "omegaconf.dictconfig.DictConfig":
     """Build the run config from base YAML, model YAML, and ``key=value`` overrides.
 
     Args:
@@ -107,7 +107,7 @@ def compose_config(
     return cfg
 
 
-def instantiate(config: "DictConfig | dict", **kwargs: Any) -> Any:
+def instantiate(config: "omegaconf.dictconfig.DictConfig | dict", **kwargs: Any) -> Any:
     """Instantiate the class named by ``config._target_`` with the remaining keys.
 
     Extra ``kwargs`` override config keys.
