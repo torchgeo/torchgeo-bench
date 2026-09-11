@@ -93,9 +93,12 @@ def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResul
     """Run one benchmark job on the assigned GPU."""
     logger.info("[%d/%d] START %s on cuda:%d", idx, total, job.label, gpu)
     start = time.time()
-    with NamedTemporaryFile(mode="w", suffix=".yaml", encoding="utf-8") as config_file:
+    # Windows needs the writer closed without deleting the file before the child opens it.
+    with NamedTemporaryFile(
+        mode="w", suffix=".yaml", encoding="utf-8", delete_on_close=False
+    ) as config_file:
         yaml.safe_dump(job.config.model_dump_yaml(), config_file, sort_keys=False)
-        config_file.flush()
+        config_file.close()
         proc = subprocess.run(
             _command(config_file.name, gpu, output),
             capture_output=True,
