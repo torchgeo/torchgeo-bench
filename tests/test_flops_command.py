@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -26,7 +27,7 @@ def test_explicit_flags_override_yaml_without_overriding_omitted_values(tmp_path
     path.write_text(
         yaml.safe_dump(
             {
-                "model": {"name": "rcf", "kwargs": {"features": 12}},
+                "model": {"name": "rcf", "kwargs": {"features": 12, "kernel_size": 5}},
                 "runtime": {"device": "cuda", "seed": 11, "verbose": True},
                 "input": {"image_size": 112, "band_configs": ["s2"]},
                 "segmentation": {"probe": {"layers": ["stem"]}},
@@ -57,7 +58,7 @@ def test_explicit_flags_override_yaml_without_overriding_omitted_values(tmp_path
     assert config.runtime.device == "cpu"
     assert config.runtime.seed == 0
     assert not config.runtime.verbose
-    assert config.model.kwargs["features"] == 8
+    assert config.model.kwargs == {"features": 8, "kernel_size": 5}
     assert config.input.band_configs == ["s2"]
     assert config.input.image_size == 112
     assert config.segmentation.probe.layers == []
@@ -65,6 +66,118 @@ def test_explicit_flags_override_yaml_without_overriding_omitted_values(tmp_path
     assert config.timing.n_measure == 2
     assert config.timing.n_warmup == 0
     assert not config.output.resume
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        pytest.param(
+            {"name": "custom-stats", "target": "torchgeo_bench.models.ImageStatsBench"},
+            id="custom-target-to-preset",
+        ),
+        pytest.param(
+            {
+                "name": "timm/resnet18",
+                "kwargs": {"pretrained": True, "model_name": "resnet18"},
+            },
+            id="incompatible-preset-kwargs",
+        ),
+        pytest.param(
+            {"name": "rcf", "kwargs": {"features": 24, "mode": "empirical"}},
+            id="same-preset-is-still-a-new-selection",
+        ),
+    ],
+)
+def test_model_flag_replaces_entire_yaml_selection(
+    tmp_path: Path, selection: dict[str, Any]
+) -> None:
+    import torch
+
+    from torchgeo_bench.datasets.cloudsen12 import CloudSEN12
+    from torchgeo_bench.models import RCFBench
+    from torchgeo_bench.presets import build_model
+
+    path = tmp_path / "flops.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {"model": selection, "runtime": {"device": "cpu"}, "input": {"image_size": 8}}
+        )
+    )
+    config = _flops.load_config(
+        parser().parse_args(
+            ["--config", str(path), "--model", "rcf", "--model-kwargs", "{features: 8}"]
+        )
+    )
+    resolved, preset = config.resolve()
+    model = build_model(preset, bands=CloudSEN12.bands).to(resolved.runtime.device).eval()
+    assert isinstance(model, RCFBench)
+    assert resolved.model.name == "rcf"
+    assert resolved.model.target is None
+    assert resolved.model.kwargs == {"features": 8}
+    images = torch.zeros(
+        2,
+        len(CloudSEN12.bands),
+        resolved.input.image_size,
+        resolved.input.image_size,
+        device=resolved.runtime.device,
+    )
+    with torch.inference_mode():
+        features = model(images)
+    assert features.shape == (2, 8)
+    assert features.device.type == "cpu"
+
+
+def test_explicit_constructor_flags_win_after_model_switch(tmp_path: Path) -> None:
+    import torch
+
+    from torchgeo_bench.datasets.cloudsen12 import CloudSEN12
+    from torchgeo_bench.models import RCFBench
+    from torchgeo_bench.presets import build_model
+
+    path = tmp_path / "flops.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "model": {
+                    "name": "timm/resnet18",
+                    "kwargs": {"pretrained": True, "model_name": "resnet18"},
+                },
+                "runtime": {"device": "cpu"},
+                "input": {"image_size": 8},
+            }
+        )
+    )
+    config = _flops.load_config(
+        parser().parse_args(
+            [
+                "--config",
+                str(path),
+                "--model",
+                "imagestats",
+                "--model-target",
+                "torchgeo_bench.models.RCFBench",
+                "--model-kwargs",
+                "{features: 8, stats_mode: stdev}",
+            ]
+        )
+    )
+    resolved, preset = config.resolve()
+    model = build_model(preset, bands=CloudSEN12.bands).to(resolved.runtime.device).eval()
+    assert isinstance(model, RCFBench)
+    assert resolved.model.name == "imagestats"
+    assert resolved.model.target == "torchgeo_bench.models.RCFBench"
+    assert resolved.model.kwargs == {"features": 8, "stats_mode": "stdev"}
+    images = torch.zeros(
+        2,
+        len(CloudSEN12.bands),
+        resolved.input.image_size,
+        resolved.input.image_size,
+        device=resolved.runtime.device,
+    )
+    with torch.inference_mode():
+        features = model(images)
+    assert features.shape == (2, 16)
+    assert features.device.type == "cpu"
 
 
 def test_all_argument_categories_dispatch_typed_config(monkeypatch: pytest.MonkeyPatch) -> None:
