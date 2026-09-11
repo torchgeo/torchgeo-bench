@@ -976,7 +976,7 @@ def load_completed_outputs(
 
 
 @accept_legacy_config
-def main(cfg: RunConfig, *, strict: bool = False) -> None:
+def main(cfg: RunConfig, *, strict: bool = False, _legacy_hash: str | None = None) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.runtime.seed)
     dataset_names = _expand_dataset_list(cfg.datasets)
@@ -993,7 +993,7 @@ def main(cfg: RunConfig, *, strict: bool = False) -> None:
     completed_runs, completed_metrics = load_completed_outputs(
         cfg, output_path, profile_output_path, intrinsic_dim_output_path
     )
-    config_hash = _resume_config_hash(cfg)
+    config_hash = _legacy_hash or _resume_config_hash(cfg)
     completed = ResumeState(completed_runs, completed_metrics)
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         for all_rows, id_out_rows, profile_out_rows in run_dataset(

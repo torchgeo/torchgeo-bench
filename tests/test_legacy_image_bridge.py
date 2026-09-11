@@ -10,7 +10,7 @@ from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.legacy_config import accept_legacy_config
 from torchgeo_bench.main import main
 
-from .test_main_fast import _synthetic_embeddings, _synthetic_loaders
+from .test_main_fast import _resume_row, _synthetic_embeddings, _synthetic_loaders
 
 
 def test_bridge_converts_old_fields_and_keeps_metadata_out_of_constructor_kwargs() -> None:
@@ -63,3 +63,33 @@ def test_old_main_caller_still_runs_and_persists(tmp_path: Path) -> None:
     ):
         main(config)
     assert pd.read_csv(output)["method"].tolist() == ["knn5"]
+
+
+def test_old_main_caller_resumes_a_historical_fingerprint(tmp_path: Path) -> None:
+    output = tmp_path / "legacy.csv"
+    config = compose_config(
+        [
+            "model=rcf",
+            "device=cpu",
+            "dataset.names=[m-eurosat]",
+            "eval.skip_linear=true",
+            "resume=true",
+            f"output={output}",
+        ]
+    )
+    typed = RunConfig.model_validate(
+        {
+            "model": {"name": "rcf"},
+            "datasets": ["m-eurosat"],
+            "runtime": {"device": "cpu"},
+            "classification": {"methods": ["knn"]},
+        }
+    )
+    pd.DataFrame([_resume_row(typed, method="knn5", metric_name="accuracy")]).to_csv(
+        output, index=False
+    )
+    with mock.patch(
+        "torchgeo_bench.main.get_datasets", side_effect=AssertionError("resume loaded data")
+    ):
+        main(config)
+    assert len(pd.read_csv(output)) == 1

@@ -9,6 +9,7 @@ from functools import wraps
 from typing import TYPE_CHECKING, Any, cast
 
 from .config_schema import RunConfig
+from .image_hash import _hash_payload
 from .presets import NORMALIZATIONS, merge_settings
 
 if TYPE_CHECKING:
@@ -118,10 +119,36 @@ def accept_legacy_config(function: Callable[..., None]) -> Callable[..., None]:
 
         raw = OmegaConf.to_container(config, resolve=True)
         assert isinstance(raw, dict)
+        values = cast(dict[str, Any], raw)
+        config_hash = _legacy_resume_hash(values)
         names = raw["dataset"]["names"]
         if isinstance(names, str):
             names = list_datasets() if names == "all" else names.split(",")
         for dataset in names:
-            function(legacy_run_config(cast(dict[str, Any], raw), dataset), strict=strict)
+            function(legacy_run_config(values, dataset), strict=strict, _legacy_hash=config_hash)
 
     return wrapped
+
+
+def _legacy_resume_hash(raw: Mapping[str, Any]) -> str:
+    """Retain the original fingerprint while the bridge resolves constructor metadata."""
+    dataset = {key: value for key, value in raw["dataset"].items() if key != "names"}
+    evaluation = {
+        key: value for key, value in raw["eval"].items() if key not in {"profile", "intrinsic_dim"}
+    }
+    evaluation["segmentation"] = {
+        "save_viz": False,
+        "viz_dir": "viz",
+        "n_viz_samples": 8,
+        **evaluation["segmentation"],
+    }
+    return _hash_payload(
+        {
+            "version": 1,
+            "seed": raw["seed"],
+            "device": raw["device"],
+            "dataset": dataset,
+            "eval": evaluation,
+            "model": raw["model"],
+        }
+    )
