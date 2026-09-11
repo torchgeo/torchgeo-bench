@@ -1,4 +1,4 @@
-"""Run the legacy CLI against tiny on-disk inputs without mocking its internals."""
+"""Run the canonical CLI against tiny on-disk inputs without mocking its internals."""
 
 import json
 import os
@@ -19,10 +19,10 @@ from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.flops_config import FlopsConfig
 
 
-def run_legacy_cli(
+def run_cli(
     *arguments: str, cwd: Path, timeout: int = 120, offline: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    """Invoke the explicit legacy entry point for key=value program coverage."""
+    """Invoke the public CLI module with an explicitly selected source checkout."""
     env = {
         **os.environ,
         "OMP_NUM_THREADS": "1",
@@ -121,7 +121,7 @@ def test_classification_program_handles_noncontiguous_labels(
     arguments = classification_arguments(output)
     if temperature_scaling:
         arguments.extend(["--no-refit-train-val", "--temp-scale"])
-    completed = run_legacy_cli(*arguments, cwd=tmp_path)
+    completed = run_cli(*arguments, cwd=tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert output.is_file(), completed.stdout + completed.stderr
 
@@ -153,7 +153,7 @@ def test_program_profiles_features_and_resumes_without_input_files(
             "profile": {"enabled": True, "n_warmup": 0, "n_measure": 1},
         },
     )
-    completed = run_legacy_cli(*arguments, cwd=tmp_path)
+    completed = run_cli(*arguments, cwd=tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert output.is_file(), completed.stdout + completed.stderr
     rows = pd.read_csv(output)
@@ -166,7 +166,7 @@ def test_program_profiles_features_and_resumes_without_input_files(
 
     before = output.read_bytes()
     shutil.rmtree(classification_files)
-    resumed = run_legacy_cli(*arguments, "--resume", cwd=tmp_path)
+    resumed = run_cli(*arguments, "--resume", cwd=tmp_path)
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert output.read_bytes() == before
 
@@ -176,7 +176,7 @@ def test_program_reinitializes_for_multispectral_and_multilabel_datasets(tmp_pat
     labels = tuple([int(index == label) for index in range(43)] for label in (0, 1))
     write_classification_files(tmp_path, "m-bigearthnet", labels, all_bands=True)
     output = tmp_path / "multiple.csv"
-    completed = run_legacy_cli(
+    completed = run_cli(
         *classification_arguments(output),
         "--dataset",
         "m-eurosat",
@@ -211,7 +211,7 @@ def test_program_fails_when_any_requested_data_is_unavailable(
     tmp_path: Path, classification_files: Path, dataset_names: tuple[str, ...]
 ) -> None:
     output = tmp_path / "missing.csv"
-    completed = run_legacy_cli(
+    completed = run_cli(
         *classification_arguments(output, dataset_names=dataset_names),
         cwd=tmp_path,
     )
@@ -247,7 +247,7 @@ def test_flops_program_writes_both_band_configurations_and_resumes(tmp_path: Pat
         "--output",
         str(output),
     ]
-    completed = run_legacy_cli(*arguments, cwd=tmp_path)
+    completed = run_cli(*arguments, cwd=tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert output.is_file(), completed.stdout + completed.stderr
     rows = pd.read_csv(output).set_index("band_config")
@@ -259,6 +259,6 @@ def test_flops_program_writes_both_band_configurations_and_resumes(tmp_path: Pat
     assert rows.loc["s2", "gflops_backbone"] > rows.loc["rgb", "gflops_backbone"]
     assert (rows["throughput_samples_per_sec"] > 0).all()
     before = output.read_bytes()
-    resumed = run_legacy_cli(*arguments, "--resume", cwd=tmp_path)
+    resumed = run_cli(*arguments, "--resume", cwd=tmp_path)
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert output.read_bytes() == before
