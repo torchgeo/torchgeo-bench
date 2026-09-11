@@ -8,17 +8,19 @@ from pathlib import Path
 
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
-from omegaconf.errors import InterpolationKeyError
+from pydantic import ValidationError
 from torch import nn
 
 from torchgeo_bench import flops_pipeline
 from torchgeo_bench.bands import BandCompatibilityError
-from torchgeo_bench.config import compose_config
+from torchgeo_bench.config_schema import ModelConfig, SegmentationConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.flops_config import FlopsConfig, FlopsSegmentationConfig
 from torchgeo_bench.flops_pipeline import (
     _MODALITY_FOR_BAND_CONFIG,
     _build_model,
+    _build_seg_probe,
     _load_completed,
     _n_tokens,
     _probe_gflops,
@@ -26,7 +28,7 @@ from torchgeo_bench.flops_pipeline import (
     main,
 )
 from torchgeo_bench.model_profile import ProfileTiming, _count_gflops
-from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
+from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset
 
 CPU = torch.device("cpu")
 
@@ -186,30 +188,16 @@ class _TapModel(nn.Module):
 _TAP_LAYERS = ["layer4", "layer3", "layer2", "layer1"]
 
 
-def _seg_cfg(layers: list[str], head_type: str):
-    from omegaconf import OmegaConf
-
-    return OmegaConf.create(
-        {
-            "segmentation": {
-                "layers": layers,
-                "head_type": head_type,
-                "lr_scheduler": "cosine",
-                "criterion": {
-                    "_target_": "torch.nn.CrossEntropyLoss",
-                    "ignore_index": 255,
-                },
-            }
-        }
-    )
+def _seg_cfg(layers: list[str], head_type: str) -> SegmentationConfig:
+    return SegmentationConfig.model_validate({"layers": layers, "head": head_type})
 
 
-@pytest.mark.parametrize("head_type", ["fpn", "dpt"])
+@pytest.mark.parametrize("head_type", ["linear", "conv_block", "fpn", "dpt", "patch_linear"])
 def test_seg_head_gflops_is_positive_and_deterministic(head_type):
     if head_type == "dpt":
         pytest.importorskip("transformers")
     model = _TapModel().eval()
-    probe, _ = build_seg_probe_and_solver(model, 4, _seg_cfg(_TAP_LAYERS, head_type), CPU, 1e-3)
+    probe = _build_seg_probe(model, 4, _seg_cfg(_TAP_LAYERS, head_type))
     probe.eval()
     first = _seg_head_gflops(probe, 12, 224, CPU)
     second = _seg_head_gflops(probe, 12, 224, CPU)
@@ -222,8 +210,8 @@ def test_finer_taps_make_a_more_expensive_head():
     coarse = _TapModel(tap_stride=16).eval()
     fine = _TapModel(tap_stride=8).eval()
 
-    probe_c, _ = build_seg_probe_and_solver(coarse, 4, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
-    probe_f, _ = build_seg_probe_and_solver(fine, 4, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
+    probe_c = _build_seg_probe(coarse, 4, _seg_cfg(_TAP_LAYERS, "fpn"))
+    probe_f = _build_seg_probe(fine, 4, _seg_cfg(_TAP_LAYERS, "fpn"))
     g_coarse = _seg_head_gflops(probe_c.eval(), 12, 224, CPU)
     g_fine = _seg_head_gflops(probe_f.eval(), 12, 224, CPU)
     assert g_fine > g_coarse
@@ -232,8 +220,8 @@ def test_finer_taps_make_a_more_expensive_head():
 def test_num_classes_barely_moves_head_cost():
     """Class count is not varied in the sweep because it barely changes head cost."""
     model = _TapModel().eval()
-    probe2, _ = build_seg_probe_and_solver(model, 2, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
-    probe15, _ = build_seg_probe_and_solver(model, 15, _seg_cfg(_TAP_LAYERS, "fpn"), CPU, 1e-3)
+    probe2 = _build_seg_probe(model, 2, _seg_cfg(_TAP_LAYERS, "fpn"))
+    probe15 = _build_seg_probe(model, 15, _seg_cfg(_TAP_LAYERS, "fpn"))
     g2 = _seg_head_gflops(probe2.eval(), 12, 224, CPU)
     g15 = _seg_head_gflops(probe15.eval(), 12, 224, CPU)
     assert abs(g15 - g2) / g2 < 0.02
@@ -254,16 +242,14 @@ def test_band_configs_come_from_cloudsen12_class_attributes():
 
 def test_terramind_modality_map_matches_shipped_configs():
     """An RGB modality paired with 12 channels can produce plausible but wrong FLOP counts."""
-    from torchgeo_bench.config import compose_config
-
     for config_name, band_config in [
         ("terratorch/terramind_v1_base", "s2"),
         ("terratorch/terramind_v1_base_rgb", "rgb"),
         ("terratorch/terramind_v1_large", "s2"),
         ("terratorch/terramind_v1_large_rgb", "rgb"),
     ]:
-        cfg = compose_config([f"model={config_name}"])
-        assert str(cfg.model.modality) == _MODALITY_FOR_BAND_CONFIG[band_config]
+        preset = load_model_preset(ModelConfig(name=config_name))
+        assert preset.kwargs["modality"] == _MODALITY_FOR_BAND_CONFIG[band_config]
 
 
 def test_load_completed_missing_file(tmp_path):
@@ -298,8 +284,8 @@ def test_build_model_skips_explicit_band_incompatibility(monkeypatch, caplog):
     def incompatible(config, **kwargs):
         raise BandCompatibilityError("unsupported selection")
 
-    monkeypatch.setattr("torchgeo_bench.flops_pipeline.instantiate", incompatible)
-    cfg = OmegaConf.create({"_target_": "example.Model", "name": "example"})
+    monkeypatch.setattr("torchgeo_bench.flops_pipeline.build_model", incompatible)
+    cfg = ModelPreset(target="example.Model", name="example")
     assert _build_model(cfg, [], "identity", "rgb") is None
     assert "unsupported selection" in caplog.text
 
@@ -307,7 +293,7 @@ def test_build_model_skips_explicit_band_incompatibility(monkeypatch, caplog):
 @pytest.mark.parametrize(
     "error",
     [
-        InterpolationKeyError("Interpolation key 'seed' not found"),
+        KeyError("missing constructor option"),
         ValueError("input channels configuration is invalid"),
         ValueError("Could not find weights for 'tt_clay_v1_5'"),
         OSError("[Errno 122] Disk quota exceeded"),
@@ -318,8 +304,8 @@ def test_build_model_propagates_real_failures(error, monkeypatch):
     def broken(config, **kwargs):
         raise error
 
-    monkeypatch.setattr("torchgeo_bench.flops_pipeline.instantiate", broken)
-    cfg = OmegaConf.create({"_target_": "example.Model", "name": "example"})
+    monkeypatch.setattr("torchgeo_bench.flops_pipeline.build_model", broken)
+    cfg = ModelPreset(target="example.Model", name="example")
     with pytest.raises(type(error)) as exc:
         _build_model(cfg, [], "identity", "rgb")
     assert exc.value is error
@@ -356,38 +342,37 @@ def test_channel_count_disagreement_is_a_bug_not_a_band_skip():
 
 
 def test_terramind_modality_mismatch_is_rejected():
-    cfg = OmegaConf.create(
-        {"_target_": "example.TerraMind", "name": "example", "modality": "S2L2A"}
-    )
+    cfg = ModelPreset(target="example.TerraMind", name="example", kwargs={"modality": "S2L2A"})
     with pytest.raises(ValueError, match="does not match band config"):
         _build_model(cfg, [], "identity", "rgb")
 
 
 @pytest.fixture
 def flops_config(tmp_path):
-    cfg = compose_config(["model=rcf"], config_name="flops_config")
-    cfg.output = str(tmp_path / "flops.csv")
-    cfg.device = "cpu"
-    cfg.image_size = 32
-    cfg.band_configs = ["rgb"]
-    cfg.timing_batch_size = 2
-    cfg.n_warmup = 0
-    cfg.n_measure = 1
-    return cfg
+    return FlopsConfig.model_validate(
+        {
+            "model": {"name": "rcf"},
+            "output": {"file": str(tmp_path / "flops.csv")},
+            "runtime": {"device": "cpu"},
+            "input": {"image_size": 32, "band_configs": ["rgb"]},
+            "timing": {"batch_size": 2, "n_warmup": 0, "n_measure": 1},
+        }
+    )
 
 
-def test_completed_profile_survives_invalid_segmentation_head(flops_config, monkeypatch):
+def test_completed_profile_survives_incompatible_segmentation_head(flops_config, monkeypatch):
     import pandas as pd
 
     monkeypatch.setattr(
-        "torchgeo_bench.flops_pipeline.instantiate", lambda *args, **kwargs: _TinyConvNet()
+        "torchgeo_bench.flops_pipeline.build_model", lambda *args, **kwargs: _TinyConvNet()
     )
-    flops_config.eval.segmentation.layers = ["stem"]
-    flops_config.seg_head_types = ["invalid"]
-    with pytest.raises(ValueError, match="head"):
+    flops_config.segmentation = FlopsSegmentationConfig(
+        heads=["dpt"], probe=SegmentationConfig(layers=["stem"])
+    )
+    with pytest.raises(ValueError, match="DPT"):
         main(flops_config)
 
-    rows = pd.read_csv(flops_config.output)
+    rows = pd.read_csv(flops_config.output.file)
     assert list(rows["task"]) == ["classification"]
     assert rows.iloc[0]["gflops_total"] > 0
     assert not rows.iloc[0]["lenient_grad_hooks"]
@@ -406,7 +391,7 @@ def test_forward_pass_only_skips_explicit_band_errors(flops_config, monkeypatch,
             raise error
 
     monkeypatch.setattr(
-        "torchgeo_bench.flops_pipeline.instantiate", lambda *args, **kwargs: BrokenForward()
+        "torchgeo_bench.flops_pipeline.build_model", lambda *args, **kwargs: BrokenForward()
     )
     if isinstance(error, BandCompatibilityError):
         main(flops_config)
@@ -416,51 +401,36 @@ def test_forward_pass_only_skips_explicit_band_errors(flops_config, monkeypatch,
             main(flops_config)
 
 
-def test_flops_config_resolves_every_shipped_model_config():
-    """flops_config must define the top-level seed referenced by rcf.yaml."""
-    from omegaconf import OmegaConf
-
-    from torchgeo_bench.config import compose_config
-
-    cfg = compose_config(["model=rcf"], config_name="flops_config", default_model=None)
-    resolved = OmegaConf.to_container(cfg, resolve=True)
-    assert resolved["model"]["seed"] == resolved["seed"] == 0
+def test_flops_config_resolves_rcf_seed():
+    config = FlopsConfig(model=ModelConfig(name="rcf"))
+    resolved, preset = config.resolve()
+    assert preset.kwargs["seed"] == resolved.runtime.seed == 0
 
 
-type FlopsRun = tuple[DictConfig, list[dict[str, object]], list[str]]
+type FlopsRun = tuple[FlopsConfig, list[dict[str, object]], list[str]]
 
 
 @pytest.fixture
 def flops_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FlopsRun:
-    cfg = OmegaConf.create(
+    cfg = FlopsConfig.model_validate(
         {
-            "output": str(tmp_path / "compute_cost.csv"),
-            "device": "cpu",
-            "image_size": 8,
-            "normalization": "bandspec_zscore",
-            "band_source": "cloudsen12",
-            "band_configs": ["rgb", "s2"],
-            "seg_band_configs": ["rgb", "s2"],
-            "seg_head_types": ["fpn", "dpt"],
-            "probe_head": "linear",
-            "probe_num_classes": 7,
-            "seg_num_classes": 3,
-            "timing_batch_size": 8,
-            "n_warmup": 1,
-            "n_measure": 2,
-            "resume": False,
-            "model": {
-                "_target_": "test.TinyModel",
-                "name": "tiny",
-                "eval": {"segmentation": {"layers": ["stem"]}},
+            "output": {"file": str(tmp_path / "compute_cost.csv"), "resume": False},
+            "runtime": {"device": "cpu"},
+            "input": {"image_size": 8},
+            "segmentation": {
+                "heads": ["fpn", "dpt"],
+                "num_classes": 3,
+                "probe": {"layers": ["stem"]},
             },
-            "eval": {"segmentation": {"layers": [], "head_type": "fpn"}},
+            "classification": {"head": "linear", "num_classes": 7},
+            "timing": {"batch_size": 8, "n_warmup": 1, "n_measure": 2},
+            "model": {"target": "test.TinyModel", "name": "tiny"},
         }
     )
     rows: list[dict[str, object]] = []
     events: list[str] = []
 
-    def build_model(_cfg: DictConfig, bands: list, *_args: object) -> nn.Module:
+    def build_model(_cfg: ModelPreset, bands: list, *_args: object) -> nn.Module:
         events.append(f"model:{len(bands)}")
         return _WidthModel(5)
 
@@ -475,20 +445,20 @@ def flops_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FlopsRun:
             "reserved_gpu_mem_gb": None,
         }, 4
 
-    def build_head(
-        _model: nn.Module, _classes: int, head_cfg: DictConfig, *_args: object
-    ) -> tuple[nn.Module, None]:
-        events.append(f"head:{head_cfg.segmentation.head_type}")
-        assert head_cfg.segmentation.layers == ["stem"]
+    def build_head(_model: nn.Module, _classes: int, head_cfg: SegmentationConfig) -> nn.Module:
+        events.append(f"head:{head_cfg.head}")
+        assert head_cfg.layers == ["stem"]
         probe = nn.Module()
         probe.head = nn.Linear(5, 3)
         probe.channels_list = [2, 3]
-        return probe, None
+        probe.hooks = []
+        probe._features = {}
+        return probe
 
     monkeypatch.setattr(flops_pipeline, "_build_model", build_model)
     monkeypatch.setattr(flops_pipeline, "_measure_backbone", measure_backbone)
     monkeypatch.setattr(flops_pipeline, "_probe_gflops", lambda *_args: (0.5, 0.01, 5))
-    monkeypatch.setattr(flops_pipeline, "build_seg_probe_and_solver", build_head)
+    monkeypatch.setattr(flops_pipeline, "_build_seg_probe", build_head)
     monkeypatch.setattr(flops_pipeline, "_seg_head_gflops", lambda *_args: 0.25)
     monkeypatch.setattr(
         flops_pipeline, "append_rows_atomic", lambda _path, values: rows.extend(values)
@@ -531,7 +501,7 @@ def test_main_writes_ordered_measurement_rows(flops_run: FlopsRun) -> None:
 @pytest.mark.parametrize("all_complete", [False, True])
 def test_main_skips_completed_cells(flops_run: FlopsRun, *, all_complete: bool) -> None:
     cfg, rows, events = flops_run
-    cfg.resume = True
+    cfg.output.resume = True
     completed = [("rgb", "classification", ""), ("s2", "segmentation", "fpn")]
     if all_complete:
         completed = [
@@ -543,7 +513,7 @@ def test_main_skips_completed_cells(flops_run: FlopsRun, *, all_complete: bool) 
                 ("segmentation", "dpt"),
             )
         ]
-    Path(cfg.output).write_text(
+    Path(cfg.output.file).write_text(
         "name,band_config,task,head_type\n"
         + "".join(f"tiny,{band},{task},{head}\n" for band, task, head in completed)
     )
@@ -618,17 +588,15 @@ def test_main_segmentation_failure_preserves_completed_rows(
     flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch, failed_head: str
 ) -> None:
     cfg, rows, _events = flops_run
-    cfg.band_configs = ["rgb"]
-    build = flops_pipeline.build_seg_probe_and_solver
+    cfg.input.band_configs = ["rgb"]
+    build = flops_pipeline._build_seg_probe
 
-    def fail_head(
-        model: nn.Module, classes: int, head_cfg: DictConfig, *args: object
-    ) -> tuple[nn.Module, None]:
-        if head_cfg.segmentation.head_type == failed_head:
+    def fail_head(model: nn.Module, classes: int, head_cfg: SegmentationConfig) -> nn.Module:
+        if head_cfg.head == failed_head:
             raise ValueError("unsupported head")
-        return build(model, classes, head_cfg, *args)
+        return build(model, classes, head_cfg)
 
-    monkeypatch.setattr(flops_pipeline, "build_seg_probe_and_solver", fail_head)
+    monkeypatch.setattr(flops_pipeline, "_build_seg_probe", fail_head)
     with pytest.raises(ValueError, match="unsupported head"):
         flops_pipeline.main(cfg)
     expected = [("rgb", "classification", "")]
@@ -641,9 +609,9 @@ def test_main_segmentation_failure_preserves_completed_rows(
 def test_main_skips_excluded_segmentation(flops_run: FlopsRun, *, empty_layers: bool) -> None:
     cfg, rows, events = flops_run
     if empty_layers:
-        cfg.model.eval.segmentation.layers = []
+        cfg.segmentation.probe.layers = []
     else:
-        cfg.seg_band_configs = []
+        cfg.segmentation.band_configs = []
     flops_pipeline.main(cfg)
 
     assert written_keys(rows) == [("rgb", "classification", ""), ("s2", "classification", "")]
@@ -655,9 +623,10 @@ def test_main_rejects_malformed_layers_before_measurement(
     flops_run: FlopsRun, layers: int | None
 ) -> None:
     cfg, rows, events = flops_run
-    cfg.model.eval.segmentation.layers = layers
-    with pytest.raises(TypeError):
-        flops_pipeline.main(cfg)
+    values = cfg.model_dump_yaml()
+    values["segmentation"]["probe"]["layers"] = layers
+    with pytest.raises(ValidationError, match="layers"):
+        FlopsConfig.model_validate(values)
     assert rows == []
     assert events == []
 
@@ -665,12 +634,10 @@ def test_main_rejects_malformed_layers_before_measurement(
 @pytest.mark.slow
 def test_panopticon_yields_finite_gflops():
     """Count the real Panopticon backbone without replacing PyTorch hooks."""
-    from torchgeo_bench.config import compose_config, instantiate
-
     bench = get_bench_dataset_class("cloudsen12")()
-    cfg = compose_config(["model=torchgeo/panopticon"])
-    model = instantiate(
-        cfg.model,
+    preset = load_model_preset(ModelConfig(name="torchgeo/panopticon"))
+    model = build_model(
+        preset,
         bands=bench.select_band_specs(None),
         normalization="bandspec_zscore",
     ).eval()
@@ -683,14 +650,12 @@ def test_panopticon_yields_finite_gflops():
 @pytest.mark.slow
 def test_vit_gflops_ordering_and_tokens():
     """ViT-L costs more than ViT-B, with patch tokens following (image_size / patch_size)^2."""
-    from torchgeo_bench.config import compose_config, instantiate
-
     bench = get_bench_dataset_class("cloudsen12")()
     rgb = bench.select_band_specs(bench.rgb_bands)
 
     def build(name):
-        cfg = compose_config([f"model={name}"])
-        return instantiate(cfg.model, bands=rgb, normalization="bandspec_zscore").eval()
+        preset = load_model_preset(ModelConfig(name=name))
+        return build_model(preset, bands=rgb, normalization="bandspec_zscore").eval()
 
     base = build("timm/vit/vit_base_patch16_224")
     large = build("timm/vit/vit_large_patch16_224")
@@ -745,3 +710,86 @@ def test_measure_backbone_propagates_oom_at_batch_one(monkeypatch: pytest.Monkey
             CPU,
             ProfileTiming(batch_size=1, n_warmup=1, n_measure=2),
         )
+
+
+@pytest.mark.parametrize(("modality", "expected_band"), [("RGB", "rgb"), ("S2L2A", "s2")])
+def test_terramind_pipeline_measures_only_its_modality(
+    flops_run: FlopsRun, modality: str, expected_band: str
+) -> None:
+    config, rows, _ = flops_run
+    config.model = ModelConfig(
+        name="tt_terramind_v1_base_rgb", target="example.TerraMind", kwargs={"modality": modality}
+    )
+    main(config)
+    assert {row["band_config"] for row in rows} == {expected_band}
+    assert {row["name"] for row in rows} == {"tt_terramind_v1_base"}
+
+
+def test_auto_device_uses_cpu_when_cuda_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert flops_pipeline._resolve_device("auto") == CPU
+
+
+def test_invalid_cuda_index_fails_before_model_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    with pytest.raises(ValueError, match="index 2"):
+        flops_pipeline._resolve_device("cuda:2")
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_segmentation_hooks_released_after_measurement(
+    monkeypatch: pytest.MonkeyPatch, *, fail: bool
+) -> None:
+    model = _TapModel(in_ch=3).eval()
+    options = FlopsSegmentationConfig.model_validate(
+        {"heads": ["linear", "fpn"], "probe": {"layers": _TAP_LAYERS}}
+    )
+    metadata = {"name": "tiny", "band_config": "rgb", "n_channels": 3, "image_size": 32}
+    if fail:
+
+        def broken(*args: object) -> float:
+            raise RuntimeError("broken head forward")
+
+        monkeypatch.setattr(flops_pipeline, "_seg_head_gflops", broken)
+        with pytest.raises(RuntimeError, match="broken head forward"):
+            list(flops_pipeline.segmentation_rows(options, model, metadata, CPU, frozenset()))
+    else:
+        rows = list(flops_pipeline.segmentation_rows(options, model, metadata, CPU, frozenset()))
+        assert len(rows) == 2
+        assert all(row["gflops_head"] > 0 for row in rows)
+    assert all(not module._forward_hooks for module in model.modules())
+
+
+def _custom_backbone(*, bands: list[BandSpec], normalization: str, width: int) -> nn.Module:
+    model = _TinyConvNet(in_ch=len(bands), width=width)
+    model.normalization = normalization
+    return model
+
+
+def test_importable_custom_constructor_receives_only_model_options() -> None:
+    bench = get_bench_dataset_class("cloudsen12")()
+    preset = ModelPreset(name="custom", target=f"{__name__}._custom_backbone", kwargs={"width": 6})
+    model = _build_model(preset, bench.bands, "identity", "s2")
+    assert model is not None
+    assert model.normalization == "identity"
+    assert model(torch.randn(2, 12, 16, 16)).shape == (2, 4)
+
+
+def test_real_rcf_construction_uses_run_seed() -> None:
+    bench = get_bench_dataset_class("cloudsen12")()
+    bands = bench.select_band_specs(bench.rgb_bands)
+    sample = torch.randn(2, 3, 16, 16)
+    outputs = []
+    for seed in (23, 23, 24):
+        config = FlopsConfig.model_validate(
+            {"model": {"name": "rcf", "kwargs": {"features": 8}}, "runtime": {"seed": seed}}
+        )
+        _, preset = config.resolve()
+        model = _build_model(preset, bands, "identity", "rgb")
+        assert model is not None
+        outputs.append(model.eval()(sample))
+    assert torch.equal(outputs[0], outputs[1])
+    assert not torch.equal(outputs[0], outputs[2])

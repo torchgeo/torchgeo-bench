@@ -1,9 +1,11 @@
 """Unit tests for CLI entrypoints."""
 
 import pytest
+import yaml
 from omegaconf import OmegaConf
 
 from torchgeo_bench.cli import main as cli_main
+from torchgeo_bench.flops_config import FlopsConfig
 
 
 def test_run_composes_and_calls_main(monkeypatch) -> None:
@@ -30,7 +32,11 @@ def test_flags_win_over_positional_overrides(command, capsys) -> None:
             "--print-config",
         ]
     )
-    assert OmegaConf.create(capsys.readouterr().out).device == "cpu"
+    output = capsys.readouterr().out
+    if command == "flops":
+        assert FlopsConfig.model_validate(yaml.safe_load(output)).runtime.device == "cpu"
+    else:
+        assert OmegaConf.create(output).device == "cpu"
 
 
 @pytest.mark.parametrize("command", ["run", "flops"])
@@ -44,7 +50,11 @@ def test_flags_win_over_positional_overrides(command, capsys) -> None:
 )
 def test_output_flag_value_can_contain_equals(command, output_args, capsys) -> None:
     cli_main([command, "model=rcf", *output_args, "--print-config"])
-    assert OmegaConf.create(capsys.readouterr().out).output == "results/run=1.csv"
+    output = capsys.readouterr().out
+    if command == "flops":
+        assert FlopsConfig.model_validate(yaml.safe_load(output)).output.file == "results/run=1.csv"
+    else:
+        assert OmegaConf.create(output).output == "results/run=1.csv"
 
 
 @pytest.mark.parametrize("command", ["run", "flops"])
@@ -58,9 +68,15 @@ def test_output_flag_value_can_contain_equals(command, output_args, capsys) -> N
 )
 def test_interleaved_overrides_keep_their_order(command, overrides, capsys) -> None:
     cli_main([command, "--model", "rcf", "--print-config", *overrides])
-    cfg = OmegaConf.create(capsys.readouterr().out)
-    assert cfg.seed == 2
-    assert cfg.device == "cpu"
+    output = capsys.readouterr().out
+    if command == "flops":
+        cfg = FlopsConfig.model_validate(yaml.safe_load(output))
+        assert cfg.runtime.seed == 2
+        assert cfg.runtime.device == "cpu"
+    else:
+        cfg = OmegaConf.create(output)
+        assert cfg.seed == 2
+        assert cfg.device == "cpu"
 
 
 @pytest.mark.parametrize(
@@ -238,8 +254,8 @@ def test_flops_composes_flops_config(monkeypatch) -> None:
     received = []
     monkeypatch.setattr("torchgeo_bench.flops_pipeline.main", received.append)
     cli_main(["flops", "-m", "rcf", "--device", "cpu"])
-    assert received[0].probe_num_classes == 10
-    assert received[0].device == "cpu"
+    assert received[0].classification.num_classes == 10
+    assert received[0].runtime.device == "cpu"
 
 
 def test_unknown_model_suggests_close_names() -> None:
