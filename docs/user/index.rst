@@ -18,6 +18,7 @@ and models, and interpreting the results.
 
    datasets
    models
+   ../handcrafted-results
    coordbench
    configuration
    results-format
