@@ -16,7 +16,11 @@ def profile(args: argparse.Namespace) -> None:
     """Profile one selected model and dataset."""
     try:
         config, _ = resolve_profile_config(load_profile_config(args))
-    except (OSError, yaml.YAMLError, ValueError) as error:
+    except (
+        OSError,
+        yaml.YAMLError,
+        ValueError,
+    ) as error:  # allow-except: report invalid profile inputs before runtime
         raise SystemExit(f"error: {error}") from error
     if getattr(args, "dry_run", False):
         print(yaml.safe_dump(config.model_dump_yaml(), sort_keys=False), end="")
