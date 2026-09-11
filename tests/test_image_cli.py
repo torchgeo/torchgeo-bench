@@ -242,9 +242,11 @@ def test_runtime_explicit_empty_layers_clear_preset(
     assert effective.segmentation.layers == []
 
 
-def test_linear_only_is_rejected_by_legacy_adapter() -> None:
-    with pytest.raises(SystemExit, match="2"):
-        main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--methods", "linear"])
+def test_linear_only_reaches_typed_runtime(monkeypatch: MonkeyPatch) -> None:
+    received = []
+    monkeypatch.setattr("torchgeo_bench.commands._image_runtime.run", received.append)
+    main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--methods", "linear"])
+    assert received[0].classification.methods == ["linear"]
 
 
 def test_unknown_config_field_fails_before_execution(tmp_path: Path) -> None:
@@ -365,7 +367,7 @@ def test_invalid_model_section_has_a_field_error(
 
 
 def test_dry_run_rejects_unsupported_method_and_band_selections() -> None:
-    for flags in (["--methods", "linear"], ["--bands", "red,,blue"]):
+    for flags in (["--methods", "other"], ["--bands", "red,,blue"]):
         with pytest.raises(SystemExit) as error:
             main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--dry-run", *flags])
         assert error.value.code == 2

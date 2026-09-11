@@ -201,7 +201,9 @@ def _plan_dataset_run(
     id_key = (ds_name, "intrinsic_dim", *model_key)
     profile_key = (ds_name, "profile", *model_key)
 
-    skip_knn = bool(cfg.output.resume and knn_key in completed_runs)
+    skip_knn = bool(
+        "knn" not in cfg.classification.methods or (cfg.output.resume and knn_key in completed_runs)
+    )
     skip_linear = bool(
         (cfg.output.resume and linear_key in completed_runs)
         or "linear" not in cfg.classification.methods
