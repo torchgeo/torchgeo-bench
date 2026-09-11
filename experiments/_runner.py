@@ -5,13 +5,19 @@ Each worker takes the next available :class:`Job` until the queue is empty.
 
 import argparse
 import logging
+import shlex
 import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
+from tempfile import NamedTemporaryFile
+
+import yaml
+
+from torchgeo_bench.config_schema import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +26,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 @dataclass
 class Job:
-    """One legacy benchmark CLI invocation.
+    """One typed benchmark configuration.
 
     Attributes:
         label: Short human-readable identifier for log lines.
-        overrides: Config overrides forwarded to ``python -m torchgeo_bench.cli run``
-            (e.g. ``["model=timm/resnet18", "dataset.names=[m-eurosat]"]``).
-            ``device`` and ``output`` are appended automatically by the
-            runner — do not include them here.
+        config: Validated run settings passed through a temporary YAML file.
+            The runner overrides device, output file, and resume with explicit flags.
     """
 
     label: str
-    overrides: list[str] = field(default_factory=list)
+    config: RunConfig
 
 
 @dataclass
@@ -68,27 +72,36 @@ def default_output(script_file: str | Path) -> str:
     return f"results/{stem}.csv"
 
 
-def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResult:
-    """Run one benchmark job on the assigned GPU."""
-    cmd = [
+def _command(config_path: str, gpu: int, output: str) -> list[str]:
+    """Build the public benchmark invocation for a serialized job."""
+    return [
         sys.executable,
         "-m",
-        "torchgeo_bench.cli",
+        "torchgeo_bench",
         "run",
-        *job.overrides,
-        f"device=cuda:{gpu}",
-        f"output={output}",
-        "resume=true",
+        "--config",
+        config_path,
+        "--device",
+        f"cuda:{gpu}",
+        "--output",
+        output,
+        "--resume",
     ]
 
+
+def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResult:
+    """Run one benchmark job on the assigned GPU."""
     logger.info("[%d/%d] START %s on cuda:%d", idx, total, job.label, gpu)
     start = time.time()
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        cwd=str(REPO_ROOT),
-    )
+    with NamedTemporaryFile(mode="w", suffix=".yaml", encoding="utf-8") as config_file:
+        yaml.safe_dump(job.config.model_dump_yaml(), config_file, sort_keys=False)
+        config_file.flush()
+        proc = subprocess.run(
+            _command(config_file.name, gpu, output),
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
     elapsed = time.time() - start
 
     if proc.returncode == 0:
@@ -165,7 +178,7 @@ def run_jobs(
     Args:
         jobs: List of :class:`Job` instances to execute.
         devices: GPU indices, with at most one job running on each GPU.
-        output: CSV path passed as ``output=<path>`` to every invocation.
+        output: CSV path passed as ``--output <path>`` to every invocation.
         dry_run: Log planned commands without starting jobs.
 
     Returns:
@@ -185,11 +198,9 @@ def run_jobs(
             gpu = devices[(index - 1) % len(devices)]
             logger.info("[%d/%d] %s -> cuda:%d", index, total, job.label, gpu)
             logger.info(
-                "%s -m torchgeo_bench.cli run %s device=cuda:%d output=%s resume=true",
-                sys.executable,
-                " ".join(job.overrides),
-                gpu,
-                output,
+                "%s\n%s",
+                shlex.join(_command("<job-config.yaml>", gpu, output)),
+                yaml.safe_dump(job.config.model_dump_yaml(), sort_keys=False).rstrip(),
             )
         logger.info("Dry run complete: %d jobs across %d devices", total, len(devices))
         return 0

@@ -30,10 +30,6 @@ from torchgeo_bench.intrinsic_dim import (
     compute_feature_spectrum,
     compute_intrinsic_dim,
 )
-from torchgeo_bench.legacy_config import (  # noqa: F401 - transitional recipe-helper export
-    accept_legacy_config,
-    resolve_model_config,
-)
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput, measure_profile
 from torchgeo_bench.models.interface import BenchModel
@@ -128,7 +124,7 @@ def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
         if names == "all":
             return list_datasets()
         return [n.strip() for n in names.split(",") if n.strip()]
-    return list(names)
+    return list_datasets() if list(names) == ["all"] else list(names)
 
 
 def embed_split(
@@ -978,8 +974,7 @@ def load_completed_outputs(
     return completed_runs, completed_metrics
 
 
-@accept_legacy_config
-def main(cfg: RunConfig, *, strict: bool = False, _legacy_hash: str | None = None) -> None:
+def main(cfg: RunConfig, *, strict: bool = False) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.runtime.seed)
     dataset_names = _expand_dataset_list(cfg.datasets)
@@ -996,7 +991,7 @@ def main(cfg: RunConfig, *, strict: bool = False, _legacy_hash: str | None = Non
     completed_runs, completed_metrics = load_completed_outputs(
         cfg, output_path, profile_output_path, intrinsic_dim_output_path
     )
-    config_hash = _legacy_hash or _resume_config_hash(cfg)
+    config_hash = _resume_config_hash(cfg)
     completed = ResumeState(completed_runs, completed_metrics)
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         for all_rows, id_out_rows, profile_out_rows in run_dataset(

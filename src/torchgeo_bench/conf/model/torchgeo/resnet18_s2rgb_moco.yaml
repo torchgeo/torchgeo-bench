@@ -1,13 +1,17 @@
-# MoCo weights trained on Sentinel-2 RGB from SSL4EO-S12.
-
-_target_: torchgeo_bench.models.TorchGeoResNetBench
-factory: resnet18
-weights_class: ResNet18_Weights
-weights_member: SENTINEL2_RGB_MOCO
-auto_resize: false
-target_size: 224
 name: tgeo_resnet18_s2rgb_moco
-eval:
-  segmentation:
-    # ResNet-18: 4 stages, measured 56x56 -> 7x7. Coarse-to-fine.
-    layers: ["layer4", "layer3", "layer2", "layer1"]
+target: torchgeo_bench.models.TorchGeoResNetBench
+track: image
+seed_from_run: false
+kwargs:
+  factory: resnet18
+  weights_class: ResNet18_Weights
+  weights_member: SENTINEL2_RGB_MOCO
+  auto_resize: false
+  target_size: 224
+segmentation:
+  layers:
+  - layer4
+  - layer3
+  - layer2
+  - layer1
+dataset_overrides: {}

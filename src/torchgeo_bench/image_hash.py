@@ -13,9 +13,14 @@ from copy import deepcopy
 from itertools import product
 from typing import Any, Literal
 
-from .config import model_config_path
-from .config_schema import RunConfig, SegmentationConfig, load_yaml
-from .presets import NORMALIZATIONS, load_model_preset, merge_settings, resolve_run_config
+from .config_schema import RunConfig, SegmentationConfig
+from .presets import (
+    NORMALIZATIONS,
+    PresetDefaults,
+    load_model_preset,
+    merge_settings,
+    resolve_run_config,
+)
 
 _SEGMENTATION_KEYS = {
     "head": "head_type",
@@ -39,21 +44,47 @@ def _segmentation_payload(config: SegmentationConfig) -> dict[str, Any]:
     return values
 
 
+def _preset_payload(defaults: PresetDefaults) -> dict[str, Any]:
+    """Retain the old CSV fingerprint representation, not its configuration engine."""
+    values = {**defaults.kwargs, **defaults.input.model_dump(exclude_unset=True)}
+    evaluation: dict[str, Any] = {}
+    classification = defaults.classification
+    if "linear" in classification.model_fields_set:
+        linear = classification.linear
+        evaluation["c_range"] = [
+            int(value) if float(value).is_integer() else value
+            for value in (linear.c_log10_start, linear.c_log10_stop)
+        ] + [linear.c_count]
+    for key in classification.model_fields_set - {"linear", "methods"}:
+        legacy_key = "bootstrap" if key == "bootstrap_samples" else key
+        evaluation[legacy_key] = classification.model_dump()[key]
+    segmentation = defaults.segmentation.model_dump(exclude_unset=True)
+    if segmentation:
+        evaluation["segmentation"] = {
+            _SEGMENTATION_KEYS.get(key, key): value
+            for key, value in segmentation.items()
+            if key != "ignore_index"
+        }
+        if "ignore_index" in segmentation:
+            evaluation["segmentation"]["criterion"] = {
+                "_target_": "torch.nn.CrossEntropyLoss",
+                "ignore_index": defaults.segmentation.ignore_index,
+            }
+    if evaluation:
+        values["eval"] = evaluation
+    return values
+
+
 def _model_payload(config: RunConfig) -> dict[str, Any]:
     if config.model.target is not None:
         return {"_target_": config.model.target, "name": config.model.name, **config.model.kwargs}
-    raw = load_yaml(model_config_path(config.model.name))
-    if "_target_" not in raw:
-        preset = load_model_preset(config.model, seed=config.runtime.seed)
-        return {
-            "_target_": preset.target,
-            "name": preset.name,
-            **preset.model_dump(exclude={"name", "target"}, exclude_unset=True),
+    preset = load_model_preset(config.model, seed=config.runtime.seed)
+    values = {"_target_": preset.target, "name": preset.name, **_preset_payload(preset)}
+    if preset.dataset_overrides:
+        values["dataset_overrides"] = {
+            name: _preset_payload(override) for name, override in preset.dataset_overrides.items()
         }
-    if raw.get("seed") == "${seed}":
-        raw["seed"] = config.runtime.seed
-    raw.update(config.model.kwargs)
-    return raw
+    return values
 
 
 def _historical_payload(config: RunConfig, style: Literal["legacy", "image"]) -> dict[str, Any]:

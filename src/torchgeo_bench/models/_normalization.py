@@ -143,7 +143,7 @@ def build_model_native_normalizer(
                 "pretrain_std, and it does not supply its own normaliser.  Converting "
                 "units without standardising leaves raw sensor values.  Set "
                 "pretrain_mean/pretrain_std on the wrapper, or evaluate it with "
-                "dataset.normalization=bandspec_zscore."
+                "--normalization dataset."
             )
 
         return _undefined

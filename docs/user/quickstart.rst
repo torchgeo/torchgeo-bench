@@ -1,120 +1,174 @@
 Quickstart
 ==========
 
-This page walks through running your first benchmark end-to-end:
-download data, run the eval pipeline, and inspect the results.
-
-Prerequisites
--------------
-
-* ``torchgeo-bench`` installed (see :doc:`installation`).
-* At least one GeoBench dataset under ``./data/``. For a small first run,
-  download EuroSAT V1 with
-  ``torchgeo-bench download geobench_v1 --datasets m-eurosat``.
+Install ``torchgeo-bench`` (see :doc:`installation`), download a dataset,
+and run a frozen-backbone benchmark. Commands accept explicit flags or
+strict YAML; module entry points use the same interface.
 
 Download data
 -------------
 
-Datasets always live under ``./data/`` relative to the current working
-directory (paths are fixed — there are no ``GEOBENCH_ROOT`` environment
-variables).  The bundled downloader fetches each family by name:
+Datasets live under ``./data/`` relative to the current working directory.
+For a small first run, download EuroSAT V1:
 
 .. code-block:: console
 
-   $ torchgeo-bench download geobench_v1                       # ALL V1 classification datasets
-   $ torchgeo-bench download geobench_v1 --datasets m-eurosat # one V1 dataset
-   $ torchgeo-bench download geobench_v2                       # default V2 set (cls + seg)
+   $ torchgeo-bench download m-eurosat
+
+You can also download multiple named datasets or a collection:
+
+.. code-block:: console
+
+   $ torchgeo-bench download m-eurosat m-pv4ger
+   $ torchgeo-bench download geobench_v1 --datasets m-eurosat
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars
-   $ torchgeo-bench download eurosat                           # torchgeo's EuroSAT mirror
+   $ torchgeo-bench download eurosat
 
-Note that ``download geobench_v1`` fetches the **entire** V1 classification
-bundle, not just one split. Use ``--datasets m-eurosat`` to download only
-EuroSAT V1. Benchmark runs require local data and raise an error with the
-download command when it is missing (see :doc:`datasets`).
-
-See :doc:`datasets` for the full list of supported names and the
-canonical destination subdirectories.
+``download geobench_v1`` without a subset fetches the entire V1
+classification collection. V1 uses the pickle-free JSON-metadata mirror;
+old pickle-based caches must be replaced. Benchmark runs require local
+data and report a download command if it is missing. See :doc:`datasets`
+for names and canonical destination directories.
 
 Run a benchmark
 ---------------
 
-The image CLI accepts explicit selections, for example ``torchgeo-bench run --model rcf --dataset m-eurosat --device cpu``. The examples below use the retained ``python -m torchgeo_bench.cli`` interface for arbitrary ``key=value`` overrides and coordinate workflows.
-
-Run the default model (Random Convolutional Features) on EuroSAT V1 with
-KNN-5 + linear probing + 200 bootstrap resamples:
+Inspect the catalogs without loading models or data:
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run dataset.names=[m-eurosat]
+   $ torchgeo-bench models
+   $ torchgeo-bench models rcf
+   $ torchgeo-bench datasets
+   $ torchgeo-bench datasets m-eurosat
 
-Use a different backbone preset (anything in :file:`src/torchgeo_bench/conf/model/`):
-
-.. code-block:: console
-
-   $ python -m torchgeo_bench.cli run model=timm/resnet50 dataset.names=[m-eurosat,m-pv4ger]
-
-Skip the (slow) linear probe and reduce bootstrap noise to iterate quickly:
+Run Random Convolutional Features on EuroSAT V1 with KNN-5, linear probing,
+and 200 bootstrap resamples:
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run eval.skip_linear=true eval.bootstrap=100
+   $ torchgeo-bench run --model rcf --dataset m-eurosat --device cpu \
+       --output results/my_run.csv
 
-The default device is ``cuda:0``.  On a machine without a working CUDA GPU
-(or if a GPU run crashes — see :doc:`troubleshooting`), add ``device=cpu``:
+The image default is ``cuda:0``. Use ``--device cpu`` on a machine without
+CUDA, or ``--device auto`` to choose automatically. A pretrained backbone
+may download its weights on first use:
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run dataset.names=[m-eurosat] device=cpu
+   $ torchgeo-bench run --model timm/resnet50 \
+       --dataset m-eurosat --dataset m-pv4ger --device cpu
 
-When the selected FAISS backend has no GPU resources, the runner evaluates KNN
-on CPU while keeping feature extraction on the configured accelerator. It logs
-this fallback; use ``eval.knn_device=cpu`` to select it explicitly.
+Select just the probe you need:
+
+.. code-block:: console
+
+   $ torchgeo-bench run --model rcf --dataset m-eurosat --device cpu \
+       --methods knn --bootstrap-samples 100
+   $ torchgeo-bench run --model rcf --dataset m-eurosat --device cpu \
+       --methods linear
+
+Use ``--knn-device cpu`` to keep KNN on CPU while extracting features on
+another device. If the installed FAISS backend lacks GPU support, the runner
+logs its KNN CPU fallback.
+
+Use a YAML file
+---------------
+
+Save the following as ``my-run.yaml``:
+
+.. code-block:: yaml
+
+   model:
+     name: rcf
+   datasets: [m-eurosat]
+   classification:
+     methods: [knn]
+     bootstrap_samples: 100
+   runtime:
+     device: cpu
+   output:
+     file: results/my_run.csv
+
+Validate without loading a model or data, then execute:
+
+.. code-block:: console
+
+   $ torchgeo-bench run --config my-run.yaml --dry-run
+   $ torchgeo-bench run --config my-run.yaml
+
+Explicit flags override YAML. Omitted YAML fields inherit model and dataset
+defaults; explicit ``null``, ``false``, and ``[]`` are preserved.
+See :doc:`configuration` and :file:`examples/image-run.yaml` for calibration,
+segmentation, temporal inputs, optional profiling, and intrinsic dimension.
+
+.. warning::
+
+   Old ``key=value`` / ``+key=value`` commands are no longer accepted.
+   For example, use ``--model rcf``, not ``model=rcf``. This also applies
+   to ``python -m torchgeo_bench`` and ``python -m torchgeo_bench.cli``.
+
+Profile a model
+---------------
+
+The standalone profiler measures a fixed real dataset batch and writes
+JSON to stdout:
+
+.. code-block:: console
+
+   $ torchgeo-bench profile --model rcf --dataset m-eurosat --device cpu \
+       --batch-size 8 --warmup 1 --measurements 5 > profile.json
+
+For synthetic per-sample compute accounting without dataset samples:
+
+.. code-block:: console
+
+   $ torchgeo-bench flops --model rcf --device cpu --band-configs rgb \
+       --seg-heads --output results/my_compute_cost.csv
+
+See :doc:`configuration` for the distinct profile and FLOPs YAML schemas.
 
 Benchmark a location encoder
 ----------------------------
 
-CoordBench does not require an image download. Run the built-in sine/cosine
-location baseline on a single regression benchmark with:
+CoordBench does not require an image download. It loads point-label tables
+from Hugging Face, so uncached tables require network access:
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run mode=coord model=sincos \
-       coord.names=california_housing coord.methods=[linear] \
-       coord.folds=2 device=cpu
+   $ torchgeo-bench coord --model sincos --dataset california_housing \
+       --methods linear --folds 2 --device cpu \
+       --output results/coordbench_quickstart.csv
 
-See :doc:`coordbench` for the pretrained MIND, SatCLIP, GeoCLIP, Climplicit,
-and SINR presets, spatial cross-validation, output schema, and a complete
-custom-encoder example.
+See :doc:`coordbench` for pretrained encoders, spatial cross-validation,
+official holdouts, and a complete custom-encoder example.
 
-Resume mode
------------
+Resume and inspect results
+--------------------------
 
-If a previous run was interrupted, ``resume=true`` skips any
-``(dataset, method, model, config)`` combination that already exists in the
-output CSV:
+Re-run the same image command with ``--resume`` to skip completed
+method/config combinations:
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run resume=true
+   $ torchgeo-bench run --model rcf --dataset m-eurosat --device cpu \
+       --output results/my_run.csv --resume
 
-See :doc:`results-format` for the exact key schema used by resume mode.
+Without an explicit output file, image metrics append to
+``results/models/<model name>.csv``. Those files **ship pre-populated** with
+reference results; ``--output`` keeps your run separate. Optional image-run
+profile and intrinsic-dimension measurements normally use their own
+directories, but an explicit output file combines them with image metrics.
+Each evaluation is saved when it finishes.
 
-Inspect the results
--------------------
-
-By default results land in ``results/models/<model name>.csv``.  Those files **ship
-pre-populated** with reference results, so to start from a clean slate write to
-your own file with ``output=results/my_run.csv``.  Profile/intrinsic-dim
-measurements go to their own ``results/profiles/`` and
-``results/intrinsic_dim/`` files -- see :doc:`results-format` for why they're
-split out.  Each row is a flat
-:class:`~torchgeo_bench.main.EvaluationResult`, so you can read it directly with
-pandas:
+Rows follow :class:`~torchgeo_bench.main.EvaluationResult` and can be
+loaded with pandas:
 
 .. code-block:: python
 
    import pandas as pd
 
-   from torchgeo_bench.results import load_results
-   df = load_results()
+   df = pd.read_csv("results/my_run.csv")
    print(df.groupby(["dataset", "method"])["metric_value"].mean())
+
+See :doc:`results-format` for the full schema and resume keys.

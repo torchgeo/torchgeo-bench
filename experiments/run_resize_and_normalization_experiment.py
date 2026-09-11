@@ -10,14 +10,29 @@ Usage:
 
 import argparse
 import sys
+from typing import Literal
 
 from _runner import Job, add_devices_argument, default_output, run_jobs
+
+from torchgeo_bench.config_schema import (
+    ClassificationConfig,
+    InputConfig,
+    LinearConfig,
+    ModelConfig,
+    RunConfig,
+    RuntimeConfig,
+)
+from torchgeo_bench.presets import resolve_run_config
 
 OUTPUT = default_output(__file__)
 
 NORMALIZATIONS = ["bands_zscore", "none", "imagenet", "timm_default"]
-IMAGE_SIZES: list[str] = ["null", "224", "256", "448", "512"]
-INTERPOLATIONS = ["bilinear", "bicubic", "nearest"]
+IMAGE_SIZES: list[int | None] = [None, 224, 256, 448, 512]
+INTERPOLATIONS: list[Literal["bilinear", "bicubic", "nearest"]] = [
+    "bilinear",
+    "bicubic",
+    "nearest",
+]
 
 
 def build_jobs() -> list[Job]:
@@ -26,23 +41,29 @@ def build_jobs() -> list[Job]:
     for norm in NORMALIZATIONS:
         for size in IMAGE_SIZES:
             for interp in INTERPOLATIONS:
-                if size == "null" and interp != "bilinear":
+                if size is None and interp != "bilinear":
                     continue
 
-                overrides = [
-                    "model=timm/resnet18",
-                    f"++model.input_normalization={norm}",
-                    f"model.name=resnet18_{norm}",
-                    "dataset.names=[m-eurosat]",
-                    f"dataset.image_size={size}",
-                    "eval.merge_val=false",
-                    "verbose=false",
-                ]
-                if size != "null":
-                    overrides.append(f"dataset.interpolation={interp}")
+                config, preset = resolve_run_config(
+                    RunConfig(
+                        model=ModelConfig(
+                            name="timm/resnet18", kwargs={"input_normalization": norm}
+                        ),
+                        datasets=["m-eurosat"],
+                        input=InputConfig(image_size=size, interpolation=interp),
+                        classification=ClassificationConfig(
+                            linear=LinearConfig(refit_train_val=False)
+                        ),
+                        runtime=RuntimeConfig(verbose=False),
+                    ),
+                    "m-eurosat",
+                )
+                config.model = ModelConfig(
+                    name=f"resnet18_{norm}", target=preset.target, kwargs=preset.kwargs
+                )
 
                 label = f"norm={norm} size={size} interp={interp}"
-                jobs.append(Job(label=label, overrides=overrides))
+                jobs.append(Job(label=label, config=config))
     return jobs
 
 

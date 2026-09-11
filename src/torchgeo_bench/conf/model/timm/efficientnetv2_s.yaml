@@ -1,7 +1,11 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: tf_efficientnetv2_s
-pretrained: true
-global_pool: avg
-seed: null
 name: efficientnetv2_s
-auto_resize: true
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: tf_efficientnetv2_s
+  pretrained: true
+  global_pool: avg
+  seed: null
+  auto_resize: true
+dataset_overrides: {}

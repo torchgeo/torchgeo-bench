@@ -1,10 +1,16 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: densenet121
-pretrained: true
-global_pool: avg
-seed: null
 name: densenet121
-eval:
-  segmentation:
-    # Layers in coarse-to-fine order (deepest first) for FPN head.
-    layers: ["features.denseblock4", "features.denseblock3", "features.denseblock2", "features.denseblock1"]
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: densenet121
+  pretrained: true
+  global_pool: avg
+  seed: null
+segmentation:
+  layers:
+  - features.denseblock4
+  - features.denseblock3
+  - features.denseblock2
+  - features.denseblock1
+dataset_overrides: {}

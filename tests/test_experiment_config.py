@@ -1,17 +1,23 @@
 """Behavioral coverage for experiment scripts using the library config API."""
 
+import importlib
 import json
+from pathlib import Path
 
 import pytest
 import torch
+import yaml
 
 from experiments.scripts import (
     audit_model_native,
     introspect_seg_layers,
     tune_dataloader,
 )
-from torchgeo_bench.config import compose_config
+from torchgeo_bench.config_schema import ModelConfig, RunConfig
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError
+from torchgeo_bench.presets import ModelPreset, load_model_preset, resolve_run_config
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("script", [audit_model_native, introspect_seg_layers])
@@ -24,8 +30,8 @@ def test_tuner_builds_packaged_model_config() -> None:
     bands = audit_model_native.band_specs("m-eurosat", "rgb")
     model = tune_dataloader._build_model("rcf", bands)
     features = model(torch.zeros(1, 3, 16, 16))
-    cfg = compose_config(["model=rcf"])
-    assert features.shape == (1, cfg.model.features)
+    preset = load_model_preset(ModelConfig(name="rcf"))
+    assert features.shape == (1, preset.kwargs["features"])
     assert torch.isfinite(features).all()
 
 
@@ -41,15 +47,15 @@ def test_native_audit_only_classifies_unsupported_normalization(
 ) -> None:
     model_dir = tmp_path / "model"
     model_dir.mkdir()
-    (model_dir / "rcf.yaml").write_text("_target_: torchgeo_bench.models.RCFBench\nname: rcf\n")
+    (model_dir / "rcf.yaml").write_text("target: torchgeo_bench.models.RCFBench\nname: rcf\n")
     output = tmp_path / "audit.json"
-    monkeypatch.setattr(audit_model_native, "CONF", model_dir)
+    monkeypatch.setattr("torchgeo_bench.config.CONF_DIR", tmp_path)
     monkeypatch.setattr("sys.argv", ["audit_model_native.py", "--out", str(output)])
 
     def fail(config, **kwargs) -> None:
         raise error
 
-    monkeypatch.setattr(audit_model_native, "instantiate", fail)
+    monkeypatch.setattr(audit_model_native, "build_model", fail)
     if isinstance(error, UnsupportedNormalizationError):
         audit_model_native.main()
         assert json.loads(output.read_text())["rcf"]["model_native"] == "unsupported"
@@ -108,3 +114,114 @@ def test_segmentation_introspection_handles_transformer_tokens() -> None:
             return self.blocks[0](torch.cat([prefix, tokens], dim=1))
 
     assert introspect_seg_layers.measure(_TokenBackbone(), size=8) == {"blocks.0": (8, 8)}
+
+
+def test_tuner_preserves_dataset_overrides_and_empirical_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "rcf.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "rcf",
+                "target": "torchgeo_bench.models.RCFBench",
+                "seed_from_run": True,
+                "kwargs": {"mode": "empirical", "features": 512},
+                "dataset_overrides": {"m-eurosat": {"kwargs": {"features": 8}}},
+            }
+        )
+    )
+    monkeypatch.setattr("torchgeo_bench.config.CONF_DIR", tmp_path)
+    bands = audit_model_native.band_specs("m-eurosat", "rgb")
+    dataset = torch.utils.data.TensorDataset(torch.zeros(1, 3, 8, 8))
+
+    def build(preset: ModelPreset, **kwargs: object) -> torch.nn.Module:
+        assert preset.kwargs["features"] == 8
+        assert preset.kwargs["seed"] == 0
+        assert kwargs["dataset"] is dataset
+        assert kwargs["bands"] == bands
+        assert kwargs["normalization"] == "bandspec_zscore"
+        return torch.nn.Identity()
+
+    monkeypatch.setattr(tune_dataloader, "build_model", build)
+    assert isinstance(
+        tune_dataloader._build_model("rcf", bands, "m-eurosat", dataset), torch.nn.Identity
+    )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["run_c_sweep_experiment", "run_effect_of_lbfgs_vs_adam"],
+)
+def test_inprocess_experiments_use_typed_constructors(
+    monkeypatch: pytest.MonkeyPatch, filename: str
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "experiments"))
+    script = importlib.import_module(f"experiments.{filename}")
+    bands = audit_model_native.band_specs("m-eurosat", "rgb")
+    for name, selection in script.MODEL_CONFIGS.items():
+        _, preset = resolve_run_config(
+            RunConfig(model=selection, datasets=["m-eurosat"]), "m-eurosat"
+        )
+        assert preset.kwargs["pretrained"] is True
+        assert preset.kwargs["global_pool"] == "avg"
+        assert preset.kwargs.get("auto_resize", False) == (
+            filename == "run_effect_of_lbfgs_vs_adam" and name == "dinov3sat"
+        )
+    model = script.instantiate_model(
+        ModelConfig(
+            name="custom-rcf",
+            target="torchgeo_bench.models.RCFBench",
+            kwargs={"features": 8, "seed": 17},
+        ),
+        bands,
+        "m-eurosat",
+    )
+    assert model(torch.zeros(1, 3, 16, 16)).shape == (1, 8)
+
+
+def test_model_variants_preserve_constructor_options_and_preset_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "experiments"))
+    script = importlib.import_module("experiments.run_cls_token_experiment")
+    monkeypatch.setattr(script, "MODELS", ["timm/vit/vit_large_patch16_dinov3sat"])
+    monkeypatch.setattr(script, "DATASETS", ["m-eurosat"])
+    jobs = script.build_jobs()
+    assert len(jobs) == 2
+    for job, use_cls in zip(jobs, [False, True], strict=True):
+        config, preset = resolve_run_config(job.config, "m-eurosat")
+        assert preset.name.endswith("_cls" if use_cls else "_avg")
+        assert preset.kwargs["use_cls_token"] is use_cls
+        assert preset.kwargs["model_name"] == "vit_large_patch16_dinov3.sat493m"
+        assert preset.kwargs["pretrained"] is True
+        assert preset.kwargs["auto_resize"] is True
+        assert config.segmentation.layers == ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+        assert RunConfig.model_validate(config.model_dump_yaml()) == config
+
+
+def test_resize_experiment_keeps_all_normalization_policies_and_null_resize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "experiments"))
+    script = importlib.import_module("experiments.run_resize_and_normalization_experiment")
+    jobs = script.build_jobs()
+    assert len(jobs) == 4 * (1 + 4 * 3)
+    for normalization in script.NORMALIZATIONS:
+        matching = [
+            job.config
+            for job in jobs
+            if job.config.model.kwargs["input_normalization"] == normalization
+        ]
+        assert len(matching) == 13
+        assert sum(config.input.image_size is None for config in matching) == 1
+        for config in matching:
+            assert config.model.target == "torchgeo_bench.models.TimmPatchBenchModel"
+            assert config.model.name == f"resnet18_{normalization}"
+            assert config.model.kwargs["model_name"] == "resnet18"
+            assert config.segmentation.layers == ["layer4", "layer3", "layer2", "layer1"]
+            assert config.classification.linear.refit_train_val is False
+            assert config.runtime.verbose is False
+            if config.input.image_size is None:
+                assert config.input.interpolation == "bilinear"

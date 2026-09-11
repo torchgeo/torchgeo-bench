@@ -1,13 +1,18 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: vit_large_patch16_dinov3.sat493m
-pretrained: true
-global_pool: avg
-seed: null
 name: vit_large_patch16_dinov3sat
-auto_resize: true
-use_cls_token: false
-eval:
-  segmentation:
-    # Blocks share one spatial grid; use four depths, deepest first.
-    # auto_resize uses 256px: 16x16 patches + 5 prefix tokens (1 CLS, 4 registers), 261 tokens total. SegmentationProbe removes all prefix tokens.
-    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: vit_large_patch16_dinov3.sat493m
+  pretrained: true
+  global_pool: avg
+  seed: null
+  auto_resize: true
+  use_cls_token: false
+segmentation:
+  layers:
+  - blocks.23
+  - blocks.17
+  - blocks.11
+  - blocks.5
+dataset_overrides: {}

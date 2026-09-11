@@ -4,6 +4,7 @@
 """Tests for the discoverable image CLI."""
 
 import argparse
+import json
 import runpy
 import subprocess
 import sys
@@ -293,7 +294,7 @@ def test_catalog_name_selection_and_unimplemented_commands(
     main(["datasets"])
     assert "m-eurosat" in capsys.readouterr().out
     main(["models", "timm/resnet50"])
-    assert "_target_:" in capsys.readouterr().out
+    assert "target:" in capsys.readouterr().out
     main(["datasets", "m-eurosat"])
     dataset_detail = capsys.readouterr().out
     assert "name: m-eurosat" in dataset_detail
@@ -335,15 +336,15 @@ def test_config_help_is_available_without_selection(
     with pytest.raises(SystemExit) as error:
         main(["run", "--config-help"])
     assert error.value.code == 0
-    assert "title: RunConfig" in capsys.readouterr().out
+    assert json.loads(capsys.readouterr().out)["title"] == "RunConfig"
 
 
 def test_main_rejects_unknown_parser_command(monkeypatch: MonkeyPatch) -> None:
     import argparse
 
     monkeypatch.setattr(
-        "torchgeo_bench.image_cli._parser",
-        lambda: argparse.Namespace(parse_args=lambda _: argparse.Namespace(command="other")),
+        "torchgeo_bench.image_cli._parse_args",
+        lambda _: argparse.Namespace(command="other"),
     )
     with pytest.raises(SystemExit, match="not implemented"):
         main([])

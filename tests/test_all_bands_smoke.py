@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import yaml
 
 from .test_cli_program import run_cli
 from .test_integration import require_dataset_data
@@ -19,21 +20,26 @@ def test_all_bands_e2e(tmp_path: Path):
     require_dataset_data("m-eurosat")
 
     output = tmp_path / "results.csv"
+    config = tmp_path / "run.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "model": {"name": "timm/resnet18", "kwargs": {"pretrained": False, "seed": 0}},
+                "datasets": ["m-eurosat"],
+                "input": {"bands": "all", "partition": "0.01x_train", "image_size": 32},
+                "runtime": {"batch_size": 16, "workers": 0, "device": "cpu"},
+                "classification": {
+                    "bootstrap_samples": 10,
+                    "linear": {"c_log10_start": -2.0, "c_log10_stop": 2.0, "c_count": 3},
+                },
+                "output": {"file": str(output)},
+            }
+        )
+    )
     cmd = [
         "run",
-        "model=timm/resnet18",
-        "model.pretrained=false",
-        "model.seed=0",
-        "dataset.names=[m-eurosat]",
-        "dataset.bands=all",
-        "dataset.partition=0.01x_train",
-        "dataset.image_size=32",
-        "dataset.batch_size=16",
-        "dataset.num_workers=0",
-        "eval.bootstrap=10",
-        "eval.c_range=[-2,2,3]",
-        "device=cpu",
-        f"output={output}",
+        "--config",
+        str(config),
     ]
     completed = run_cli(*cmd, cwd=Path.cwd(), timeout=600)
     assert completed.returncode == 0, (

@@ -1,11 +1,17 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: vit_large_patch16_224
-pretrained: true
-global_pool: avg
-seed: null
 name: vit_large_patch16_224
-use_cls_token: false
-eval:
-  segmentation:
-    # All blocks keep a 14x14 patch grid at 224px; use four depths, deepest first.
-    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: vit_large_patch16_224
+  pretrained: true
+  global_pool: avg
+  seed: null
+  use_cls_token: false
+segmentation:
+  layers:
+  - blocks.23
+  - blocks.17
+  - blocks.11
+  - blocks.5
+dataset_overrides: {}

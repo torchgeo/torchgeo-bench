@@ -1,10 +1,16 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: convnext_base
-pretrained: true
-global_pool: avg
-seed: null
 name: convnext_base
-eval:
-  segmentation:
-    # Layers in coarse-to-fine order (deepest first) for FPN head.
-    layers: ["stages.3", "stages.2", "stages.1", "stages.0"]
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: convnext_base
+  pretrained: true
+  global_pool: avg
+  seed: null
+segmentation:
+  layers:
+  - stages.3
+  - stages.2
+  - stages.1
+  - stages.0
+dataset_overrides: {}

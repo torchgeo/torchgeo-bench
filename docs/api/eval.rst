@@ -5,6 +5,9 @@ The evaluation pipeline lives in :mod:`torchgeo_bench.main` and a few
 focused sub-modules.  Each evaluation method (KNN-5, linear probe,
 segmentation, intrinsic dimension) consumes per-split feature embeddings
 or raw images and produces one :class:`EvaluationResult` row per metric.
+Image orchestration accepts
+:class:`~torchgeo_bench.config_schema.RunConfig`; see :doc:`cli` for loading,
+preset resolution, and the separate standalone measurement schemas.
 
 Result schema
 -------------

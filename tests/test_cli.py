@@ -1,42 +1,65 @@
 """Unit tests for CLI entrypoints."""
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 import yaml
-from omegaconf import OmegaConf
 
+from torchgeo_bench import commands
 from torchgeo_bench.cli import main as cli_main
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.flops_config import FlopsConfig
+from torchgeo_bench.presets import ModelPreset
 
 
-def test_run_composes_and_calls_main(monkeypatch) -> None:
-    received = []
-    monkeypatch.setattr("torchgeo_bench.main.main", received.append)
-    cli_main(["run", "model=rcf", "dataset.batch_size=8", "--device", "cpu"])
+def test_run_dispatches_typed_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[RunConfig] = []
+    monkeypatch.setattr(commands, "_image_runtime", SimpleNamespace(run=received.append))
+    cli_main(
+        ["run", "--model", "rcf", "--dataset", "m-eurosat", "--batch-size", "8", "--device", "cpu"]
+    )
     assert len(received) == 1
     cfg = received[0]
+    assert isinstance(cfg, RunConfig)
     assert cfg.model.name == "rcf"
-    assert cfg.dataset.batch_size == 8
-    assert cfg.device == "cpu"
+    assert cfg.datasets == ["m-eurosat"]
+    assert cfg.runtime.batch_size == 8
+    assert cfg.runtime.device == "cpu"
 
 
 @pytest.mark.parametrize("command", ["run", "flops"])
-def test_flags_win_over_positional_overrides(command, capsys) -> None:
+def test_flags_override_yaml_and_preserve_omitted_values(
+    command: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings = {
+        "model": {"name": "rcf", "kwargs": {"features": 8}},
+        "runtime": {"device": "cuda:0", "seed": 17, "verbose": True},
+        "output": {"resume": True},
+    }
+    if command == "run":
+        settings["datasets"] = ["m-eurosat"]
+    path = tmp_path / "run=1.yaml"
+    path.write_text(yaml.safe_dump(settings))
     cli_main(
         [
             command,
-            "model=rcf",
-            "device=cuda:0",
+            "--config",
+            str(path),
             "--device",
             "cpu",
-            "device=cuda:1",
-            "--print-config",
+            "--no-resume",
+            "--no-verbose",
+            "--dry-run",
         ]
     )
-    output = capsys.readouterr().out
-    if command == "flops":
-        assert FlopsConfig.model_validate(yaml.safe_load(output)).runtime.device == "cpu"
-    else:
-        assert OmegaConf.create(output).device == "cpu"
+    schema = RunConfig if command == "run" else FlopsConfig
+    config = schema.model_validate(yaml.safe_load(capsys.readouterr().out))
+    assert config.runtime.device == "cpu"
+    assert config.runtime.seed == 17
+    assert not config.runtime.verbose
+    assert config.model.kwargs == {"features": 8}
+    assert not config.output.resume
 
 
 @pytest.mark.parametrize("command", ["run", "flops"])
@@ -48,43 +71,67 @@ def test_flags_win_over_positional_overrides(command, capsys) -> None:
         ["--output=results/run=1.csv"],
     ],
 )
-def test_output_flag_value_can_contain_equals(command, output_args, capsys) -> None:
-    cli_main([command, "model=rcf", *output_args, "--print-config"])
-    output = capsys.readouterr().out
-    if command == "flops":
-        assert FlopsConfig.model_validate(yaml.safe_load(output)).output.file == "results/run=1.csv"
-    else:
-        assert OmegaConf.create(output).output == "results/run=1.csv"
+def test_output_flag_value_can_contain_equals(
+    command: str, output_args: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    selection = ["--dataset", "m-eurosat"] if command == "run" else []
+    cli_main([command, "--model", "rcf", *selection, *output_args, "--dry-run"])
+    schema = RunConfig if command == "run" else FlopsConfig
+    config = schema.model_validate(yaml.safe_load(capsys.readouterr().out))
+    assert config.output.file == "results/run=1.csv"
 
 
 @pytest.mark.parametrize("command", ["run", "flops"])
 @pytest.mark.parametrize(
-    "overrides",
+    "flags",
     [
-        ["seed=1", "--device", "cpu", "seed=2"],
-        ["seed=1", "--device", "cpu", "--", "seed=2"],
-        ["seed=1", "--device", "cpu", "seed=1", "--", "seed=2"],
+        ["--seed", "1", "--device", "cpu", "--seed", "2"],
+        ["--seed=1", "--device=cpu", "--seed=2"],
+        ["--seed", "1", "--device", "cpu", "--seed", "1", "--seed", "2"],
     ],
 )
-def test_interleaved_overrides_keep_their_order(command, overrides, capsys) -> None:
-    cli_main([command, "--model", "rcf", "--print-config", *overrides])
-    output = capsys.readouterr().out
-    if command == "flops":
-        cfg = FlopsConfig.model_validate(yaml.safe_load(output))
-        assert cfg.runtime.seed == 2
-        assert cfg.runtime.device == "cpu"
-    else:
-        cfg = OmegaConf.create(output)
-        assert cfg.seed == 2
-        assert cfg.device == "cpu"
+def test_repeated_flags_keep_their_order(
+    command: str, flags: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    selection = ["--dataset", "m-eurosat"] if command == "run" else []
+    cli_main([command, "--model", "rcf", *selection, "--dry-run", *flags])
+    schema = RunConfig if command == "run" else FlopsConfig
+    config = schema.model_validate(yaml.safe_load(capsys.readouterr().out))
+    assert config.runtime.seed == 2
+    assert config.runtime.device == "cpu"
+
+
+@pytest.mark.parametrize("command", ["run", "flops", "profile", "coord"])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["model=rcf"],
+        ["+model.features=8"],
+        ["++model.pool=cls", "+model.gsd=1.0"],
+        ["typo.key=1"],
+        ["seed=1", "--device", "cpu", "seed=2"],
+        ["seed=1", "--device", "cpu", "--", "seed=2"],
+    ],
+)
+def test_old_override_grammar_reports_migration(
+    command: str, arguments: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as error:
+        cli_main([command, *arguments])
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert "key=value and +key=value overrides have been retired" in message
+    assert "--model rcf --dataset m-eurosat" in message
+    assert "--config run.yaml" in message
+    assert "Traceback" not in message
 
 
 @pytest.mark.parametrize(
     "argv",
     [
-        ["run", "--unknown=value", "--print-config"],
-        ["run", "model=rcf", "--print-config", "--unknown=value"],
-        ["flops", "model=rcf", "--print-config", "--unknown=value"],
+        ["run", "--unknown=value", "--dry-run"],
+        ["run", "--model", "rcf", "--dataset", "m-eurosat", "--dry-run", "--unknown=value"],
+        ["flops", "--model", "rcf", "--dry-run", "--unknown=value"],
     ],
 )
 def test_unrecognized_arguments_are_rejected(argv, capsys) -> None:
@@ -94,57 +141,80 @@ def test_unrecognized_arguments_are_rejected(argv, capsys) -> None:
     assert "unrecognized arguments" in capsys.readouterr().err
 
 
-def test_run_datasets_flag_becomes_list(monkeypatch) -> None:
-    received = []
-    monkeypatch.setattr("torchgeo_bench.main.main", received.append)
-    cli_main(["run", "-d", "m-eurosat,m-so2sat"])
-    assert list(received[0].dataset.names) == ["m-eurosat", "m-so2sat"]
+def test_run_repeated_dataset_flags_preserve_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[RunConfig] = []
+    monkeypatch.setattr(commands, "_image_runtime", SimpleNamespace(run=received.append))
+    cli_main(["run", "-m", "rcf", "-d", "m-eurosat", "--dataset", "m-so2sat"])
+    assert received[0].datasets == ["m-eurosat", "m-so2sat"]
 
 
-def test_run_unknown_model_errors() -> None:
-    with pytest.raises(SystemExit, match="Unknown model config"):
-        cli_main(["run", "model=not_a_model"])
+def test_run_unknown_model_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        cli_main(["run", "--model", "not_a_model", "--dataset", "m-eurosat"])
+    assert error.value.code == 2
+    assert "not_a_model" in capsys.readouterr().err
 
 
-def test_run_unknown_key_errors() -> None:
-    with pytest.raises(SystemExit, match="typo_key"):
-        cli_main(["run", "typo_key=1"])
+def test_run_unknown_yaml_key_errors_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "invalid.yaml"
+    path.write_text("model: {name: rcf}\ndatasets: [m-eurosat]\ntypo_key: 1\n")
+    with pytest.raises(SystemExit) as error:
+        cli_main(["run", "--config", str(path)])
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert "typo_key" in message
+    assert "Extra inputs are not permitted" in message
+    assert "Traceback" not in message
 
 
-def test_run_print_config(capsys) -> None:
-    cli_main(["run", "model=rcf", "--print-config"])
-    out = capsys.readouterr().out
-    assert "name: rcf" in out
-    assert "names: all" in out
+def test_run_dry_run_prints_reusable_typed_config(capsys: pytest.CaptureFixture[str]) -> None:
+    cli_main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--dry-run"])
+    config = RunConfig.model_validate(yaml.safe_load(capsys.readouterr().out))
+    assert config.model.name == "rcf"
+    assert config.datasets == ["m-eurosat"]
 
 
 def test_run_list_models(capsys) -> None:
-    cli_main(["run", "--list-models"])
+    cli_main(["models"])
     out = capsys.readouterr().out
     assert "rcf" in out
     assert "torchgeo/scalemae_large_fmow" in out
 
 
 def test_run_list_datasets(capsys) -> None:
-    cli_main(["run", "--list-datasets"])
+    cli_main(["datasets"])
     out = capsys.readouterr().out
     assert "m-eurosat" in out
 
 
 def test_run_model_help(capsys) -> None:
-    cli_main(["run", "--model-help", "rcf"])
-    out = capsys.readouterr().out
-    assert "torchgeo_bench.models.RCFBench" in out
+    cli_main(["models", "rcf"])
+    preset = ModelPreset.model_validate(yaml.safe_load(capsys.readouterr().out))
+    assert preset.name == "rcf"
+    assert preset.target == "torchgeo_bench.models.RCFBench"
+    assert preset.track == "image"
 
 
 def test_run_model_help_unknown_model_errors() -> None:
-    with pytest.raises(SystemExit, match="error: Unknown model config"):
-        cli_main(["run", "--model-help", "not-a-real-model"])
+    with pytest.raises(SystemExit, match="unknown model 'not-a-real-model'"):
+        cli_main(["models", "not-a-real-model"])
 
 
 def test_run_model_help_rejects_path_traversal() -> None:
-    with pytest.raises(SystemExit, match="error: Unknown model config"):
-        cli_main(["run", "--model-help", "../flops_config"])
+    with pytest.raises(SystemExit, match="unknown model"):
+        cli_main(["models", "../flops_config"])
+
+
+@pytest.mark.parametrize(
+    ("dataset", "task"), [("m-eurosat", "classification"), ("burn_scars", "segmentation")]
+)
+def test_dataset_catalog_details(
+    dataset: str, task: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli_main(["datasets", dataset])
+    assert yaml.safe_load(capsys.readouterr().out) == {"name": dataset, "task": task}
 
 
 def test_download_invalid_target() -> None:
@@ -200,7 +270,7 @@ def test_download_rejects_mixed_collection_targets(names: list[str]) -> None:
         cli_main(["download", *names])
 
 
-@pytest.mark.parametrize("invalid", ["unknown", "model=rcf"])
+@pytest.mark.parametrize("invalid", ["unknown", "not_a_dataset"])
 def test_download_named_dataset_rejects_unknown_before_backend(monkeypatch, invalid: str) -> None:
     calls: list[object] = []
     monkeypatch.setattr(
@@ -245,43 +315,45 @@ def test_download_rejects_datasets_for_eurosat() -> None:
 
 
 def test_flops_without_model_errors_cleanly() -> None:
-    """The flops subparser has no --datasets flag; flag translation must not assume one."""
-    with pytest.raises(SystemExit, match="No model selected"):
+    with pytest.raises(SystemExit) as error:
         cli_main(["flops"])
+    assert "model" in str(error.value)
+    assert "Field required" in str(error.value)
 
 
-def test_flops_composes_flops_config(monkeypatch) -> None:
-    received = []
-    monkeypatch.setattr("torchgeo_bench.flops_pipeline.main", received.append)
+def test_flops_dispatches_typed_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[FlopsConfig] = []
+    monkeypatch.setattr(commands, "run_flops", received.append)
     cli_main(["flops", "-m", "rcf", "--device", "cpu"])
+    assert isinstance(received[0], FlopsConfig)
     assert received[0].classification.num_classes == 10
     assert received[0].runtime.device == "cpu"
 
 
-def test_unknown_model_suggests_close_names() -> None:
-    with pytest.raises(SystemExit, match="timm/resnet50"):
-        cli_main(["run", "-m", "resnet50"])
+def test_unknown_model_suggests_close_names(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        cli_main(["run", "-m", "resnet50", "-d", "m-eurosat"])
+    assert error.value.code == 2
+    assert "timm/resnet50" in capsys.readouterr().err
 
 
-def test_bad_override_is_not_a_traceback() -> None:
-    with pytest.raises(SystemExit, match="bad config override"):
-        cli_main(["run", "typo.key=1"])
+def test_constructor_options_are_explicit_yaml_kwargs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "custom.yaml"
+    path.write_text(
+        "model:\n  name: custom\n  target: not_installed.Model\n"
+        "  kwargs: {pool: cls, gsd: 1.0}\ndatasets: [m-eurosat]\n"
+    )
+    cli_main(["run", "--config", str(path), "--dry-run"])
+    config = RunConfig.model_validate(yaml.safe_load(capsys.readouterr().out))
+    assert config.model.target == "not_installed.Model"
+    assert config.model.kwargs == {"pool": "cls", "gsd": 1.0}
 
 
-def test_double_plus_override_sets_the_real_key():
-    """``++key=value`` adds or overrides a key, not a literal ``+key``."""
-    from torchgeo_bench.config import compose_config
-
-    cfg = compose_config(["model=rcf", "++model.pool=cls", "+model.gsd=1.0"])
-    assert "+model" not in cfg
-    assert cfg.model.pool == "cls"
-    assert float(cfg.model.gsd) == 1.0
-
-
-def test_model_names_are_posix_on_every_platform():
+def test_model_names_are_posix_on_every_platform(capsys: pytest.CaptureFixture[str]) -> None:
     """Model names are CLI identifiers and must use forward slashes even on Windows."""
-    from torchgeo_bench.config import list_model_configs
-
-    names = list_model_configs()
+    cli_main(["models"])
+    names = capsys.readouterr().out.splitlines()
     assert "torchgeo/scalemae_large_fmow" in names
     assert not any("\\" in n for n in names)

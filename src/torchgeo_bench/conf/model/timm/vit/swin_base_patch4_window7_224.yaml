@@ -1,6 +1,10 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: swin_base_patch4_window7_224
-pretrained: true
-global_pool: avg
-seed: null
 name: swin_base_patch4_window7_224
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: swin_base_patch4_window7_224
+  pretrained: true
+  global_pool: avg
+  seed: null
+dataset_overrides: {}

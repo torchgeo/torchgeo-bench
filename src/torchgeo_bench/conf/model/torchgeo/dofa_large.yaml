@@ -1,14 +1,17 @@
-# MAE-pretrained DOFA uses a wavelength for each selected band.
-
-_target_: torchgeo_bench.models.TorchGeoDOFABench
-factory: dofa_large_patch16_224
-weights_class: DOFALarge16_Weights
-weights_member: DOFA_MAE
-auto_resize: true
-target_size: 224
 name: tgeo_dofa_large
-eval:
-  segmentation:
-    # Use four encoder depths, deepest first; each has a 14x14 patch grid plus a CLS token.
-    # Do not hook patch_embed.weight_generator's internal transformer: it generates weights, not spatial features.
-    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+target: torchgeo_bench.models.TorchGeoDOFABench
+track: image
+seed_from_run: false
+kwargs:
+  factory: dofa_large_patch16_224
+  weights_class: DOFALarge16_Weights
+  weights_member: DOFA_MAE
+  auto_resize: true
+  target_size: 224
+segmentation:
+  layers:
+  - blocks.23
+  - blocks.17
+  - blocks.11
+  - blocks.5
+dataset_overrides: {}

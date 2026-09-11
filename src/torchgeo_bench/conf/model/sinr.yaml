@@ -1,5 +1,7 @@
-# SINR location encoder (Cole et al. 2023) -> 256-d features.
-# Requires the `coordbench` extra: pip install -e ".[coordbench]"
-_target_: torchgeo_bench.coordbench.models.SINRLocationEncoder
-repo: MVRL/sinr-location-encoder-1000-cls
 name: sinr
+target: torchgeo_bench.coordbench.models.SINRLocationEncoder
+track: coord
+seed_from_run: false
+kwargs:
+  repo: MVRL/sinr-location-encoder-1000-cls
+dataset_overrides: {}

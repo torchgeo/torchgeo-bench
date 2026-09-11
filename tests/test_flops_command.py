@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from torchgeo_bench import commands
+from torchgeo_bench.cli import main as cli_main
 from torchgeo_bench.commands import _flops
 from torchgeo_bench.commands.flops_arguments import add_flops_arguments
 from torchgeo_bench.flops_config import FlopsConfig
@@ -279,26 +280,30 @@ def test_constructor_options_use_strict_safe_yaml(kwargs: str) -> None:
         _flops.run(parser().parse_args(["--model", "rcf", "--model-kwargs", kwargs, "--dry-run"]))
 
 
-@pytest.mark.parametrize("arguments", [["model=rcf"], ["+model.features=8"]])
-def test_explicit_parser_rejects_old_override_syntax(arguments: list[str]) -> None:
-    with pytest.raises(SystemExit):
-        parser().parse_args(arguments)
+@pytest.mark.parametrize("arguments", [["model=rcf"], ["+model.features=8"], ["++device=cpu"]])
+def test_canonical_parser_rejects_old_override_syntax(
+    arguments: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as error:
+        cli_main(["flops", *arguments])
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert "overrides have been retired" in message
+    assert "--config" in message
 
 
-def test_legacy_namespace_bridge_retains_flags_and_bounded_rcf_overrides(
-    monkeypatch: pytest.MonkeyPatch,
+def test_canonical_parser_dispatches_yaml_and_explicit_flags(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     received: list[FlopsConfig] = []
     monkeypatch.setattr(commands, "run_flops", received.append)
-    _flops.flops(
-        argparse.Namespace(
-            model="rcf",
-            device="cpu",
-            output=None,
-            print_config=False,
-            overrides=["model=rcf", "device=cuda", "model.features=8", "resume=false"],
-        )
+    path = tmp_path / "flops.yaml"
+    path.write_text(
+        "model: {name: rcf, kwargs: {features: 8}}\n"
+        "runtime: {device: cuda}\noutput: {resume: true}\n"
     )
+    cli_main(["flops", "--config", str(path), "--device", "cpu", "--no-resume"])
+    assert isinstance(received[0], FlopsConfig)
     assert received[0].model.kwargs == {"features": 8}
     assert received[0].runtime.device == "cpu"
     assert not received[0].output.resume

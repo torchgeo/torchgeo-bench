@@ -4,6 +4,7 @@
 """Implementation of the image benchmark command."""
 
 import argparse
+import json
 from typing import Any
 
 import yaml
@@ -48,12 +49,15 @@ def _run_mapping(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901 - fl
     for name in ("methods", "knn_k", "knn_device", "bootstrap_samples"):
         if hasattr(args, name):
             _set(overrides, "classification", name, getattr(args, name))
-    if hasattr(args, "refit_train_val"):
-        _set(overrides, "classification.linear", "refit_train_val", args.refit_train_val)
-    if hasattr(args, "temp_scale"):
-        _set(overrides, "classification.calibration", "temp_scale", args.temp_scale)
-    if hasattr(args, "resume"):
-        _set(overrides, "output", "resume", args.resume)
+    for flag, section, key in (
+        ("refit_train_val", "classification.linear", "refit_train_val"),
+        ("temp_scale", "classification.calibration", "temp_scale"),
+        ("resume", "output", "resume"),
+        ("output", "output", "file"),
+        ("results_dir", "output", "directory"),
+    ):
+        if hasattr(args, flag):
+            _set(overrides, section, key, getattr(args, flag))
     return overrides
 
 
@@ -61,6 +65,9 @@ def _apply_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> dict[st
     """Apply known CLI fields with explicit section handling."""
     result = dict(base)
     for key, value in overrides.items():
+        if key == "model":
+            result[key] = value
+            continue
         if key in {"model", "input", "classification", "runtime", "output"}:
             section = dict(result.get(key, {}))
             for nested_key, nested_value in value.items():
@@ -84,12 +91,14 @@ def _load_run(
     base = load_yaml(config_path) if config_path else {}
     values = _apply_overrides(base, _run_mapping(args))
     if getattr(args, "config_help", False):
-        print(yaml.safe_dump(RunConfig.model_json_schema(), sort_keys=False), end="")
+        print(json.dumps(RunConfig.model_json_schema(), indent=2))
         raise SystemExit(0)
     config = validate_run_config(values)
     unknown_model = config.model.target is None and config.model.name not in model_names
-    unknown_datasets = [name for name in config.datasets if name not in datasets]
-    if unknown_model or unknown_datasets:
+    unknown_datasets = [name for name in config.datasets if name != "all" and name not in datasets]
+    if unknown_model:
+        load_model_preset(config.model)
+    if unknown_datasets:
         raise ValueError(
             f"unknown model or dataset: model={config.model.name}, datasets={unknown_datasets}"
         )

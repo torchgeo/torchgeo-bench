@@ -1,7 +1,11 @@
-_target_: torchgeo_bench.models.UniverSatBenchModel
-modality: null
-patch_size: 10
-output_grid: null
-input_res: null
-normalize: false
 name: universat_base
+target: torchgeo_bench.models.UniverSatBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  modality: null
+  patch_size: 10
+  output_grid: null
+  input_res: null
+  normalize: false
+dataset_overrides: {}

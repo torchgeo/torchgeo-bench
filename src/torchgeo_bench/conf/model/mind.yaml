@@ -1,8 +1,10 @@
-# MIND location encoder (distilled from AlphaEarth/Climplicit/GeoCLIP/SINR).
-# Uses the first 64 pooled features from the Matryoshka embedding. https://huggingface.co/isaaccorley/MIND
-_target_: torchgeo_bench.coordbench.models.MINDLocationEncoder
-repo: isaaccorley/MIND
-filename: mind.safetensors
-feature: pooled
-dim: 64
 name: mind
+target: torchgeo_bench.coordbench.models.MINDLocationEncoder
+track: coord
+seed_from_run: false
+kwargs:
+  repo: isaaccorley/MIND
+  filename: mind.safetensors
+  feature: pooled
+  dim: 64
+dataset_overrides: {}
