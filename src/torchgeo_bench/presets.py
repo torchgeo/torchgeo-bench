@@ -133,6 +133,7 @@ def load_model_preset(selection: ModelConfig, *, seed: int = 0) -> ModelPreset:
 def resolve_run_config(config: RunConfig, dataset: str) -> tuple[RunConfig, ModelPreset]:
     """Resolve preset and dataset defaults beneath explicitly supplied settings."""
     preset = load_model_preset(config.model, seed=config.runtime.seed).for_dataset(dataset)
+    preset = preset.model_copy(update={"kwargs": {**preset.kwargs, **config.model.kwargs}})
     if preset.track != "image":
         raise ValueError(f"{config.model.name!r} is a coordinate encoder; use 'coord'")
     defaults = {

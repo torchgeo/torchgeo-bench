@@ -5,8 +5,8 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
-from omegaconf import OmegaConf
 
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import evaluate_intrinsic_dim, main
 
 from .test_main_fast import _compose_cfg, _resume_row, _synthetic_embeddings, _synthetic_loaders
@@ -16,13 +16,15 @@ def test_intrinsic_dim_rows_emitted(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn,mle]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-        ],
+        overrides={
+            "classification": {"methods": ["knn"]},
+            "intrinsic_dim": {
+                "enabled": True,
+                "estimators": ["twonn", "mle"],
+                "splits": ["train"],
+                "max_samples": 100,
+            },
+        },
     )
 
     def _mock_compute(*args, **kwargs):
@@ -59,13 +61,15 @@ def test_spectrum_rows_do_not_require_torchid_estimators(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-        ],
+        overrides={
+            "classification": {"methods": ["knn"]},
+            "intrinsic_dim": {
+                "enabled": True,
+                "estimators": [],
+                "splits": ["train"],
+                "max_samples": 100,
+            },
+        },
     )
 
     with (
@@ -112,17 +116,15 @@ def test_degenerate_spectrum_writes_nan_and_keeps_other_splits(caplog) -> None:
         common_meta.update(feature_dim=8, n_train=0, n_val=0, n_test=0)
         rows = evaluate_intrinsic_dim(
             splits={"train": good_X, "val": degenerate_X},
-            cfg=OmegaConf.create(
+            cfg=RunConfig.model_validate(
                 {
-                    "seed": 0,
-                    "device": "cpu",
-                    "verbose": False,
-                    "eval": {
-                        "intrinsic_dim": {
-                            "estimators": [],
-                            "splits": ["train", "val"],
-                            "max_samples": None,
-                        }
+                    "model": {"name": "rcf"},
+                    "datasets": ["m-eurosat"],
+                    "runtime": {"device": "cpu"},
+                    "intrinsic_dim": {
+                        "estimators": [],
+                        "splits": ["train", "val"],
+                        "max_samples": None,
                     },
                 }
             ),
@@ -139,14 +141,16 @@ def test_intrinsic_dim_resume_per_estimator(tmp_path: Path):
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn,mle]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-        ],
+        overrides={
+            "output": {"resume": True},
+            "classification": {"methods": ["knn"]},
+            "intrinsic_dim": {
+                "enabled": True,
+                "estimators": ["twonn", "mle"],
+                "splits": ["train"],
+                "max_samples": 100,
+            },
+        },
     )
 
     seed_rows = [
@@ -189,14 +193,16 @@ def test_resume_backfills_spectrum_without_rerunning_completed_estimators(tmp_pa
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn,mle]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-        ],
+        overrides={
+            "output": {"resume": True},
+            "classification": {"methods": ["knn"]},
+            "intrinsic_dim": {
+                "enabled": True,
+                "estimators": ["twonn", "mle"],
+                "splits": ["train"],
+                "max_samples": 100,
+            },
+        },
     )
 
     seed_rows = [

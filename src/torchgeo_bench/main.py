@@ -1,15 +1,13 @@
 """Benchmark script for torchgeo-bench."""
 
 import logging
-import math
 import os
 from collections.abc import Iterator, Sequence, Sized
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
@@ -18,7 +16,7 @@ from torchgeo_bench.calibration import (
     compute_calibration_metrics,
     fit_temperature,
 )
-from torchgeo_bench.config import instantiate
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.datasets import (
     BenchDataset,
     get_bench_dataset_class,
@@ -33,13 +31,15 @@ from torchgeo_bench.intrinsic_dim import (
     compute_intrinsic_dim,
 )
 from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
+from torchgeo_bench.legacy_config import (  # noqa: F401 - transitional recipe-helper export
+    accept_legacy_config,
+    resolve_model_config,
+)
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput, measure_profile
 from torchgeo_bench.models.interface import BenchModel
+from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset, build_model, resolve_run_config
 from torchgeo_bench.results import (
-    DEFAULT_INTRINSIC_DIM_RESULTS_DIR,
-    DEFAULT_PROFILE_RESULTS_DIR,
-    DEFAULT_RESULTS_DIR,
     EvaluationResult,
     append_rows_atomic,
     bootstrap_accuracy,
@@ -59,9 +59,10 @@ from torchgeo_bench.resume import (  # noqa: F401  (re-exported for back-compat)
     _profile_metric_names,
     _resume_config_hash,
     _row_key,
+    compatible_hashes,
     load_completed,
 )
-from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features, resolve_device
+from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
 
 if TYPE_CHECKING:
     import torchgeo_bench.segmentation_task
@@ -105,12 +106,14 @@ class LoaderSplits:
     test: DataLoader
 
 
-def resolve_model_config(model_cfg: DictConfig, dataset_name: str) -> DictConfig:
-    """Apply a dataset-specific partial override to a model configuration."""
-    resolved = DictConfig(OmegaConf.to_container(model_cfg, resolve=True))
-    dataset_overrides = resolved.pop("dataset_overrides", {})
-    resolved.merge_with(dataset_overrides.get(dataset_name, {}))
-    return resolved
+def resolve_image_device(requested: str) -> torch.device:
+    """Resolve auto selection without silently accepting an unavailable explicit GPU."""
+    if requested == "auto":
+        requested = "cuda:0" if torch.cuda.is_available() else "cpu"
+    device = torch.device(requested)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError(f"CUDA device {requested!r} requested but CUDA is unavailable")
+    return device
 
 
 def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
@@ -147,7 +150,7 @@ def embed_split(
 def evaluate_knn(
     train: FeatureSplit[np.ndarray],
     test: FeatureSplit[np.ndarray],
-    cfg: DictConfig,
+    cfg: RunConfig,
     device: str,
     n_neighbors: int = 5,
 ) -> tuple[float, float, float, dict[str, float], int]:
@@ -159,8 +162,9 @@ def evaluate_knn(
     """
     x_train, y_train = train.features, train.labels
     x_test, y_test = test.features, test.labels
-    seed, n_bootstrap, verbose = cfg.seed, cfg.eval.bootstrap, cfg.verbose
-    calibration_n_bins = (cfg.eval.get("calibration") or {}).get("n_bins_knn")
+    seed = cfg.runtime.seed
+    n_bootstrap, verbose = cfg.classification.bootstrap_samples, cfg.runtime.verbose
+    calibration_n_bins = cfg.classification.calibration.n_bins_knn
     n_bins = calibration_n_bins if calibration_n_bins is not None else n_neighbors + 1
     multi_label = y_train.ndim == 2
     clf = KNNClassifier(n_neighbors=n_neighbors, device=device, use_fp16=False)
@@ -211,12 +215,12 @@ def select_logistic_c(
     train: FeatureSplit[torch.Tensor],
     val: FeatureSplit[np.ndarray],
     c_values: Sequence[float],
-    cfg: DictConfig,
+    cfg: RunConfig,
 ) -> float:
     """Choose C by validation accuracy or micro average precision."""
     x_train, y_train = train.features, train.labels
     x_val, y_val = torch.from_numpy(val.features), val.labels
-    seed, device, verbose = cfg.seed, cfg.device, cfg.verbose
+    seed, device, verbose = cfg.runtime.seed, cfg.runtime.device, cfg.runtime.verbose
     from sklearn.metrics import accuracy_score, average_precision_score
 
     multi_label = y_train.ndim == 2
@@ -306,7 +310,7 @@ def calibrate_logistic(
 def evaluate_logistic(
     splits: FeatureSplits[np.ndarray],
     c_values: Sequence[float],
-    cfg: DictConfig,
+    cfg: RunConfig,
 ) -> tuple[float, float, float, float, dict[str, float], dict[str, float | None]]:
     """Select C on validation data, refit, and score the test split.
 
@@ -320,11 +324,12 @@ def evaluate_logistic(
     x_train, y_train = splits.train.features, splits.train.labels
     x_val, y_val = splits.val.features, splits.val.labels
     x_test, y_test = splits.test.features, splits.test.labels
-    seed, device, verbose = cfg.seed, cfg.device, cfg.verbose
-    n_bootstrap, merge_val = cfg.eval.bootstrap, cfg.eval.merge_val
-    calibration_cfg = cfg.eval.get("calibration") or {}
-    calibration_n_bins = int(calibration_cfg.get("n_bins_linear", 15))
-    temp_scale = bool(calibration_cfg.get("temp_scale", True))
+    seed, device, verbose = cfg.runtime.seed, cfg.runtime.device, cfg.runtime.verbose
+    n_bootstrap = cfg.classification.bootstrap_samples
+    merge_val = cfg.classification.linear.refit_train_val
+    calibration_cfg = cfg.classification.calibration
+    calibration_n_bins = calibration_cfg.n_bins_linear
+    temp_scale = calibration_cfg.temp_scale
     multi_label = y_train.ndim == 2
     x_train_tensor = torch.from_numpy(x_train)
     x_test_tensor = torch.from_numpy(x_test)
@@ -428,45 +433,19 @@ def evaluate_logistic(
     return metric, lo, hi, float(best_c), calibration, calibration_ts
 
 
-def _resolve_segmentation_runtime_config(
-    seg_cfg: DictConfig,
-) -> tuple[int, int, float, bool, torch.dtype]:
-    """Validate segmentation settings before feature extraction or training."""
-    epochs = seg_cfg.get("epochs", 10)
-    batch_size = seg_cfg.get("batch_size", 64)
-    lr = seg_cfg.get("lr", 1e-3)
-    use_cache = seg_cfg.get("cache_features", True)
-    cache_dtype_name = seg_cfg.get("cache_dtype", "float16")
-
-    for name, value in (("epochs", epochs), ("batch_size", batch_size)):
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise ValueError(f"eval.segmentation.{name} must be a positive integer, got {value!r}.")
-    if isinstance(lr, bool) or not isinstance(lr, (int, float)) or not math.isfinite(lr) or lr <= 0:
-        raise ValueError(f"eval.segmentation.lr must be a finite positive number, got {lr!r}.")
-    if not isinstance(use_cache, bool):
-        raise TypeError(f"eval.segmentation.cache_features must be a boolean, got {use_cache!r}.")
-    cache_dtypes = {"float16": torch.float16, "float32": torch.float32}
-    if cache_dtype_name not in cache_dtypes:
-        raise ValueError(
-            "eval.segmentation.cache_dtype must be one of "
-            f"{tuple(cache_dtypes)}, got {cache_dtype_name!r}."
-        )
-    return epochs, batch_size, float(lr), use_cache, cache_dtypes[cache_dtype_name]
-
-
 def estimate_intrinsic_dimensions(
     X: np.ndarray,
     split_name: str,
-    cfg: DictConfig,
+    cfg: RunConfig,
     common_meta: ResultMetadata,
     only_metrics: frozenset[str] | None,
 ) -> dict[str, float]:
     """Compute each estimator independently so one degenerate estimate keeps the others."""
-    id_cfg = cfg.eval.intrinsic_dim
+    id_cfg = cfg.intrinsic_dim
     estimators = list(id_cfg.estimators)
-    device = id_cfg.get("device") or cfg.device
-    max_samples = id_cfg.get("max_samples")
-    seed = cfg.seed
+    device = id_cfg.device or cfg.runtime.device
+    max_samples = id_cfg.max_samples
+    seed = cfg.runtime.seed
     dims: dict[str, float] = {}
     for est_name in estimators:
         if only_metrics is not None and f"id_{est_name}_{split_name}" not in only_metrics:
@@ -498,7 +477,7 @@ def estimate_intrinsic_dimensions(
 
 def evaluate_intrinsic_dim(
     splits: dict[str, np.ndarray],
-    cfg: DictConfig,
+    cfg: RunConfig,
     common_meta: ResultMetadata,
     only_metrics: frozenset[str] | None = None,
 ) -> list[dict]:
@@ -510,10 +489,10 @@ def evaluate_intrinsic_dim(
 
     ``only_metrics`` selects unfinished metrics on resume. ``None`` computes everything.
     """
-    id_cfg = cfg.eval.intrinsic_dim
+    id_cfg = cfg.intrinsic_dim
     estimators, selected_splits = list(id_cfg.estimators), list(id_cfg.splits)
-    device = id_cfg.get("device") or cfg.device
-    max_samples, seed, verbose = id_cfg.get("max_samples"), cfg.seed, cfg.verbose
+    device = id_cfg.device or cfg.runtime.device
+    max_samples, seed, verbose = id_cfg.max_samples, cfg.runtime.seed, cfg.runtime.verbose
     rows: list[dict] = []
     for split_name in selected_splits:
         if split_name not in splits:
@@ -575,35 +554,35 @@ def evaluate_intrinsic_dim(
 def evaluate_profile(
     model: BenchModel,
     sample_loader: DataLoader,
-    cfg: DictConfig,
+    cfg: RunConfig,
     common_meta: ResultMetadata,
 ) -> list[dict]:
     """Measure backbone throughput, memory, and parameter count as CSV rows.
 
     One row per metric, with ``method="profile"``.
 
-    ``cfg.eval.profile.cpu_throughput.enabled`` adds CPU metrics with a ``_cpu`` suffix.
+    ``cfg.profile.cpu_throughput.enabled`` adds CPU metrics with a ``_cpu`` suffix.
     Its ``time_budget_s`` setting bounds the extra measurement.
     """
-    device = torch.device(cfg.device)
-    profile_cfg = cfg.eval.profile
-    n_warmup, n_measure = int(profile_cfg.get("n_warmup", 3)), int(profile_cfg.get("n_measure", 20))
-    cpu_cfg = profile_cfg.get("cpu_throughput") or {}
+    device = torch.device(cfg.runtime.device)
+    profile_cfg = cfg.profile
+    n_warmup, n_measure = profile_cfg.n_warmup, profile_cfg.n_measure
+    cpu_cfg = profile_cfg.cpu_throughput
     sample = next(iter(sample_loader))["image"].to(device)
 
     metrics = measure_profile(model, sample, device, n_warmup=n_warmup, n_measure=n_measure)
 
-    if cpu_cfg.get("enabled", False):
+    if cpu_cfg.enabled:
         metrics.update(
             measure_cpu_throughput(
                 model,
                 sample,
                 timing=ProfileTiming(
-                    batch_size=int(cpu_cfg.get("batch_size", 8)),
-                    n_warmup=int(cpu_cfg.get("n_warmup", 1)),
-                    n_measure=int(cpu_cfg.get("n_measure", 5)),
+                    batch_size=cpu_cfg.batch_size,
+                    n_warmup=cpu_cfg.n_warmup,
+                    n_measure=cpu_cfg.n_measure,
                 ),
-                time_budget_s=float(cpu_cfg.get("time_budget_s", 300.0)),
+                time_budget_s=cpu_cfg.time_budget_s,
             )
         )
 
@@ -623,8 +602,7 @@ def evaluate_profile(
 def evaluate_segmentation(
     model: torch.nn.Module,
     loaders: LoaderSplits,
-    eval_cfg: DictConfig,
-    cfg: DictConfig,
+    cfg: RunConfig,
     num_classes: int,
 ) -> "tuple[torchgeo_bench.segmentation_task.SegMetrics, int, float | None, int | None]":
     """Train a segmentation head on a frozen backbone and evaluate test mIoU.
@@ -635,19 +613,17 @@ def evaluate_segmentation(
         Tuple of (metrics, feature_dim, lr, batch_size).
     """
     train_loader, val_loader, test_loader = loaders.train, loaders.val, loaders.test
-    device, seed, verbose = torch.device(cfg.device), cfg.seed, cfg.verbose
+    device = torch.device(cfg.runtime.device)
+    seed, verbose = cfg.runtime.seed, cfg.runtime.verbose
     from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
-    if "segmentation" not in eval_cfg:
-        raise ValueError("Segmentation evaluation config missing for the model.")
+    seg_cfg = cfg.segmentation
+    epochs, probe_batch_size, lr = seg_cfg.epochs, seg_cfg.batch_size, seg_cfg.learning_rate
+    use_cache = seg_cfg.cache_features
+    cache_dtype = {"float16": torch.float16, "float32": torch.float32}[seg_cfg.cache_dtype]
 
-    seg_cfg = eval_cfg.segmentation
-    epochs, probe_batch_size, lr, use_cache, cache_dtype = _resolve_segmentation_runtime_config(
-        seg_cfg
-    )
-
-    probe, solver = build_seg_probe_and_solver(model, num_classes, eval_cfg, device, lr)
-    collect_confusions = int(eval_cfg.bootstrap) > 0
+    probe, solver = build_seg_probe_and_solver(model, num_classes, seg_cfg, device)
+    collect_confusions = cfg.classification.bootstrap_samples > 0
     if use_cache and probe.freeze_backbone:
         logger.info("Caching backbone features for train and val splits...")
         train_cache = probe.extract_segmentation_features(train_loader, cache_dtype=cache_dtype)
@@ -681,7 +657,7 @@ def evaluate_segmentation(
         metrics, confusion_matrices = eval_result
         metrics["ci_lower"], metrics["ci_upper"] = bootstrap_miou(
             confusion_matrices,
-            n_boot=int(eval_cfg.bootstrap),
+            n_boot=cfg.classification.bootstrap_samples,
             seed=seed,
         )
     else:
@@ -689,28 +665,22 @@ def evaluate_segmentation(
     return metrics, sum(probe.channels_list), lr, actual_batch_size
 
 
-def _resolve_output_path(
-    cfg: DictConfig, dir_key: str = "results_dir", default_dir: str = DEFAULT_RESULTS_DIR
-) -> str:
+def _resolve_output_path(cfg: RunConfig, directory: str | None = None) -> str:
     """Return explicit ``output``, else the model's CSV in the requested directory.
 
-    An explicit ``output=`` routes metrics, profile, and intrinsic-dimension
+    An explicit ``output.file`` routes metrics, profile, and intrinsic-dimension
     rows to one file; otherwise each kind has its own per-model directory.
     """
-    if cfg.get("output"):
-        return str(cfg.output)
-    name = cfg.model.get("name")
-    if not name:
-        raise ValueError(
-            "model config has no 'name', so no per-model results file can be "
-            "derived; set output= explicitly or add a name to the model config."
-        )
-    return str(model_results_path(cfg.get(dir_key, default_dir), name))
+    if cfg.output.file:
+        return cfg.output.file
+    from torchgeo_bench.presets import load_model_preset
+
+    preset = load_model_preset(cfg.model, seed=cfg.runtime.seed)
+    return str(model_results_path(directory or cfg.output.directory, preset.name))
 
 
 def run_segmentation(
-    cfg: DictConfig,
-    eval_cfg: DictConfig,
+    cfg: RunConfig,
     model: BenchModel,
     loaders: LoaderSplits,
     common_meta: ResultMetadata,
@@ -722,9 +692,7 @@ def run_segmentation(
     num_classes = common_meta["num_classes"]
     assert isinstance(val_loader.dataset, Sized)
     assert isinstance(test_loader.dataset, Sized)
-    metrics, feat_dim, best_lr, best_bs = evaluate_segmentation(
-        model, loaders, eval_cfg, cfg, num_classes
-    )
+    metrics, feat_dim, best_lr, best_bs = evaluate_segmentation(model, loaders, cfg, num_classes)
 
     segmentation_meta: ResultMetadata = {
         **common_meta,
@@ -736,7 +704,7 @@ def run_segmentation(
     }
     row = EvaluationResult(
         **segmentation_meta,
-        method=f"seg-{eval_cfg.segmentation.head_type}",
+        method=f"seg-{cfg.segmentation.head}",
         metric_name="mIoU",
         metric_value=metrics.get("mIoU", float("nan")),
         ci_lower=metrics.get("ci_lower", float("nan")),
@@ -752,7 +720,7 @@ def run_segmentation(
 
 
 def run_classification(  # noqa: PLR0913 - keep the CLI failure policy explicit
-    cfg: DictConfig,
+    cfg: RunConfig,
     plan: DatasetRunPlan,
     model: BenchModel,
     loaders: LoaderSplits,
@@ -762,11 +730,12 @@ def run_classification(  # noqa: PLR0913 - keep the CLI failure policy explicit
 ) -> Iterator[tuple[list[dict], list[dict], list[dict]]]:
     """Yield each completed probe or feature measurement for immediate persistence."""
     train_loader, val_loader, test_loader = loaders.train, loaders.val, loaders.test
-    model_eval = {} if strict else cfg.model.get("eval") or {}
-    knn_k = int(model_eval["knn_k"]) if "knn_k" in model_eval else int(cfg.eval.get("knn_k", 5))
-    c_start, c_stop, c_num = model_eval.get("c_range") or cfg.eval.c_range
-    c_values_list = (10 ** np.linspace(float(c_start), float(c_stop), int(c_num))).tolist()
-    device = torch.device(cfg.device)
+    knn_k = cfg.classification.knn_k
+    linear = cfg.classification.linear
+    c_values_list = (
+        10 ** np.linspace(linear.c_log10_start, linear.c_log10_stop, linear.c_count)
+    ).tolist()
+    device = torch.device(cfg.runtime.device)
     metric_name = plan.metric_name
     x_train, y_train = embed_split(model, train_loader, device, verbose=True, split="train")
     x_val, y_val = embed_split(model, val_loader, device, verbose=True, split="val")
@@ -784,7 +753,7 @@ def run_classification(  # noqa: PLR0913 - keep the CLI failure policy explicit
         "n_val": n_counts["val"],
         "n_test": n_counts["test"],
     }
-    cal_n_bins_linear = int((cfg.eval.get("calibration") or {}).get("n_bins_linear", 15))
+    cal_n_bins_linear = cfg.classification.calibration.n_bins_linear
 
     if not plan.skip_knn:
         assert plan.knn_device is not None
@@ -845,7 +814,7 @@ def run_classification(  # noqa: PLR0913 - keep the CLI failure policy explicit
             {"train": x_train, "val": x_val, "test": x_test},
             cfg,
             common_meta,
-            only_metrics=plan.id_missing_metrics if cfg.resume else None,
+            only_metrics=plan.id_missing_metrics if cfg.output.resume else None,
         )
         yield [], id_rows, []
 
@@ -855,22 +824,22 @@ def run_classification(  # noqa: PLR0913 - keep the CLI failure policy explicit
 
 
 def instantiate_dataset_model(
-    cfg: DictConfig,
-    model_cfg: DictConfig,
+    cfg: RunConfig,
+    model_cfg: ModelPreset,
     bench: BenchDataset,
     train_dataset: Dataset,
     device: torch.device,
 ) -> BenchModel:
     """Construct the model with bands matching the loaded tensor channels."""
-    num_channels = train_dataset[0]["image"].shape[0]
-    normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
+    num_channels = train_dataset[0]["image"].shape[-3]
+    normalization = NORMALIZATIONS[cfg.input.normalization]
     ds_name = bench.name
     bands_resolved = (
         tuple(bench.rgb_bands)
-        if cfg.dataset.bands == "rgb"
+        if cfg.input.bands == "rgb"
         else None
-        if cfg.dataset.bands in ("all", None)
-        else tuple(cfg.dataset.bands)
+        if cfg.input.bands == "all"
+        else tuple(cfg.input.bands)
     )
     bands_list = bench.select_band_specs(bands_resolved)
     if len(bands_list) != num_channels:
@@ -879,62 +848,54 @@ def instantiate_dataset_model(
             f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
         )
 
-    # Pass BandSpecs outside OmegaConf to preserve the dataclass objects.
     instantiate_kwargs: dict = {
         "bands": bands_list,
         "normalization": normalization,
     }
-    if model_cfg.get("mode", None) == "empirical":
+    if model_cfg.kwargs.get("mode") == "empirical":
         # Empirical RCF whitens against real patches, so it needs the dataset.
         instantiate_kwargs["dataset"] = train_dataset
-    # Interpolation belongs to the loader rather than the model constructor.
-    model_cfg.pop("interpolation", None)
-    model: BenchModel = instantiate(model_cfg, **instantiate_kwargs)
+    model: BenchModel = build_model(model_cfg, **instantiate_kwargs)
     model.to(device).eval()
 
     return model
 
 
 def dataset_metadata(
-    cfg: DictConfig,
+    cfg: RunConfig,
     ds_name: str,
     ds_cls: type[BenchDataset],
-    model_cfg: DictConfig,
+    model_cfg: ModelPreset,
     config_hash: str,
 ) -> ResultMetadata:
     """Collect result metadata before loading data or initializing the model."""
-    model_eval = cfg.model.get("eval") or {}
-    c_start, c_stop, c_num = model_eval.get("c_range") or cfg.eval.c_range
-    normalization = str(getattr(cfg.dataset, "normalization", "bandspec_zscore"))
-    bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
-    effective_image_size = model_cfg.get("image_size", cfg.dataset.get("image_size"))
-    effective_interpolation = model_cfg.get(
-        "interpolation", cfg.dataset.get("interpolation", "bilinear")
-    )
+    linear = cfg.classification.linear
+    normalization = NORMALIZATIONS[cfg.input.normalization]
+    bands_value = _normalize_bands_value(cfg.input.bands)
     return {
         "dataset": ds_name,
-        "seed": cfg.seed,
-        "model": model_cfg._target_,
+        "seed": cfg.runtime.seed,
+        "model": model_cfg.target,
         "name": model_cfg.name,
         "normalization": normalization,
-        "image_size": effective_image_size,
-        "interpolation": effective_interpolation,
-        "partition": cfg.dataset.partition,
+        "image_size": cfg.input.image_size,
+        "interpolation": cfg.input.interpolation,
+        "partition": cfg.input.partition,
         "bands": bands_value,
         "num_classes": ds_cls.num_classes,
         "config_hash": config_hash,
-        "c_range_start": c_start,
-        "c_range_stop": c_stop,
-        "c_range_num": c_num,
-        "merge_val": cfg.eval.merge_val,
-        "bootstrap": cfg.eval.bootstrap,
-        "res": model_cfg.get("res"),
-        "pool": model_cfg.get("pool"),
+        "c_range_start": linear.c_log10_start,
+        "c_range_stop": linear.c_log10_stop,
+        "c_range_num": linear.c_count,
+        "merge_val": linear.refit_train_val,
+        "bootstrap": cfg.classification.bootstrap_samples,
+        "res": model_cfg.kwargs.get("res"),
+        "pool": model_cfg.kwargs.get("pool"),
     }
 
 
 def run_dataset(
-    cfg: DictConfig,
+    cfg: RunConfig,
     ds_name: str,
     config_hash: str,
     completed: ResumeState,
@@ -944,53 +905,46 @@ def run_dataset(
     """Load and evaluate one dataset unless resume marks it complete."""
     ds_cls = get_bench_dataset_class(ds_name)
 
-    model_cfg = resolve_model_config(cfg.model, ds_name)
+    aliases = compatible_hashes(cfg, ds_name, segmentation=ds_cls.task == "segmentation")
+    cfg, model_cfg = resolve_run_config(cfg, ds_name)
     common_meta = dataset_metadata(cfg, ds_name, ds_cls, model_cfg, config_hash)
-    if strict:
-        c_start, c_stop, c_num = cfg.eval.c_range
-        common_meta.update(
-            c_range_start=float(c_start), c_range_stop=float(c_stop), c_range_num=int(c_num)
-        )
-    model_eval = cfg.model.get("eval", None) if "eval" in cfg.model else None
-    eval_cfg = cast(
-        DictConfig,
-        OmegaConf.merge(OmegaConf.create(model_eval or {}), cfg.eval)
-        if strict
-        else OmegaConf.merge(cfg.eval, model_eval or {}),
-    )
-    plan = _plan_dataset_run(cfg, ds_cls, common_meta, completed, eval_cfg)
+    completed = completed.with_hash_aliases(config_hash, aliases)
+    plan = _plan_dataset_run(cfg, ds_cls, common_meta, completed)
     if plan.skip_dataset:
-        if cfg.verbose:
+        if cfg.runtime.verbose:
             logger.info("[%s] Resume preflight: all requested work already complete", ds_name)
         return
 
     if ds_cls.task != "segmentation" and not plan.skip_knn:
-        plan = replace(plan, knn_device=resolve_knn_device(cfg.eval.get("knn_device"), cfg.device))
+        plan = replace(
+            plan,
+            knn_device=resolve_knn_device(cfg.classification.knn_device, cfg.runtime.device),
+        )
     train_dataset, train_loader, val_loader, test_loader = get_datasets(
         dataset_name=ds_name,
-        partition_name=cfg.dataset.partition,
-        batch_size=cfg.dataset.batch_size,
-        num_workers=int(cfg.dataset.get("num_workers", 8)),
+        partition_name=cfg.input.partition,
+        batch_size=cfg.runtime.batch_size,
+        num_workers=cfg.runtime.workers,
         return_val=True,
-        image_size=model_cfg.get("image_size", cfg.dataset.get("image_size")),
-        interpolation=model_cfg.get("interpolation", cfg.dataset.get("interpolation", "bilinear")),
-        bands=getattr(cfg.dataset, "bands", "rgb"),
-        time_steps=cfg.dataset.get("time_steps", None),
+        image_size=cfg.input.image_size,
+        interpolation=cfg.input.interpolation,
+        bands=cfg.input.bands,
+        time_steps=cfg.input.time_steps,
     )
 
     bench = ds_cls()
     model = instantiate_dataset_model(
-        cfg, model_cfg, bench, train_dataset, torch.device(cfg.device)
+        cfg, model_cfg, bench, train_dataset, torch.device(cfg.runtime.device)
     )
     loaders = LoaderSplits(train_loader, val_loader, test_loader)
     if ds_cls.task == "segmentation":
-        for rows in run_segmentation(cfg, eval_cfg, model, loaders, common_meta):
+        for rows in run_segmentation(cfg, model, loaders, common_meta):
             yield rows, [], []
         return
     for rows, id_rows, profile_rows in run_classification(
         cfg, plan, model, loaders, common_meta, strict=strict
     ):
-        if cfg.resume:
+        if cfg.output.resume:
             id_rows = _filter_completed_metric_rows(id_rows, completed.completed_metrics, KEY_COLS)
             profile_rows = _filter_completed_metric_rows(
                 profile_rows, completed.completed_metrics, KEY_COLS
@@ -999,7 +953,7 @@ def run_dataset(
 
 
 def load_completed_outputs(
-    cfg: DictConfig,
+    cfg: RunConfig,
     output_path: str,
     profile_output_path: str,
     intrinsic_dim_output_path: str,
@@ -1007,7 +961,7 @@ def load_completed_outputs(
     """Read each distinct output once, merging side files only into metric resume keys."""
     completed_runs: set[tuple[str, ...]] = set()
     completed_metrics: dict[str, set[tuple[str, ...]]] = {}
-    if cfg.resume:
+    if cfg.output.resume:
         for path in {output_path, profile_output_path, intrinsic_dim_output_path}:
             if not os.path.exists(path):
                 continue
@@ -1021,28 +975,17 @@ def load_completed_outputs(
     return completed_runs, completed_metrics
 
 
-def main(cfg: DictConfig, *, strict: bool = False) -> None:
+@accept_legacy_config
+def main(cfg: RunConfig, *, strict: bool = False) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
-    torch.manual_seed(cfg.seed)
-
-    # Coordinate models use (lon, lat) inputs and ridge/KNN with k-fold validation.
-    if str(cfg.get("mode", "image")) == "coord":
-        from torchgeo_bench.coordbench.run import run_coordbench
-
-        run_coordbench(cfg)
-        return
-
-    dataset_names = _expand_dataset_list(cfg.dataset.names)
-    device = resolve_device(cfg.device)
-    cfg.device = str(device)
+    torch.manual_seed(cfg.runtime.seed)
+    dataset_names = _expand_dataset_list(cfg.datasets)
+    device = resolve_image_device(cfg.runtime.device)
+    cfg = cfg.model_copy(update={"runtime": cfg.runtime.model_copy(update={"device": str(device)})})
 
     output_path = _resolve_output_path(cfg)
-    profile_output_path = _resolve_output_path(
-        cfg, "profile_results_dir", DEFAULT_PROFILE_RESULTS_DIR
-    )
-    intrinsic_dim_output_path = _resolve_output_path(
-        cfg, "intrinsic_dim_results_dir", DEFAULT_INTRINSIC_DIM_RESULTS_DIR
-    )
+    profile_output_path = _resolve_output_path(cfg, cfg.output.profile_directory)
+    intrinsic_dim_output_path = _resolve_output_path(cfg, cfg.output.intrinsic_dim_directory)
     output_paths = {output_path, profile_output_path, intrinsic_dim_output_path}
     for path in output_paths:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

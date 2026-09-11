@@ -9,9 +9,9 @@ import torch
 from torch.utils.data import DataLoader
 
 from torchgeo_bench.main import LinearProbeDivergedError, main
-from torchgeo_bench.resume import _resume_config_hash
+from torchgeo_bench.presets import merge_settings
 
-from .test_main_fast import _compose_cfg, _DictTensorDataset
+from .test_main_fast import _compose_cfg, _DictTensorDataset, _resume_row
 
 
 def _synthetic_multilabel_loaders(
@@ -56,35 +56,23 @@ def _synthetic_multilabel_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
 
 def _multilabel_resume_row(cfg) -> dict[str, object]:
     return {
+        **_resume_row(cfg, method="knn5", metric_name="micro_mAP"),
         "dataset": "m-bigearthnet",
-        "method": "knn5",
-        "model": cfg.model._target_,
-        "name": cfg.model.name,
-        "normalization": cfg.dataset.normalization,
-        "image_size": cfg.dataset.image_size,
-        "interpolation": cfg.dataset.interpolation,
-        "partition": cfg.dataset.partition,
-        "bands": cfg.dataset.bands,
         "num_classes": 43,
-        "config_hash": _resume_config_hash(cfg),
-        "metric_name": "micro_mAP",
         "metric_value": 0.2,
     }
 
 
-def _cfg_for_multilabel(out: Path, overrides: list[str] | None = None):
+def _cfg_for_multilabel(out: Path, overrides: dict | None = None):
     return _compose_cfg(
         out,
-        overrides=[
-            "dataset.names=[m-bigearthnet]",
-            *(overrides or []),
-        ],
+        overrides=merge_settings({"datasets": ["m-bigearthnet"]}, overrides or {}),
     )
 
 
 def test_multilabel_knn_emits_micro_map(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _cfg_for_multilabel(out, overrides=["eval.skip_linear=true"])
+    cfg = _cfg_for_multilabel(out, overrides={"classification": {"methods": ["knn"]}})
 
     with (
         mock.patch(
@@ -169,7 +157,9 @@ def test_diverged_linear_probe_skips_row_not_whole_run(tmp_path: Path):
 
 def test_multilabel_resume_key_stable(tmp_path: Path):
     out = tmp_path / "out.csv"
-    cfg = _cfg_for_multilabel(out, overrides=["resume=true", "eval.skip_linear=true"])
+    cfg = _cfg_for_multilabel(
+        out, overrides={"output": {"resume": True}, "classification": {"methods": ["knn"]}}
+    )
     pd.DataFrame([_multilabel_resume_row(cfg)]).to_csv(out, index=False)
 
     with (

@@ -3,41 +3,40 @@
 Keep profiling and intrinsic-dimension results separate unless ``output=`` is explicit.
 """
 
-from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
 
 import pandas as pd
 import pytest
-from omegaconf import DictConfig
 
-from torchgeo_bench.config import compose_config
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import main
+from torchgeo_bench.presets import merge_settings
 from torchgeo_bench.results import model_results_path
 
-from .test_main_fast import _chainable_model_mock, _synthetic_embeddings, _synthetic_loaders
+from .test_main_fast import (
+    _chainable_model_mock,
+    _compose_cfg,
+    _synthetic_embeddings,
+    _synthetic_loaders,
+)
 
 
-def _compose_default_routing_cfg(
-    tmp_path: Path, overrides: Sequence[str] | None = None
-) -> DictConfig:
+def _compose_default_routing_cfg(tmp_path: Path, overrides: dict | None = None) -> RunConfig:
     """Use separate result directories without setting ``output=``."""
-    extra = list(overrides or [])
-    return compose_config(
-        [
-            "model=rcf",
-            "dataset.names=[m-eurosat]",
-            "dataset.partition=default",
-            "dataset.batch_size=4",
-            "dataset.num_workers=0",
-            "eval.bootstrap=5",
-            "eval.c_range=[-2,-1,2]",
-            "device=cpu",
-            f"results_dir={tmp_path / 'models'}",
-            f"profile_results_dir={tmp_path / 'profiles'}",
-            f"intrinsic_dim_results_dir={tmp_path / 'intrinsic_dim'}",
-            *extra,
-        ]
+    return _compose_cfg(
+        tmp_path / "unused.csv",
+        merge_settings(
+            {
+                "output": {
+                    "file": None,
+                    "directory": str(tmp_path / "models"),
+                    "profile_directory": str(tmp_path / "profiles"),
+                    "intrinsic_dim_directory": str(tmp_path / "intrinsic_dim"),
+                }
+            },
+            overrides or {},
+        ),
     )
 
 
@@ -47,19 +46,19 @@ def test_routing_splits_by_kind_unless_output_is_explicit(
 ) -> None:
     cfg = _compose_default_routing_cfg(
         tmp_path,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "classification": {"methods": ["knn"]},
+            "intrinsic_dim": {
+                "enabled": True,
+                "estimators": ["twonn"],
+                "splits": ["train"],
+                "max_samples": 100,
+            },
+            "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+        },
     )
     if explicit_output:
-        cfg.output = str(tmp_path / "all.csv")
+        cfg.output.file = str(tmp_path / "all.csv")
     profile_metrics = {
         "params_m": 0.01,
         "throughput_samples_per_sec": 100.0,
@@ -86,7 +85,7 @@ def test_routing_splits_by_kind_unless_output_is_explicit(
     id_path = model_results_path(tmp_path / "intrinsic_dim", "rcf")
     if explicit_output:
         assert not any(path.exists() for path in (metrics_path, profile_path, id_path))
-        metrics_path = profile_path = id_path = Path(cfg.output)
+        metrics_path = profile_path = id_path = Path(cfg.output.file)
     all_methods = {"knn5", "profile", "intrinsic_dim"}
 
     assert metrics_path.exists()
@@ -111,23 +110,21 @@ def test_completed_intrinsic_dim_survives_profile_failure(
 ) -> None:
     cfg = _compose_default_routing_cfg(
         tmp_path,
-        overrides=[
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.profile.enabled=true",
-        ],
+        overrides={
+            "classification": {"methods": ["knn"]},
+            "intrinsic_dim": {"enabled": True, "estimators": ["twonn"], "splits": ["train"]},
+            "profile": {"enabled": True},
+        },
     )
     metrics_path = model_results_path(tmp_path / "models", "rcf")
     id_path = model_results_path(tmp_path / "intrinsic_dim", "rcf")
     if explicit_output:
-        cfg.output = str(tmp_path / "all.csv")
-        metrics_path = id_path = Path(cfg.output)
+        cfg.output.file = str(tmp_path / "all.csv")
+        metrics_path = id_path = Path(cfg.output.file)
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.instantiate", return_value=_chainable_model_mock()),
+        mock.patch("torchgeo_bench.main.build_model", return_value=_chainable_model_mock()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -153,17 +150,17 @@ def test_completed_intrinsic_dim_survives_profile_failure(
 def test_default_routing_resume_reads_all_three_files(tmp_path: Path):
     cfg = _compose_default_routing_cfg(
         tmp_path,
-        overrides=[
-            "resume=true",
-            "eval.skip_linear=true",
-            "eval.intrinsic_dim.enabled=true",
-            "eval.intrinsic_dim.estimators=[twonn]",
-            "eval.intrinsic_dim.splits=[train]",
-            "eval.intrinsic_dim.max_samples=100",
-            "eval.profile.enabled=true",
-            "eval.profile.n_warmup=1",
-            "eval.profile.n_measure=1",
-        ],
+        overrides={
+            "output": {"resume": True},
+            "classification": {"methods": ["knn"]},
+            "intrinsic_dim": {
+                "enabled": True,
+                "estimators": ["twonn"],
+                "splits": ["train"],
+                "max_samples": 100,
+            },
+            "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
+        },
     )
 
     def _mock_compute(*args, **kwargs):

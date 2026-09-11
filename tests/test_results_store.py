@@ -2,8 +2,8 @@
 
 import pandas as pd
 import pytest
-from omegaconf import OmegaConf
 
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import _resolve_output_path
 from torchgeo_bench.results import (
     DEFAULT_INTRINSIC_DIM_RESULTS_DIR,
@@ -38,23 +38,24 @@ def test_model_results_path(tmp_path):
 
 
 def test_resolve_output_path_prefers_explicit_output():
-    cfg = OmegaConf.create(
-        {"output": "results/scratch.csv", "results_dir": "results/models", "model": {"name": "m"}}
+    cfg = RunConfig.model_validate(
+        {
+            "output": {"file": "results/scratch.csv"},
+            "model": {"name": "rcf"},
+            "datasets": ["m-eurosat"],
+        }
     )
     assert _resolve_output_path(cfg) == "results/scratch.csv"
 
 
 def test_resolve_output_path_derives_per_model_file():
-    cfg = OmegaConf.create(
-        {"output": None, "results_dir": "results/models", "model": {"name": "m"}}
-    )
-    assert _resolve_output_path(cfg) == str(model_results_path("results/models", "m"))
+    cfg = RunConfig.model_validate({"model": {"name": "rcf"}, "datasets": ["m-eurosat"]})
+    assert _resolve_output_path(cfg) == str(model_results_path("results/models", "rcf"))
 
 
 def test_resolve_output_path_requires_a_model_name():
-    cfg = OmegaConf.create({"output": None, "results_dir": "results/models", "model": {}})
-    with pytest.raises(ValueError, match="no 'name'"):
-        _resolve_output_path(cfg)
+    with pytest.raises(ValueError, match="name"):
+        RunConfig.model_validate({"model": {}, "datasets": ["m-eurosat"]})
 
 
 def test_load_results_concatenates_every_model_file(tmp_path):

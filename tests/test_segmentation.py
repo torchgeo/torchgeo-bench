@@ -3,7 +3,6 @@ from unittest import mock
 import pytest
 import torch
 import torch.nn as nn
-from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics.functional.classification import (
     multiclass_confusion_matrix,
@@ -13,6 +12,7 @@ from torchmetrics.functional.classification import (
     multiclass_recall,
 )
 
+from torchgeo_bench.config_schema import SegmentationConfig
 from torchgeo_bench.results import bootstrap_miou
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
@@ -149,44 +149,24 @@ def test_probe_rejects_missing_or_duplicate_layers(mock_backbone):
 
 def test_build_seg_probe_requires_spatial_layers(mock_backbone):
     """A pooled image vector is not a spatial segmentation feature map."""
-    eval_cfg = OmegaConf.create(
-        {
-            "segmentation": {
-                "layers": [],
-                "head_type": "fpn",
-                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 255},
-                "lr_scheduler": "none",
-            }
-        }
-    )
-    with pytest.raises(ValueError, match=r"requires eval\.segmentation\.layers"):
+    config = SegmentationConfig(layers=[], head="fpn", scheduler="none")
+    with pytest.raises(ValueError, match=r"requires segmentation\.layers"):
         build_seg_probe_and_solver(
             mock_backbone,
             num_classes=NUM_CLASSES,
-            eval_cfg=eval_cfg,
+            config=config,
             device=torch.device("cpu"),
-            lr=1e-3,
         )
 
 
 def test_build_seg_solver_uses_criterion_ignore_index(mock_backbone):
     """Metrics inherit the loss ignore_index when no separate override is set."""
-    eval_cfg = OmegaConf.create(
-        {
-            "segmentation": {
-                "layers": ["layer1"],
-                "head_type": "linear",
-                "criterion": {"_target_": "torch.nn.CrossEntropyLoss", "ignore_index": 7},
-                "lr_scheduler": "none",
-            }
-        }
-    )
+    config = SegmentationConfig(layers=["layer1"], head="linear", ignore_index=7, scheduler="none")
     _, solver = build_seg_probe_and_solver(
         mock_backbone,
         num_classes=NUM_CLASSES,
-        eval_cfg=eval_cfg,
+        config=config,
         device=torch.device("cpu"),
-        lr=1e-3,
     )
     assert solver.ignore_index == 7
 
