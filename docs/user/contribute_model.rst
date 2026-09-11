@@ -139,6 +139,8 @@ Create :file:`tests/test_<model>.py`.  Every added code path must be covered.
 
 **Weight-download tests (slow, run locally before PR) — mark with** ``@pytest.mark.slow``:
 
+Replace the template's Identity backbone and implement weight loading before using this test as evidence that a pretrained model works. The unmodified scaffold loads no weights, even when ``pretrained=True``.
+
 .. code-block:: python
 
    @pytest.mark.slow
