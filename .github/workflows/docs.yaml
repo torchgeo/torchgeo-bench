@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, 'docs/refactor-**']
   workflow_dispatch:
 
 # Run one deployment at a time without interrupting the one in progress.
