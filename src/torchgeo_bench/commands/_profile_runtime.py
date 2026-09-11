@@ -154,7 +154,7 @@ def run(config: ProfileConfig) -> None:
     config, preset = resolve_profile_config(config)
     try:
         device = _resolve_device(config.runtime.device)
-    except ValueError as error:
+    except ValueError as error:  # allow-except: report unavailable or invalid requested devices
         raise SystemExit(f"error: {error}") from error
     torch.manual_seed(config.runtime.seed)
     np.random.seed(config.runtime.seed)  # noqa: NPY002 - Dataset transforms use NumPy's global RNG.

@@ -14,7 +14,7 @@ def _image_size(value: str) -> int | None:
         return None
     try:
         size = int(value)
-    except ValueError as error:
+    except ValueError as error:  # allow-except: convert invalid sizes into argparse input errors
         raise argparse.ArgumentTypeError("image-size must be a positive integer or none") from error
     if size <= 0:
         raise argparse.ArgumentTypeError("image-size must be a positive integer or none")
