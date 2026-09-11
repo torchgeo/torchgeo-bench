@@ -1,4 +1,5 @@
 # Core image benchmark configuration (schema version 1).
+# Every value below is explicit. Omit fields to inherit model/dataset defaults.
 schema_version: 1
 model:
   name: timm/resnet50
@@ -46,3 +47,21 @@ output:
   directory: results/models
   file: null
   resume: false
+  profile_directory: results/profiles
+  intrinsic_dim_directory: results/intrinsic_dim
+profile:
+  enabled: false
+  n_warmup: 3
+  n_measure: 20
+  cpu_throughput:
+    enabled: false
+    batch_size: 8
+    n_warmup: 1
+    n_measure: 5
+    time_budget_s: 300.0
+intrinsic_dim:
+  enabled: false
+  estimators: [TwoNN, MLE, lPCA]
+  splits: [train]
+  max_samples: 10000
+  device: null

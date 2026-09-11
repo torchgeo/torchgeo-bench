@@ -1,0 +1,23 @@
+# Synthetic inputs need band metadata, not local dataset samples.
+schema_version: 1
+model:
+  name: rcf
+runtime:
+  device: cpu
+  seed: 0
+input:
+  band_source: cloudsen12
+  band_configs: [rgb]
+  image_size: 32
+classification:
+  head: linear
+  num_classes: 10
+segmentation:
+  heads: []
+timing:
+  batch_size: 1
+  n_warmup: 1
+  n_measure: 3
+output:
+  file: results/example_compute_cost.csv
+  resume: true

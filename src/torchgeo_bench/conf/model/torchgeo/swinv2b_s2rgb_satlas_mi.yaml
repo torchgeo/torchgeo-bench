@@ -1,14 +1,17 @@
-# SatlasPretrain multi-image weights for Sentinel-2 RGB.
-
-_target_: torchgeo_bench.models.TorchGeoSwinBench
-factory: swin_v2_b
-weights_class: Swin_V2_B_Weights
-weights_member: SENTINEL2_MI_RGB_SATLAS
-auto_resize: true
-target_size: 256
 name: tgeo_swinv2b_s2rgb_satlas_mi
-eval:
-  segmentation:
-    # Use coarse-to-fine stages: features.7 (8×8, 1024ch) to features.1 (64×64, 128ch).
-    # SegmentationProbe strips the backbone.* prefix.
-    layers: ["features.7", "features.5", "features.3", "features.1"]
+target: torchgeo_bench.models.TorchGeoSwinBench
+track: image
+seed_from_run: false
+kwargs:
+  factory: swin_v2_b
+  weights_class: Swin_V2_B_Weights
+  weights_member: SENTINEL2_MI_RGB_SATLAS
+  auto_resize: true
+  target_size: 256
+segmentation:
+  layers:
+  - features.7
+  - features.5
+  - features.3
+  - features.1
+dataset_overrides: {}

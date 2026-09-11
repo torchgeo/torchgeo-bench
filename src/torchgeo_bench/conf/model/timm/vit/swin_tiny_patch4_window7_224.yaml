@@ -1,10 +1,16 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: swin_tiny_patch4_window7_224
-pretrained: true
-global_pool: avg
-seed: null
 name: swin_tiny_patch4_window7_224
-eval:
-  segmentation:
-    # Use coarse-to-fine stages (7x7 to 56x56 at 224px). SegmentationProbe converts Swin's NHWC outputs to channel-first tensors.
-    layers: ["layers.3", "layers.2", "layers.1", "layers.0"]
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: swin_tiny_patch4_window7_224
+  pretrained: true
+  global_pool: avg
+  seed: null
+segmentation:
+  layers:
+  - layers.3
+  - layers.2
+  - layers.1
+  - layers.0
+dataset_overrides: {}

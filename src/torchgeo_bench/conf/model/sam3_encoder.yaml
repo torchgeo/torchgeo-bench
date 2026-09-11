@@ -1,29 +1,16 @@
-# RGB-only vision encoder; inputs are cropped to multiples of 14px.
-# RoPE position embeddings are rebuilt for the actual image size.
-# FPN levels have 256 channels. At 252×252 input (18×18 tokens), coarse-to-fine order is:
-#   neck.fpn_layers.3:  9× 9, 256 ch  (scale 0.5× patch grid)
-#   neck.fpn_layers.2: 18×18, 256 ch  (scale 1×)
-#   neck.fpn_layers.1: 36×36, 256 ch  (scale 2×)
-#   neck.fpn_layers.0: 72×72, 256 ch  (scale 4×)
-#
-# Run with:
-#   torchgeo-bench run model=sam3_encoder dataset.bands=[red,green,blue]
-#
-# Set checkpoint_path to a local directory containing model.safetensors + config.json to avoid gated-repo authentication.
-
-_target_: torchgeo_bench.models.SAM3Encoder
-checkpoint_path: checkpoints/sam3
 name: sam3_encoder
-
-eval:
-  segmentation:
-    # Coarse-to-fine order required by FPN/DPT heads
-    layers:
-      - "neck.fpn_layers.3"
-      - "neck.fpn_layers.2"
-      - "neck.fpn_layers.1"
-      - "neck.fpn_layers.0"
-    head_type: fpn
-    # Cache in float16 to save RAM
-    cache_dtype: float16
-    cache_features: true
+target: torchgeo_bench.models.SAM3Encoder
+track: image
+seed_from_run: false
+kwargs:
+  checkpoint_path: checkpoints/sam3
+segmentation:
+  head: fpn
+  layers:
+  - neck.fpn_layers.3
+  - neck.fpn_layers.2
+  - neck.fpn_layers.1
+  - neck.fpn_layers.0
+  cache_features: true
+  cache_dtype: float16
+dataset_overrides: {}

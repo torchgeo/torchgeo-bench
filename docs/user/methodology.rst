@@ -36,7 +36,7 @@ evaluation path is taken:
 
 Optionally, intrinsic-dimension metrics
 (:doc:`/api/intrinsic_dim`) can be emitted alongside the standard
-classification rows when ``eval.intrinsic_dim.enabled=true``.
+classification rows with YAML ``intrinsic_dim: {enabled: true}``.
 
 Feature extraction (classification)
 -----------------------------------
@@ -60,7 +60,7 @@ reused by both KNN and the linear probe.
 Feature-spectrum diagnostics
 ----------------------------
 
-When ``eval.intrinsic_dim.enabled=true``, each selected split also emits five
+With ``intrinsic_dim.enabled`` enabled, each selected split also emits five
 scale-invariant diagnostics from the **centered** embedding matrix.  Let
 ``s_i`` be its singular values and let
 
@@ -117,7 +117,7 @@ Procedure
 3. Predict labels for every test sample.
 4. Compute test-set accuracy (or micro-mAP for multilabel datasets).
 5. Compute **95% bootstrap confidence intervals**
-   (``eval.bootstrap`` resamples, default ``200``) by resampling test
+   (``classification.bootstrap_samples`` resamples, default ``200``) by resampling test
    predictions with replacement.
 
 Key details
@@ -142,10 +142,10 @@ Procedure
 1. Extract train, validation, and test embeddings.
 2. **Hyperparameter sweep:** train one logistic regression per ``C``
    value in a log-spaced grid
-   (``eval.c_range``, default 40 values from 10⁻⁶ to 10⁴).
+   (``classification.linear``, default 40 values from 10⁻⁶ to 10⁴).
    Each model is evaluated on the validation set to pick the best ``C``.
 3. **Final model:** retrain with the chosen ``C``, optionally on
-   ``train ∪ val`` (``eval.merge_val=true``, the default).
+   ``train ∪ val`` (``classification.linear.refit_train_val: true``, the default).
 4. Evaluate on the test set; report accuracy / micro-mAP with 95%
    bootstrap confidence intervals.
 
@@ -179,13 +179,13 @@ Hyperparameters
    * - Parameter
      - Default
      - Description
-   * - ``eval.c_range``
+   * - ``classification.linear`` range
      - ``[-6, 4, 40]``
      - log₁₀ start, stop, and number of ``C`` values
-   * - ``eval.merge_val``
+   * - ``classification.linear.refit_train_val``
      - ``true``
      - merge train + val for final model training
-   * - ``eval.bootstrap``
+   * - ``classification.bootstrap_samples``
      - ``200``
      - bootstrap resamples for the confidence interval
 
@@ -195,7 +195,7 @@ Segmentation probes
 All segmentation methods share a common skeleton:
 :class:`~torchgeo_bench.segmentation_probe.SegmentationProbe` registers
 forward hooks on the configured
-:attr:`eval.segmentation.layers <torchgeo_bench.segmentation_probe.SegmentationProbe>`
+:attr:`segmentation.layers <torchgeo_bench.segmentation_probe.SegmentationProbe>`
 to capture intermediate feature maps.  See :doc:`segmentation-layers`
 for verified layer names per timm backbone family.
 
@@ -214,7 +214,7 @@ Linear segmentation probe
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 **Method name:** ``seg-linear``
-(``eval.segmentation.head_type=linear``).
+(``segmentation: {head: linear}`` in YAML).
 A lightweight per-pixel linear classifier per layer, with multi-layer
 fusion via learned scalar weights.
 
@@ -228,7 +228,7 @@ Convolutional probe
 ^^^^^^^^^^^^^^^^^^^
 
 **Method name:** ``seg-conv_block``
-(``eval.segmentation.head_type=conv_block``).
+(``segmentation: {head: conv_block}`` in YAML).
 Slightly more expressive: projects and fuses multi-scale features
 before classification, testing whether the backbone captures
 complementary information at different depths.
@@ -244,7 +244,7 @@ complementary information at different depths.
 FPN probe
 ^^^^^^^^^
 
-**Method name:** ``seg-fpn`` (``eval.segmentation.head_type=fpn``).
+**Method name:** ``seg-fpn`` (YAML ``segmentation: {head: fpn}``).
 A Feature-Pyramid-Network-style top-down decoder that fuses multi-scale
 maps in coarse-to-fine order — matching common dense-prediction
 literature.
@@ -263,7 +263,7 @@ literature.
 DPT probe
 ^^^^^^^^^
 
-**Method name:** ``seg-dpt`` (``eval.segmentation.head_type=dpt``).
+**Method name:** ``seg-dpt`` (YAML ``segmentation: {head: dpt}``).
 A DPT-style reassemble + fusion-transformer decoder
 (:class:`~torchgeo_bench.models.DPTHead`).  Requires exactly four
 backbone layers in coarse-to-fine order; otherwise structurally
@@ -276,7 +276,7 @@ Training & evaluation (all heads)
 * **Loss:** ``CrossEntropyLoss(ignore_index=255)`` so unlabeled pixels
   are excluded from both loss and metric computation.
 * **Schedule:** cosine decay to 1e-6 by default
-  (``eval.segmentation.lr_scheduler``); ``none`` disables.
+  (``segmentation.scheduler``); ``none`` disables.
 * **Metric:** mean Intersection-over-Union (mIoU) via
   ``torchmetrics.MulticlassJaccardIndex``.  Frequency-weighted IoU plus
   macro precision / recall / F1 are also reported in the result row
@@ -288,9 +288,9 @@ Training & evaluation (all heads)
 Segmentation knobs
 ------------------
 
-All keys live under ``eval.segmentation`` in
-:file:`src/torchgeo_bench/conf/config.yaml` (global defaults) or under a
-model preset's ``eval`` block (per-model override).
+All keys live under ``segmentation`` in run YAML or model presets.
+Defaults are declared in :class:`~torchgeo_bench.config_schema.SegmentationConfig`.
+Explicit run settings override preset defaults, including empty layer lists.
 
 Head type
 ^^^^^^^^^
@@ -299,7 +299,7 @@ Head type
    :header-rows: 1
    :widths: 20 80
 
-   * - ``head_type``
+   * - ``head``
      - Description
    * - ``linear``
      - Per-layer BN + 1×1 conv → upsample.  Multi-layer fused with
@@ -328,19 +328,15 @@ Training knobs
    * - ``epochs``
      - ``10``
      - Training epochs for the probe head.
-   * - ``lr``
+   * - ``learning_rate``
      - ``1e-3``
      - Initial learning rate (AdamW).
-   * - ``lr_scheduler``
+   * - ``scheduler``
      - ``cosine``
      - ``cosine`` (CosineAnnealingLR to 1e-6) or ``none`` (constant).
-   * - ``criterion``
-     - ``torch.nn.CrossEntropyLoss``
-     - Instantiable loss criterion; provide an alternative via the
-       config ``criterion`` block.
-   * - ``hidden_dim``
-     - ``256``
-     - Projection dimension for ``conv_block`` / ``fpn`` / ``dpt`` heads.
+   * - ``ignore_index``
+     - ``255``
+     - Unlabeled mask value excluded by cross entropy and segmentation metrics.
    * - ``batch_size``
      - ``64``
      - Batch size when training the probe head.
@@ -379,19 +375,19 @@ All evaluation paths share these settings:
    * - Setting
      - Default
      - Description
-   * - ``seed``
+   * - ``runtime.seed``
      - ``0``
      - Random seed for reproducibility (numpy + torch).
-   * - ``device``
+   * - ``runtime.device``
      - ``cuda:0``
      - PyTorch device.
-   * - ``dataset.batch_size``
+   * - ``runtime.batch_size``
      - ``64``
      - Batch size for data loading.
-   * - ``dataset.image_size``
+   * - ``input.image_size``
      - ``224``
      - Resize input images (``null`` = preserve native size).
-   * - ``dataset.interpolation``
+   * - ``input.interpolation``
      - ``bilinear``
      - Resize interpolation method.
    * - ``resume``

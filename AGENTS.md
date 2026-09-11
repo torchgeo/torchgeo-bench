@@ -4,7 +4,7 @@ Guidelines for AI coding agents working in the torchgeo-bench repository.
 
 ## Project Overview
 
-**torchgeo-bench** is a Python benchmarking framework for evaluating geospatial foundation models on GeoBench datasets (V1 and V2). Uses PyTorch and an OmegaConf-based config system (see `config.py` — replaces Hydra, same `model=…`/`key=value` override syntax), and provides KNN-5, Linear Probing, and Segmentation (mIoU) evaluation with bootstrapped confidence intervals.
+**torchgeo-bench** is a Python benchmarking framework for evaluating geospatial foundation models on GeoBench datasets (V1 and V2) and location encoders on CoordBench. It uses PyTorch and strict Pydantic configuration with explicit CLI flags and YAML, and provides KNN-5, linear probing, and segmentation (mIoU) evaluation with bootstrapped confidence intervals. Legacy `key=value` and `+key=value` overrides are rejected.
 
 ### Key Features
 - **Resume Mode**: Skip already-computed experiments when interrupted/restarted
@@ -15,15 +15,19 @@ Guidelines for AI coding agents working in the torchgeo-bench repository.
 
 ```
 src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
-  ├── cli.py               # CLI entry point (torchgeo-bench command: run/flops/download)
+  ├── cli.py               # Unified CLI: run/models/datasets/download/profile/flops/coord
   ├── main.py              # Benchmark runner (classification + segmentation)
-  ├── config.py            # OmegaConf config composition + _target_ instantiation
+  ├── config_schema.py     # Strict image RunConfig and safe YAML loading
+  ├── presets.py           # ModelPreset resolution + explicit build_model construction
+  ├── profile_config.py    # Real-batch standalone profile settings
+  ├── flops_config.py      # Synthetic compute settings
+  ├── coordbench/          # Location encoders, typed config, probes, and runner
   ├── resume.py            # config_hash-based resume/skip logic
   ├── results.py            # EvaluationResult schema + atomic per-model CSV writes
   ├── download.py          # Dataset downloads (geobench_v1/v2 + torchgeo eurosat)
   ├── datasets/            # Per-dataset BenchDataset wrappers + V1/V2 base classes
   ├── linear.py            # Custom LogisticRegression (PyTorch-based)
-  ├── knn.py               # FAISS-CPU KNN classifier
+  ├── knn.py               # FAISS-backed KNN via faissknn
   ├── segmentation_task.py # Segmentation task solver
   ├── segmentation_probe.py# Hook-based segmentation probe
   ├── conf/                # Config YAMLs (packaged inside the source tree)
@@ -153,37 +157,75 @@ torchgeo-bench download resisc45                          # torchgeo RESISC45 ->
 
 ```bash
 # Basic usage
-torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
+torchgeo-bench run --model timm/resnet50 --dataset m-eurosat
 
 # Quick eval (skip linear probing, minimal bootstrap)
-torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
+torchgeo-bench run --model rcf --dataset m-eurosat --methods knn --bootstrap-samples 100
+
+# Linear-only evaluation
+torchgeo-bench run --model rcf --dataset m-eurosat --methods linear
 
 # Resume a previously interrupted run (skips completed experiments)
-torchgeo-bench run resume=true
+torchgeo-bench run --config examples/image-run.yaml --resume
 
 # Evaluate segmentation datasets (V2)
-torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
+torchgeo-bench run --model timm/resnet50 --dataset burn_scars --dataset pastis --dataset flair2
 
 # Select specific GPU device
-torchgeo-bench run device=cuda:1
+torchgeo-bench run --model rcf --dataset m-eurosat --device cuda:1
 
 # Measure per-sample compute cost (GFLOPs, params, throughput) -> results/compute_cost.csv
-torchgeo-bench flops model=timm/resnet50
+torchgeo-bench flops --model timm/resnet50
+
+# Measure a fixed real batch -> JSON stdout
+torchgeo-bench profile --model rcf --dataset m-eurosat --device cpu
+
+# Coordinate-only linear probe
+torchgeo-bench coord --model sincos --dataset california_housing --methods linear
 ```
+
+## Configuration Architecture
+
+- The installed CLI, `python -m torchgeo_bench`, and
+  `python -m torchgeo_bench.cli` dispatch the same commands. Do not reintroduce
+  a legacy override parser or a second configuration engine.
+- `config_schema.py` defines strict Pydantic image settings and
+  `load_run_config`. Unknown fields, duplicate YAML keys, and wrong types
+  are errors. Profile, FLOPs, and CoordBench have separate typed schemas.
+- A run selects `model: {name: rcf}` or a custom
+  `model: {name: my-model, target: my_package.MyModel, kwargs: {...}}`.
+  Presets in `conf/model/` use `name`, `target`, `track`, `seed_from_run`,
+  `kwargs`, `input`, `classification`, `segmentation`, and
+  `dataset_overrides`. Metadata is never a constructor kwarg.
+- Preserve precedence: built-in defaults < model preset < preset's dataset
+  defaults < explicit YAML < explicit flags. Use unset-aware serialization;
+  explicit `false`, `null`, and `[]` must not be replaced by defaults.
+- `resolve_run_config` resolves effective settings per dataset. `build_model`
+  receives runtime `BandSpec` objects and empirical-RCF datasets explicitly;
+  never serialize them into YAML. Existing timm/RCF model dataclasses remain
+  construction boundaries, not a competing configuration system.
+- Optional model dependencies stay lazy. Catalogs, schemas, and dry runs
+  must not load weights or dataset samples.
 
 ## Results Layout & Resume
 
 - Each model writes to its own `results/models/<model name>.csv` (not one
   shared file), so re-running one model only touches that file. Rows are
   appended, never rewritten in place.
-- `resume=true` skips a (dataset, method, bands, normalization, ...) combo
+- `--resume` skips a (dataset, method, bands, normalization, ...) combo
   only if an existing row's `config_hash` matches the current run's config.
-  Changing any hashed config field (including additive passes like
-  `eval.profile`/`eval.intrinsic_dim`) invalidates the match and reruns.
+  Changing a hashed config field invalidates the match. Additive `profile`
+  and `intrinsic_dim` settings do not invalidate equivalent classification
+  results; their own metric completeness is checked separately.
 - One-time, hardware-dependent measurements (`torchgeo-bench flops`,
   intrinsic-dimension probes) live in their own side files —
-  `results/compute_cost.csv` and `results/intrinsic_dim/<model name>.csv` —
+  `results/compute_cost.csv`, `results/profiles/<model name>.csv`, and
+  `results/intrinsic_dim/<model name>.csv` —
   so a routine metrics rerun doesn't touch them.
+- `--output` / `output.file` combines selected image-run measurements in one
+  CSV; otherwise `output.directory`, `output.profile_directory`, and
+  `output.intrinsic_dim_directory` keep their respective defaults. Standalone
+  `profile` writes JSON stdout, and `coord` has its own CSV schema/resume key.
 - Don't hand-edit `config_hash`/`KEY_COLS` logic without checking
   `resume.py`'s docstring first; it's easy to silently invalidate every
   existing row across `results/models/`.
@@ -256,16 +298,14 @@ def get_datasets(
 ### Documentation Style (Google-style)
 
 ```python
-def forward_patch_features(
+def _forward_patch_features(
     self,
     images: torch.Tensor,
-    bboxes: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Return a batch of vector embeddings (B, K).
 
     Args:
-        images: Input images, shape (B, C, H, W).
-        bboxes: Optional bounding boxes, shape (B, 4).
+        images: Normalized input images, shape (B, C, H, W).
 
     Returns:
         Embeddings tensor of shape (B, K).
@@ -318,9 +358,12 @@ class BandStats:
 
 class BenchModel(nn.Module, ABC):
     @abstractmethod
-    def forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 ```
+
+Implement `_forward_patch_features`, not the public `forward_patch_features`:
+the public method applies the configured normalization before calling the hook.
 
 ## Ruff Configuration
 
@@ -350,7 +393,7 @@ class TestGeoBenchDatasetBasics:
 
 Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision>=0.15`,
 `numpy>=1.24`, `scikit-learn>=1.3`, `timm>=0.9`, `torchgeo>=0.9`, `torchmetrics>=1.4`,
-`omegaconf>=2.3`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform),
+`pydantic>=2`, `pyyaml>=6`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform),
 `huggingface-hub>=0.20`, `geobenchv2>=0.9`, `pandas>=2`, `pyarrow>=14`, `safetensors>=0.4`,
 `filelock>=3.12`, `rich>=13`.
 

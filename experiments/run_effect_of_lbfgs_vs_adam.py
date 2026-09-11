@@ -27,8 +27,11 @@ from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
+from torchgeo_bench.config_schema import ModelConfig, RunConfig, RuntimeConfig
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
+from torchgeo_bench.presets import build_model, resolve_run_config
 from torchgeo_bench.utils import extract_features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -41,22 +44,10 @@ IMAGE_SIZE = 224
 DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
 
 MODEL_CONFIGS = {
-    "resnet18": {
-        "_target_": "torchgeo_bench.models.timm.TimmPatchBenchModel",
-        "model_name": "resnet18",
-        "pretrained": True,
-        "global_pool": "avg",
-        "name": "resnet18",
-    },
-    "dinov3sat": {
-        "_target_": "torchgeo_bench.models.timm.TimmPatchBenchModel",
-        "model_name": "vit_large_patch16_dinov3.sat493m",
-        "pretrained": True,
-        "global_pool": "avg",
-        "use_cls_token": False,
-        "auto_resize": True,
-        "name": "vit_large_patch16_dinov3sat",
-    },
+    "resnet18": ModelConfig(name="timm/resnet18"),
+    "dinov3sat": ModelConfig(
+        name="timm/vit/vit_large_patch16_dinov3sat", kwargs={"auto_resize": True}
+    ),
 }
 
 # Search a broad C range so the best result need not sit at an endpoint.
@@ -69,16 +60,15 @@ MAX_ITER = 2000
 TOL = 1e-6
 
 
-def instantiate_model(model_cfg: dict, bands: list) -> torch.nn.Module:
+def instantiate_model(
+    model_cfg: ModelConfig, bands: list[BandSpec], dataset_name: str
+) -> torch.nn.Module:
     """Create a model with the requested configuration and input bands."""
-    target = model_cfg["_target_"]
-    module_name, class_name = target.rsplit(".", 1)
-    module = __import__(module_name, fromlist=[class_name])
-    cls = getattr(module, class_name)
-
-    kwargs = {k: v for k, v in model_cfg.items() if k not in ("_target_", "name")}
-    kwargs["bands"] = bands
-    return cls(**kwargs)
+    _, preset = resolve_run_config(
+        RunConfig(model=model_cfg, datasets=[dataset_name], runtime=RuntimeConfig(seed=SEED)),
+        dataset_name,
+    )
+    return build_model(preset, bands=bands, normalization="bandspec_zscore")
 
 
 def build_configs() -> list[dict]:
@@ -183,7 +173,7 @@ def run_dataset(
         )
 
         logger.info("  Loading model %s...", model_name)
-        model = instantiate_model(model_cfg, bands_list)
+        model = instantiate_model(model_cfg, bands_list, dataset_name)
         model.to(device).eval()
 
         logger.info("  Extracting features...")

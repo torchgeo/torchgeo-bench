@@ -2,11 +2,11 @@
 
 Run from the repository root:
 
-    PYTHONPATH=. uv run python -m torchgeo_bench.cli run mode=coord model=sincos \
-        model._target_=examples.coordbench_location_encoder.FourierLocationEncoder \
-        model.name=fourier +model.num_frequencies=8 \
-        coord.names=california_housing coord.methods=[linear] coord.folds=2 \
-        device=cpu coord.output=results/fourier_coordbench.csv
+    PYTHONPATH=. uv run torchgeo-bench coord --config examples/coord-run.yaml
+
+The YAML selects this class through ``model.target`` and passes
+``num_frequencies`` under ``model.kwargs``. Add ``--dry-run`` to validate
+configuration without loading the remote benchmark table.
 """
 
 import numpy as np

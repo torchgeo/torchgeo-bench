@@ -15,7 +15,10 @@ from pathlib import Path
 from typing import ClassVar, Protocol
 
 import torch
+import yaml
 from filelock import FileLock, Timeout
+
+from torchgeo_bench.config_schema import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,14 @@ def write_json_atomic(path: Path, payload: object) -> None:
     """Write JSON without exposing a partly written file."""
     temporary = Path(f"{path}.tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    temporary.replace(path)
+
+
+def write_run_config(path: Path, config: RunConfig) -> None:
+    """Persist a job's explicit YAML settings beside its sweep state."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".yaml.tmp")
+    temporary.write_text(yaml.safe_dump(config.model_dump_yaml(), sort_keys=False))
     temporary.replace(path)
 
 

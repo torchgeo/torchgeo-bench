@@ -1,6 +1,10 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: resnet152
-pretrained: true
-global_pool: avg
-seed: null
 name: resnet152
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: resnet152
+  pretrained: true
+  global_pool: avg
+  seed: null
+dataset_overrides: {}

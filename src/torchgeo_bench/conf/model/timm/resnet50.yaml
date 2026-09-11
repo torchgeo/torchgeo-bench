@@ -1,10 +1,16 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: resnet50
-pretrained: true
-global_pool: avg
-seed: null
 name: resnet50
-eval:
-  segmentation:
-    # Layers in coarse-to-fine order (deepest first) for FPN head.
-    layers: ["layer4", "layer3", "layer2", "layer1"]
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: resnet50
+  pretrained: true
+  global_pool: avg
+  seed: null
+segmentation:
+  layers:
+  - layer4
+  - layer3
+  - layer2
+  - layer1
+dataset_overrides: {}

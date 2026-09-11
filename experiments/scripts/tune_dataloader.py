@@ -21,17 +21,20 @@ import time
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from torchgeo_bench.config import compose_config, instantiate
+from torchgeo_bench.config_schema import ModelConfig, RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
+from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.models.interface import BenchModel
+from torchgeo_bench.presets import NORMALIZATIONS, build_model, resolve_run_config
 from torchgeo_bench.utils import resolve_device
 
 logger = logging.getLogger(__name__)
 
 
-def _build_dataset(name: str, bands: str, root: Path):
+def _build_dataset(name: str, bands: str, root: Path) -> GeoBenchv1Sharded:
     cls = get_bench_dataset_class(name)
     bench = cls()
     sel = (
@@ -51,17 +54,28 @@ def _build_dataset(name: str, bands: str, root: Path):
     )
 
 
-def _build_model(model_cfg: str, bands_list):
-    cfg = compose_config([f"model={model_cfg}"])
-    return instantiate(
-        cfg.model,
+def _build_model(
+    model_name: str,
+    bands_list: list[BandSpec],
+    dataset_name: str = "m-bigearthnet",
+    train_dataset: Dataset | None = None,
+) -> BenchModel:
+    cfg, preset = resolve_run_config(
+        RunConfig(model=ModelConfig(name=model_name), datasets=[dataset_name]), dataset_name
+    )
+    runtime_options = {}
+    if preset.kwargs.get("mode") == "empirical":
+        runtime_options["dataset"] = train_dataset
+    return build_model(
+        preset,
         bands=bands_list,
-        normalization="bandspec_zscore",
+        normalization=NORMALIZATIONS[cfg.input.normalization],
+        **runtime_options,
     )
 
 
 def _bench(
-    model: torch.nn.Module, dl: DataLoader, device: torch.device, max_batches: int
+    model: BenchModel, dl: DataLoader, device: torch.device, max_batches: int
 ) -> tuple[float, float, float]:
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -108,7 +122,7 @@ def main() -> None:
         else tuple(args.bands.split(","))
     )
     bands_list = bench_cls.select_band_specs(sel)
-    model = _build_model(args.model, bands_list).to(device).eval()
+    model = _build_model(args.model, bands_list, args.dataset, dataset).to(device).eval()
 
     logger.info("Tuning %s on %s/%s (%s)", args.model, args.dataset, args.bands, device)
     logger.info("%6s %6s %12s %10s %10s", "bs", "nw", "samples/sec", "peak GB", "wall (s)")

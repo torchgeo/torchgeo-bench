@@ -6,6 +6,7 @@ Public API
 ----------
 .. autofunction:: get_datasets
 .. autofunction:: get_bench_dataset_class
+.. autofunction:: get_dataset_task
 .. autofunction:: list_datasets
 .. autoclass:: BandSpec
 .. autoclass:: BenchDataset
@@ -16,6 +17,7 @@ from importlib import import_module
 from .base import BandSpec, BenchDataset
 from .loading import (
     get_bench_dataset_class,
+    get_dataset_task,
     get_datasets,
     list_datasets,
 )
@@ -47,6 +49,7 @@ __all__ = [
     "SpaceNet7",
     "TreeSatAI",
     "get_bench_dataset_class",
+    "get_dataset_task",
     "get_datasets",
     "list_datasets",
 ]

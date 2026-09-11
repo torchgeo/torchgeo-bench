@@ -1,11 +1,16 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: vgg19
-pretrained: true
-global_pool: avg
-seed: null
 name: vgg19
-eval:
-  segmentation:
-    # Layers at MaxPool boundaries, coarse-to-fine (deepest first) for FPN head.
-    # Spatial sizes (224px input): 7, 14, 28, 56.
-    layers: ["features.36", "features.27", "features.18", "features.9"]
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: vgg19
+  pretrained: true
+  global_pool: avg
+  seed: null
+segmentation:
+  layers:
+  - features.36
+  - features.27
+  - features.18
+  - features.9
+dataset_overrides: {}

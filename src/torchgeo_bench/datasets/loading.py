@@ -6,7 +6,7 @@ Wrapper modules and torch load only when needed; listing datasets does not impor
 import logging
 import warnings
 from importlib import import_module
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from .base import BenchDataset
 
@@ -19,35 +19,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Store (submodule, class name) as strings so listing datasets needs no wrapper imports.
-_REGISTRY_SPEC: dict[str, tuple[str, str]] = {
+# Store (submodule, class name, task) so catalogs need no wrapper imports.
+_REGISTRY_SPEC: dict[str, tuple[str, str, Literal["classification", "segmentation"]]] = {
     # V1 classification
-    "m-eurosat": ("m_eurosat", "MEurosat"),
-    "m-forestnet": ("m_forestnet", "MForestnet"),
-    "m-so2sat": ("m_so2sat", "MSo2Sat"),
-    "m-pv4ger": ("m_pv4ger", "MPv4ger"),
-    "m-brick-kiln": ("m_brick_kiln", "MBrickKiln"),
-    "m-bigearthnet": ("m_bigearthnet", "MBigEarthNet"),
+    "m-eurosat": ("m_eurosat", "MEurosat", "classification"),
+    "m-forestnet": ("m_forestnet", "MForestnet", "classification"),
+    "m-so2sat": ("m_so2sat", "MSo2Sat", "classification"),
+    "m-pv4ger": ("m_pv4ger", "MPv4ger", "classification"),
+    "m-brick-kiln": ("m_brick_kiln", "MBrickKiln", "classification"),
+    "m-bigearthnet": ("m_bigearthnet", "MBigEarthNet", "classification"),
     # V2 classification
-    "benv2": ("benv2", "BENV2"),
-    "treesatai": ("treesatai", "TreeSatAI"),
-    "so2sat": ("so2sat", "So2Sat"),
-    "forestnet": ("forestnet", "Forestnet"),
+    "benv2": ("benv2", "BENV2", "classification"),
+    "treesatai": ("treesatai", "TreeSatAI", "classification"),
+    "so2sat": ("so2sat", "So2Sat", "classification"),
+    "forestnet": ("forestnet", "Forestnet", "classification"),
     # V2 segmentation
-    "caffe": ("caffe", "CaFFe"),
-    "burn_scars": ("burn_scars", "BurnScars"),
-    "cloudsen12": ("cloudsen12", "CloudSEN12"),
-    "dynamic_earthnet": ("dynamic_earthnet", "DynamicEarthNet"),
-    "flair2": ("flair2", "FLAIR2"),
-    "fotw": ("fotw", "FieldsOfTheWorld"),
-    "kuro_siwo": ("kuro_siwo", "KuroSiwo"),
-    "pastis": ("pastis", "PASTIS"),
-    "spacenet2": ("spacenet2", "SpaceNet2"),
-    "spacenet7": ("spacenet7", "SpaceNet7"),
+    "caffe": ("caffe", "CaFFe", "segmentation"),
+    "burn_scars": ("burn_scars", "BurnScars", "segmentation"),
+    "cloudsen12": ("cloudsen12", "CloudSEN12", "segmentation"),
+    "dynamic_earthnet": ("dynamic_earthnet", "DynamicEarthNet", "segmentation"),
+    "flair2": ("flair2", "FLAIR2", "segmentation"),
+    "fotw": ("fotw", "FieldsOfTheWorld", "segmentation"),
+    "kuro_siwo": ("kuro_siwo", "KuroSiwo", "segmentation"),
+    "pastis": ("pastis", "PASTIS", "segmentation"),
+    "spacenet2": ("spacenet2", "SpaceNet2", "segmentation"),
+    "spacenet7": ("spacenet7", "SpaceNet7", "segmentation"),
     # torchgeo datasets
-    "eurosat": ("eurosat", "EuroSAT"),
-    "eurosat-spatial": ("eurosat", "EuroSATSpatial"),
-    "resisc45": ("resisc45", "RESISC45"),
+    "eurosat": ("eurosat", "EuroSAT", "classification"),
+    "eurosat-spatial": ("eurosat", "EuroSATSpatial", "classification"),
+    "resisc45": ("resisc45", "RESISC45", "classification"),
 }
 
 
@@ -66,7 +66,7 @@ def get_bench_dataset_class(name: str) -> type[BenchDataset]:
     if name not in _REGISTRY_SPEC:
         available = ", ".join(sorted(_REGISTRY_SPEC))
         raise KeyError(f"Unknown dataset '{name}'. Available: {available}")
-    module_name, class_name = _REGISTRY_SPEC[name]
+    module_name, class_name, _ = _REGISTRY_SPEC[name]
     cls: type[BenchDataset] = getattr(import_module(f".{module_name}", __package__), class_name)
     if cls.name != name:
         raise RuntimeError(
@@ -79,6 +79,15 @@ def get_bench_dataset_class(name: str) -> type[BenchDataset]:
 def list_datasets() -> list[str]:
     """Return sorted names of all registered benchmark datasets."""
     return sorted(_REGISTRY_SPEC)
+
+
+def get_dataset_task(name: str) -> Literal["classification", "segmentation"]:
+    """Return a registered dataset's task without importing its wrapper.
+
+    Raises:
+        KeyError: If *name* is not in the registry.
+    """
+    return _REGISTRY_SPEC[name][2]
 
 
 def download_command(name: str) -> str:
@@ -264,6 +273,7 @@ def get_datasets(  # noqa: PLR0913 - public dataset loading options.
 
 __all__ = [
     "get_bench_dataset_class",
+    "get_dataset_task",
     "get_datasets",
     "list_datasets",
 ]

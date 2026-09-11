@@ -8,7 +8,7 @@
 A lightweight benchmarking framework for evaluating **frozen** geospatial
 foundation models on GeoBench V1/V2 and location encoders on CoordBench. Plug
 in a backbone or coordinate encoder and run consistent downstream probes through
-OmegaConf configs.
+explicit CLI flags and strictly validated Pydantic YAML configuration.
 
 - **Frozen-backbone evaluation** — KNN-5, L-BFGS logistic regression, and
   linear / conv / FPN / DPT segmentation probes.
@@ -85,15 +85,50 @@ fall back to CPU:
 torchgeo-bench run --model rcf --dataset m-eurosat --device cpu
 ```
 
-Results are appended to `results/models/<model name>.csv`, which **ship pre-populated with reference results**. To start from a clean slate, set `output.file: results/my_run.csv` in a YAML file passed with `--config`. Re-run with `--resume` to skip completed rows. Each evaluation is saved as soon as it finishes, so a later failure does not discard completed metrics.
+Results are appended to `results/models/<model name>.csv`, which **ship pre-populated with reference results**. To start from a clean slate, pass `--output results/my_run.csv` or set `output.file` in a YAML file passed with `--config`. Re-run the same command with `--resume` to skip completed rows. Each evaluation is saved as soon as it finishes, so a later failure does not discard completed metrics.
 
-See `examples/image-run.yaml` for a complete config and `run --config-help` for its schema. The standalone `profile` command writes JSON to stdout; redirect it to a separate file when needed.
+```bash
+# Linear-only probing, with explicit flags overriding the YAML
+torchgeo-bench run --config examples/image-run.yaml --methods linear --device cpu
 
-The previous interface remains available through `python -m torchgeo_bench.cli` for existing `key=value` scripts, `flops`, and coordinate workflows. Without an explicit `output=`, its profile and intrinsic-dimension rows retain their separate per-model files.
+# Validate selections without loading a model or dataset
+torchgeo-bench run --model rcf --dataset m-eurosat --dry-run
+```
+
+See [`examples/image-run.yaml`](examples/image-run.yaml) for the image configuration
+fields and `run --config-help` for the JSON schema. Omitted settings inherit
+model and dataset defaults; explicit YAML values override them, and supplied
+flags override YAML. This includes explicit `false`, `null`, and `[]`.
+
+`torchgeo-bench`, `python -m torchgeo_bench`, and
+`python -m torchgeo_bench.cli` expose the same commands. The old `key=value`
+and `+key=value` overrides are **rejected**; migrate scripts to flags or YAML.
+There is no separate legacy configuration entry point.
+
+## Measure encoder cost
+
+The standalone `profile` command measures one fixed **real dataset batch** and
+writes JSON to stdout. The `flops` command uses **synthetic inputs**, does not
+load dataset samples, and appends compute measurements to a CSV:
+
+```bash
+torchgeo-bench profile --model rcf --dataset m-eurosat --device cpu \
+  --batch-size 8 --warmup 1 --measurements 5 > profile.json
+
+torchgeo-bench flops --model rcf --device cpu --band-configs rgb \
+  --seg-heads --output results/my_compute_cost.csv
+```
+
+Both accept `--config` and `--dry-run`. See
+[`examples/profile.yaml`](examples/profile.yaml),
+[`examples/flops.yaml`](examples/flops.yaml), and the
+[configuration reference](https://torchgeo.org/torchgeo-bench/user/configuration.html).
+Optional `profile` and `intrinsic_dim` passes within an image run retain their
+separate per-model CSVs unless `output.file` explicitly combines them.
 
 ## CoordBench — location encoders
 
-`mode=coord` swaps the image pipeline for a **coordinate-only** track: point
+`torchgeo-bench coord` runs the **coordinate-only** track: point
 `(lon, lat)` in, a downstream label out. Benchmarks are streamed directly from
 the unified [`taylor-geospatial/coordbench`](https://huggingface.co/datasets/taylor-geospatial/coordbench)
 HuggingFace dataset (PDFM, SatCLIP, SustainBench, CDC PLACES, MOSAIKS/USAVars,
@@ -103,21 +138,21 @@ is probed with **KNN** and a **ridge linear** head under **random** or
 
 ```bash
 # MIND on the full suite, using random and spatial cross-validation
-python -m torchgeo_bench.cli run mode=coord model=mind coord.split=both
+torchgeo-bench coord --model mind --dataset all --split both
 
 # One dataset family with the sine/cosine baseline and a linear probe
-python -m torchgeo_bench.cli run mode=coord model=sincos coord.names=pdfm coord.methods=[linear]
+torchgeo-bench coord --model sincos --dataset pdfm --methods linear
 ```
 
-`model=mind` and `model=mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),
-distilled from AlphaEarth/Climplicit/GeoCLIP/SINR) and `model=sincos` work with
+`--model mind` and `--model mind-small` ([MIND](https://huggingface.co/isaaccorley/MIND),
+distilled from AlphaEarth/Climplicit/GeoCLIP/SINR) and `--model sincos` work with
 the base install. The other pretrained encoders (SatCLIP / GeoCLIP / Climplicit /
 SINR, via `rshf`) need the `coordbench` extra:
 `pip install "torchgeo-bench[coordbench]"`,
-then `model=climplicit` (etc.). Results land in
+then `--model climplicit` (etc.). Results land in
 `results/coordbench_results.csv`. Add your own encoder by subclassing
-`LocationEncoder` (implement `_encode`) and pointing a `model` config's
-`_target_` at it. See the
+`LocationEncoder` (implement `_encode`) and setting `model.target` to its
+importable Python name, with constructor options under `model.kwargs`. See the
 [CoordBench guide](https://torchgeo.org/torchgeo-bench/user/coordbench.html)
 and the runnable
 [`FourierLocationEncoder` example](https://github.com/torchgeo/torchgeo-bench/blob/main/examples/coordbench_location_encoder.py).

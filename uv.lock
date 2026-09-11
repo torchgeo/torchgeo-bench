@@ -3971,7 +3971,6 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "lazy-loader" },
     { name = "numpy" },
-    { name = "omegaconf" },
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pydantic" },
@@ -4060,14 +4059,13 @@ requires-dist = [
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=2" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "olmoearth-pretrain-minimal", marker = "extra == 'olmoearth'", specifier = ">=0.0.6" },
-    { name = "omegaconf", specifier = ">=2.3" },
     { name = "pandas", specifier = ">=2" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.3" },
     { name = "pyarrow", specifier = ">=14" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.15" },
     { name = "pyproject-fmt", marker = "extra == 'dev'", specifier = ">=2.21" },
-    { name = "pyrefly", marker = "extra == 'dev'", specifier = "==1.2.0" },
+    { name = "pyrefly", marker = "extra == 'dev'", specifier = "==1.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.6" },
@@ -4096,7 +4094,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.66" },
     { name = "transformers", marker = "extra == 'sam3'", specifier = ">=4.50" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.21" },
-    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6" },
 ]
 provides-extras = ["all", "coordbench", "dev", "docs", "id", "olmoearth", "sam3", "terratorch"]
 

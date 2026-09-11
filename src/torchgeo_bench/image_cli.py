@@ -9,47 +9,10 @@ import sys
 from collections.abc import Callable, Sequence
 
 from . import commands
-from .cli import add_profile_arguments
-
-_DATASETS = (
-    "m-eurosat",
-    "m-forestnet",
-    "m-so2sat",
-    "m-pv4ger",
-    "m-brick-kiln",
-    "m-bigearthnet",
-    "benv2",
-    "treesatai",
-    "so2sat",
-    "forestnet",
-    "caffe",
-    "burn_scars",
-    "cloudsen12",
-    "dynamic_earthnet",
-    "flair2",
-    "fotw",
-    "kuro_siwo",
-    "pastis",
-    "spacenet2",
-    "spacenet7",
-    "eurosat",
-    "eurosat-spatial",
-    "resisc45",
-)
-_SEGMENTATION_DATASETS = frozenset(
-    {
-        "caffe",
-        "burn_scars",
-        "cloudsen12",
-        "dynamic_earthnet",
-        "flair2",
-        "fotw",
-        "kuro_siwo",
-        "pastis",
-        "spacenet2",
-        "spacenet7",
-    }
-)
+from .commands.coord_arguments import add_coord_arguments
+from .commands.flops_arguments import add_flops_arguments
+from .commands.profile_arguments import add_profile_arguments
+from .datasets import get_dataset_task, list_datasets
 
 
 def _model_names() -> list[str]:
@@ -68,7 +31,7 @@ def _model_detail(name: str) -> str:
 
 def _dataset_detail(name: str) -> str:
     """Return lightweight metadata for a dataset catalog detail request."""
-    task = "segmentation" if name in _SEGMENTATION_DATASETS else "classification"
+    task = get_dataset_task(name)
     return f"name: {name}\ntask: {task}\n"
 
 
@@ -80,8 +43,10 @@ def _parser() -> argparse.ArgumentParser:
         "run", help="Run image benchmarks", argument_default=argparse.SUPPRESS
     )
     run.add_argument("--config", type=pathlib.Path, help="YAML configuration file")
-    run.add_argument("--model", help="Model preset name")
-    run.add_argument("--dataset", action="append", dest="datasets", help="Dataset (repeatable)")
+    run.add_argument("-m", "--model", help="Model preset name")
+    run.add_argument(
+        "-d", "--dataset", action="append", dest="datasets", help="Dataset (repeatable)"
+    )
     run.add_argument("--device")
     run.add_argument("--batch-size", type=int)
     run.add_argument("--workers", type=int)
@@ -89,7 +54,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--bands", help="rgb, all, or comma-separated band names")
     run.add_argument("--interpolation", choices=("area", "bilinear", "bicubic", "nearest"))
     run.add_argument("--image-size", type=_image_size, metavar="PX|none")
-    run.add_argument("--normalization", choices=("dataset", "model", "minmax", "none"))
+    run.add_argument(
+        "--normalization", choices=("dataset", "model", "minmax", "minmax_zscore", "none")
+    )
     run.add_argument("--partition")
     run.add_argument("--time-steps", type=int)
     run.add_argument("--methods", nargs="+", choices=("knn", "linear"))
@@ -99,6 +66,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--refit-train-val", action=argparse.BooleanOptionalAction)
     run.add_argument("--temp-scale", action=argparse.BooleanOptionalAction)
     run.add_argument("--resume", action=argparse.BooleanOptionalAction)
+    run.add_argument("-o", "--output", help="CSV for all image result kinds")
+    run.add_argument("--results-dir", help="Directory for per-model metric CSVs")
     run.add_argument("--verbose", action=argparse.BooleanOptionalAction)
     run.add_argument(
         "--dry-run", action="store_true", help="Validate and print reusable YAML without running"
@@ -116,6 +85,10 @@ def _parser() -> argparse.ArgumentParser:
     download.add_argument("--datasets")
     profile = subcommands.add_parser("profile", help="Measure one real inference batch")
     add_profile_arguments(profile)
+    flops = subcommands.add_parser("flops", help="Measure synthetic compute cost")
+    add_flops_arguments(flops)
+    coord = subcommands.add_parser("coord", help="Run coordinate encoder benchmarks")
+    add_coord_arguments(coord)
     return parser
 
 
@@ -131,7 +104,7 @@ def _image_size(value: str) -> int | None:
 
 def _run(args: argparse.Namespace) -> None:
     """Validate and execute one image benchmark."""
-    commands._image.run(args, _model_names(), _DATASETS)
+    commands._image.run(args, _model_names(), tuple(list_datasets()))
 
 
 def _show_catalog(
@@ -146,23 +119,37 @@ def _show_catalog(
         print(detail(name), end="")
 
 
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """Reject retired override syntax without confusing equals signs in flag values."""
+    parser = _parser()
+    args, extras = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
+    if extras:
+        if any("=" in value and not value.startswith("--") for value in extras):
+            parser.error(
+                "key=value and +key=value overrides have been retired; use explicit flags "
+                "(for example --model rcf --dataset m-eurosat) or --config run.yaml"
+            )
+        parser.error(f"unrecognized arguments: {' '.join(extras)}")
+    return args
+
+
 def main(argv: list[str] | None = None) -> None:
-    """Run the image benchmark CLI."""
-    args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
+    """Run image, coordinate, download, and compute commands."""
+    args = _parse_args(argv)
     if args.command == "run":
-        try:
-            _run(args)
-        except ValueError as error:  # allow-except: report configuration errors to the CLI user
-            print(f"error: {error}", file=sys.stderr)
-            raise SystemExit(2) from error
+        _run(args)
     elif args.command == "models":
         _show_catalog(args.name, _model_names(), _model_detail, "model")
     elif args.command == "datasets":
-        _show_catalog(args.name, _DATASETS, _dataset_detail, "dataset")
+        _show_catalog(args.name, list_datasets(), _dataset_detail, "dataset")
     elif args.command == "download":
         commands.download(args)
     elif args.command == "profile":
         commands.profile(args)
+    elif args.command == "flops":
+        commands.flops(args)
+    elif args.command == "coord":
+        commands.coord(args)
     else:
         raise SystemExit(f"{args.command} is not implemented by the image CLI yet")
 

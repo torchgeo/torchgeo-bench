@@ -23,7 +23,6 @@ def _image_size(value: str) -> int | None:
 
 def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
     """Register profile flags without overriding YAML with parser defaults."""
-    parser.set_defaults(_profile_explicit=True)
     parser.add_argument("--config", default=argparse.SUPPRESS, help="Standalone profile YAML")
     parser.add_argument("-m", "--model", default=argparse.SUPPRESS, help="Image model preset")
     parser.add_argument("-d", "--dataset", default=argparse.SUPPRESS, help="One dataset name")
@@ -57,20 +56,14 @@ def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _input_mapping(args: argparse.Namespace) -> dict[str, Any]:
-    """Map explicit preprocessing flags, accepting old parser normalization names."""
+    """Map explicitly supplied preprocessing flags."""
     values: dict[str, Any] = {}
-    legacy = not getattr(args, "_profile_explicit", False)
-    aliases = {value: key for key, value in NORMALIZATIONS.items()}
     for name in ("bands", "partition", "image_size", "interpolation", "normalization"):
         if not hasattr(args, name):
             continue
         value = getattr(args, name)
-        if legacy and value is None:
-            continue
         if name == "bands" and isinstance(value, str) and value not in {"rgb", "all"}:
             value = [band.strip() for band in value.split(",")]
-        if name == "normalization" and isinstance(value, str):
-            value = aliases.get(value, value)
         values[name] = value
     return values
 

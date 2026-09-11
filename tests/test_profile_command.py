@@ -20,7 +20,7 @@ from torch.utils.data import Dataset
 from torchgeo_bench import commands
 from torchgeo_bench.commands import _profile_runtime
 from torchgeo_bench.commands._profile import profile
-from torchgeo_bench.commands.profile_arguments import load_profile_config
+from torchgeo_bench.commands.profile_arguments import add_profile_arguments, load_profile_config
 from torchgeo_bench.config_schema import ModelConfig
 from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset
 from torchgeo_bench.profile_config import ProfileConfig
@@ -47,21 +47,38 @@ class _ImageDataset(Dataset):
 
 @pytest.fixture
 def profile_args() -> argparse.Namespace:
-    return argparse.Namespace(
-        model="rcf",
-        dataset="m-eurosat",
-        partition="default",
-        device="cpu",
-        bands="rgb",
-        image_size=8,
-        interpolation="bilinear",
-        batch_size=4,
-        warmup=0,
-        measurements=1,
-        precision="float32",
-        count_flops=False,
-        seed=0,
-        normalization="bandspec_zscore",
+    parser = argparse.ArgumentParser()
+    add_profile_arguments(parser)
+    return parser.parse_args(
+        [
+            "--model",
+            "rcf",
+            "--dataset",
+            "m-eurosat",
+            "--partition",
+            "default",
+            "--device",
+            "cpu",
+            "--bands",
+            "rgb",
+            "--image-size",
+            "8",
+            "--interpolation",
+            "bilinear",
+            "--batch-size",
+            "4",
+            "--warmup",
+            "0",
+            "--measurements",
+            "1",
+            "--precision",
+            "float32",
+            "--no-count-flops",
+            "--seed",
+            "0",
+            "--normalization",
+            "dataset",
+        ]
     )
 
 
@@ -125,24 +142,35 @@ def test_profile_emits_fixed_real_batch_metadata(
 
 
 @pytest.mark.parametrize(
-    ("image_size", "explicit", "expected_size", "loader_size"),
-    [(None, False, 64, 64), (32, True, 32, 32), (None, True, 64, None)],
+    ("image_size_flags", "expected_size", "loader_size"),
+    [([], 64, 64), (["--image-size", "32"], 32, 32), (["--image-size", "none"], 64, None)],
 )
-def test_profile_applies_image_size_to_model_and_loader(  # noqa: PLR0913 - fixtures and resize-precedence cases
-    profile_args: argparse.Namespace,
+def test_profile_applies_image_size_to_model_and_loader(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    image_size: int | None,
-    *,
-    explicit: bool,
+    image_size_flags: list[str],
     expected_size: int,
     loader_size: int | None,
 ) -> None:
-    profile_args.model = "torchgeo/scalemae_large_fmow"
-    profile_args.image_size = image_size
-    del profile_args.interpolation
-    profile_args.normalization = "identity"
-    profile_args._profile_explicit = explicit
+    parser = argparse.ArgumentParser()
+    add_profile_arguments(parser)
+    args = parser.parse_args(
+        [
+            "--model",
+            "torchgeo/scalemae_large_fmow",
+            "--dataset",
+            "m-eurosat",
+            "--batch-size",
+            "4",
+            "--warmup",
+            "0",
+            "--measurements",
+            "1",
+            "--normalization",
+            "none",
+            *image_size_flags,
+        ]
+    )
     inputs: dict[str, Any] = {}
     construction: dict[str, Any] = {}
 
@@ -160,7 +188,7 @@ def test_profile_applies_image_size_to_model_and_loader(  # noqa: PLR0913 - fixt
     monkeypatch.setattr(_profile_runtime, "get_datasets", load)
     monkeypatch.setattr(_profile_runtime, "build_model", build)
 
-    _profile_runtime.run(load_profile_config(profile_args))
+    _profile_runtime.run(load_profile_config(args))
 
     record = json.loads(capsys.readouterr().out)
     model_kwargs = record["model_config"]["kwargs"]
@@ -171,7 +199,7 @@ def test_profile_applies_image_size_to_model_and_loader(  # noqa: PLR0913 - fixt
     assert record["model_config"]["input"]["image_size"] == loader_size
     assert record["input_shape"] == [4, 3, expected_size, expected_size]
     assert inputs["interpolation"] == record["interpolation"] == "area"
-    assert inputs["partition_name"] == profile_args.partition
+    assert inputs["partition_name"] == "default"
     assert model_kwargs["res"] == 3.5
     assert model_kwargs["pool"] == "cls"
     assert model_kwargs["auto_resize"] is False

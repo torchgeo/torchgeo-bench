@@ -1,6 +1,10 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: convnextv2_base
-pretrained: true
-global_pool: avg
-seed: null
 name: convnextv2_base
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: convnextv2_base
+  pretrained: true
+  global_pool: avg
+  seed: null
+dataset_overrides: {}

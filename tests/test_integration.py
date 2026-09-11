@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 
 from torchgeo_bench.datasets import get_bench_dataset_class
 
@@ -46,20 +47,26 @@ def test_real_classification_program(
 ) -> None:
     require_dataset_data(dataset)
     output = tmp_path / "classification.csv"
+    config = tmp_path / "run.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "model": {"name": "rcf", "kwargs": {"features": 32}},
+                "datasets": [dataset],
+                "input": {"bands": bands, "partition": partition, "image_size": 32},
+                "runtime": {"batch_size": 64, "workers": 0, "device": "cpu"},
+                "classification": {
+                    "bootstrap_samples": 5,
+                    "linear": {"c_log10_start": -2.0, "c_log10_stop": 2.0, "c_count": 3},
+                },
+                "output": {"file": str(output)},
+            }
+        )
+    )
     arguments = [
         "run",
-        "model=rcf",
-        "model.features=32",
-        f"dataset.names=[{dataset}]",
-        f"dataset.bands={bands}",
-        f"dataset.partition={partition}",
-        "dataset.image_size=32",
-        "dataset.batch_size=64",
-        "dataset.num_workers=0",
-        "device=cpu",
-        "eval.bootstrap=5",
-        "eval.c_range=[-2,2,3]",
-        f"output={output}",
+        "--config",
+        str(config),
     ]
     result = run_cli(*arguments, cwd=Path.cwd(), timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -76,7 +83,7 @@ def test_real_classification_program(
     assert (rows["ci_lower"] <= rows["ci_upper"]).all()
 
     before = output.read_bytes()
-    resumed = run_cli(*arguments, "resume=true", cwd=Path.cwd(), timeout=120)
+    resumed = run_cli(*arguments, "--resume", cwd=Path.cwd(), timeout=120)
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert output.read_bytes() == before
 
@@ -85,22 +92,29 @@ def test_real_classification_program(
 def test_real_segmentation_program(tmp_path: Path, *, cached: bool) -> None:
     require_dataset_data("caffe")
     output = tmp_path / "segmentation.csv"
+    config = tmp_path / "run.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "model": {"name": "timm/resnet18", "kwargs": {"pretrained": False, "seed": 0}},
+                "datasets": ["caffe"],
+                "input": {"image_size": 32},
+                "runtime": {"batch_size": 32, "workers": 0, "device": "cpu"},
+                "classification": {"bootstrap_samples": 5},
+                "segmentation": {
+                    "head": "linear",
+                    "epochs": 1,
+                    "batch_size": 16,
+                    "cache_features": cached,
+                },
+                "output": {"file": str(output)},
+            }
+        )
+    )
     arguments = [
         "run",
-        "model=timm/resnet18",
-        "model.pretrained=false",
-        "model.seed=0",
-        "dataset.names=[caffe]",
-        "dataset.image_size=32",
-        "dataset.batch_size=32",
-        "dataset.num_workers=0",
-        "device=cpu",
-        "eval.bootstrap=5",
-        "eval.segmentation.head_type=linear",
-        "eval.segmentation.epochs=1",
-        "eval.segmentation.batch_size=16",
-        f"eval.segmentation.cache_features={str(cached).lower()}",
-        f"output={output}",
+        "--config",
+        str(config),
     ]
     result = run_cli(*arguments, cwd=Path.cwd(), timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -117,6 +131,6 @@ def test_real_segmentation_program(tmp_path: Path, *, cached: bool) -> None:
     assert row["best_batch_size"] == (16 if cached else 32)
 
     before = output.read_bytes()
-    resumed = run_cli(*arguments, "resume=true", cwd=Path.cwd(), timeout=120)
+    resumed = run_cli(*arguments, "--resume", cwd=Path.cwd(), timeout=120)
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert output.read_bytes() == before

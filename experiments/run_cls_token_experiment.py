@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Compare a transformer's classification token with averaged image-patch features.
 
-Compare ``model.use_cls_token=false`` and ``true`` for ViT/DeiT.
+Compare the ``use_cls_token`` constructor option for ViT/DeiT.
 
 Swin has no classification token and is excluded.
 
@@ -14,6 +14,9 @@ import argparse
 import sys
 
 from _runner import Job, add_devices_argument, default_output, run_jobs
+
+from torchgeo_bench.config_schema import InputConfig, ModelConfig, RunConfig
+from torchgeo_bench.presets import resolve_run_config
 
 OUTPUT = default_output(__file__)
 
@@ -40,14 +43,18 @@ def build_jobs() -> list[Job]:
             short = model.removeprefix("timm/vit/")
             for use_cls in (False, True):
                 tag = "cls" if use_cls else "avg"
-                overrides = [
-                    f"model={model}",
-                    f"model.use_cls_token={'true' if use_cls else 'false'}",
-                    f"model.name={short}_{tag}",
-                    f"dataset.names=[{dataset}]",
-                    "dataset.partition=default",
-                ]
-                jobs.append(Job(label=f"{dataset} {short} {tag}", overrides=overrides))
+                config, preset = resolve_run_config(
+                    RunConfig(
+                        model=ModelConfig(name=model, kwargs={"use_cls_token": use_cls}),
+                        datasets=[dataset],
+                        input=InputConfig(partition="default"),
+                    ),
+                    dataset,
+                )
+                config.model = ModelConfig(
+                    name=f"{short}_{tag}", target=preset.target, kwargs=preset.kwargs
+                )
+                jobs.append(Job(label=f"{dataset} {short} {tag}", config=config))
     return jobs
 
 

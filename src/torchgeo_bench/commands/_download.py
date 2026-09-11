@@ -33,7 +33,10 @@ def download(args: argparse.Namespace) -> None:
         if not names:
             raise SystemExit("error: --datasets must contain at least one dataset name")
     output_dir = Path(args.output_dir)
-    if target == "geobench_v1":
-        commands.download_module.download_geobench_v1(output_dir, datasets=names)
-    else:
-        commands.download_module.download_geobench_v2(output_dir, datasets=names)
+    try:
+        if target == "geobench_v1":
+            commands.download_module.download_geobench_v1(output_dir, datasets=names)
+        else:
+            commands.download_module.download_geobench_v2(output_dir, datasets=names)
+    except ValueError as err:  # allow-except: report invalid collection selections
+        raise SystemExit(f"error: {err}") from err

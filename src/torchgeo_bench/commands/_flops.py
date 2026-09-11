@@ -1,6 +1,7 @@
 """Validate synthetic compute measurements before importing the runtime."""
 
 import argparse
+import json
 import logging
 from typing import Any
 
@@ -68,7 +69,7 @@ def load_config(args: argparse.Namespace) -> FlopsConfig:
 def run(args: argparse.Namespace) -> None:
     """Execute the explicit command; report expected input errors without a traceback."""
     if getattr(args, "config_help", False):
-        print(yaml.safe_dump(FlopsConfig.model_json_schema(), sort_keys=False), end="")
+        print(json.dumps(FlopsConfig.model_json_schema(), indent=2))
         return
     try:
         config = load_config(args)
@@ -84,57 +85,4 @@ def run(args: argparse.Namespace) -> None:
     commands.run_flops(config)
 
 
-_LEGACY_FIELDS = {
-    **{name: name for name in _FLAG_FIELDS},
-    "seg_head_types": "seg_heads",
-    "eval.segmentation.layers": "seg_layers",
-    "eval.segmentation.temporal_pool": "temporal_pool",
-}
-
-
-def _legacy_namespace(args: argparse.Namespace) -> argparse.Namespace:
-    """Translate the retiring parser's finite FLOPs vocabulary."""
-    flags: dict[str, Any] = {}
-    kwargs: dict[str, Any] = {}
-    for override in getattr(args, "overrides", []):
-        key, separator, raw = override.partition("=")
-        if separator and key in {
-            "model.features",
-            "model.kernel_size",
-            "model.mode",
-            "model.stats_mode",
-            "model.seed",
-        }:
-            kwargs[key.removeprefix("model.")] = yaml.safe_load(raw)
-            continue
-        if not separator or key not in _LEGACY_FIELDS:
-            raise SystemExit(
-                f"error: unsupported FLOPs override {override!r}; use explicit flags or --config YAML"
-            )
-        flags[_LEGACY_FIELDS[key]] = yaml.safe_load(raw)
-    if kwargs:
-        flags["model_kwargs"] = yaml.safe_dump(kwargs)
-    flags.update(
-        {
-            key: value
-            for key, value in vars(args).items()
-            if key in _FLAG_FIELDS and value is not None
-        }
-    )
-    if "model" not in flags:
-        raise SystemExit("error: No model selected; pass --model/-m or use --config YAML")
-    normalization = flags.get("normalization")
-    aliases = {"bandspec_zscore": "dataset", "model_native": "model", "identity": "none"}
-    if isinstance(normalization, str) and normalization in aliases:
-        flags["normalization"] = aliases[normalization]
-    flags["dry_run"] = getattr(args, "print_config", False)
-    return argparse.Namespace(**flags)
-
-
-def flops(args: argparse.Namespace) -> None:
-    """Keep legacy command callers working until canonical CLI registration."""
-    try:
-        converted = _legacy_namespace(args)
-    except yaml.YAMLError as error:  # allow-except: legacy YAML input errors
-        raise SystemExit(f"error: {error}") from error
-    run(converted)
+flops = run

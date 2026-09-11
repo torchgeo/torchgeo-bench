@@ -68,61 +68,13 @@ class ModelPreset(PresetDefaults):
         return ModelPreset.model_validate(values)
 
 
-def _legacy_defaults(raw: dict[str, Any]) -> dict[str, Any]:
-    """Translate the finite packaged preset vocabulary during staged migration."""
-    values = deepcopy(raw)
-    result: dict[str, Any] = {}
-    inputs = {key: values.pop(key) for key in ("image_size", "interpolation") if key in values}
-    if inputs:
-        result["input"] = inputs
-    evaluation = values.pop("eval", {})
-    if "c_range" in evaluation:
-        start, stop, count = evaluation.pop("c_range")
-        result["classification"] = {
-            "linear": {"c_log10_start": start, "c_log10_stop": stop, "c_count": count}
-        }
-    if "segmentation" in evaluation:
-        segmentation = evaluation.pop("segmentation")
-        for old, new in (
-            ("head_type", "head"),
-            ("lr", "learning_rate"),
-            ("lr_scheduler", "scheduler"),
-        ):
-            if old in segmentation:
-                segmentation[new] = segmentation.pop(old)
-        result["segmentation"] = segmentation
-    if evaluation:
-        raise ValueError(f"Unsupported preset evaluation defaults: {sorted(evaluation)}")
-    result["kwargs"] = values
-    return result
-
-
 def load_model_preset(selection: ModelConfig, *, seed: int = 0) -> ModelPreset:
     """Load a packaged preset or a custom constructor without importing weights."""
     if selection.target is not None:
         return ModelPreset(name=selection.name, target=selection.target, kwargs=selection.kwargs)
     from .config import model_config_path
 
-    raw = load_yaml(model_config_path(selection.name))
-    if "target" in raw:
-        preset = ModelPreset.model_validate(raw)
-    else:
-        name, target = raw.pop("name"), raw.pop("_target_")
-        overrides = raw.pop("dataset_overrides", {})
-        seed_from_run = raw.get("seed") == "${seed}"
-        if seed_from_run:
-            raw.pop("seed")
-        preset = ModelPreset(
-            name=name,
-            target=target,
-            track="coord" if ".coordbench." in target else "image",
-            seed_from_run=seed_from_run,
-            dataset_overrides={
-                key: PresetDefaults.model_validate(_legacy_defaults(value))
-                for key, value in overrides.items()
-            },
-            **_legacy_defaults(raw),
-        )
+    preset = ModelPreset.model_validate(load_yaml(model_config_path(selection.name)))
     kwargs = dict(preset.kwargs)
     if preset.seed_from_run:
         kwargs["seed"] = seed

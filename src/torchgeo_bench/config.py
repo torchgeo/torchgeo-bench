@@ -1,170 +1,28 @@
-"""YAML configuration and ``_target_`` model construction.
+"""Lightweight discovery of packaged Pydantic model presets."""
 
-Combine base YAML, a model preset, and ``key=value`` overrides.
-
-Supported overrides:
-
-* ``model=timm/resnet50`` selects ``conf/model/timm/resnet50.yaml``.
-* ``dataset.names=[m-eurosat,m-so2sat]`` — values parse as YAML.
-* Unknown keys are rejected; prefix with ``+`` to add a new key (``+model.gsd=10``).
-"""
-
-import importlib
-from collections.abc import Sequence
+import difflib
 from importlib.resources import files
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    import omegaconf.dictconfig
 
 CONF_DIR = Path(str(files("torchgeo_bench") / "conf"))
 
 
 def list_model_configs() -> list[str]:
-    """Names accepted by ``model=`` / ``--model``, e.g. ``timm/resnet50``."""
+    """Return portable names accepted by ``--model`` and YAML ``model.name``."""
     model_dir = CONF_DIR / "model"
-    # CLI model names use "/" on every platform, including Windows.
     return sorted(
-        p.relative_to(model_dir).as_posix().removesuffix(".yaml") for p in model_dir.rglob("*.yaml")
+        path.relative_to(model_dir).as_posix().removesuffix(".yaml")
+        for path in model_dir.rglob("*.yaml")
     )
 
 
 def model_config_path(name: str) -> Path:
-    """Return the YAML file backing ``model=<name>`` / ``--model <name>``."""
-    if name not in list_model_configs():
-        raise ValueError(f"Unknown model config '{name}'. {_closest_models(name)}")
+    """Return a catalog-validated preset path, rejecting path traversal."""
+    names = list_model_configs()
+    if name not in names:
+        matches = difflib.get_close_matches(name, names, n=5, cutoff=0.5)
+        if not matches:
+            matches = [candidate for candidate in names if name.lower() in candidate.lower()][:5]
+        suggestion = f" Did you mean: {', '.join(matches)}?" if matches else ""
+        raise ValueError(f"Unknown model config {name!r}.{suggestion}")
     return CONF_DIR / "model" / f"{name}.yaml"
-
-
-def _closest_models(name: str, n: int = 5) -> str:
-    """Suggest similar model names, or return an empty string if none match."""
-    import difflib
-
-    candidates = list_model_configs()
-    matches = difflib.get_close_matches(name, candidates, n=n, cutoff=0.5)
-    if not matches:
-        # Fall back to substring hits — "resnet50" should still find its variants.
-        matches = [c for c in candidates if name.lower() in c.lower()][:n]
-    return f"Did you mean: {', '.join(matches)}? " if matches else ""
-
-
-def compose_config(
-    overrides: Sequence[str] = (),
-    *,
-    config_name: str = "config",
-    default_model: str | None = "rcf",
-) -> "omegaconf.dictconfig.DictConfig":
-    """Build the run config from base YAML, model YAML, and ``key=value`` overrides.
-
-    Args:
-        overrides: ``key=value`` strings.  ``model=<name>`` selects the model
-            YAML; ``+key=value`` adds a key not present in the base config.
-        config_name: Base YAML under ``conf/`` (``config`` or ``flops_config``).
-        default_model: Model selected when no ``model=`` override is given;
-            ``None`` makes the override mandatory.
-
-    Returns:
-        The merged config, which rejects unknown keys.
-    """
-    from omegaconf import DictConfig, OmegaConf, open_dict
-
-    cfg = OmegaConf.load(CONF_DIR / f"{config_name}.yaml")
-    assert isinstance(cfg, DictConfig)
-
-    model_name = default_model
-    dotlist: list[str] = []
-    additions: list[str] = []
-    for override in overrides:
-        key, sep, value = override.partition("=")
-        if not sep:
-            raise ValueError(f"Malformed override {override!r}: expected key=value")
-        if key == "model":
-            model_name = value
-        elif key.startswith("+"):
-            # Existing Hydra scripts use both +key (add) and ++key (add or override).
-            additions.append(f"{key.lstrip('+')}={value}")
-        else:
-            dotlist.append(override)
-
-    if model_name is None:
-        raise ValueError("No model selected; pass --model/-m (see `run --list-models`).")
-    model_path = CONF_DIR / "model" / f"{model_name}.yaml"
-    if not model_path.is_file():
-        raise ValueError(
-            f"Unknown model config {model_name!r}. "
-            f"{_closest_models(model_name)}Run `torchgeo-bench run --list-models` for all "
-            f"{len(list_model_configs())} configs."
-        )
-    cfg.model = OmegaConf.load(model_path)
-
-    OmegaConf.set_struct(cfg, True)
-    if additions:
-        with open_dict(cfg):
-            cfg.merge_with(OmegaConf.from_dotlist(additions))
-    if dotlist:
-        cfg.merge_with(OmegaConf.from_dotlist(dotlist))
-    return cfg
-
-
-def instantiate(config: "omegaconf.dictconfig.DictConfig | dict", **kwargs: Any) -> Any:
-    """Instantiate the class named by ``config._target_`` with the remaining keys.
-
-    Extra ``kwargs`` override config keys.
-
-    Pass nested values as plain containers; do not instantiate nested ``_target_`` values.
-    """
-    from omegaconf import DictConfig, OmegaConf
-
-    if isinstance(config, DictConfig):
-        config = OmegaConf.to_container(config, resolve=True)  # type: ignore[assignment]
-    conf = dict(config)
-    target = conf.pop("_target_")
-    if target in {
-        "torchgeo_bench.models.TimmPatchBenchModel",
-        "torchgeo_bench.models.RCFBench",
-    }:
-        return _instantiate_explicit_model(target, conf, kwargs)
-    module_name, _, attr = target.rpartition(".")
-    cls = getattr(importlib.import_module(module_name), attr)
-    conf.update(kwargs)
-    return cls(**conf)
-
-
-def _instantiate_explicit_model(target: str, config: dict, overrides: dict[str, Any]) -> Any:
-    """Translate legacy model YAML into one of the explicit model builders."""
-    from torchgeo_bench.models.build import (
-        RCFModelConfig,
-        TimmModelConfig,
-        build_rcf_model,
-        build_timm_model,
-    )
-
-    metadata = {"name", "eval", "seed", "image_size", "interpolation", "dataset_overrides"}
-    allowed = (
-        {
-            "model_name",
-            "pretrained",
-            "normalize",
-            "global_pool",
-            "auto_resize",
-            "target_size",
-            "use_cls_token",
-            "input_normalization",
-        }
-        if target.endswith("TimmPatchBenchModel")
-        else {"features", "kernel_size", "mode", "stats_mode", "dataset", "seed"}
-    )
-    unknown = set(config) - allowed - metadata
-    unknown.update(set(overrides) - allowed - {"bands", "normalization"})
-    if unknown:
-        raise ValueError(f"Unknown settings for {target.rsplit('.', 1)[-1]}: {sorted(unknown)}")
-    merged = {key: value for key, value in config.items() if key in allowed}
-    merged.update({key: value for key, value in overrides.items() if key in allowed})
-    bands = overrides.get("bands")
-    if bands is None:
-        raise ValueError(f"{target.rsplit('.', 1)[-1]} requires explicit bands")
-    normalization = str(overrides.get("normalization", "bandspec_zscore"))
-    if target.endswith("TimmPatchBenchModel"):
-        return build_timm_model(TimmModelConfig(**merged), bands, normalization=normalization)
-    return build_rcf_model(RCFModelConfig(**merged), bands, normalization=normalization)

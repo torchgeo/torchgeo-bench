@@ -22,9 +22,11 @@ from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
+from torchgeo_bench.config_schema import ModelConfig, RunConfig, RuntimeConfig
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
+from torchgeo_bench.presets import build_model, resolve_run_config
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -37,58 +39,27 @@ IMAGE_SIZE = 224
 DATASETS = ["m-bigearthnet", "m-brick-kiln", "m-eurosat", "m-forestnet", "m-pv4ger", "m-so2sat"]
 
 MODEL_CONFIGS = {
-    "resnet18": {
-        "_target_": "torchgeo_bench.models.timm.TimmPatchBenchModel",
-        "model_name": "resnet18",
-        "pretrained": True,
-        "global_pool": "avg",
-        "name": "resnet18",
-    },
-    "resnet50": {
-        "_target_": "torchgeo_bench.models.timm.TimmPatchBenchModel",
-        "model_name": "resnet50",
-        "pretrained": True,
-        "global_pool": "avg",
-        "name": "resnet50",
-    },
-    "convnext_large_dinov3": {
-        "_target_": "torchgeo_bench.models.timm.TimmPatchBenchModel",
-        "model_name": "convnext_large.dinov3_lvd1689m",
-        "pretrained": True,
-        "global_pool": "avg",
-        "name": "convnext_large_dinov3",
-    },
-    "dinov3": {
-        "_target_": "torchgeo_bench.models.timm.TimmPatchBenchModel",
-        "model_name": "vit_large_patch16_dinov3.lvd1689m",
-        "pretrained": True,
-        "global_pool": "avg",
-        "use_cls_token": False,
-        "name": "vit_large_patch16_dinov3",
-    },
-    "dinov3sat": {
-        "_target_": "torchgeo_bench.models.timm.TimmPatchBenchModel",
-        "model_name": "vit_large_patch16_dinov3.sat493m",
-        "pretrained": True,
-        "global_pool": "avg",
-        "use_cls_token": False,
-        "name": "vit_large_patch16_dinov3sat",
-    },
+    "resnet18": ModelConfig(name="timm/resnet18"),
+    "resnet50": ModelConfig(name="timm/resnet50"),
+    "convnext_large_dinov3": ModelConfig(name="timm/convnext_large_dinov3"),
+    "dinov3": ModelConfig(name="timm/vit/vit_large_patch16_dinov3", kwargs={"auto_resize": False}),
+    "dinov3sat": ModelConfig(
+        name="timm/vit/vit_large_patch16_dinov3sat", kwargs={"auto_resize": False}
+    ),
 }
 
 C_VALUES = np.sort(np.unique(np.append(np.logspace(-7, 2, 40), 1.0)))
 
 
-def instantiate_model(model_cfg: dict, bands: list[BandSpec]) -> torch.nn.Module:
+def instantiate_model(
+    model_cfg: ModelConfig, bands: list[BandSpec], dataset_name: str
+) -> torch.nn.Module:
     """Create a model with the requested configuration and input bands."""
-    target = model_cfg["_target_"]
-    module_name, class_name = target.rsplit(".", 1)
-    module = __import__(module_name, fromlist=[class_name])
-    cls = getattr(module, class_name)
-
-    kwargs = {k: v for k, v in model_cfg.items() if k not in ("_target_", "name")}
-    kwargs["bands"] = bands
-    return cls(**kwargs)
+    _, preset = resolve_run_config(
+        RunConfig(model=model_cfg, datasets=[dataset_name], runtime=RuntimeConfig(seed=SEED)),
+        dataset_name,
+    )
+    return build_model(preset, bands=bands, normalization="bandspec_zscore")
 
 
 def run_c_sweep(
@@ -178,7 +149,7 @@ def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[di
 
         logger.info("=== %s/%s ===", dataset_name, model_name)
         logger.info("  Loading model %s...", model_name)
-        model = instantiate_model(model_cfg, bands)
+        model = instantiate_model(model_cfg, bands, dataset_name)
         model.to(device).eval()
 
         logger.info("  Extracting features...")

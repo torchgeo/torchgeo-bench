@@ -32,34 +32,36 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
-from torchgeo_bench.config import (
-    compose_config,
-    instantiate,
-    list_model_configs,
-    model_config_path,
-)
+from torchgeo_bench.config import list_model_configs
+from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_run_config
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.datasets.base import BandSpec, BenchDataset
 from torchgeo_bench.linear import LogisticRegression
-from torchgeo_bench.main import embed_split, resolve_model_config
+from torchgeo_bench.main import embed_split, instantiate_dataset_model, resolve_image_device
+from torchgeo_bench.presets import (
+    NORMALIZATIONS,
+    load_model_preset,
+    merge_settings,
+    resolve_run_config,
+)
 from torchgeo_bench.results import DEFAULT_RESULTS_DIR, load_results
 from torchgeo_bench.utils import FeatureSplit
 
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-VALID_NORMS = {"bandspec_zscore", "model_native", "minmax", "minmax_zscore", "identity"}
+VALID_NORMS = set(NORMALIZATIONS.values())
 
 
 def build_name_to_config_map() -> dict[str, str]:
     """Map recorded model names to packaged model config identifiers."""
     out: dict[str, str] = {}
     for config_name in list_model_configs():
-        cfg = OmegaConf.load(model_config_path(config_name))
-        out[str(cfg.name)] = config_name
+        preset = load_model_preset(ModelConfig(name=config_name))
+        if preset.track == "image":
+            out[preset.name] = config_name
     return out
 
 
@@ -95,6 +97,11 @@ def parse_args() -> argparse.Namespace:
     """Parse probability extraction options."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, help="Dataset name (e.g. m-eurosat).")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Original run YAML for a custom model or non-default constructor options.",
+    )
     parser.add_argument(
         "--results",
         type=Path,
@@ -168,6 +175,19 @@ def band_specs(bench: BenchDataset, bands: str | list[str] | None) -> list[BandS
     return bench.select_band_specs(names)
 
 
+def source_config(path: Path | None, model_name: str, dataset: str) -> RunConfig:
+    """Load explicit constructor settings or locate the recorded packaged preset."""
+    if path is not None:
+        return load_run_config(path)
+    name_map = build_name_to_config_map()
+    if model_name not in name_map:
+        raise ValueError(
+            f"No packaged model config found with name={model_name!r}; "
+            "pass --config with the original run YAML."
+        )
+    return RunConfig(model=ModelConfig(name=name_map[model_name]), datasets=[dataset])
+
+
 def main() -> None:
     """Extract and save train/test probabilities for the selected dataset."""
     args = parse_args()
@@ -188,7 +208,12 @@ def main() -> None:
         if pd.notna(row["image_size"]) and str(row["image_size"]).strip() not in ("", "None", "nan")
         else None
     )
-    interpolation = str(row.get("interpolation") or "bicubic")
+    interpolation_value = row.get("interpolation")
+    interpolation = (
+        str(interpolation_value)
+        if pd.notna(interpolation_value) and interpolation_value
+        else "bicubic"
+    )
     partition = str(row["partition"])
     best_c = float(args.c) if args.c is not None else float(row["best_c"])
 
@@ -209,13 +234,40 @@ def main() -> None:
         best_c,
     )
 
-    name_map = build_name_to_config_map()
-    if model_name not in name_map:
-        raise SystemExit(f"No packaged model config found with name={model_name!r}")
-    cfg = compose_config([f"model={name_map[model_name]}", f"seed={args.seed}"])
-    model_cfg = resolve_model_config(cfg.model, args.dataset)
+    requested_config = source_config(args.config, model_name, args.dataset)
+    cfg, model_cfg = resolve_run_config(
+        RunConfig.model_validate(
+            merge_settings(
+                requested_config.model_dump_yaml(),
+                {
+                    "datasets": [args.dataset],
+                    "input": {
+                        "bands": bands_value,
+                        "normalization": {value: key for key, value in NORMALIZATIONS.items()}[
+                            normalization
+                        ],
+                        "image_size": image_size,
+                        "interpolation": interpolation,
+                        "partition": partition,
+                    },
+                    "runtime": {
+                        "device": args.device,
+                        "batch_size": args.batch_size,
+                        "workers": args.num_workers,
+                        "seed": args.seed,
+                        "verbose": args.verbose,
+                    },
+                },
+            )
+        ),
+        args.dataset,
+    )
+    if model_cfg.name != model_name:
+        raise ValueError(
+            f"Configured model {model_cfg.name!r} does not match result model {model_name!r}"
+        )
 
-    device = torch.device(args.device)
+    device = resolve_image_device(cfg.runtime.device)
     torch.manual_seed(args.seed)
 
     ds_cls = get_bench_dataset_class(args.dataset)
@@ -223,13 +275,14 @@ def main() -> None:
 
     result = get_datasets(
         dataset_name=args.dataset,
-        partition_name=partition,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
+        partition_name=cfg.input.partition,
+        batch_size=cfg.runtime.batch_size,
+        num_workers=cfg.runtime.workers,
         return_val=True,
-        image_size=image_size,
-        interpolation=interpolation,
-        bands=bands_value,
+        image_size=cfg.input.image_size,
+        interpolation=cfg.input.interpolation,
+        bands=cfg.input.bands,
+        time_steps=cfg.input.time_steps,
     )
     assert result is not None
     train_dataset, train_loader_shuffled, val_loader, test_loader = result
@@ -242,14 +295,7 @@ def main() -> None:
         pin_memory=train_loader_shuffled.pin_memory,
     )
 
-    bands_list = band_specs(ds_cls(), bands_value)
-
-    model = instantiate(
-        model_cfg,
-        bands=bands_list,
-        normalization=normalization,
-    )
-    model.to(device).eval()
+    model = instantiate_dataset_model(cfg, model_cfg, ds_cls(), train_dataset, device)
 
     x_train, y_train = embed_split(model, train_loader, device, verbose=args.verbose)
     x_val, y_val = embed_split(model, val_loader, device, verbose=args.verbose)
@@ -269,7 +315,7 @@ def main() -> None:
         torch.cuda.empty_cache()
 
     clf = fit_probe(
-        FeatureSplit(x_train, y_train), FeatureSplit(x_val, y_val), best_c, args.seed, args.device
+        FeatureSplit(x_train, y_train), FeatureSplit(x_val, y_val), best_c, args.seed, str(device)
     )
 
     classes = (

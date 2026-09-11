@@ -4,7 +4,9 @@ Version 1 hashed the model recipe *and* the user evaluation section, including
 obsolete visualization defaults. Preserve that representation, not a Pydantic
 dump. Legacy composition used integer C endpoints; the image adapter used floats
 and copied preset layers. Both are accepted only when their effective settings
-match the current run. Additive profile/ID passes and dataset selection stay out.
+match the current run. New rows retain the public image CLI's fingerprint when
+its effective recipe is unchanged. Additive profile/ID passes and dataset
+selection stay out.
 """
 
 import hashlib
@@ -13,9 +15,14 @@ from copy import deepcopy
 from itertools import product
 from typing import Any, Literal
 
-from .config import model_config_path
-from .config_schema import RunConfig, SegmentationConfig, load_yaml
-from .presets import NORMALIZATIONS, load_model_preset, merge_settings, resolve_run_config
+from .config_schema import RunConfig, SegmentationConfig
+from .presets import (
+    NORMALIZATIONS,
+    PresetDefaults,
+    load_model_preset,
+    merge_settings,
+    resolve_run_config,
+)
 
 _SEGMENTATION_KEYS = {
     "head": "head_type",
@@ -39,21 +46,47 @@ def _segmentation_payload(config: SegmentationConfig) -> dict[str, Any]:
     return values
 
 
+def _preset_payload(defaults: PresetDefaults) -> dict[str, Any]:
+    """Retain the old CSV fingerprint representation, not its configuration engine."""
+    values = {**defaults.kwargs, **defaults.input.model_dump(exclude_unset=True)}
+    evaluation: dict[str, Any] = {}
+    classification = defaults.classification
+    if "linear" in classification.model_fields_set:
+        linear = classification.linear
+        evaluation["c_range"] = [
+            int(value) if float(value).is_integer() else value
+            for value in (linear.c_log10_start, linear.c_log10_stop)
+        ] + [linear.c_count]
+    for key in classification.model_fields_set - {"linear", "methods"}:
+        legacy_key = "bootstrap" if key == "bootstrap_samples" else key
+        evaluation[legacy_key] = classification.model_dump()[key]
+    segmentation = defaults.segmentation.model_dump(exclude_unset=True)
+    if segmentation:
+        evaluation["segmentation"] = {
+            _SEGMENTATION_KEYS.get(key, key): value
+            for key, value in segmentation.items()
+            if key != "ignore_index"
+        }
+        if "ignore_index" in segmentation:
+            evaluation["segmentation"]["criterion"] = {
+                "_target_": "torch.nn.CrossEntropyLoss",
+                "ignore_index": defaults.segmentation.ignore_index,
+            }
+    if evaluation:
+        values["eval"] = evaluation
+    return values
+
+
 def _model_payload(config: RunConfig) -> dict[str, Any]:
     if config.model.target is not None:
         return {"_target_": config.model.target, "name": config.model.name, **config.model.kwargs}
-    raw = load_yaml(model_config_path(config.model.name))
-    if "_target_" not in raw:
-        preset = load_model_preset(config.model, seed=config.runtime.seed)
-        return {
-            "_target_": preset.target,
-            "name": preset.name,
-            **preset.model_dump(exclude={"name", "target"}, exclude_unset=True),
+    preset = load_model_preset(config.model, seed=config.runtime.seed)
+    values = {"_target_": preset.target, "name": preset.name, **_preset_payload(preset)}
+    if preset.dataset_overrides:
+        values["dataset_overrides"] = {
+            name: _preset_payload(override) for name, override in preset.dataset_overrides.items()
         }
-    if raw.get("seed") == "${seed}":
-        raw["seed"] = config.runtime.seed
-    raw.update(config.model.kwargs)
-    return raw
+    return values
 
 
 def _historical_payload(config: RunConfig, style: Literal["legacy", "image"]) -> dict[str, Any]:
@@ -97,8 +130,8 @@ def _historical_payload(config: RunConfig, style: Literal["legacy", "image"]) ->
     }
 
 
-def _resume_config_payload(config: RunConfig) -> dict[str, Any]:
-    """Return canonical version-1 settings, with explicit values above preset defaults."""
+def _legacy_canonical_payload(config: RunConfig) -> dict[str, Any]:
+    """Retain the first typed runner's precedence-aware version-1 representation."""
     payload = _historical_payload(config, "legacy")
     if config.model.target is not None:
         # Custom kwargs are opaque constructor data, including names such as "eval".
@@ -117,6 +150,26 @@ def _resume_config_payload(config: RunConfig) -> dict[str, Any]:
                 recipe[key] = value
         _override_evaluation_defaults(recipe.get("eval", {}), config, evaluation)
     return payload
+
+
+def _resume_config_payload(config: RunConfig) -> dict[str, Any]:
+    """Retain the public CLI fingerprint unless effective preset behavior changed."""
+    legacy = _legacy_canonical_payload(config)
+    if config.model.target is not None:
+        return legacy
+    preset = load_model_preset(config.model, seed=config.runtime.seed)
+    if preset.track != "image":
+        return legacy
+    image = _historical_payload(config, "image")
+    # Consider every recipe, not the selected datasets: selection is not a hash input.
+    recipes = ("", *preset.dataset_overrides)
+    if all(
+        _matches_effective(image, config, dataset, segmentation=segmentation, image=True)
+        for dataset in recipes
+        for segmentation in (False, True)
+    ):
+        return image
+    return legacy
 
 
 def _override_evaluation_defaults(
@@ -179,7 +232,7 @@ def _matches_effective(
 
 def compatible_hashes(config: RunConfig, dataset: str, *, segmentation: bool) -> set[str]:
     """Return only historical keys whose effective recipe matches this dataset's run."""
-    hashes = {_resume_config_hash(config)}
+    hashes = {_resume_config_hash(config), _hash_payload(_legacy_canonical_payload(config))}
     if config.model.target is not None:
         return hashes
     for style in ("legacy", "image"):

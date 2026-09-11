@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.datasets import get_dataset_task
 from torchgeo_bench.image_hash import (
     _hash_payload,
     _historical_payload,
@@ -22,6 +23,9 @@ from .test_main_fast import _resume_row
 
 with gzip.open(Path(__file__).parent / "data/image-hash-baseline.json.gz", "rt") as file:
     BASELINE = json.load(file)
+
+with (Path(__file__).parent / "fixtures/image-cli-hash-cases.json").open() as file:
+    IMAGE_CLI_CASES = json.load(file)
 
 
 def _config(name: str = "rcf", **sections) -> RunConfig:
@@ -47,9 +51,50 @@ def test_all_128_historical_payloads_and_hashes_are_exact(name: str, style: str)
 
 
 @pytest.mark.parametrize("name", BASELINE)
-def test_default_canonical_hash_retains_legacy_payload(name: str) -> None:
-    assert _resume_config_payload(_config(name)) == BASELINE[name]["legacy"]["payload"]
-    assert _resume_config_hash(_config(name)) == BASELINE[name]["legacy"]["hash"]
+def test_default_canonical_hash_retains_equivalent_public_cli_payload(name: str) -> None:
+    model = BASELINE[name]["legacy"]["payload"]["model"]
+    changed_probe_defaults = "c_range" in model.get("eval", {})
+    coordinate_encoder = ".coordbench." in model["_target_"]
+    style = "legacy" if changed_probe_defaults or coordinate_encoder else "image"
+    assert _resume_config_payload(_config(name)) == BASELINE[name][style]["payload"]
+    assert _resume_config_hash(_config(name)) == BASELINE[name][style]["hash"]
+
+
+@pytest.mark.parametrize("case", IMAGE_CLI_CASES, ids=lambda case: case["id"])
+def test_canonical_hash_matches_captured_public_cli_cases(case: dict) -> None:
+    config = RunConfig.model_validate(case["input"])
+    assert _resume_config_hash(config) == case["hash"]
+    for dataset in config.datasets:
+        hashes = compatible_hashes(
+            config, dataset, segmentation=get_dataset_task(dataset) == "segmentation"
+        )
+        assert case["first_typed_hash"] in hashes
+
+
+def test_canonical_format_selection_does_not_depend_on_dataset_selection() -> None:
+    hashes = set()
+    for datasets in (["m-eurosat"], ["caffe"], ["m-eurosat", "caffe"], ["all"]):
+        config = _config(
+            model={"name": "torchgeo/scalemae_large_fmow", "kwargs": {"res": 9.0}},
+            datasets=datasets,
+        )
+        hashes.add(_resume_config_hash(config))
+        assert _hash_payload(_historical_payload(config, "image")) not in compatible_hashes(
+            config, "m-eurosat", segmentation=False
+        )
+    assert len(hashes) == 1
+
+
+def test_real_legacy_segmentation_fingerprint_remains_resumable() -> None:
+    config = _config(
+        model={"name": "timm/resnet18", "kwargs": {"pretrained": False}},
+        datasets=["caffe"],
+        input={"image_size": 32},
+        runtime={"device": "cpu", "batch_size": 2, "workers": 0},
+        classification={"bootstrap_samples": 2},
+        segmentation={"head": "linear", "epochs": 1, "batch_size": 2, "cache_dtype": "float32"},
+    )
+    assert "17895d85c4b14519" in compatible_hashes(config, "caffe", segmentation=True)
 
 
 @pytest.mark.parametrize("style", ["legacy", "image"])

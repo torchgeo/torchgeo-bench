@@ -27,6 +27,15 @@ def test_defaults_and_modern_shape() -> None:
     assert config.output.directory == "results/models"
 
 
+def test_all_datasets_must_be_an_exclusive_selection() -> None:
+    config = valid_config()
+    config["datasets"] = ["all"]
+    assert validate_run_config(config).datasets == ["all"]
+    config["datasets"] = ["all", "m-eurosat"]
+    with pytest.raises(ValidationError, match="cannot be combined"):
+        validate_run_config(config)
+
+
 @pytest.mark.parametrize(
     ("section", "field", "value"),
     [
