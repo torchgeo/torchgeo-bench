@@ -17,7 +17,6 @@ The setup steps are the same as Stage 1:
 
    $ git clone https://github.com/torchgeo/torchgeo-bench.git
    $ cd torchgeo-bench
-   $ conda activate torchgeo-bench
    $ uv sync --extra dev
 
 Then fork the repository on GitHub and create a feature branch:
@@ -37,8 +36,7 @@ tests, and the PR submission.
 Integrate into the package
 --------------------------
 
-Once your model class is working locally, move it into torchgeo-bench and export
-it so config composition can resolve ``_target_``.
+Once your model class is working locally, move it into torchgeo-bench and expose its import path to the model preset loader.
 
 **1. Place the module** under :file:`src/torchgeo_bench/models/`:
 
@@ -77,15 +75,12 @@ Install the extra locally to confirm it resolves:
 
 .. code-block:: console
 
-   $ uv sync --extra <newmodel>
+   $ uv sync --extra dev --extra <newmodel>
+   $ uv lock
 
 .. note::
 
-   If your model requires an optional extra, document it clearly in your
-   model's ``__init__`` docstring and in the PR description.  The test suite
-   must still import the class without the extra installed (guard weight
-   loading with a ``try/except ImportError`` only around the optional import,
-   not the class definition).
+   Document required extras in the constructor docstring and PR description. Import optional packages inside the constructor or weight-loading method, not at module scope, so the model class remains importable without the extra. Do not add fallback imports for hard dependencies or silently use random weights when pretrained loading fails.
 
 .. _contrib-weights:
 
@@ -112,8 +107,9 @@ Create :file:`tests/test_<model>.py`.  Every added code path must be covered.
 
 .. code-block:: python
 
-   import torch
    import pytest
+   import torch
+
    from torchgeo_bench.datasets.base import BandSpec
    from torchgeo_bench.models.new_model import NewModel
 
@@ -126,9 +122,9 @@ Create :file:`tests/test_<model>.py`.  Every added code path must be covered.
        ]
 
 
-   def test_new_model_output_shape():
+   def test_new_model_output_shape() -> None:
        """Model returns (B, K) with random weights."""
-       model = NewModel(bands=_bands(), pretrained=False)
+       model = NewModel(bands=_bands(), pretrained=False).eval()
        x = torch.randn(2, 3, 64, 64)
        with torch.no_grad():
            out = model.forward_patch_features(x)
@@ -136,7 +132,7 @@ Create :file:`tests/test_<model>.py`.  Every added code path must be covered.
        assert out.shape[0] == 2
 
 
-   def test_new_model_num_channels():
+   def test_new_model_num_channels() -> None:
        """`num_channels` matches the input BandSpec list length."""
        model = NewModel(bands=_bands(5), pretrained=False)
        assert model.num_channels == 5
@@ -146,9 +142,9 @@ Create :file:`tests/test_<model>.py`.  Every added code path must be covered.
 .. code-block:: python
 
    @pytest.mark.slow
-   def test_new_model_pretrained_loads():
+   def test_new_model_pretrained_loads() -> None:
        """Pretrained weights download and load without error."""
-       model = NewModel(bands=_bands(), pretrained=True)
+       model = NewModel(bands=_bands(), pretrained=True).eval()
        x = torch.randn(1, 3, 64, 64)
        with torch.no_grad():
            out = model.forward_patch_features(x)
@@ -158,36 +154,38 @@ Run the fast tests before opening the PR:
 
 .. code-block:: console
 
-   $ pytest --no-cov tests/test_new_model.py
+   $ uv run pytest --no-cov tests/test_new_model.py
+
+Also cover the normalization strategies your wrapper supports, unsupported inputs, and construction through its packaged preset. For a segmentation-capable backbone, exercise its configured feature layers with a compatible head. Fast tests must not download weights or datasets.
 
 Slow tests must pass locally but are excluded from the default CI run
 (``pytest`` without ``-m slow`` skips them automatically):
 
 .. code-block:: console
 
-   $ pytest --no-cov -m slow tests/test_new_model.py
+   $ uv run pytest --no-cov -m slow tests/test_new_model.py
 
 .. _contrib-results:
 
 Submit results
 --------------
 
-Run the full benchmark on all datasets applicable to your model's sensor
-coverage and write the results to :file:`results/contributed/<model_name>.csv`:
+Run the benchmark on datasets applicable to your model's sensor coverage. The default output is :file:`results/models/<model_name>.csv`, matching the model PR template. For example:
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run model=new_model \
-       dataset.names=[m-eurosat,m-so2sat,m-bigearthnet,m-brick-kiln,m-forestnet,m-pv4ger] \
-       output=results/contributed/new_model.csv
+   $ uv run torchgeo-bench run --model new_model --device cuda:0 \
+       --dataset m-eurosat --dataset m-so2sat --dataset m-bigearthnet \
+       --dataset m-brick-kiln --dataset m-forestnet --dataset m-pv4ger
 
 For V2 datasets:
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run model=new_model \
-       dataset.names=[benv2,treesatai,so2sat,forestnet] \
-       output=results/contributed/new_model.csv resume=true
+   $ uv run torchgeo-bench run --model new_model --device cuda:0 \
+       --dataset benv2 --dataset treesatai --dataset so2sat --dataset forestnet --resume
+
+Use ``--device cpu`` without a CUDA device. Record the selected bands and normalization, and list unsupported datasets with a reason rather than silently skipping them. For a longer dataset list or segmentation options, submit the run YAML and invoke it with ``--config`` as shown in :doc:`eval_own_model`. Commit only the new model's result file.
 
 The CSV schema is identical to the per-model results files — see
 :doc:`results-format` for the full column reference.
@@ -201,8 +199,8 @@ Before opening the PR, apply auto-fixes and verify the full test suite passes:
 
 .. code-block:: console
 
-   $ ruff check . --fix && ruff format .
-   $ pytest --no-cov
+   $ uv run ruff check . --fix && uv run ruff format .
+   $ uv run pytest --no-cov
 
 .. _contrib-pr:
 
