@@ -150,11 +150,7 @@ def main(argv: list[str] | None = None) -> None:
     """Run the image benchmark CLI."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     if args.command == "run":
-        try:
-            _run(args)
-        except ValueError as error:  # allow-except: report configuration errors to the CLI user
-            print(f"error: {error}", file=sys.stderr)
-            raise SystemExit(2) from error
+        _run(args)
     elif args.command == "models":
         _show_catalog(args.name, _model_names(), _model_detail, "model")
     elif args.command == "datasets":
