@@ -16,7 +16,7 @@ Docs:
 |-------|-------|
 | **Model name** | <!-- e.g. `new_model` as it appears in the results CSV --> |
 | **Class** | <!-- e.g. `torchgeo_bench.models.NewModel` --> |
-| **Hydra config** | <!-- e.g. `src/torchgeo_bench/conf/model/new_model.yaml` --> |
+| **Model preset** | <!-- e.g. `src/torchgeo_bench/conf/model/new_model.yaml` --> |
 | **Pretraining data** | <!-- e.g. Sentinel-2 global, fMoW, ImageNet, etc. --> |
 | **Sensor coverage** | <!-- e.g. Sentinel-2 RGB, Sentinel-2 multispectral, aerial RGB --> |
 | **Weights URL** | <!-- Hugging Face Hub repo, release asset, or equivalent public URL --> |
@@ -29,7 +29,8 @@ Follow the Stage 2 guide: [Contribute a model](https://torchgeo.org/torchgeo-ben
 
 - [ ] Class inherits `BenchModel` and implements `_forward_patch_features(images) -> (B, K)`.
 - [ ] Class is exported from `src/torchgeo_bench/models/__init__.py` and listed in `__all__`.
-- [ ] Hydra config exists at `src/torchgeo_bench/conf/model/<name>.yaml` with the correct `_target_`.
+- [ ] Model preset exists at `src/torchgeo_bench/conf/model/<name>.yaml` with the correct `target`, result `name`, and constructor `kwargs`.
+- [ ] The wrapper honors the requested normalization and input BandSpecs.
 - [ ] Model weights are publicly accessible without authentication.
 - [ ] Optional dependencies are declared under `[project.optional-dependencies]` in `pyproject.toml`, if needed.
 - [ ] Tests cover all added code in `tests/test_<model>.py`.
@@ -56,15 +57,24 @@ uv run torchgeo-bench download geobench_v2
 uv run torchgeo-bench download eurosat
 ```
 
-Run `torchgeo-bench` with only this model selected. Use `resume=true` so an
-interrupted run can continue without duplicating completed rows. Set `device`
-explicitly so maintainers rerun on the same CPU/GPU path.
+Create a run YAML listing the applicable datasets and the exact bands, normalization, and device used. Use `--resume` so an interrupted run can continue without duplicating completed rows:
+
+```yaml
+model:
+  name: <model_config_name>
+datasets: [m-eurosat, m-pv4ger]  # Replace with every applicable dataset.
+input:
+  bands: rgb
+  normalization: dataset
+runtime:
+  device: cuda:0
+```
+
+Save this as `new_model_run.yaml`, including any additional settings needed for the model:
 
 ```bash
-uv run torchgeo-bench run model=<model_config_name> \
-  dataset.names=all \
-  resume=true \
-  device=<cuda:0|cpu>
+uv run torchgeo-bench run --config new_model_run.yaml --dry-run
+uv run torchgeo-bench run --config new_model_run.yaml --resume
 ```
 
 If a dataset cannot run because the model does not support that sensor or
@@ -94,10 +104,7 @@ Maintainers should be able to check out this PR and rerun the exact benchmark.
 ```bash
 git checkout <this-branch>
 uv sync --extra dev
-uv run torchgeo-bench run model=<model_config_name> \
-  dataset.names=all \
-  resume=true \
-  device=<cuda:0|cpu>
+uv run torchgeo-bench run --config new_model_run.yaml --resume
 ```
 
 Hardware and software used for submitted results:
