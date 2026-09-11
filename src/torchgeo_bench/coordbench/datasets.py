@@ -19,6 +19,14 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from torchgeo_bench.coordbench.catalog import (
+    CDC_PLACES_MEASURES,
+    DEEPMIND_EVAL_CONFIGS,
+    FAMILY_BENCHMARKS,
+    SUSTAINBENCH_TASKS,
+    USAVARS_LABELS,
+)
+
 logger = logging.getLogger(__name__)
 
 # https://huggingface.co/datasets/taylor-geospatial/coordbench
@@ -27,33 +35,6 @@ COORDBENCH_REPO = os.environ.get("COORDBENCH_REPO", "taylor-geospatial/coordbenc
 # canonical (non-task) schema columns, excluded when scanning for task columns
 _CANONICAL_EXTRA = frozenset({"timestamp", "timestamp_end", "split", "id"})
 
-DEEPMIND_EVAL_CONFIGS = (
-    "africa_crop_mask",
-    "aster_ged",
-    "canada_crops_coarse",
-    "canada_crops_fine",
-    "descals",
-    "ethiopia_crops",
-    "glance",
-    "lcmap_lc",
-    "lcmap_lcc",
-    "lcmap_lu",
-    "lcmap_luc",
-    "lucas_lc",
-    "lucas_lu",
-    "openet_ensemble",
-    "us_trees",
-)
-
-USAVARS_LABELS = (
-    "treecover",
-    "elevation",
-    "population",
-    "nightlights",
-    "income",
-    "roads",
-    "housing",
-)
 USAVARS_NODATA = -999.0  # nodata sentinel in the label CSVs
 # log1p the heavy right-skewed targets (matches PDFM's own convention for pop/nightlights).
 USAVARS_LOG_LABELS = frozenset({"population", "income", "nightlights", "housing"})
@@ -71,30 +52,6 @@ PDFM_NON_TASK = frozenset(
         "extrapolation_split",
     }
 )
-
-SUSTAINBENCH_TASKS = {
-    "asset": "asset_index",
-    "water": "water_index",
-    "sanitation": "sanitation_index",
-    "child_mortality": "under5_mort",
-    "women_edu": "women_edu",
-    "women_bmi": "women_bmi",
-}
-
-CDC_PLACES_MEASURES = {  # task name -> GIS-friendly column prefix (CrudePrev = crude prevalence %)
-    "phys_health": "PHLTH",
-    "diabetes": "DIABETES",
-    "copd": "COPD",
-    "cancer": "CANCER",
-    "chd": "CHD",
-    "mental_health": "MHLTH",
-    "checkup": "CHECKUP",
-    "sleep_lt7": "SLEEP",
-    "asthma": "CASTHMA",
-    "obesity": "OBESITY",
-    "smoking": "CSMOKING",
-    "high_chol": "HIGHCHOL",
-}
 
 
 @dataclass
@@ -524,37 +481,6 @@ FAMILY_LOADERS: dict[str, Callable[[], list[CoordBenchmark]]] = {
     "deepmind": load_deepmind,
 }
 
-
-# Benchmark names each family emits; lets a selection load only the needed family,
-# and lets callers enumerate the suite without a download.
-FAMILY_BENCHMARKS: dict[str, tuple[str, ...]] = {
-    "pdfm": ("pdfm-conus27",),
-    "air_temp": ("satclip-air-temp",),
-    "california_housing": ("california-housing",),
-    "satclip": (
-        "satclip-country",
-        "satclip-ecoregion",
-        "satclip-biome",
-        "satclip-population",
-        "satclip-elevation",
-    ),
-    "sustainbench": tuple(f"sustainbench-{k}" for k in SUSTAINBENCH_TASKS),
-    "better_together": (
-        "bt-cropharvest",
-        "bt-biomass",
-        "bt-landcover",
-        "bt-bioclim",
-        "bt-population",
-        "bt-distroad",
-    ),
-    "cdc_places": tuple(f"places-{k}" for k in CDC_PLACES_MEASURES),
-    "usavars": tuple(f"mosaiks-{label}" for label in USAVARS_LABELS),
-    "country": ("country",),
-    "ecoregions": ("ecoregions",),
-    "worldclim": ("worldclim-bio1", "worldclim-bio12"),
-    "soilgrids": ("soilgrids-soc", "soilgrids-phh2o"),
-    "deepmind": tuple(f"dm-{stem}" for stem in DEEPMIND_EVAL_CONFIGS),
-}
 
 _BENCHMARK_TO_FAMILY: dict[str, str] = {
     name: family for family, names in FAMILY_BENCHMARKS.items() for name in names
