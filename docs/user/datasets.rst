@@ -5,7 +5,7 @@ Datasets
 V2 — plus wrappers around torchgeo's standalone EuroSAT and NWPU-RESISC45
 datasets.  All datasets share the
 :class:`~torchgeo_bench.datasets.BenchDataset` interface and are
-auto-registered on import so they can be selected by their CLI name.
+registered by name so they can be selected without importing every loader.
 
 Filesystem layout
 -----------------
@@ -38,10 +38,11 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
 Downloading
 -----------
 
-The bundled :doc:`/api/cli` provides one subcommand per family:
+The :doc:`/api/cli` accepts one or more dataset names. Collection aliases remain available for downloading a whole GeoBench family or a selected subset:
 
 .. code-block:: console
 
+   $ torchgeo-bench download m-eurosat burn_scars resisc45            # selected datasets
    $ torchgeo-bench download geobench_v1                              # all six V1 datasets
    $ torchgeo-bench download geobench_v1 --datasets m-eurosat         # V1 subset
    $ torchgeo-bench download geobench_v2                              # default V2 set
@@ -49,6 +50,8 @@ The bundled :doc:`/api/cli` provides one subcommand per family:
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT
    $ torchgeo-bench download resisc45                                 # torchgeo RESISC45
    $ torchgeo-bench download geobench_v2 --output-dir /scratch/data   # custom root
+
+Do not mix collection aliases and individual names in one invocation. ``--datasets`` applies only to a collection alias. ``--output-dir`` changes the download destination, not the runner's fixed ``data/`` location; link the downloaded root to ``data/`` before loading it from another working directory.
 
 The default V2 download set is: ``benv2``, ``burn_scars``, ``caffe``,
 ``cloudsen12``, ``dynamic_earthnet``, ``flair2``, ``forestnet``,
