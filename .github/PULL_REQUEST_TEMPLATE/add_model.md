@@ -29,7 +29,7 @@ Follow the Stage 2 guide: [Contribute a model](https://torchgeo.org/torchgeo-ben
 
 - [ ] Class inherits `BenchModel` and implements `_forward_patch_features(images) -> (B, K)`.
 - [ ] Class is exported from `src/torchgeo_bench/models/__init__.py` and listed in `__all__`.
-- [ ] Model preset exists at `src/torchgeo_bench/conf/model/<name>.yaml` with the correct `_target_` and result `name`.
+- [ ] Model preset exists at `src/torchgeo_bench/conf/model/<name>.yaml` with the correct `target`, result `name`, and constructor `kwargs`.
 - [ ] The wrapper honors the requested normalization and input BandSpecs.
 - [ ] Model weights are publicly accessible without authentication.
 - [ ] Optional dependencies are declared under `[project.optional-dependencies]` in `pyproject.toml`, if needed.

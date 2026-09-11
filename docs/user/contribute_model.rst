@@ -55,13 +55,15 @@ Once your model class is working locally, move it into torchgeo-bench and expose
        "NewModel",
    ]
 
-**3. Update the model config** ``_target_`` to the package path:
+**3. Update the model preset** ``target`` to the package path and put constructor options under ``kwargs``:
 
 .. code-block:: yaml
 
-   _target_: torchgeo_bench.models.NewModel
    name: new_model
-   pretrained: true
+   target: torchgeo_bench.models.NewModel
+   track: image
+   kwargs:
+     pretrained: true
 
 **4. Declare optional dependencies** in :file:`pyproject.toml` if your model
 requires packages beyond ``[project.dependencies]``:

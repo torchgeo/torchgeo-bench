@@ -82,6 +82,9 @@ Pick the strategy that matches how your backbone was trained:
    * - ``minmax``
      - Scale each band using its dataset ``BandSpec.min`` and ``BandSpec.max``.
      - Forward ``normalization`` unchanged; the constructor strategy is also named ``minmax``.
+   * - ``minmax_zscore``
+     - Min-max scale each channel, then z-score using the correspondingly scaled dataset statistics.
+     - Forward ``normalization`` unchanged; the constructor uses the same name.
 
 For the full list of available strategies and their exact semantics, see
 :file:`src/torchgeo_bench/models/_normalization.py`.
@@ -161,13 +164,13 @@ The preset identifies your importable class and its result name. Add any constru
 
 .. code-block:: yaml
 
-   _target_: new_model.NewModel    # Python import path for your class.
-   pretrained: true
-   name: new_model                 # Name shown in result rows.
+   name: new_model
+   target: new_model.NewModel
+   track: image
+   kwargs:
+     pretrained: true
 
-   # Add other constructor options; the runner supplies bands and normalization.
-   # embed_dim: 768
-   # checkpoint: path/to/weights.pt
+Only ``kwargs`` are passed as constructor options. Keep input and evaluation defaults in the preset's ``input``, ``classification``, and ``segmentation`` sections, not inside ``kwargs``. Dataset-specific defaults belong in ``dataset_overrides``. These are Pydantic-validated mappings; ``_target_``, interpolation, and recursive instantiation are not supported.
 
 .. note::
 
@@ -185,7 +188,7 @@ parent directory to ``PYTHONPATH`` before running:
 Run the benchmark
 -----------------
 
-Select the preset with ``--model`` and repeat ``--dataset`` for each applicable dataset. Use the canonical CLI and its Pydantic-validated YAML interface rather than the separate legacy ``key=value`` interface:
+Select the preset with ``--model`` and repeat ``--dataset`` for each applicable dataset. The CLI accepts explicit flags and Pydantic-validated YAML; the old ``key=value`` interface is retired:
 
 .. code-block:: console
 
@@ -227,6 +230,23 @@ Validate it before running, then use ``--resume`` to continue against the same o
    $ uv run torchgeo-bench run --config new_model_run.yaml --resume
 
 Only explicitly supplied flags override YAML values. ``run --config-help`` describes the supported fields, and :file:`examples/image-run.yaml` provides a complete example.
+
+You can also evaluate an external class without adding a packaged preset. In the run YAML, provide its importable target and constructor options directly:
+
+.. code-block:: yaml
+
+   model:
+     name: new_model
+     target: new_model.NewModel
+     kwargs:
+       pretrained: true
+   datasets: [m-eurosat]
+   runtime:
+     device: cpu
+   output:
+     file: results/new_model_results.csv
+
+Run this file with ``--config``. The copied module's directory must still be on ``PYTHONPATH``. For either form, precedence is built-in defaults, preset defaults, dataset-specific defaults, explicit run YAML, then explicit flags.
 
 .. _eval-results:
 
