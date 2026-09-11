@@ -25,6 +25,12 @@ Image statistics baseline
 
 .. autoclass:: ImageStatsBench
 
+Handcrafted baseline
+^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: HandcraftedBench
+   :members: feature_names, num_features, feature_metadata
+
 timm encoders
 ^^^^^^^^^^^^^
 

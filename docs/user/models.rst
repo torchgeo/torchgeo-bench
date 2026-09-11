@@ -36,6 +36,116 @@ returns per-channel mean / std as the feature vector.
 
    $ python -m torchgeo_bench.cli run model=imagestats
 
+Handcrafted baseline
+^^^^^^^^^^^^^^^^^^^^
+
+:class:`~torchgeo_bench.models.HandcraftedBench` is a deterministic,
+zero-learned-parameter baseline for arbitrary input channels and positive
+spatial dimensions. It includes every raw channel (including SAR), plus
+available sensor-local optical index maps. It has no weights to download,
+feature selection, random initialization, image gradients or training state.
+
+.. code-block:: console
+
+   $ torchgeo-bench run model=handcrafted dataset.names=[eurosat] dataset.bands=all dataset.normalization=identity
+   $ torchgeo-bench run model=handcrafted model.level=3 dataset.names=[resisc45] dataset.bands=all dataset.normalization=identity
+   $ python -m experiments.run_handcrafted --levels 1 2 3
+
+The sweep script selects classification datasets only. ``dataset.names=all``
+also includes segmentation tasks, which this patch-feature baseline does not
+support.
+
+See :doc:`../handcrafted-results` for the completed classification sweep.
+
+Levels are cumulative and their feature vectors are strict prefixes:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 15 75
+
+   * - Level
+     - Width
+     - Features
+   * - 1
+     - ``9M``
+     - Mean, population std, min, max, and linearly interpolated p10, p25,
+       p50, p75, p90, for every raw band and available index map.
+   * - 2 (default)
+     - ``21M``
+     - Adds gradient magnitude mean/std, global structure-tensor coherence
+       and magnitude-weighted, eight-bin unsigned orientation entropy at
+       pooling factors 1, 2 and 4 for every map.
+   * - 3
+     - ``37M``
+     - Adds LBP entropy/uniform share, Harris corner density/strength,
+       four quadrant means/stds, and low/high-tail anisotropy/spread for
+       every map, including raw SAR channels.
+
+Here ``M`` is the number of input channels plus available index maps, not a
+fixed model width. An RGB input has widths 27/63/111; 13 Sentinel-2 bands
+with all four indices have widths 153/357/629. Names are ordered first by
+level, then by map, then by statistic. Raw maps follow input order; indices
+follow sensor first-occurrence order and the fixed NDVI, NDWI, NDBI, NBR order.
+``feature_names`` is a tuple and ``num_features`` is fixed at construction,
+regardless of image size. Names start with ``sensor.band.actual_band`` or
+``sensor.index.index_name``; identifiers are URL-escaped and repeated identical
+sensor/band labels receive numbered suffixes. ``feature_metadata`` is a
+JSON-serializable list of map records with output columns, actual source band
+names/channel indices, canonical roles, and explicitly skipped indices.
+
+**Spectral indices and normalization.** Index roles are resolved by canonical
+band name independently within each sensor: NDVI = (NIR - red)/(NIR + red),
+NDWI = (green - NIR)/(green + NIR), NDBI = (SWIR1 - NIR)/(SWIR1 + NIR),
+and NBR = (NIR - SWIR2)/(NIR + SWIR2). Broad NIR is preferred; narrow
+NIR/B8A is used only when broad NIR is absent and its actual source is
+recorded. Semantic Landsat NIR/SWIR names work even without wavelengths.
+There is no nearest-band fallback, zero-filled source, or cross-sensor
+mixing: aerial RGB never borrows Sentinel-2 NIR. SAR produces raw
+statistics/texture but no optical indices; missing roles simply omit maps.
+
+The constructor defaults to identity normalization, but the CLI passes its
+global strategy, so explicitly use ``dataset.normalization=identity``.
+Other base-class strategies are honored and recorded, not secretly bypassed;
+z-scored bands do not produce physically meaningful normalized-difference
+indices. No fitted input or downstream scaler is added. The ratio calculation
+rescales both operands by their shared absolute maximum to avoid overflow,
+then returns zero where ``abs(a+b) <= 1e-6*(abs(a)+abs(b))``. It does not
+divide by an epsilon or clip ratios from signed inputs.
+
+**Texture and structure definitions.** Pooling uses non-overlapping mean
+cells, including partial edge cells without zero padding. Gradients are
+central differences with one-sided edges and zero on singleton axes.
+Coherence is ``sqrt((Jxx-Jyy)^2 + 4*Jxy^2)/(Jxx+Jyy)`` for the global
+mean gradient tensor. Orientation entropy is Shannon entropy divided by
+``log(8)`` over angles modulo pi, weighted by gradient magnitude.
+Constant maps have zero gradient, coherence and orientation entropy.
+
+LBP uses eight clockwise neighbors starting at top-left, with a one bit
+only when the neighbor is strictly above the center. It reports 256-bin
+entropy divided by ``log(256)`` and the share with at most two circular
+bit transitions. Only valid 3-by-3 neighborhoods count; smaller images
+return zeros. A constant map with valid neighborhoods has uniform share one.
+Harris uses deterministic per-map min/max contrast scaling, a 3-by-3
+box-averaged gradient tensor and ``R = det(J) - 0.04*trace(J)^2``. Density
+is the fraction of non-strict 3-by-3 local maxima above 1% of the maximum
+positive response; strength is the mean positive response. Flat maps have
+no corners.
+
+Quadrants are TL, TR, BL, BR, with the extra row/column assigned to
+top/left for odd dimensions; empty quadrants return zeros. Tail weights
+are positive ``p25 - x`` and ``x - p75`` on min/max contrast-scaled maps.
+Weighted coordinate covariance gives anisotropy (eigenvalue difference
+over sum) and spread (square root of trace). Coordinates span [-1, 1]
+per axis, with singleton axes at zero; empty or point-like tails yield
+zeros. Structural divisions use a ``1e-6`` minimum denominator.
+
+Computation uses existing PyTorch only, float32 with autocast disabled, and
+two-map chunks to bound intermediate memory. Outputs stay on the input
+device and can train an attached head through ordinary ``no_grad`` feature
+extraction. Nonfinite inputs are rejected, and float32 overflow raises a
+descriptive error. The model never resizes inputs: normal benchmark runs
+inherit ``dataset.image_size=224`` and bilinear interpolation.
+
 timm — ImageNet-pretrained CNNs and ViTs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

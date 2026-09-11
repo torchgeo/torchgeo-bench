@@ -1,0 +1,5 @@
+# Optional runtime overlay for hosts whose driver supports CUDA 12.8, not CUDA 13.
+# Install after uv sync; use .venv/bin/python directly to retain this overlay.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
