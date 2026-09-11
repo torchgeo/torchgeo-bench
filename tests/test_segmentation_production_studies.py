@@ -275,7 +275,7 @@ def test_gpu_autodetection_duplicates_and_command(
     runner = runner_for(scratch, payload, [job])
     command = runner._command(job, 4, 1)
     assert command[0] == sys.executable
-    assert command[1].endswith("scripts/run_segmentation_optimizer_study.py")
+    assert Path(command[1]).parts[-2:] == ("scripts", "run_segmentation_optimizer_study.py")
     assert command[command.index("--device") + 1] == "cuda:4"
     assert "--worker" in command
     assert "--resume" in command
