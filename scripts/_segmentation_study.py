@@ -10,7 +10,7 @@ import statistics
 import sys
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import _segmentation_convergence as convergence
@@ -39,11 +39,18 @@ class Job:
     trial: convergence.TrialConfig
     layer_group: str
     layers: tuple[str, ...]
+    continuation: dict | None = None
 
     @property
     def job_id(self) -> str:
         """Return a scheduling-independent identifier, without redundant group aliases."""
-        return features.identity({"trial": asdict(self.trial), "layers": self.layers})
+        return features.identity(
+            {
+                "trial": asdict(self.trial),
+                "layers": self.layers,
+                "continuation": self.continuation,
+            }
+        )
 
 
 @dataclass(frozen=True)
@@ -117,6 +124,7 @@ def build_jobs(args: argparse.Namespace, suite: str) -> list[Job]:
             continue
         if args.phase not in ("both", optimizer):
             continue
+        trial_options = options if optimizer == "adam" else {**options, "adam_schedule": "constant"}
         for head in args.heads:
             for group, layers in groups.items():
                 selected = layers
@@ -126,7 +134,7 @@ def build_jobs(args: argparse.Namespace, suite: str) -> list[Job]:
                 features.check_head_layers(head, selected)
                 jobs.extend(
                     Job(
-                        convergence.TrialConfig(head, optimizer, lr, seed=seed, **options),
+                        convergence.TrialConfig(head, optimizer, lr, seed=seed, **trial_options),
                         group,
                         tuple(selected),
                     )
@@ -143,15 +151,54 @@ def layer_union(jobs: list[Job]) -> list[str]:
     return list(dict.fromkeys(name for job in jobs for name in job.layers))
 
 
-def job_identity(job: Job, metadata: dict) -> dict:
-    """Bind a trial to its named subset and the validated union cache."""
+def continuation_jobs(jobs: list[Job], parent: Path, output: Path) -> tuple[list[Job], dict]:
+    """Pair every requested fit uniquely with a read-only terminal constant-Adam parent."""
+    if output.resolve() == parent.resolve() or output.resolve().is_relative_to(parent.resolve()):
+        raise ValueError("Continuation requires a new output directory outside the parent study.")
+    if any(job.trial.optimizer != "adam" or job.trial.adam_schedule != "plateau" for job in jobs):
+        raise ValueError("--continue-from requires --phase adam --adam-schedule plateau.")
+
+    def pairing(trial: dict, layers: list[str] | tuple[str, ...]) -> tuple:
+        return (*(trial[name] for name in ("head", "optimizer", "lr", "seed")), tuple(layers))
+
+    available: dict[tuple, list[Path]] = defaultdict(list)
+    for path in sorted((parent / "trials").glob("*/result.json")):
+        identity = json.loads(path.read_text())["identity"]
+        available[pairing(identity["trial"], identity["selected_layers"])].append(path.parent)
+    paired = []
+    parent_spec = None
+    for job in jobs:
+        matches = available[pairing(asdict(job.trial), job.layers)]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected one unique continuation parent for {job.job_id}; found {len(matches)}."
+            )
+        provenance, metadata = convergence.inspect_continuation_parent(
+            matches[0], job.trial, list(job.layers)
+        )
+        if parent_spec is not None and metadata["spec"] != parent_spec:
+            raise ValueError(
+                "Continuation parents must share exactly one union extraction configuration."
+            )
+        parent_spec = metadata["spec"]
+        paired.append(replace(job, continuation=provenance))
+    return paired, parent_spec
+
+
+def selected_metadata(job: Job, metadata: dict) -> dict:
+    """Describe a named subset and optional continuation without modifying union provenance."""
     indices = [metadata["spec"]["layers"].index(name) for name in job.layers]
-    selected = {
+    return {
         **metadata,
         "selected_layers": list(job.layers),
         "selected_feature_shapes": [metadata["feature_shapes"][i] for i in indices],
+        "continuation": job.continuation,
     }
-    return convergence.scientific_identity(job.trial, selected)
+
+
+def job_identity(job: Job, metadata: dict) -> dict:
+    """Bind a trial to its named subset, fresh cache and exact parent when applicable."""
+    return convergence.scientific_identity(job.trial, selected_metadata(job, metadata))
 
 
 def result_row(job: Job, metadata: dict, result: dict | None) -> dict:
@@ -176,6 +223,10 @@ def result_row(job: Job, metadata: dict, result: dict | None) -> dict:
         "normalization": spec["normalization"],
         "optimizer": job.trial.optimizer,
         "lr": job.trial.lr,
+        "adam_schedule": job.trial.adam_schedule,
+        "current_lr": (result or {}).get("current_lr"),
+        "lr_decay_count": (result or {}).get("lr_decay_count"),
+        "selected_learning_rate": selected.get("learning_rate"),
         "seed": job.trial.seed,
         "batch_size": job.trial.batch_size,
         "hidden_dim": job.trial.hidden_dim,
@@ -192,6 +243,14 @@ def result_row(job: Job, metadata: dict, result: dict | None) -> dict:
         "trainable_parameter_count": (result or {}).get("trainable_parameter_count"),
         "optimization_seconds": timing.get("optimization"),
         "training_wall_seconds": (result or {}).get("training_wall_seconds"),
+        "incremental_optimization_seconds": (result or {}).get("incremental_optimization_seconds"),
+        "incremental_training_wall_seconds": (result or {}).get(
+            "incremental_training_wall_seconds"
+        ),
+        "continuation_parent": (job.continuation or {}).get("directory"),
+        "parent_result_sha256": (job.continuation or {}).get("result_file_sha256"),
+        "parent_checkpoint_sha256": (job.continuation or {}).get("checkpoint_file_sha256"),
+        "selected_from_parent": (result or {}).get("selected_from_parent"),
         "selected_optimization_seconds": selected.get("optimization_seconds"),
         "selected_training_wall_seconds": selected.get("training_wall_seconds"),
         "selected_iterations": selected.get("iterations"),
@@ -253,6 +312,7 @@ def validation_summary(rows: list[dict]) -> list[dict]:
             "head": head,
             "layer_group": group,
             "optimizer": optimizer,
+            "adam_schedule": candidates[0].get("adam_schedule", "constant"),
             "dataset": candidates[0]["dataset"],
             "model": candidates[0]["model"],
             "layers": candidates[0]["layers"],
@@ -473,6 +533,9 @@ def run_worker(args: argparse.Namespace) -> None:
     if payload["metadata"]["tensor_sha256"] != manifest["cache_tensor_sha256"]:
         raise ValueError("Worker cache checksum differs from scheduled cache.")
     selected, metadata = features.select_layers(payload, job_data["layers"])
+    metadata["continuation"] = job_data.get("continuation")
+    if metadata["continuation"] is not None:
+        convergence.verified_continuation_parent(metadata["continuation"], trial, metadata)
     caches = {split: features.device_cache(data, device) for split, data in selected.items()}
     result = convergence.run_trial(
         trial, caches, metadata, args.output_dir / "trials", resume=args.resume
@@ -567,6 +630,19 @@ def build_parser(suite: str, doc: str) -> argparse.ArgumentParser:
         "--max-iterations", type=int, help="Optional safety cap: never implies convergence."
     )
     parser.add_argument("--bootstrap", type=int, default=1000)
+    parser.add_argument(
+        "--adam-schedule",
+        choices=("constant", "plateau"),
+        default="constant",
+        help="Optional train-loss plateau decay; the default constant-LR protocol is unchanged.",
+    )
+    parser.add_argument("--adam-lr-factor", type=float, default=0.1)
+    parser.add_argument("--adam-min-lr", type=float, default=1e-8)
+    parser.add_argument(
+        "--continue-from",
+        type=Path,
+        help="Read-only prior study: warm-start matching uncapped terminal constant-Adam fits into NEW output.",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
         "--dry-run",
@@ -605,13 +681,20 @@ def main(suite: str, doc: str, argv: list[str] | None = None) -> None:
     if args.num_workers < 0:
         raise ValueError("num_workers must be nonnegative.")
     jobs = build_jobs(args, suite)
+    output = resolve_path(ROOT, args.output_dir)
+    parent_spec = None
+    if args.continue_from is not None:
+        jobs, parent_spec = continuation_jobs(jobs, resolve_path(ROOT, args.continue_from), output)
     features.preflight_heads([] if args.dry_run else args.heads)
     gpus = selected_gpus(args.gpus, dry_run=args.dry_run)
     extraction = features.ExtractionConfig(
         **{name: getattr(args, name) for name in features.ExtractionConfig.__dataclass_fields__}
     )
-    spec = features.cache_spec(extraction, layer_union(jobs))
-    output = resolve_path(ROOT, args.output_dir)
+    spec = features.cache_spec(
+        extraction, parent_spec["layers"] if parent_spec else layer_union(jobs)
+    )
+    if parent_spec is not None:
+        convergence.compatible_extraction_spec(parent_spec, spec)
     cache = resolve_path(ROOT, args.cache) if args.cache else output / "features.pt"
     config = StudyConfig(
         root=ROOT,
@@ -636,6 +719,12 @@ def main(suite: str, doc: str, argv: list[str] | None = None) -> None:
                 runner._command(job, gpus[index % len(gpus)], 1),
             )
         return
+    execute_study(config, jobs, spec, suite)
+
+
+def execute_study(config: StudyConfig, jobs: list[Job], spec: dict, suite: str) -> None:
+    """Lock a study, validate provenance, extract once, and execute its pending jobs."""
+    output = config.output_dir
     output.mkdir(parents=True, exist_ok=True)
     with FileLock(str(output / "study.lock"), timeout=0):
         path = output / "metadata.json"
@@ -643,7 +732,7 @@ def main(suite: str, doc: str, argv: list[str] | None = None) -> None:
             json.dumps({"suite": suite, "cache_spec": spec, "jobs": [asdict(job) for job in jobs]})
         )
         if path.exists():
-            if not args.resume:
+            if not config.resume:
                 raise FileExistsError("Study exists; use --resume or a new output directory.")
             if json.loads(path.read_text()) != expected:
                 raise ValueError("Incompatible study configuration; refusing resume.")
@@ -656,9 +745,14 @@ def main(suite: str, doc: str, argv: list[str] | None = None) -> None:
                 raise ValueError("Study metadata missing for existing artifacts.")
             features.atomic_json(path, expected)
         payload = features.prepare_cache(
-            cache, spec, torch.device(f"cuda:{gpus[0]}"), args.num_workers
+            config.cache, spec, torch.device(f"cuda:{config.gpus[0]}"), config.num_workers
         )
         metadata = payload["metadata"]
+        for job in jobs:
+            if job.continuation is not None:
+                convergence.verified_continuation_parent(
+                    job.continuation, job.trial, selected_metadata(job, metadata)
+                )
         del payload
         torch.cuda.empty_cache()
         runner = StudyRunner(config, jobs, spec, metadata)

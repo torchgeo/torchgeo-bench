@@ -61,6 +61,15 @@ def tensor_digest(tensors: dict[str, torch.Tensor]) -> str:
     return digest.hexdigest()
 
 
+def file_digest(path: Path) -> str:
+    """Hash an immutable artifact without loading the whole file into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def software_versions() -> dict:
     """Identify installed dependencies and implementation, excluding session experiments."""
     import torchgeo_bench
@@ -326,8 +335,10 @@ class FeatureExtractor(SegmentationProbe):
 
 def prepare_cache(path: Path, spec: dict, device: torch.device, num_workers: int) -> dict:
     """Extract complete official splits once through a frozen BenchModel wrapper."""
+    if path.is_file():
+        return load_cache(path, spec)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with FileLock(str(path) + ".lock", timeout=0):
+    with FileLock(str(path) + ".lock"):
         if path.exists():
             return load_cache(path, spec)
         configure_device(device, strict=spec["strict_determinism"])

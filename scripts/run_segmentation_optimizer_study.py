@@ -7,6 +7,11 @@ Examples (run from the repository root in the torchgeo-bench environment)::
     python scripts/run_segmentation_optimizer_study.py --gpus all --resume
     python scripts/run_segmentation_optimizer_study.py --heads linear fpn \
         --adam-lrs 0.0001 0.001 0.01 --seeds 0 1 --output-dir results/optimizer-small
+    python scripts/run_segmentation_optimizer_study.py --phase adam \
+        --adam-schedule plateau --heads linear --adam-lrs 0.01 --seeds 0 \
+        --absolute-tol 0.0001 --continue-from results/segmentation_studies/optimizer \
+        --output-dir results/segmentation_studies/adam-plateau/linear \
+        --cache results/segmentation_studies/features-plateau.pt
 
 Defaults: Burn Scars, pretrained ViT-S/16, RGB 224, model normalization, all five
 heads, paired seeds 0/1/2. Four connections are deepest-first; patch_linear
@@ -30,6 +35,27 @@ second-half mean > tolerance means recovery: keep going even above an early best
 Equal halves exclude an odd middle observation. Plateau is not stationarity.
 L-BFGS also reports gradient tolerance or numerical_stall. --max-iterations is
 an optional not_converged safety cap, independent of recovery.
+
+--adam-schedule plateau instead reduces LR on no_best_improvement by
+--adam-lr-factor (default 0.1), retains Adam momentum and the validation-best
+weights, and resets training-loss reference/window/patience. It waits a full
+new window, not another minimum-epoch period. Material recovery never triggers
+decay. --adam-min-lr defaults to 1e-8; inability to lower it is explicitly
+not_converged/lr_floor, never successful convergence. Constant remains default.
+
+--continue-from reads a prior study, pairing head/initial-LR/seed/layers uniquely.
+Only uncapped terminal constant-Adam no_best_improvement fits can continue;
+every nonschedule scientific setting must match, including tolerances. NEW output
+is required. The entire parent layer union is freshly extracted and must have
+identical tensor and backbone checksums and geometry. Reusing an old-source cache
+is refused. Only explicit continuation permits source evolution (schema 2 or 3);
+dependencies, initialization, optimizer options, data and extraction must match.
+Parent result/checkpoint checksums and identity are recorded; parent files are
+read-only. New checkpoints carry optimizer/RNG/best-validation state and original
+counters/timing. CSV optimization/training-wall time is cumulative; incremental_*
+columns report child-only work. Curve learning_rate is the rate used by that
+block; next_learning_rate records any decay for the next block. Resume with the
+same command plus --resume: it restores the child's checkpoint, not its parent.
 
 Features are cached once in FP32 through BenchModel; source/configuration/content
 mismatches are refused. DPT requires optional transformers; real runs preflight

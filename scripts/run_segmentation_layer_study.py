@@ -40,6 +40,19 @@ recovering windows continue even above the historical best; a flat window is
 operational convergence, not stationarity or an oscillation-floor certificate.
 No time budget/default cap; optional --max-iterations is labeled not_converged.
 
+Optional --adam-schedule plateau lowers LR on no_best_improvement using
+--adam-lr-factor (default 0.1), resets loss-window patience, and retains Adam
+momentum and validation-best weights. Recovery never triggers decay; lr_floor
+at --adam-min-lr (default 1e-8) is nonconvergence. Constant remains the default.
+--continue-from can explicitly continue uniquely matched, uncapped terminal
+constant-Adam fits into NEW output. All nonschedule settings must match and a
+fresh parent-union cache must reproduce exact tensors/geometry/backbone weights.
+Source evolution is allowed only for explicit continuation; normal cache loading
+and resume stay strict. Parent checkpoints/results remain read-only and their
+checksums and identities are recorded. Counters and total times are cumulative;
+incremental_* CSV columns separate child-only optimization/training wall time.
+--resume retains the child's scheduler, optimizer, RNG, history and selected state.
+
 OUTPUT/combined.csv preserves all raw trials and per-image test-bootstrap CIs.
 OUTPUT/validation_selected.csv selects one LR by mean validation over paired
 seeds for each head/group/optimizer, then reports mean test mIoU and seed SD.

@@ -1,6 +1,8 @@
 """Resumable accepted-training-CE convergence, shared by both production studies.
 
-Adam is constant-rate with zero decay. L-BFGS keeps strong-Wolfe history across
+Adam has zero weight decay and defaults to a constant rate. Optional plateau
+scheduling lowers LR on nonrecovering oscillations, then waits for a fresh loss
+window; reaching the LR floor is not convergence. L-BFGS keeps history across
 20-iteration chunks; closures accumulate globally valid-pixel-weighted gradients
 over fixed microbatches. Adam shuffles these same batches, never their membership,
 and scales summed batch CE by the number of batches / total valid pixels.
@@ -17,6 +19,7 @@ Active training wall time excludes offline time. Optimization timing excludes
 monitoring, calibration, validation, selection, persistence and final evaluation.
 """
 
+import copy
 import csv
 import json
 import logging
@@ -70,6 +73,9 @@ class TrialConfig:
     numerical_patience: int = 3
     max_iterations: int | None = None
     bootstrap: int = 1000
+    adam_schedule: str = "constant"
+    adam_lr_factor: float = 0.1
+    adam_min_lr: float = 1e-8
 
     def __post_init__(self) -> None:
         if self.head not in shared.HEADS or self.optimizer not in ("adam", "lbfgs"):
@@ -95,6 +101,29 @@ class TrialConfig:
             raise ValueError("Counts must be positive and seed in [0, 2**32).")
         if self.max_iterations is not None and self.max_iterations < 1:
             raise ValueError("max_iterations is a positive optional safety cap.")
+        self._validate_schedule()
+
+    def _validate_schedule(self) -> None:
+        """Validate optional Adam controls without changing constant-rate optimization."""
+        if self.adam_schedule not in ("constant", "plateau"):
+            raise ValueError("adam_schedule must be constant or plateau.")
+        if self.optimizer != "adam" and self.adam_schedule != "constant":
+            raise ValueError("Plateau scheduling is supported only for Adam.")
+        if not math.isfinite(self.adam_lr_factor) or not 0 < self.adam_lr_factor < 1:
+            raise ValueError("adam_lr_factor must be finite and strictly between zero and one.")
+        if not math.isfinite(self.adam_min_lr) or self.adam_min_lr <= 0:
+            raise ValueError("adam_min_lr must be positive and finite.")
+        if self.adam_schedule == "plateau" and self.adam_min_lr > self.lr:
+            raise ValueError("adam_min_lr cannot exceed the initial LR.")
+
+
+@dataclass
+class AdamScheduleState:
+    """Persist actual LR and decay phase independently of initial scientific LR."""
+
+    current_lr: float
+    decay_count: int = 0
+    last_decay_iteration: int | None = None
 
 
 @dataclass
@@ -392,7 +421,10 @@ class TrialStore:
             )
             with shared.atomic_stream(self.directory / "curve.csv", "w") as stream:
                 writer = csv.DictWriter(
-                    stream, fieldnames=list(run.curve[0]) if run.curve else ["block"]
+                    stream,
+                    fieldnames=list(dict.fromkeys(key for row in run.curve for key in row))
+                    if run.curve
+                    else ["block"],
                 )
                 writer.writeheader()
                 writer.writerows(run.curve)
@@ -410,6 +442,7 @@ class TrialStore:
                 "timings_seconds": run.timings.seconds,
                 "training_wall_seconds": run.training_wall_seconds,
                 "plateau": asdict(run.plateau),
+                "scheduler": asdict(run.scheduler),
             },
         )
 
@@ -448,6 +481,13 @@ class ConvergenceRun:
         self.training_wall_seconds = 0.0
         self.failure: str | None = None
         self.hardware_history = [shared.hardware(self.device)]
+        self.scheduler = AdamScheduleState(config.lr)
+        self.continuation: dict | None = None
+
+    @property
+    def current_lr(self) -> float:
+        """Return the LR actually used by the optimizer."""
+        return self.optimizer.param_groups[0]["lr"]
 
     @property
     def lbfgs_state(self) -> dict:
@@ -482,6 +522,8 @@ class ConvergenceRun:
             "closure_evaluations": self.objective.evaluations,
             "monitor_evaluations": self.objective.monitor_evaluations,
             "hardware_history": self.hardware_history,
+            "scheduler": asdict(self.scheduler),
+            "continuation": self.continuation,
         }
 
     def restore(self, state: dict) -> None:
@@ -489,6 +531,10 @@ class ConvergenceRun:
         setup_seconds = self.timings.seconds["setup"]
         restore_model(self.head, state["model"])
         self.optimizer.load_state_dict(state["optimizer"])
+        self.scheduler = AdamScheduleState(**state["scheduler"])
+        if self.scheduler.current_lr != self.current_lr:
+            raise ValueError("Scheduler/optimizer LR mismatch.")
+        self.continuation = state["continuation"]
         self.counters = state["counters"]
         self.plateau = Plateau(**state["plateau"])
         self.curve, self.best = state["curve"], state["best"]
@@ -508,6 +554,21 @@ class ConvergenceRun:
         if current != self.hardware_history[-1]:
             self.hardware_history.append(current)
         restore_rng(state["rng"], self.device)
+
+    def decay_learning_rate(self, loss: float) -> bool:
+        """Lower Adam's LR without discarding momentum or imposing another minimum epoch count."""
+        new_lr = max(self.config.adam_min_lr, self.current_lr * self.config.adam_lr_factor)
+        if new_lr >= self.current_lr:
+            return False
+        previous = self.current_lr
+        for group in self.optimizer.param_groups:
+            group["lr"] = new_lr
+        self.scheduler.current_lr = new_lr
+        self.scheduler.decay_count += 1
+        self.scheduler.last_decay_iteration = self.iterations
+        self.plateau = Plateau(reference=loss, best_loss=loss)
+        logger.info("Adam plateau decay %g -> %g at epoch %d", previous, new_lr, self.iterations)
+        return True
 
     def optimize(self) -> bool:
         """Execute a block and report exact accepted parameter change for L-BFGS."""
@@ -567,6 +628,11 @@ class ConvergenceRun:
         ):
             return "numerical_stall"
         if plateau_reason is not None:
+            if plateau_reason == "no_best_improvement" and config.adam_schedule == "plateau":
+                if config.max_iterations is not None and self.iterations >= config.max_iterations:
+                    plateau_reason = "safety_max_iterations"
+                else:
+                    plateau_reason = None if self.decay_learning_rate(loss) else "lr_floor"
             return plateau_reason
         if config.max_iterations is not None and self.iterations >= config.max_iterations:
             return "safety_max_iterations"
@@ -578,6 +644,10 @@ class ConvergenceRun:
             "block": self.counters["blocks"],
             "iterations": self.iterations,
             "epochs": self.counters["epochs"],
+            "adam_schedule": self.config.adam_schedule,
+            "learning_rate": self.current_lr,
+            "next_learning_rate": self.current_lr,
+            "lr_decay_count": self.scheduler.decay_count,
             "train_ce": loss,
             "gradient_inf_norm": gradient,
             "val_ce": val["ce"],
@@ -603,6 +673,7 @@ class ConvergenceRun:
 
     def check(self, block_started_at: float, *, changed: bool) -> None:
         """Monitor training CE, calibrate BN on train, then select by validation mIoU."""
+        block_lr = self.current_lr
         with self.timings.measure("convergence"):
             loss, gradient = self.objective.monitor(backward=self.config.optimizer == "lbfgs")
             self.stop_reason = self.stopping_reason(loss, gradient, changed=changed)
@@ -619,6 +690,7 @@ class ConvergenceRun:
         with self.timings.measure("validation"):
             val = shared.evaluate(self.head, self.caches["val"], self.config.batch_size)
         row = self.row(loss, gradient, val)
+        row["learning_rate"] = block_lr
         selected = self.best is None or row["val_miou"] > self.best["val_miou"]
         with self.timings.measure("selection"):
             if selected:
@@ -730,10 +802,22 @@ class ConvergenceRun:
                 p.numel() for p in self.head.parameters() if p.requires_grad
             ),
             "optimizer_settings": optimizer_settings(self.config),
+            "adam_schedule": self.config.adam_schedule,
+            "current_lr": self.current_lr,
+            "lr_decay_count": self.scheduler.decay_count,
             "precision": "float32",
             "tf32": False,
             "weight_decay": 0.0,
             "training_wall_seconds": self.training_wall_seconds,
+            "incremental_optimization_seconds": self.timings.seconds["optimization"]
+            - (
+                self.continuation["baseline"]["timings_seconds"]["optimization"]
+                if self.continuation
+                else 0
+            ),
+            "incremental_training_wall_seconds": self.training_wall_seconds
+            - (self.continuation["baseline"]["training_wall_seconds"] if self.continuation else 0),
+            "continuation": self.continuation,
             "iterations": self.iterations,
             "counters": self.counters,
             "plateau": asdict(self.plateau),
@@ -743,6 +827,11 @@ class ConvergenceRun:
             }
             if self.best
             else None,
+            "selected_from_parent": bool(
+                self.continuation
+                and self.best
+                and self.best["iterations"] <= self.continuation["baseline"]["counters"]["epochs"]
+            ),
             "closure_evaluations": self.objective.evaluations,
             "monitor_evaluations": self.objective.monitor_evaluations,
             "hardware_history": self.hardware_history,
@@ -756,7 +845,7 @@ class ConvergenceRun:
 def scientific_identity(config: TrialConfig, metadata: dict) -> dict:
     """Exclude GPU indices and hardware, but bind exact cache and selected connections."""
     return {
-        "schema": 2,
+        "schema": 3,
         "trial": asdict(config),
         "cache_key": metadata["key"],
         "cache_tensor_sha256": metadata["tensor_sha256"],
@@ -764,6 +853,7 @@ def scientific_identity(config: TrialConfig, metadata: dict) -> dict:
         "selected_feature_shapes": metadata["selected_feature_shapes"],
         "versions": metadata["spec"]["versions"],
         "strict_determinism": metadata["spec"]["strict_determinism"],
+        "continuation": metadata.get("continuation"),
     }
 
 
@@ -792,6 +882,187 @@ def completed_result(directory: Path, trial_identity: dict) -> dict:
     if not all((directory / name).is_file() for name in required):
         raise ValueError(f"Incomplete completed trial in {directory}.")
     return result
+
+
+SCHEDULE_FIELDS = frozenset(("adam_schedule", "adam_lr_factor", "adam_min_lr"))
+
+
+def inspect_continuation_parent(
+    directory: Path, config: TrialConfig, layers: list[str]
+) -> tuple[dict, dict]:
+    """Identify one immutable constant-Adam parent under a supported scientific schema."""
+    if config.optimizer != "adam" or config.adam_schedule != "plateau":
+        raise ValueError("Continuation requires Adam with --adam-schedule plateau.")
+    parent_identity = json.loads((directory / "identity.json").read_text())
+    result = completed_result(directory, parent_identity)
+    if parent_identity["schema"] not in (2, 3):
+        raise ValueError(
+            "Unsupported parent schema; only fixed-BN-bucket convergence fits qualify."
+        )
+    if directory.name != shared.identity(parent_identity) or result["trial_key"] != directory.name:
+        raise ValueError("Parent trial directory/key mismatch.")
+    old_config = TrialConfig(**parent_identity["trial"])
+    old_settings = {k: v for k, v in asdict(old_config).items() if k not in SCHEDULE_FIELDS}
+    new_settings = {k: v for k, v in asdict(config).items() if k not in SCHEDULE_FIELDS}
+    if old_settings != new_settings or old_config.adam_schedule != "constant":
+        raise ValueError(
+            "Parent scientific trial settings mismatch (only Adam schedule may change)."
+        )
+    if (
+        old_config.max_iterations is not None
+        or result["status"] != "not_converged"
+        or result["stop_reason"] != "no_best_improvement"
+        or result["failure"] is not None
+    ):
+        raise ValueError("Parent must be uncapped not_converged/no_best_improvement, never failed.")
+    if parent_identity["selected_layers"] != layers:
+        raise ValueError("Parent selected layers mismatch.")
+    if shared.identity(result["optimizer_settings"]) != shared.identity(
+        optimizer_settings(old_config)
+    ):
+        raise ValueError("Parent optimizer hyperparameters mismatch.")
+    metadata = result["cache_metadata"]
+    expected_fields = {
+        "cache_key": metadata["key"],
+        "cache_tensor_sha256": metadata["tensor_sha256"],
+        "selected_layers": metadata["selected_layers"],
+        "selected_feature_shapes": metadata["selected_feature_shapes"],
+        "versions": metadata["spec"]["versions"],
+        "strict_determinism": metadata["spec"]["strict_determinism"],
+    }
+    if metadata["key"] != shared.identity(metadata["spec"]) or any(
+        parent_identity[key] != value for key, value in expected_fields.items()
+    ):
+        raise ValueError("Parent identity/cache metadata mismatch.")
+    provenance = {
+        "directory": str(directory.resolve()),
+        "result_file_sha256": shared.file_digest(directory / "result.json"),
+        "checkpoint_file_sha256": shared.file_digest(directory / "checkpoint.pt"),
+        "parent_identity": parent_identity,
+        "parent_initial_state_sha256": result["initial_state_sha256"],
+    }
+    return provenance, metadata
+
+
+def compatible_extraction_spec(parent: dict, current: dict) -> None:
+    """Permit source evolution only here, retaining exact extraction and dependency settings."""
+
+    def without_source(spec: dict) -> dict:
+        return {
+            **spec,
+            "versions": {k: v for k, v in spec["versions"].items() if k != "source_sha256"},
+        }
+
+    if without_source(parent) != without_source(current):
+        raise ValueError("Parent extraction configuration/dependencies mismatch.")
+
+
+def verified_continuation_parent(provenance: dict, config: TrialConfig, metadata: dict) -> dict:
+    """Bind a newly extracted cache to the exact immutable parent result and checkpoint."""
+    if metadata["key"] != shared.identity(metadata["spec"]):
+        raise ValueError("Current cache configuration key mismatch.")
+    directory = Path(provenance["directory"])
+    actual, old_metadata = inspect_continuation_parent(
+        directory, config, metadata["selected_layers"]
+    )
+    if actual != provenance:
+        raise ValueError("Parent result/checkpoint provenance checksum mismatch.")
+    compatible_extraction_spec(old_metadata["spec"], metadata["spec"])
+    for name in ("tensor_sha256", "feature_shapes", "selected_feature_shapes", "selected_layers"):
+        if old_metadata[name] != metadata[name]:
+            raise ValueError(f"Parent cache {name} mismatch.")
+    if old_metadata.get("backbone_state_sha256") != metadata.get("backbone_state_sha256"):
+        raise ValueError("Parent backbone state mismatch.")
+    return completed_result(directory, provenance["parent_identity"])
+
+
+def require_finite_state(value: object) -> None:
+    """Refuse nonfinite parameters, buffers, optimizer slots or numerical diagnostics."""
+    if isinstance(value, torch.Tensor):
+        shared.require_finite([value], "parent checkpoint")
+    elif isinstance(value, dict):
+        for item in value.values():
+            require_finite_state(item)
+    elif isinstance(value, (tuple, list)):
+        for item in value:
+            require_finite_state(item)
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("Nonfinite parent checkpoint diagnostic.")
+
+
+def validate_parent_checkpoint(state: dict, result: dict, run: ConvergenceRun) -> None:
+    """Verify checkpoint/result pairing and current initialization before restoring anything."""
+    if (
+        state["identity"] != result["identity"]
+        or state["status"] != "not_converged"
+        or state["stop_reason"] != "no_best_improvement"
+        or state["failure"] is not None
+    ):
+        raise ValueError("Parent checkpoint is not the matching terminal Adam fit.")
+    if state["initial_state_sha256"] != result["initial_state_sha256"] or (
+        state["initial_state_sha256"] != run.initial_state_sha256
+    ):
+        raise ValueError("Parent/current initial decoder state mismatch.")
+    if (
+        state["counters"] != result["counters"]
+        or state["counters"]["epochs"] != result["iterations"]
+        or shared.identity(state["curve"][-1]) != shared.identity(result["final"])
+        or state["timings_seconds"]["optimization"] != result["timings_seconds"]["optimization"]
+    ):
+        raise ValueError(
+            "Parent checkpoint/result counters, curve or optimization timing mismatch."
+        )
+    if state["best"] is None:
+        raise ValueError("Parent checkpoint has no validation-selected state.")
+    selected = {
+        k: v for k, v in state["best"].items() if k not in ("state_dict", "buffers", "modes")
+    }
+    if shared.identity(selected) != shared.identity(result["selected"]):
+        raise ValueError("Parent checkpoint/result validation selection mismatch.")
+    old_groups = state["optimizer"]["param_groups"]
+    new_groups = run.optimizer.state_dict()["param_groups"]
+    old_options = [{k: v for k, v in group.items() if k != "params"} for group in old_groups]
+    new_options = [{k: v for k, v in group.items() if k != "params"} for group in new_groups]
+    if old_options != new_options:
+        raise ValueError("Parent checkpoint optimizer hyperparameters mismatch.")
+    names = list(dict(run.head.named_parameters()))
+    old_names = [name for name in state["model"]["state_dict"] if name in names]
+    if old_names != names or [group["params"] for group in old_groups] != [
+        group["params"] for group in new_groups
+    ]:
+        raise ValueError("Parent checkpoint optimizer parameter ordering mismatch.")
+    for key in ("model", "optimizer", "best", "curve"):
+        require_finite_state(state[key])
+
+
+def warm_continue(run: ConvergenceRun, metadata: dict) -> None:
+    """Restore an explicitly authorized parent into a new store, carrying all training history."""
+    provenance = metadata["continuation"]
+    result = verified_continuation_parent(provenance, run.config, metadata)
+    checkpoint = Path(provenance["directory"]) / "checkpoint.pt"
+    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    if shared.file_digest(checkpoint) != provenance["checkpoint_file_sha256"]:
+        raise ValueError("Parent checkpoint changed during loading.")
+    validate_parent_checkpoint(state, result, run)
+    baseline = {
+        "timings_seconds": copy.deepcopy(result["timings_seconds"]),
+        "training_wall_seconds": result["training_wall_seconds"],
+        "counters": copy.deepcopy(result["counters"]),
+        "plateau": copy.deepcopy(state["plateau"]),
+    }
+    state["timings_seconds"] = copy.deepcopy(baseline["timings_seconds"])
+    state["training_wall_seconds"] = baseline["training_wall_seconds"]
+    state["scheduler"] = asdict(AdamScheduleState(run.config.lr))
+    state["continuation"] = {"provenance": provenance, "baseline": baseline}
+    for row in [*state["curve"], state["best"]]:
+        row.setdefault("adam_schedule", "constant")
+        row.setdefault("learning_rate", run.config.lr)
+        row.setdefault("next_learning_rate", run.config.lr)
+        row.setdefault("lr_decay_count", 0)
+    run.restore(state)
+    run.status, run.stop_reason = "running", None
+    if not run.decay_learning_rate(state["curve"][-1]["train_ce"]):
+        run.status, run.stop_reason = "not_converged", "lr_floor"
 
 
 def run_trial(
@@ -827,7 +1098,15 @@ def run_trial(
         run.timings.seconds["setup"] += setup_seconds
         if existing and (directory / "checkpoint.pt").exists():
             run.restore(store.load())
+            start = time.perf_counter()
             store.write_checkpoint(run)
+            run.training_wall_seconds += time.perf_counter() - start
+            store.progress(run)
+        elif metadata.get("continuation") is not None:
+            warm_continue(run, metadata)
+            start = time.perf_counter()
+            store.write_checkpoint(run)
+            run.training_wall_seconds += time.perf_counter() - start
             store.progress(run)
         result = run.fit()
         result.update(
