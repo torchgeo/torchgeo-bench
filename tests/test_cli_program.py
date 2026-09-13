@@ -1,4 +1,4 @@
-"""Run the installed program against tiny on-disk inputs without mocking its internals."""
+"""Run the legacy CLI against tiny on-disk inputs without mocking its internals."""
 
 import json
 import os
@@ -18,7 +18,7 @@ from torchgeo_bench.datasets import get_bench_dataset_class
 def run_cli(
     *arguments: str, cwd: Path, timeout: int = 120, offline: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    """Invoke the same entry point used by the console command."""
+    """Invoke the explicit legacy entry point for key=value program coverage."""
     env = {
         **os.environ,
         "OMP_NUM_THREADS": "1",
@@ -28,7 +28,7 @@ def run_cli(
     if offline:
         env["HF_HUB_OFFLINE"] = "1"
     return subprocess.run(
-        [sys.executable, "-m", "torchgeo_bench", *arguments],
+        [sys.executable, "-m", "torchgeo_bench.cli", *arguments],
         cwd=cwd,
         env=env,
         capture_output=True,
