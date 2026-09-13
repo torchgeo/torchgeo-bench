@@ -4,6 +4,7 @@
 """Tests for the discoverable image CLI."""
 
 import argparse
+import os
 import runpy
 import subprocess
 import sys
@@ -272,13 +273,170 @@ def test_unknown_config_field_fails_before_execution(tmp_path: Path) -> None:
         main(["run", "--config", str(path), "--dry-run"])
 
 
-def test_runtime_failure_propagates_from_image_cli(monkeypatch: MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "error_type",
+    [FileNotFoundError, PermissionError, ValueError, yaml.YAMLError, RuntimeError, TypeError],
+)
+def test_runtime_failure_propagates_from_image_cli(
+    monkeypatch: MonkeyPatch, error_type: type[Exception]
+) -> None:
     def fail(_: object) -> None:
-        raise FileNotFoundError("dataset missing")
+        raise error_type("benchmark failed")
 
     monkeypatch.setattr("torchgeo_bench.commands._image_runtime.run", fail)
-    with pytest.raises(FileNotFoundError, match="dataset missing"):
-        main(["run", "--model", "rcf", "--dataset", "m-eurosat"])
+    with pytest.raises(error_type, match="benchmark failed"):
+        main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--device", "cpu"])
+
+
+@pytest.mark.parametrize(
+    ("contents", "diagnostic"),
+    [
+        (None, "No such file"),
+        ("model: [\n", "while parsing"),
+        ("model: {name: rcf}\nmodel: {name: other}\n", "duplicate key"),
+        ("[a, b]: value\n", "unhashable key"),
+        ("model: !unknown rcf\n", "could not determine a constructor"),
+        ("null\n", "top level"),
+        ("runtime: null\n", "runtime"),
+        ("runtime: []\n", "runtime"),
+        ("runtime: {workers: -1}\n", "runtime.workers"),
+    ],
+)
+def test_config_errors_exit_without_tracebacks(
+    contents: str | None, diagnostic: str, tmp_path: Path
+) -> None:
+    path = tmp_path / "invalid.yaml"
+    if contents is not None:
+        path.write_text(contents, encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "torchgeo_bench.image_cli",
+            "run",
+            "--config",
+            str(path),
+            "--model",
+            "rcf",
+            "--dataset",
+            "m-eurosat",
+            "--device",
+            "cpu",
+            "--dry-run",
+        ],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+            "CUDA_VISIBLE_DEVICES": "",
+            "HF_HUB_OFFLINE": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "error:" in result.stderr
+    assert str(path) in result.stderr
+    assert diagnostic in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_config_directory_is_reported(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["run", "--config", str(tmp_path), "--dry-run"])
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert str(tmp_path) in message
+    assert "directory" in message
+
+
+def test_unreadable_config_is_reported(
+    tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    path = tmp_path / "unreadable.yaml"
+
+    def deny_read(_: Path, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(Path, "open", deny_read)
+    with pytest.raises(SystemExit) as error:
+        main(["run", "--config", str(path), "--dry-run"])
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert str(path) in message
+    assert "Permission denied" in message
+
+
+def test_invalid_config_encoding_is_reported(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    path = tmp_path / "invalid-encoding.yaml"
+    path.write_bytes(b"\xff")
+    with pytest.raises(SystemExit) as error:
+        main(["run", "--config", str(path), "--dry-run"])
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert str(path) in message
+    assert "utf-8" in message
+
+
+@pytest.mark.parametrize(
+    ("section", "flags"),
+    [
+        ("model", ["--model", "rcf"]),
+        ("runtime", ["--seed", "3"]),
+        ("input", ["--image-size", "32"]),
+        ("classification", ["--knn-k", "3"]),
+        ("output", ["--no-resume"]),
+        ("classification.linear", ["--no-refit-train-val"]),
+        ("classification.calibration", ["--no-temp-scale"]),
+    ],
+)
+@pytest.mark.parametrize("value", [None, [], [["seed", 8]], 3])
+def test_invalid_sections_are_not_coerced_or_replaced_by_overrides(
+    section: str, flags: list[str], value: object, tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    config = {"model": {"name": "rcf"}, "datasets": ["m-eurosat"]}
+    if "." in section:
+        parent, child = section.split(".")
+        config[parent] = {child: value}
+    else:
+        config[section] = value
+    path = tmp_path / "invalid-section.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    with pytest.raises(SystemExit) as error:
+        main(["run", "--config", str(path), *flags, "--dry-run"])
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert str(path) in message
+    assert section in message
+    assert "mapping" in message
+
+
+def test_flags_complete_partial_config(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    path = tmp_path / "partial.yaml"
+    path.write_text("runtime: {seed: 8}\n", encoding="utf-8")
+    main(
+        [
+            "run",
+            "--config",
+            str(path),
+            "--model",
+            "rcf",
+            "--dataset",
+            "m-eurosat",
+            "--device",
+            "cpu",
+            "--seed",
+            "3",
+            "--dry-run",
+        ]
+    )
+    config = yaml.safe_load(capsys.readouterr().out)
+    assert config["runtime"] == {"device": "cpu", "seed": 3}
+    assert config["model"]["name"] == "rcf"
+    assert config["datasets"] == ["m-eurosat"]
 
 
 def test_nested_linear_override_preserves_sibling_values(
