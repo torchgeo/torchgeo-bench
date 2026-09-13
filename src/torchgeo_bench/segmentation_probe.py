@@ -340,7 +340,8 @@ class SegmentationProbe(nn.Module):
                 for full precision.
 
         Returns:
-            A :class:`CachedFeaturesDataset` with one entry per sample.
+            A :class:`CachedFeaturesDataset` with one entry per sample, pooling
+            temporal features across dates as in :meth:`forward`.
         """
         was_training = self.backbone.training
         self.backbone.eval()
@@ -356,6 +357,11 @@ class SegmentationProbe(nn.Module):
                 else:
                     images, masks = batch[0].to(device), batch[1]
 
+                steps = 0
+                if images.ndim == 5:
+                    steps = images.shape[1]
+                    images = images.flatten(0, 1)
+
                 if masks.ndim == 4:
                     masks = masks.squeeze(1)
                 masks = masks.long()
@@ -363,10 +369,10 @@ class SegmentationProbe(nn.Module):
                 _ = self.backbone(images)
 
                 for li, n in enumerate(self.layer_names):
-                    feat = self._process_feature(self._features[n]).to(
-                        dtype=cache_dtype, device="cpu"
-                    )
-                    batches_per_layer[li].append(feat)
+                    feat = self._process_feature(self._features[n])
+                    if steps:
+                        feat = self._pool_time(feat, steps)
+                    batches_per_layer[li].append(feat.to(dtype=cache_dtype, device="cpu"))
                 all_masks.append(masks.cpu())
         finally:
             self.backbone.train(was_training)
