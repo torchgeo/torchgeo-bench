@@ -15,8 +15,10 @@ import io
 import logging
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import numpy as np
 import pandas as pd
@@ -222,11 +224,36 @@ class EvaluationResult:
         return self.__dict__.copy()
 
 
+def _replace_csv(path: str, contents: str) -> None:
+    """Publish a fully written replacement without modifying the existing file on failure."""
+    destination = Path(path)
+    mode = stat.S_IMODE(destination.stat().st_mode)
+    staged_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            newline="",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as replacement:
+            staged_path = Path(replacement.name)
+            replacement.write(contents)
+            replacement.flush()
+            staged_path.chmod(mode)
+            os.fsync(replacement.fileno())
+        os.replace(staged_path, destination)
+    finally:
+        if staged_path is not None:
+            staged_path.unlink(missing_ok=True)
+
+
 def append_rows_atomic(path: str, rows: list[dict]) -> None:
     """Append CSV rows under a file lock, extending the schema when needed.
 
     Write the header for an empty or new file. Append when column names and order match.
-    Otherwise, rewrite with all old and new columns so no values lose their labels.
+    Otherwise, stage and atomically replace the file with all old and new columns.
 
     Args:
         path: Output CSV path; created if missing.
@@ -268,9 +295,10 @@ def append_rows_atomic(path: str, rows: list[dict]) -> None:
                         list(df_local.columns),
                         ordered,
                     )
-                    f.seek(0)
-                    f.truncate()
                     combined.to_csv(buf, header=True, index=False)
-                    f.write(buf.getvalue())
+                    # Windows requires the destination handle to close before replacement.
+                    f.close()
+                    _replace_csv(path, buf.getvalue())
+                    return
             f.flush()
             os.fsync(f.fileno())
