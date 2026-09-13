@@ -12,8 +12,7 @@ import torch
 import torch.nn as nn
 
 from torchgeo_bench.datasets.base import BandSpec
-
-from .interface import BenchModel
+from torchgeo_bench.models.interface import BenchModel
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +26,12 @@ class NewModel(BenchModel):
 
     Args:
         bands: Ordered list of :class:`BandSpec` from the dataset wrapper.
-            Do **not** include ``bands`` in the Hydra YAML — the runner
+            Do **not** include ``bands`` in the model YAML - the runner
             injects it at construction time.
         pretrained: Load pretrained weights (default: ``True``).
+        normalization: Input strategy forwarded to ``BenchModel``. Defaults
+            to ``"bandspec_zscore"``. Use ``"identity"`` if your backbone
+            normalizes raw sensor values internally.
     """
 
     def __init__(
@@ -37,12 +39,12 @@ class NewModel(BenchModel):
         bands: list[BandSpec],
         *,
         pretrained: bool = True,
+        normalization: str = "bandspec_zscore",
         # TODO: add any extra kwargs your backbone needs and mirror them in
         #       src/torchgeo_bench/conf/model/<name>.yaml
-        **_kwargs: object,
+        **kwargs: object,
     ) -> None:
-        super().__init__(bands=bands, normalization="bandspec_zscore")
-        # Use identity normalization if the backbone handles raw inputs internally.
+        super().__init__(bands=bands, normalization=normalization, **kwargs)
         self.backbone = nn.Identity()  # TODO: replace with your backbone
         logger.info(
             "NewModel initialized with %d input channels (pretrained=%s)",
@@ -51,17 +53,12 @@ class NewModel(BenchModel):
         )
 
     @torch.no_grad()
-    def _forward_patch_features(
-        self,
-        images: torch.Tensor,
-        _bboxes: torch.Tensor | None = None,  # optional; BenchModel passes images only
-    ) -> torch.Tensor:
+    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         """Return embeddings ``(B, K)`` from already-normalized inputs.
 
         ``images`` has shape ``(B, C, H, W)`` and has already been passed
         through ``normalize_inputs`` by the sealed ``forward_patch_features``.
-        If you chose ``normalization="identity"`` above, ``images`` is the
-        raw sensor tensor.
+        With ``normalization="identity"``, ``images`` is the raw sensor tensor.
 
         Args:
             images: Normalized input tensor of shape ``(B, C, H, W)``.
@@ -70,6 +67,6 @@ class NewModel(BenchModel):
             Embedding tensor of shape ``(B, K)``.
         """
         x = self.backbone(images)
-        if x.ndim == 4:  # (B, K, H, W) — pool spatial dims
+        if x.ndim == 4:
             x = x.flatten(start_dim=2).mean(dim=-1)
-        return x  # (B, K)
+        return x
