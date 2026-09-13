@@ -75,9 +75,21 @@ class StrictModel(BaseModel):
 
 
 class ModelConfig(StrictModel):
-    """Selected model preset."""
+    """Selected preset or importable custom model with constructor-only options."""
 
     name: StrictStr = Field(min_length=1)
+    target: StrictStr | None = None
+    kwargs: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("target")
+    @classmethod
+    def validate_target(cls, value: str | None) -> str | None:
+        """Require an importable dotted symbol, without importing optional models."""
+        if value is not None and (
+            "." not in value or any(not part.isidentifier() for part in value.split("."))
+        ):
+            raise ValueError("target must be a dotted Python symbol")
+        return value
 
     @field_validator("name")
     @classmethod
@@ -96,7 +108,7 @@ class InputConfig(StrictModel):
     time_steps: StrictInt | None = Field(default=None, gt=0)
     image_size: StrictInt | None = Field(default=224, gt=0)
     interpolation: Literal["area", "bilinear", "bicubic", "nearest"] = "bilinear"
-    normalization: Literal["dataset", "model", "minmax", "none"] = "dataset"
+    normalization: Literal["dataset", "model", "minmax", "minmax_zscore", "none"] = "dataset"
 
     @field_validator("partition")
     @classmethod
@@ -225,14 +237,62 @@ class OutputConfig(StrictModel):
     directory: StrictStr = "results/models"
     file: StrictStr | None = None
     resume: StrictBool = False
+    profile_directory: StrictStr = "results/profiles"
+    intrinsic_dim_directory: StrictStr = "results/intrinsic_dim"
 
-    @field_validator("directory", "file")
+    @field_validator("directory", "file", "profile_directory", "intrinsic_dim_directory")
     @classmethod
     def validate_paths(cls, value: str | None) -> str | None:
         """Reject blank paths while allowing a null optional file."""
         if value is not None and not value.strip():
             raise ValueError("paths must not be blank")
         return value
+
+
+class CPUThroughputConfig(StrictModel):
+    """Optional bounded CPU measurement alongside an image run."""
+
+    enabled: StrictBool = False
+    batch_size: StrictInt = Field(default=8, gt=0)
+    n_warmup: StrictInt = Field(default=1, ge=0)
+    n_measure: StrictInt = Field(default=5, gt=0)
+    time_budget_s: StrictFloat = Field(default=300.0, gt=0)
+
+
+class FeatureProfileConfig(StrictModel):
+    """Additive encoder measurements stored separately from probe scores."""
+
+    enabled: StrictBool = False
+    n_warmup: StrictInt = Field(default=3, ge=0)
+    n_measure: StrictInt = Field(default=20, gt=0)
+    cpu_throughput: CPUThroughputConfig = Field(default_factory=CPUThroughputConfig)
+
+
+def _default_splits() -> list[Literal["train", "val", "test"]]:
+    """Return the default intrinsic-dimension split selection."""
+    return ["train"]
+
+
+class IntrinsicDimensionConfig(StrictModel):
+    """Additive feature-dimension and spectrum measurements."""
+
+    enabled: StrictBool = False
+    estimators: list[StrictStr] = Field(default_factory=lambda: ["TwoNN", "MLE", "lPCA"])
+    splits: list[Literal["train", "val", "test"]] = Field(default_factory=_default_splits)
+    max_samples: StrictInt | None = Field(default=10000, gt=0)
+    device: StrictStr | None = None
+
+    @field_validator("estimators", "splits")
+    @classmethod
+    def validate_selections(cls, values: list[str]) -> list[str]:
+        """Require distinct non-empty selections."""
+        if (
+            not values
+            or any(not value.strip() for value in values)
+            or len(set(values)) != len(values)
+        ):
+            raise ValueError("selections must contain distinct non-empty names")
+        return values
 
 
 class RunConfig(StrictModel):
@@ -246,6 +306,8 @@ class RunConfig(StrictModel):
     segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    profile: FeatureProfileConfig = Field(default_factory=FeatureProfileConfig)
+    intrinsic_dim: IntrinsicDimensionConfig = Field(default_factory=IntrinsicDimensionConfig)
 
     @field_validator("schema_version", mode="before")
     @classmethod

@@ -13,9 +13,10 @@ import importlib
 from collections.abc import Sequence
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from omegaconf import DictConfig, OmegaConf, open_dict
+if TYPE_CHECKING:
+    import omegaconf.dictconfig
 
 CONF_DIR = Path(str(files("torchgeo_bench") / "conf"))
 
@@ -53,7 +54,7 @@ def compose_config(
     *,
     config_name: str = "config",
     default_model: str | None = "rcf",
-) -> DictConfig:
+) -> "omegaconf.dictconfig.DictConfig":
     """Build the run config from base YAML, model YAML, and ``key=value`` overrides.
 
     Args:
@@ -66,6 +67,8 @@ def compose_config(
     Returns:
         The merged config, which rejects unknown keys.
     """
+    from omegaconf import DictConfig, OmegaConf, open_dict
+
     cfg = OmegaConf.load(CONF_DIR / f"{config_name}.yaml")
     assert isinstance(cfg, DictConfig)
 
@@ -104,13 +107,15 @@ def compose_config(
     return cfg
 
 
-def instantiate(config: DictConfig | dict, **kwargs: Any) -> Any:
+def instantiate(config: "omegaconf.dictconfig.DictConfig | dict", **kwargs: Any) -> Any:
     """Instantiate the class named by ``config._target_`` with the remaining keys.
 
     Extra ``kwargs`` override config keys.
 
     Pass nested values as plain containers; do not instantiate nested ``_target_`` values.
     """
+    from omegaconf import DictConfig, OmegaConf
+
     if isinstance(config, DictConfig):
         config = OmegaConf.to_container(config, resolve=True)  # type: ignore[assignment]
     conf = dict(config)
