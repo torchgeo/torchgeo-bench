@@ -1,13 +1,17 @@
 """Tests for intrinsic dimension and feature-spectrum metrics."""
 
 import logging
+import sys
 from importlib.util import find_spec
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
 import pytest
 import torch
 
+import torchgeo_bench.intrinsic_dim as intrinsic_dim
+from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench.intrinsic_dim import (
     FEATURE_SPECTRUM_METRICS,
     DegenerateManifoldError,
@@ -19,6 +23,8 @@ from torchgeo_bench.intrinsic_dim import (
     compute_feature_spectrum,
     compute_intrinsic_dim,
 )
+
+pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 
 torchid_available = find_spec("torchid") is not None
 requires_torchid = pytest.mark.skipif(
@@ -42,26 +48,21 @@ class TestResolveDevice:
 
 
 class TestSubsample:
-    def test_no_subsample_when_under_cap(self) -> None:
+    @pytest.mark.parametrize("max_samples", [None, 10, 100])
+    def test_no_subsample_when_under_cap(self, max_samples: int | None) -> None:
         X = np.arange(20).reshape(10, 2)
-        out = _subsample(X, max_samples=100, seed=0)
+        out = _subsample(X, max_samples=max_samples, seed=0)
         assert out is X
 
-    def test_no_subsample_when_max_is_none(self) -> None:
-        X = np.arange(20).reshape(10, 2)
-        out = _subsample(X, max_samples=None, seed=0)
-        assert out is X
-
-    def test_subsamples_to_exact_size(self) -> None:
-        X = np.arange(200).reshape(100, 2)
-        out = _subsample(X, max_samples=10, seed=0)
-        assert out.shape == (10, 2)
-
-    def test_seed_determinism(self) -> None:
+    def test_subsamples_without_replacement_and_with_local_seed(self) -> None:
         X = np.arange(200).reshape(100, 2)
         a = _subsample(X, max_samples=10, seed=42)
         b = _subsample(X, max_samples=10, seed=42)
         np.testing.assert_array_equal(a, b)
+        assert a.shape == (10, 2)
+        assert len(np.unique(a, axis=0)) == 10
+        assert set(map(tuple, a)) <= set(map(tuple, X))
+        assert not np.array_equal(a, _subsample(X, max_samples=10, seed=43))
 
 
 class TestComputeBasic:
@@ -172,37 +173,34 @@ class TestFeatureSpectrum:
 
 
 class TestErrorHandling:
-    @requires_torchid
-    def test_unknown_estimator_raises(self) -> None:
+    def test_unknown_estimator_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Estimator lookup failure raises instead of writing NaN."""
-        X = np.random.RandomState(0).randn(100, 5).astype(np.float32)
+        monkeypatch.setitem(sys.modules, "torchid", SimpleNamespace(estimators=SimpleNamespace()))
+        X = np.random.default_rng(0).normal(size=(100, 5)).astype(np.float32)
         with pytest.raises(ValueError, match="Unknown torchid estimator"):
             compute_intrinsic_dim(
                 X, estimators=["NotARealEstimator"], device="cpu", max_samples=None
             )
 
-    @requires_torchid
-    def test_failing_estimator_propagates(self) -> None:
+    def test_failing_estimator_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Unexpected estimator failures must propagate, not become NaN results."""
-        import torchid.estimators as real_estimators
 
         class _Boom:
             def fit(self, X: torch.Tensor) -> "_Boom":
                 raise RuntimeError("boom")
 
-        X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
-        with (
-            mock.patch.object(real_estimators, "Boom", _Boom, create=True),
-            pytest.raises(RuntimeError, match="boom"),
-        ):
+        X = np.random.default_rng(0).normal(size=(50, 4)).astype(np.float32)
+        monkeypatch.setattr(intrinsic_dim, "_load_estimator", lambda name: _Boom)
+        with pytest.raises(RuntimeError, match="boom"):
             compute_intrinsic_dim(X, estimators=["Boom"], device="cpu", max_samples=None)
 
 
 class TestLoadEstimator:
     @requires_torchid
     def test_known_estimator_returns_class(self) -> None:
-        cls = _load_estimator("TwoNN")
-        assert callable(cls)
+        from torchid.estimators import TwoNN
+
+        assert _load_estimator("TwoNN") is TwoNN
 
     def test_missing_torchid_raises_import_error(self) -> None:
         import builtins
@@ -223,63 +221,42 @@ class TestLoadEstimator:
 
 class TestDropZeroDistanceRows:
     def test_no_duplicates_all_rows_kept(self) -> None:
-        torch.manual_seed(0)
-        X = torch.randn(20, 4)
+        X = torch.arange(20, dtype=torch.float32).reshape(10, 2)
         out = _drop_zero_distance_rows(X)
-        assert out.shape[0] == 20
+        torch.testing.assert_close(out, X)
 
-    def test_exact_duplicates_rows_dropped(self) -> None:
-        torch.manual_seed(1)
-        X = torch.randn(10, 4)
-        X[3] = X[1].clone()
-        out = _drop_zero_distance_rows(X)
-        assert out.shape[0] < 10
-
-    def test_output_has_no_zero_distance(self) -> None:
-        torch.manual_seed(2)
-        X = torch.randn(15, 4)
-        X[5] = X[2].clone()
-        out = _drop_zero_distance_rows(X)
-        if out.shape[0] >= 2:
-            from torchgeo_bench.intrinsic_dim import _two_nearest_distances
-
-            d = _two_nearest_distances(out)
-            assert (d[:, 0] > 0).all()
-
-    def test_logging_on_drop(self, caplog: pytest.LogCaptureFixture) -> None:
-        torch.manual_seed(3)
-        X = torch.randn(10, 4)
-        X[0] = X[1].clone()
+    def test_duplicate_neighbors_are_removed_without_losing_unique_rows(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        X = torch.tensor([[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [3.0, 0.0], [7.0, 0.0]])
         with caplog.at_level(logging.INFO):
-            _drop_zero_distance_rows(X)
-        assert any("dropped" in r.message for r in caplog.records)
+            out = _drop_zero_distance_rows(X)
+        torch.testing.assert_close(out, X[[0, 3, 4]])
+        distances = torch.cdist(out, out)
+        distances.fill_diagonal_(float("inf"))
+        assert (distances.min(dim=1).values > 0).all()
+        assert "dropped 2 rows" in caplog.text
 
 
 class TestDegenerateManifoldError:
-    @requires_torchid
-    def test_raised_on_non_finite_dimension(self) -> None:
-        import torchid.estimators as real_estimators
-
+    @pytest.mark.parametrize("dimension", [float("nan"), float("inf")])
+    def test_raised_on_non_finite_dimension(
+        self, monkeypatch: pytest.MonkeyPatch, dimension: float
+    ) -> None:
         class _NaNEstimator:
-            dimension_: float = float("nan")
+            dimension_ = dimension
 
             def fit(self, X: torch.Tensor) -> "_NaNEstimator":
                 return self
 
-        X = np.random.RandomState(0).randn(50, 4).astype(np.float32)
-        with (
-            mock.patch.object(real_estimators, "NaNEst", _NaNEstimator, create=True),
-            pytest.raises(DegenerateManifoldError, match="non-finite"),
-        ):
+        X = np.random.default_rng(0).normal(size=(50, 4)).astype(np.float32)
+        monkeypatch.setattr(intrinsic_dim, "_load_estimator", lambda name: _NaNEstimator)
+        with pytest.raises(DegenerateManifoldError, match="non-finite"):
             compute_intrinsic_dim(X, estimators=["NaNEst"], device="cpu", max_samples=None)
 
 
 @requires_torchid
 class TestRealTorchid:
-    @pytest.fixture(autouse=True)
-    def _seed(self) -> None:
-        torch.manual_seed(0)
-
     @staticmethod
     def _swiss_roll(n: int) -> np.ndarray:
         """2D manifold embedded in 3D — true intrinsic dim = 2."""
@@ -294,15 +271,11 @@ class TestRealTorchid:
         rng = np.random.default_rng(0)
         return rng.uniform(0, 1, size=(n, d)).astype(np.float32)
 
-    def test_swiss_roll_two_nn_close_to_2(self) -> None:
+    @pytest.mark.parametrize("estimator", ["TwoNN", "MLE"])
+    def test_swiss_roll_recovers_two_dimensions(self, estimator: str) -> None:
         X = self._swiss_roll(2000)
-        out = compute_intrinsic_dim(X, estimators=["TwoNN"], device="cpu", max_samples=None)
-        assert abs(out["TwoNN"] - 2.0) < 0.5
-
-    def test_swiss_roll_mle_close_to_2(self) -> None:
-        X = self._swiss_roll(2000)
-        out = compute_intrinsic_dim(X, estimators=["MLE"], device="cpu", max_samples=None)
-        assert abs(out["MLE"] - 2.0) < 0.5
+        out = compute_intrinsic_dim(X, estimators=[estimator], device="cpu", max_samples=None)
+        assert out[estimator] == pytest.approx(2.0, abs=0.5)
 
     def test_uniform_cube_lpca_matches_ambient(self) -> None:
         X = self._uniform_cube(1000, d=5)

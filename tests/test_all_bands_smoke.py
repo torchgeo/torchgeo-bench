@@ -10,12 +10,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from .test_cli_program import run_cli
-from .test_integration import require_dataset_data
+from tests.support.cli import run_cli
+from tests.support.data import require_dataset_data
 
 
 @pytest.mark.slow
-def test_all_bands_e2e(tmp_path: Path):
+def test_all_bands_e2e(tmp_path: Path) -> None:
     require_dataset_data("m-eurosat")
 
     output = tmp_path / "results.csv"

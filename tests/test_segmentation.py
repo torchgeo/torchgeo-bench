@@ -1,5 +1,8 @@
+"""Numerical, training, and caching contracts for dense segmentation probes."""
+
 from unittest import mock
 
+import numpy as np
 import pytest
 import torch
 import torch.nn as nn
@@ -13,6 +16,7 @@ from torchmetrics.functional.classification import (
     multiclass_recall,
 )
 
+from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench.results import bootstrap_miou
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,
@@ -24,6 +28,8 @@ from torchgeo_bench.segmentation_task import SegmentationSolver, build_seg_probe
 
 NUM_CLASSES = 5
 
+pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
+
 
 def test_bootstrap_miou_uses_per_image_resampling() -> None:
     """Bootstrap intervals reflect variation across held-out images."""
@@ -31,7 +37,20 @@ def test_bootstrap_miou_uses_per_image_resampling() -> None:
 
     lower, upper = bootstrap_miou(confusions, n_boot=200, seed=7)
 
-    assert 0.0 <= lower < upper <= 1.0
+    assert (lower, upper) == pytest.approx((0.0, 1.0))
+    # The mixed-image draw has mIoU 0.25, not the mean of the per-image scores (0.5).
+    central = bootstrap_miou(confusions, n_boot=200, ci=10, seed=7)
+    assert central == pytest.approx((0.25, 0.25))
+
+
+@pytest.mark.parametrize("shape", [(2, 2), (0, 2, 2), (3, 2, 3)])
+def test_bootstrap_miou_rejects_invalid_confusions(shape: tuple[int, ...]) -> None:
+    with pytest.raises(ValueError, match=r"shape|square"):
+        bootstrap_miou(torch.zeros(shape))
+
+
+def test_bootstrap_miou_can_be_disabled() -> None:
+    assert all(np.isnan(value) for value in bootstrap_miou(torch.zeros(2, 2, 2), n_boot=0))
 
 
 class MockBackbone(nn.Module):
@@ -391,11 +410,21 @@ def test_probe_backbone_prefix_stripping(dummy_data):
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
 
 
-def test_probe_linear_multi_layer_weighted(mock_backbone, dummy_data):
-    probe = make_probe(mock_backbone, ["layer1", "layer2"], head_type="linear")
-    assert hasattr(probe.head, "scale_weights")
-    logits = probe(dummy_data["image"])
-    assert logits.shape == (2, NUM_CLASSES, 64, 64)
+def test_linear_head_weights_each_scale_before_fusion() -> None:
+    from torchgeo_bench.models.segmentation_heads import LinearHead
+
+    head = LinearHead([1, 1], num_classes=1).eval()
+    with torch.no_grad():
+        head.scale_weights.copy_(torch.tensor([2.0, -0.5]))
+        for branch in head.heads:
+            branch[0].weight.fill_((1 + branch[0].eps) ** 0.5)
+            branch[1].weight.fill_(1)
+            branch[1].bias.zero_()
+    features = [torch.full((1, 1, 2, 2), 3.0), torch.full((1, 1, 4, 4), 4.0)]
+    logits = head(features, 8, 8)
+    torch.testing.assert_close(logits, torch.full((1, 1, 8, 8), 4.0))
+    logits.sum().backward()
+    torch.testing.assert_close(head.scale_weights.grad, torch.tensor([192.0, 256.0]))
 
 
 def test_probe_conv_block_multi_layer(mock_backbone, dummy_data):
@@ -440,43 +469,29 @@ def test_resolve_num_prefix_tokens_walks_module_tree():
     assert _resolve_num_prefix_tokens(nn.Linear(4, 4)) is None
 
 
-def test_process_feature_drops_dinov3_register_tokens():
-    """DINOv3's 261 tokens contain 256 patches, one CLS token, and four registers.
-
-    Mistaking feature width 1024 for the token count would create a 32x32 grid with 261 channels.
-    """
-
-    class _DinoV3Backbone(nn.Module):
-        def __init__(self):
+@pytest.mark.parametrize(
+    ("prefix", "side", "width"), [(5, 16, 1024), (1, 14, 768)], ids=["dinov3-registers", "vit-cls"]
+)
+def test_process_feature_preserves_patch_order_after_prefix_removal(
+    prefix: int, side: int, width: int
+) -> None:
+    class TokenBackbone(nn.Module):
+        def __init__(self) -> None:
             super().__init__()
-            self.num_prefix_tokens = 5
+            self.num_prefix_tokens = prefix
             self.blocks = nn.Identity()
 
-        def forward(self, x):
-            b = x.shape[0]
-            return self.blocks(torch.randn(b, 261, 1024))
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return self.blocks(torch.zeros(images.shape[0], prefix + side**2, width))
 
-    probe = make_probe(_DinoV3Backbone(), ["blocks"], head_type="linear")
-    assert probe.channels_list == [1024]
-    assert probe.feature_hw_list == [(16, 16)]
-
-
-def test_process_feature_plain_vit_cls_token_unchanged():
-    """A single CLS token (L=197) still resolves to a 14x14 grid."""
-
-    class _ViTBackbone(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.num_prefix_tokens = 1
-            self.blocks = nn.Identity()
-
-        def forward(self, x):
-            b = x.shape[0]
-            return self.blocks(torch.randn(b, 197, 768))
-
-    probe = make_probe(_ViTBackbone(), ["blocks"], head_type="linear")
-    assert probe.channels_list == [768]
-    assert probe.feature_hw_list == [(14, 14)]
+    probe = make_probe(TokenBackbone(), ["blocks"], head_type="linear")
+    assert probe.channels_list == [width]
+    assert probe.feature_hw_list == [(side, side)]
+    tokens = torch.arange(2 * (prefix + side**2) * width).reshape(2, prefix + side**2, width)
+    features = probe._process_feature(tokens)
+    torch.testing.assert_close(
+        features.flatten(2).transpose(1, 2), tokens[:, prefix:], rtol=0, atol=0
+    )
 
 
 def test_process_feature_rejects_unreshapeable_tokens():
@@ -518,7 +533,7 @@ def test_solver_training_schedule_and_frozen_backbone(
     images = torch.randn(2, 3, 8, 8, generator=rng)
     masks = torch.randint(0, NUM_CLASSES, (2, 8, 8), generator=rng)
     masks[0, :2, :2] = 255
-    loader = make_loader(images, masks)
+    loader = make_loader(images, masks, as_dict=True, mask_4d=True)
     backbone = nn.Sequential(nn.Conv2d(3, 4, 1), nn.BatchNorm2d(4))
     probe = make_probe(backbone, ["1"])
     solver = SegmentationSolver(
@@ -550,27 +565,6 @@ def test_solver_training_schedule_and_frozen_backbone(
         not torch.equal(before, after)
         for before, after in zip(head_before, probe.head.parameters(), strict=True)
     )
-
-
-def test_solver_dict_batches(mock_backbone, dummy_data):
-    images, masks = dummy_data["image"], dummy_data["mask"]
-    loader = make_loader(images, masks, as_dict=True)
-    probe = make_probe(mock_backbone, ["layer1"])
-    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
-    solver.fit(loader, epochs=1, verbose=False)
-    metrics = solver.evaluate(loader)
-    assert 0.0 <= metrics["mIoU"] <= 1.0
-
-
-def test_solver_4d_masks(mock_backbone, dummy_data):
-    """fit and evaluate both squeeze (B, 1, H, W) masks to (B, H, W)."""
-    images, masks = dummy_data["image"], dummy_data["mask"]
-    loader = make_loader(images, masks, mask_4d=True)
-    probe = make_probe(mock_backbone, ["layer1"])
-    solver = SegmentationSolver(model=probe, num_classes=NUM_CLASSES, lr=1e-3, device="cpu")
-    solver.fit(loader, epochs=1, verbose=False)
-    metrics = solver.evaluate(loader)
-    assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
 def test_solver_fit_with_val_loader(mock_backbone, dummy_data):
@@ -684,35 +678,14 @@ def test_dpt_head_upsamples_purely_through_fusion_cascade():
     assert logits.shape == (1, NUM_CLASSES, 224, 224)
 
 
-def test_patch_linear_head_output_shape():
-    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
-
-    head = PatchLinearHead([16], num_classes=5)
-    logits = head([torch.randn(2, 16, 4, 4)], 64, 64)
-
-    assert logits.shape == (2, 5, 64, 64)
-    assert torch.isfinite(logits).all()
-
-
-def test_patch_linear_head_small_patch():
-    """Infer patch size from the token grid rather than assuming 16-pixel patches."""
+@pytest.mark.parametrize(("grid", "size", "patch"), [(4, 64, 16), (16, 64, 4), (16, 65, 4)])
+def test_patch_linear_head_infers_patch_geometry(grid: int, size: int, patch: int) -> None:
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
     head = PatchLinearHead([8], num_classes=3)
-    logits = head([torch.randn(2, 8, 16, 16)], 64, 64)
-
-    assert logits.shape == (2, 3, 64, 64)
-    assert torch.isfinite(logits).all()
-
-
-def test_patch_linear_head_non_exact_size():
-    """PatchLinearHead resizes to the requested image size when pixel shuffle is not exact."""
-    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
-
-    head = PatchLinearHead([8], num_classes=3)
-    logits = head([torch.randn(2, 8, 16, 16)], 65, 65)
-
-    assert logits.shape == (2, 3, 65, 65)
+    logits = head([torch.randn(2, 8, grid, grid)], size, size)
+    assert head.patch_size == patch
+    assert logits.shape == (2, 3, size, size)
     assert torch.isfinite(logits).all()
 
 
@@ -721,10 +694,11 @@ def test_patch_linear_head_ignores_extra_channels():
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
     head = PatchLinearHead([8, 16], num_classes=3)
-    logits = head([torch.randn(2, 8, 16, 16), torch.randn(2, 16, 8, 8)], 64, 64)
-
-    assert logits.shape == (2, 3, 64, 64)
-    assert torch.isfinite(logits).all()
+    primary = torch.randn(2, 8, 16, 16)
+    extra = torch.randn(2, 16, 8, 8)
+    expected = head([primary], 64, 64)
+    torch.testing.assert_close(head([primary, extra], 64, 64), expected)
+    torch.testing.assert_close(head([primary, extra * 100], 64, 64), expected)
 
 
 def test_probe_patch_linear_head_vit():
@@ -752,9 +726,12 @@ def test_probe_patch_linear_cached_features():
     assert 0.0 <= val_miou <= 1.0
 
 
-def test_extract_segmentation_features_returns_cached_dataset(mock_backbone, dummy_data):
+@pytest.mark.parametrize("as_dict", [False, True])
+def test_extract_segmentation_features_preserves_layer_values_and_masks(
+    mock_backbone, dummy_data, *, as_dict: bool
+) -> None:
     images, masks = dummy_data["image"], dummy_data["mask"]
-    loader = make_loader(images, masks)
+    loader = make_loader(images, masks, as_dict=as_dict)
     probe = make_probe(mock_backbone, ["layer1", "layer2"])
 
     cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float16)
@@ -765,6 +742,12 @@ def test_extract_segmentation_features_returns_cached_dataset(mock_backbone, dum
     assert len(feats) == 2
     assert feats[0].dtype == torch.float16
     assert mask.dtype == torch.int64
+    with torch.no_grad():
+        first = mock_backbone.layer1(images)
+        second = mock_backbone.layer2(first)
+    for actual, expected in zip(cache.layer_tensors, [first, second], strict=True):
+        torch.testing.assert_close(actual, expected.half())
+    torch.testing.assert_close(cache.masks, masks)
 
 
 def test_solver_fit_cached(mock_backbone, dummy_data):
@@ -788,22 +771,26 @@ def test_solver_fit_cached(mock_backbone, dummy_data):
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
-def test_extract_segmentation_features_dict_batches(mock_backbone, dummy_data):
-    images, masks = dummy_data["image"], dummy_data["mask"]
-    loader = make_loader(images, masks, as_dict=True)
-    probe = make_probe(mock_backbone, ["layer1"])
-    cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
-    assert len(cache) == len(images)
-
-
-def test_extract_segmentation_features_restores_backbone_mode(mock_backbone, dummy_data):
+@pytest.mark.parametrize("fail", [False, True])
+def test_extract_segmentation_features_restores_backbone_mode(
+    mock_backbone, dummy_data, monkeypatch: pytest.MonkeyPatch, *, fail: bool
+) -> None:
     """Feature extraction preserves the caller's backbone train/eval state."""
     images, masks = dummy_data["image"], dummy_data["mask"]
     loader = make_loader(images, masks)
     probe = make_probe(mock_backbone, ["layer1"])
     probe.backbone.train()
 
-    probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    if fail:
+
+        def broken_forward(images: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("feature extraction failed")
+
+        monkeypatch.setattr(mock_backbone, "forward", broken_forward)
+        with pytest.raises(RuntimeError, match="feature extraction failed"):
+            probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
+    else:
+        probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
 
     assert probe.backbone.training
 
@@ -827,18 +814,18 @@ def test_gpu_tensor_cache_from_cached_cpu(mock_backbone, dummy_data):
     assert gpu_cache.masks.shape == (len(cache), 64, 64)
 
 
-def test_gpu_tensor_cache_shuffled_batches(mock_backbone, dummy_data):
-    cache = _make_cpu_cache(mock_backbone, dummy_data)
+def test_gpu_tensor_cache_shuffling_keeps_features_paired_with_masks() -> None:
+    ids = torch.arange(5).reshape(5, 1, 1)
+    cache = CachedFeaturesDataset([ids[:, None].float(), (ids[:, None] + 10).float()], ids)
     gpu_cache = GPUTensorCache.from_cached(cache, device="cpu")
 
-    all_masks = []
-    for feats, masks in gpu_cache.shuffled_batches(batch_size=1):
-        assert len(feats) == 2
-        assert feats[0].shape[0] == masks.shape[0]
-        all_masks.append(masks)
-
-    total = sum(m.shape[0] for m in all_masks)
-    assert total == len(cache)
+    batches = list(gpu_cache.shuffled_batches(batch_size=2))
+    assert [len(masks) for _, masks in batches] == [2, 2, 1]
+    observed = torch.cat([masks for _, masks in batches]).flatten()
+    torch.testing.assert_close(observed.sort().values, torch.arange(5))
+    for features, masks in batches:
+        torch.testing.assert_close(features[0][:, 0], masks.float())
+        torch.testing.assert_close(features[1][:, 0], masks.float() + 10)
 
 
 def test_gpu_tensor_cache_ordered_batches(mock_backbone, dummy_data):
@@ -896,15 +883,19 @@ def test_solver_fit_cached_builds_missing_validation_gpu_cache(mock_backbone, du
     val_cache = probe.extract_segmentation_features(loader, cache_dtype=torch.float32)
     gpu_train = GPUTensorCache.from_cached(train_cache, device="cpu")
 
-    val_miou = solver.fit_cached(
-        gpu_train,
-        val_cache=val_cache,
-        batch_size=2,
-        epochs=1,
-        verbose=False,
-    )
+    with mock.patch.object(
+        GPUTensorCache, "from_cached", wraps=GPUTensorCache.from_cached
+    ) as transfer:
+        val_miou = solver.fit_cached(
+            gpu_train,
+            val_cache=val_cache,
+            batch_size=2,
+            epochs=1,
+            verbose=False,
+        )
 
     assert isinstance(val_miou, float)
+    transfer.assert_called_once_with(val_cache, solver.device)
 
 
 def test_probe_pools_time_series_features(mock_backbone, dummy_data):
@@ -918,17 +909,20 @@ def test_probe_pools_time_series_features(mock_backbone, dummy_data):
     assert torch.allclose(series, single, atol=1e-4)
 
 
-def test_probe_temporal_pool_max_differs_from_mean(mock_backbone, dummy_data):
+@pytest.mark.parametrize("temporal_pool", ["mean", "max"])
+def test_probe_pools_encoded_dates_with_the_requested_reduction(
+    mock_backbone, dummy_data, temporal_pool: str
+) -> None:
     images = dummy_data["image"]
     series = torch.stack([images, images * 0.5], dim=1)
-    mean_probe = SegmentationProbe(
-        mock_backbone, ["layer1"], NUM_CLASSES, head_type="fpn", temporal_pool="mean"
-    )
-    max_probe = SegmentationProbe(
-        mock_backbone, ["layer1"], NUM_CLASSES, head_type="fpn", temporal_pool="max"
-    )
-    max_probe.head.load_state_dict(mean_probe.head.state_dict())
-    assert not torch.allclose(mean_probe(series), max_probe(series), atol=1e-5)
+    probe = SegmentationProbe(
+        mock_backbone, ["layer1"], NUM_CLASSES, head_type="fpn", temporal_pool=temporal_pool
+    ).eval()
+    with torch.no_grad():
+        dates = torch.stack([mock_backbone.layer1(series[:, step]) for step in range(2)], dim=1)
+        pooled = dates.mean(dim=1) if temporal_pool == "mean" else dates.amax(dim=1)
+        expected = probe.head([pooled], *images.shape[-2:])
+        torch.testing.assert_close(probe(series), expected)
 
 
 def test_probe_rejects_unknown_temporal_pool(mock_backbone):

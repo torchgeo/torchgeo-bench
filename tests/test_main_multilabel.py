@@ -8,10 +8,9 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
+from tests.support.runner import _compose_cfg, _DictTensorDataset
 from torchgeo_bench.main import LinearProbeDivergedError, main
 from torchgeo_bench.resume import _resume_config_hash
-
-from .test_main_fast import _compose_cfg, _DictTensorDataset
 
 
 def _synthetic_multilabel_loaders(
@@ -22,9 +21,9 @@ def _synthetic_multilabel_loaders(
     n_classes: int = 8,
 ) -> tuple[_DictTensorDataset, DataLoader, DataLoader, DataLoader]:
     rng = torch.Generator().manual_seed(2)
-    train_images = torch.rand(n_train, channels, 64, 64, generator=rng) * 3000.0
-    val_images = torch.rand(n_val, channels, 64, 64, generator=rng) * 3000.0
-    test_images = torch.rand(n_test, channels, 64, 64, generator=rng) * 3000.0
+    train_images = torch.rand(n_train, channels, 8, 8, generator=rng) * 3000.0
+    val_images = torch.rand(n_val, channels, 8, 8, generator=rng) * 3000.0
+    test_images = torch.rand(n_test, channels, 8, 8, generator=rng) * 3000.0
 
     train_labels = torch.randint(
         0, 2, (n_train, n_classes), generator=rng, dtype=torch.int64
@@ -36,7 +35,9 @@ def _synthetic_multilabel_loaders(
     val_dataset = _DictTensorDataset(val_images, val_labels)
     test_dataset = _DictTensorDataset(test_images, test_labels)
 
-    train_loader = DataLoader(train_dataset, batch_size=3, shuffle=True, num_workers=0)
+    train_loader = DataLoader(
+        train_dataset, batch_size=3, shuffle=True, generator=rng, num_workers=0
+    )
     val_loader = DataLoader(val_dataset, batch_size=3, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=3, shuffle=False, num_workers=0)
     return train_dataset, train_loader, val_loader, test_loader

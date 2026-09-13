@@ -28,15 +28,15 @@ def _bands(
     ]
 
 
-def test_identity_is_noop():
+def test_identity_is_noop() -> None:
     bands = _bands([10000.0, 10000.0])
     fn = build_normalizer("identity", bands)
-    x = torch.randn(2, 2, 4, 4) * 5000
+    x = torch.arange(64, dtype=torch.float32).reshape(2, 2, 4, 4)
     out = fn(x)
     assert out is x
 
 
-def test_bandspec_zscore_zero_mean():
+def test_bandspec_zscore_zero_mean() -> None:
     means = [1000.0, 2000.0]
     stds = [500.0, 800.0]
     bands = _bands([10000.0, 10000.0], means=means, stds=stds)
@@ -48,17 +48,15 @@ def test_bandspec_zscore_zero_mean():
     assert torch.allclose(out, torch.zeros_like(out), atol=1e-5)
 
 
-def test_bandspec_zscore_unit_variance():
+def test_bandspec_zscore_scales_deviations() -> None:
     bands = _bands([10000.0], means=[500.0], stds=[250.0])
     fn = build_normalizer("bandspec_zscore", bands)
-    torch.manual_seed(0)
-    x = torch.randn(100, 1, 1, 1) * 250 + 500
+    x = torch.tensor([0.0, 250.0, 500.0, 750.0, 1000.0]).reshape(1, 1, 1, 5)
     out = fn(x)
-    assert abs(out.mean().item()) < 0.1
-    assert abs(out.std().item() - 1.0) < 0.15
+    torch.testing.assert_close(out, torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]).reshape_as(x))
 
 
-def test_minmax_range():
+def test_minmax_range() -> None:
     bands = [BandSpec(sensor="s2", name="b", source_name="B", mean=5.0, std=2.0, min=2.0, max=12.0)]
     fn = build_normalizer("minmax", bands)
     x_min = torch.tensor([[[[2.0]]]])
@@ -67,16 +65,18 @@ def test_minmax_range():
     assert torch.allclose(fn(x_max), torch.ones(1, 1, 1, 1), atol=1e-6)
 
 
-def test_minmax_zscore_produces_finite():
-    bands = _bands([1.0, 1.0], means=[0.3, 0.5], stds=[0.1, 0.2])
+def test_minmax_zscore_uses_actual_bandspec_stats() -> None:
+    bands = [
+        BandSpec("s2", "red", "RED", mean=3.0, std=2.0, min=0.0, max=10.0),
+        BandSpec("s2", "green", "GREEN", mean=30.0, std=4.0, min=10.0, max=50.0),
+    ]
     fn = build_normalizer("minmax_zscore", bands)
-    x = torch.rand(4, 2, 8, 8)
-    out = fn(x)
-    assert torch.isfinite(out).all()
-    assert out.shape == x.shape
+    images = torch.tensor([3.0, 10.0, 30.0, 50.0]).reshape(1, 2, 1, 2)
+    expected = torch.tensor([0.0, 3.5, 0.0, 5.0]).reshape_as(images)
+    torch.testing.assert_close(fn(images), expected)
 
 
-def test_model_native_s2dn_to_reflectance():
+def test_model_native_s2dn_to_reflectance() -> None:
     bands = _bands([10000.0])
     fn = build_normalizer(
         "model_native",
@@ -90,7 +90,7 @@ def test_model_native_s2dn_to_reflectance():
     assert torch.allclose(out, torch.ones(1, 1, 1, 1), atol=1e-5)
 
 
-def test_model_native_with_pretrain_stats():
+def test_model_native_with_pretrain_stats() -> None:
     """Apply pretraining statistics after converting input units."""
     bands = _bands([10000.0])
     fn = build_normalizer(
@@ -100,18 +100,18 @@ def test_model_native_with_pretrain_stats():
         pretrain_mean=[0.5],
         pretrain_std=[0.5],
     )
-    x = torch.tensor([[[[10000.0]]]])  # 10000 DN becomes reflectance 1, then (1 - 0.5) / 0.5 = 1.
+    x = torch.tensor([[[[7500.0]]]])
     out = fn(x)
-    assert torch.allclose(out, torch.ones(1, 1, 1, 1), atol=1e-5)
+    torch.testing.assert_close(out, torch.full_like(x, 0.5))
 
 
-def test_model_native_requires_expected_unit():
+def test_model_native_requires_expected_unit() -> None:
     bands = _bands([10000.0])
     with pytest.raises(UnsupportedNormalizationError, match="expected_input_unit"):
         build_normalizer("model_native", bands)
 
 
-def test_model_native_s2dn_target():
+def test_model_native_s2dn_target() -> None:
     """Already-DN inputs need no unit conversion."""
     bands = _bands([10000.0])
     fn = build_normalizer(
@@ -126,7 +126,7 @@ def test_model_native_s2dn_target():
     assert torch.allclose(out, x, atol=1e-5)
 
 
-def test_model_native_without_pretrain_stats_raises_on_use():
+def test_model_native_without_pretrain_stats_raises_on_use() -> None:
     """Unit conversion alone is not normalization.
 
     Without pretraining statistics, raw sensor values can collapse the features.

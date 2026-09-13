@@ -39,12 +39,12 @@ Target              What it does
 =================== ===================================================
 ``make install``    Create / update the conda env and install ``[dev]``.
 ``make sync``       Alias for ``install``.
-``make tests``      ``pytest`` (skips ``slow`` integration tests).
+``make tests``      ``pytest`` with coverage and offline integrations.
 ``make lint``       ``pre-commit run --all-files``.
 ``make format``     ``ruff format`` then ``ruff check --fix --select I``.
 ``make docs``       Build HTML documentation into ``docs/_build/html``.
 ``make docs-clean`` Remove the ``docs/_build`` directory.
-``make clean``      Removes ``htmlcov``, ``.coverage``, ``.pytest_cache``.
+``make clean``      Removes coverage reports and the pytest cache.
 =================== ===================================================
 
 Linting and formatting
@@ -67,14 +67,21 @@ Tests
 
 .. code-block:: console
 
-   $ uv run pytest                                  # all tests (skipping slow)
-   $ uv run pytest -m slow                          # only slow integration tests
+   $ uv run pytest                                  # unit + offline integration tests, with coverage
+   $ uv run pytest -m integration                   # toy-data workflows only
+   $ uv run pytest -m slow                          # optional downloaded-data/weight tests
+   $ uv run pytest -m accuracy_check                # optional model accuracy baselines
    $ uv run pytest tests/test_intrinsic_dim.py -v   # one file
    $ uv run pytest -k "m-eurosat" -v                # by keyword
    $ uv run pytest --no-cov                         # disable coverage for speed
 
-Tests skip gracefully when ``data/`` is missing — they look up the
-canonical subdirs documented in :doc:`datasets`.
+All test cases live under :file:`tests/`, including the optional Cleanlab project tests in :file:`tests/projects/cleanlab/`. Shared inputs and subprocess helpers belong in :file:`tests/support/`, not in another test module. Use the same Ruff profile for every test.
+
+The default suite needs no downloaded datasets or pretrained weights and can run on CPU; GPU-specific tests skip when CUDA is unavailable. The :file:`tests/integration/` suite creates small on-disk datasets with separate training, validation, and test samples. It exercises CLI parsing, data loading, feature extraction, fitting, output files, and resume behavior together. External download transport is replaced with local fixture data, and a temporary random-weight preset lets the public CLI exercise segmentation offline; numerical algorithms and result writers run normally. Integration tests must assert meaningful outputs, not just a zero exit status.
+
+``pytest-cov`` measures both lines and branches across :mod:`torchgeo_bench`, including Python subprocesses. Every normal run displays missing coverage and writes :file:`coverage.xml`; CI saves that report as an artifact and uploads it to Codecov. Generate a navigable local report with ``uv run pytest --cov-report=html`` and open :file:`htmlcov/index.html`. Optional model packages remain in the coverage denominator even when they are not installed, so compare results using the same dependency extras.
+
+Only the explicitly selected ``slow`` and ``accuracy_check`` suites need real data or cached weights. Missing datasets skip individually; present but malformed data must fail. They use the canonical subdirectories documented in :doc:`datasets`.
 
 Code style
 ----------

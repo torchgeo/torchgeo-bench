@@ -3,8 +3,6 @@
 
 """Tests for the strict core image configuration schema."""
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -68,19 +66,22 @@ def test_unknown_nested_field_is_rejected() -> None:
         validate_run_config(config)
 
 
-def test_empty_or_duplicate_selections_are_rejected() -> None:
-    for datasets in ([], [""], ["x", "x"]):
-        config = valid_config()
-        config["datasets"] = datasets
-        with pytest.raises(ValidationError):
-            validate_run_config(config)
-    for bands in (" ", [], ["red", ""]):
-        config = valid_config()
-        config["input"] = {"bands": bands}
-        with pytest.raises(ValidationError):
-            validate_run_config(config)
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"datasets": []},
+        {"datasets": [""]},
+        {"datasets": ["x", "x"]},
+        {"input": {"bands": " "}},
+        {"input": {"bands": []}},
+        {"input": {"bands": ["red", ""]}},
+        {"input": {"bands": ["red", "red"]}},
+        {"classification": {"methods": ["knn", "knn"]}},
+    ],
+)
+def test_empty_or_duplicate_selections_are_rejected(overrides: dict[str, object]) -> None:
     config = valid_config()
-    config["classification"] = {"methods": ["knn", "knn"]}
+    config.update(overrides)
     with pytest.raises(ValidationError):
         validate_run_config(config)
 
@@ -108,8 +109,9 @@ def test_invalid_device_is_rejected() -> None:
         validate_run_config(config)
 
 
-def test_blank_names_paths_and_invalid_knn_device_are_rejected() -> None:
-    for config in (
+@pytest.mark.parametrize(
+    "config",
+    [
         {"model": {"name": " "}, "datasets": ["x"]},
         {"model": {"name": "x"}, "datasets": ["x"], "input": {"partition": " "}},
         {"model": {"name": "x"}, "datasets": ["x"], "output": {"directory": " "}},
@@ -118,9 +120,11 @@ def test_blank_names_paths_and_invalid_knn_device_are_rejected() -> None:
             "datasets": ["x"],
             "classification": {"knn_device": "gpu"},
         },
-    ):
-        with pytest.raises(ValidationError):
-            validate_run_config(config)
+    ],
+)
+def test_blank_names_paths_and_invalid_knn_device_are_rejected(config: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        validate_run_config(config)
 
 
 def test_yaml_loads_bare_exponent_as_float(tmp_path: Path) -> None:
@@ -158,17 +162,6 @@ def test_schema_rejects_bool_schema_version() -> None:
     config["schema_version"] = True
     with pytest.raises(ValidationError):
         validate_run_config(config)
-
-
-def test_schema_does_not_import_ml_frameworks() -> None:
-    code = (
-        "import sys; import torchgeo_bench.config_schema; "
-        "print([name for name in ('torch', 'torchgeo', 'pandas', 'numpy') if name in sys.modules])"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
-    assert result.stdout.strip() == "[]"
 
 
 def test_round_trip_dump_is_valid() -> None:

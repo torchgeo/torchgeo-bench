@@ -2,15 +2,18 @@
 
 import pickle
 from collections.abc import Iterator
-from functools import partial
 from pathlib import Path
 
-import cleanlab_per_class_multilabel
-import cleanlab_per_class_singlelabel
 import numpy as np
 import pandas as pd
 import pytest
-import run_cleanlab_audit
+
+from projects.cleanlab import (
+    cleanlab_extract_probs,
+    cleanlab_per_class_multilabel,
+    cleanlab_per_class_singlelabel,
+    run_cleanlab_audit,
+)
 
 EXECUTED: list[bool] = []
 
@@ -121,17 +124,8 @@ def test_multilabel_report_reads_numeric_and_unicode_artifacts(
     assert (tmp_path / "out" / "perclass_example_test.csv").is_file()
 
 
-def test_singlelabel_report_reads_numeric_and_unicode_artifacts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    pytest.importorskip("cleanlab")
-    from cleanlab import filter as cleanlab_filter
-
-    monkeypatch.setattr(
-        cleanlab_filter,
-        "find_label_issues",
-        partial(cleanlab_filter.find_label_issues, n_jobs=1),
-    )
+@pytest.mark.usefixtures("cleanlab_filter")
+def test_singlelabel_report_reads_numeric_and_unicode_artifacts(tmp_path: Path) -> None:
     path = tmp_path / "example__model_test.npz"
     labels = np.tile([0, 1], 10)
     np.savez(
@@ -194,7 +188,6 @@ def test_audit_model_name_comes_from_the_artifact_name(
 def test_probability_writer_emits_no_object_arrays(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dataset: str
 ) -> None:
-    import cleanlab_extract_probs
     import torch
     from torch.utils.data import DataLoader
 
@@ -230,39 +223,64 @@ def test_probability_writer_emits_no_object_arrays(
             "cpu",
         ],
     )
-    labels = np.array([0, 1, 0, 1], dtype=np.int64)
+    train_labels = np.array([0, 1, 0, 1], dtype=np.int64)
+    val_labels = np.array([1, 0], dtype=np.int64)
+    test_labels = np.array([1, 0, 1], dtype=np.int64)
     if dataset == "m-bigearthnet":
-        labels = np.eye(2, dtype=np.float32)[labels]
-    samples = [
-        {"image": torch.zeros(3, 2, 2), "label": torch.from_numpy(np.asarray(label))}
-        for label in labels
-    ]
-    loader = DataLoader(samples, batch_size=2)
+        train_labels, val_labels, test_labels = [
+            np.eye(2, dtype=np.float32)[labels]
+            for labels in (train_labels, val_labels, test_labels)
+        ]
+
+    def samples(labels: np.ndarray) -> list[dict[str, torch.Tensor]]:
+        return [
+            {
+                "image": torch.full((3, 2, 2), float(index)),
+                "label": torch.from_numpy(np.asarray(label)),
+            }
+            for index, label in enumerate(labels)
+        ]
+
+    train = samples(train_labels)
+    train_loader = DataLoader(
+        train, batch_size=2, shuffle=True, generator=torch.Generator().manual_seed(17)
+    )
+    val_loader = DataLoader(samples(val_labels), batch_size=2)
+    test_loader = DataLoader(samples(test_labels), batch_size=2)
     monkeypatch.setattr(
-        cleanlab_extract_probs, "get_datasets", lambda **kwargs: (samples, loader, loader, loader)
+        cleanlab_extract_probs,
+        "get_datasets",
+        lambda **kwargs: (train, train_loader, val_loader, test_loader),
     )
     monkeypatch.setattr(
         cleanlab_extract_probs, "instantiate", lambda *args, **kwargs: torch.nn.Identity()
     )
-    monkeypatch.setattr(
-        cleanlab_extract_probs,
-        "embed_split",
-        lambda *args, **kwargs: (np.zeros((4, 2), dtype=np.float32), labels),
-    )
+
+    def embed(
+        model: torch.nn.Module, loader: DataLoader, device: torch.device, **kwargs: object
+    ) -> tuple[np.ndarray, np.ndarray]:
+        labels = np.concatenate([batch["label"].numpy() for batch in loader])
+        return np.zeros((len(labels), 2), dtype=np.float32), labels
+
+    monkeypatch.setattr(cleanlab_extract_probs, "embed_split", embed)
 
     class Probe:
         def __init__(self, **kwargs: object) -> None:
             self.classes_ = np.array([0, 1], dtype=np.int64)
 
         def fit(self, images: torch.Tensor, labels: torch.Tensor) -> None:
-            pass
+            np.testing.assert_array_equal(
+                labels.numpy(), np.concatenate([train_labels, val_labels])
+            )
+            assert len(images) == len(train_labels) + len(val_labels)
 
         def predict_proba(self, images: torch.Tensor) -> np.ndarray:
             return np.tile(np.array([[0.75, 0.25]], dtype=np.float32), (len(images), 1))
 
     monkeypatch.setattr(cleanlab_extract_probs, "LogisticRegression", Probe)
-    cleanlab_extract_probs.main()
-    for split in ("train", "test"):
+    with torch.random.fork_rng(devices=[]):
+        cleanlab_extract_probs.main()
+    for split, labels in (("train", train_labels), ("test", test_labels)):
         path = output / f"{dataset}__rcf_{split}.npz"
         with np.load(path, allow_pickle=False) as archive:
             assert all(not archive[name].dtype.hasobject for name in archive.files)
@@ -271,4 +289,8 @@ def test_probability_writer_emits_no_object_arrays(
             assert archive["meta"][-1] == split
             np.testing.assert_array_equal(archive["indices"], np.arange(len(labels)))
             np.testing.assert_array_equal(archive["labels"], labels)
+            np.testing.assert_array_equal(
+                archive["probs"],
+                np.tile(np.array([[0.75, 0.25]], dtype=np.float32), (len(labels), 1)),
+            )
         np.testing.assert_array_equal(run_cleanlab_audit._load_npz(path)["labels"], labels)

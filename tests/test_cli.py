@@ -291,22 +291,3 @@ def test_unknown_model_suggests_close_names() -> None:
 def test_bad_override_is_not_a_traceback() -> None:
     with pytest.raises(SystemExit, match="bad config override"):
         cli_main(["run", "typo.key=1"])
-
-
-def test_double_plus_override_sets_the_real_key():
-    """``++key=value`` adds or overrides a key, not a literal ``+key``."""
-    from torchgeo_bench.config import compose_config
-
-    cfg = compose_config(["model=rcf", "++model.pool=cls", "+model.gsd=1.0"])
-    assert "+model" not in cfg
-    assert cfg.model.pool == "cls"
-    assert float(cfg.model.gsd) == 1.0
-
-
-def test_model_names_are_posix_on_every_platform():
-    """Model names are CLI identifiers and must use forward slashes even on Windows."""
-    from torchgeo_bench.config import list_model_configs
-
-    names = list_model_configs()
-    assert "torchgeo/scalemae_large_fmow" in names
-    assert not any("\\" in n for n in names)

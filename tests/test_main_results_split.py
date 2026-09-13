@@ -11,11 +11,10 @@ import pandas as pd
 import pytest
 from omegaconf import DictConfig
 
+from tests.support.runner import _chainable_model_mock, _synthetic_embeddings, _synthetic_loaders
 from torchgeo_bench.config import compose_config
 from torchgeo_bench.main import main
 from torchgeo_bench.results import model_results_path
-
-from .test_main_fast import _chainable_model_mock, _synthetic_embeddings, _synthetic_loaders
 
 
 def _compose_default_routing_cfg(
@@ -96,8 +95,8 @@ def test_routing_splits_by_kind_unless_output_is_explicit(
     assert profile_path.exists()
     profile_df = pd.read_csv(profile_path)
     assert set(profile_df["method"]) == (all_methods if explicit_output else {"profile"})
-    for name in profile_metrics:
-        assert name in profile_df["metric_name"].values
+    actual_metrics = profile_df[profile_df["method"] == "profile"].set_index("metric_name")
+    assert actual_metrics["metric_value"].to_dict() == profile_metrics
 
     assert id_path.exists()
     id_df = pd.read_csv(id_path)

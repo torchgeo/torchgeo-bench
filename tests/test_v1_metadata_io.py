@@ -106,9 +106,57 @@ def _write_shard(directory: Path, metadata: bytes, suffix: str = "meta.json") ->
             shard.addfile(member, io.BytesIO(payload))
 
 
+@pytest.mark.parametrize("as_bytes", [False, True])
+def test_metadata_accepts_json_text_and_bytes(*, as_bytes: bool) -> None:
+    metadata = _metadata()
+    payload = json.dumps(metadata)
+    assert decode_metadata(payload.encode() if as_bytes else payload) == metadata
+
+
+@pytest.mark.parametrize("reader", [GeoBenchv1, GeoBenchv1Sharded])
+@pytest.mark.parametrize(
+    ("selection", "error", "message"),
+    [
+        ({"dataset_name": "missing", "split": "train"}, FileNotFoundError, "dir"),
+        (
+            {"dataset_name": "m-eurosat", "partition": "missing", "split": "train"},
+            FileNotFoundError,
+            r"missing_partition\.json",
+        ),
+        (
+            {"dataset_name": "m-eurosat", "split": "invalid"},
+            ValueError,
+            "Split 'invalid' not found",
+        ),
+    ],
+)
+def test_readers_reject_invalid_dataset_partition_and_split(
+    tmp_path: Path,
+    reader: type[GeoBenchv1] | type[GeoBenchv1Sharded],
+    selection: dict[str, str],
+    error: type[Exception],
+    message: str,
+) -> None:
+    source = tmp_path / "m-eurosat"
+    _write_shard(source, json.dumps(_metadata()).encode())
+    _write_hdf5(source, json.dumps(_metadata()))
+    with pytest.raises(error, match=message):
+        reader(root=tmp_path, **selection)
+
+
+def test_v1_wrapper_rejects_unknown_band_without_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="unknown band"):
+        MEurosat().get_dataset("train", bands=("nonexistent_band",))
+
+
 @pytest.mark.parametrize("label", [2, [1, 0, 1]])
 @pytest.mark.parametrize("bands", [None, ("03 - Green", "04 - Red")])
-def test_hdf5_repack_and_sharded_reader_round_trip(tmp_path, label, bands) -> None:
+def test_hdf5_repack_and_sharded_reader_round_trip(
+    tmp_path: Path, label: int | list[int], bands: tuple[str, ...] | None
+) -> None:
     source = tmp_path / "hdf5" / "m-eurosat"
     output = tmp_path / "shards" / "m-eurosat"
     ids = [SID + ".second", SID]
@@ -148,7 +196,9 @@ def test_hdf5_repack_and_sharded_reader_round_trip(tmp_path, label, bands) -> No
 
 
 @pytest.mark.parametrize("sharded", [False, True])
-def test_v1_wrapper_loads_data_only_metadata(tmp_path, monkeypatch, sharded) -> None:
+def test_v1_wrapper_loads_data_only_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, sharded: bool
+) -> None:
     hdf_root = tmp_path / "hdf5"
     shard_root = tmp_path / "shards"
     source = hdf_root / "m-eurosat"
@@ -172,7 +222,7 @@ def test_repack_validation_does_not_require_partition_files(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("encoding", ["bytes", "repr", "void", "expression"])
-def test_metadata_decoder_rejects_executable_representations(encoding) -> None:
+def test_metadata_decoder_rejects_executable_representations(encoding: str) -> None:
     with pytest.raises((TypeError, ValueError)):
         decode_metadata(_payload(encoding))
 
@@ -188,20 +238,22 @@ def test_metadata_decoder_rejects_executable_representations(encoding) -> None:
         {"label": [float("nan")], "bands_order": ["red"]},
     ],
 )
-def test_metadata_decoder_rejects_invalid_fields(metadata) -> None:
+def test_metadata_decoder_rejects_invalid_fields(metadata: dict) -> None:
     with pytest.raises(ValueError, match="GeoBench metadata"):
         decode_metadata(json.dumps(metadata))
 
 
 @pytest.mark.parametrize("metadata", [[], None, 1, "text"])
-def test_metadata_decoder_requires_json_object(metadata) -> None:
+def test_metadata_decoder_requires_json_object(metadata: object) -> None:
     with pytest.raises(TypeError, match="must be a JSON object"):
         decode_metadata(json.dumps(metadata))
 
 
 @pytest.mark.parametrize("attribute", ["pickle", "metadata_json"])
 @pytest.mark.parametrize("encoding", ["repr", "void", "expression"])
-def test_hdf5_consumers_reject_non_json_metadata(tmp_path, attribute, encoding) -> None:
+def test_hdf5_consumers_reject_non_json_metadata(
+    tmp_path: Path, attribute: str, encoding: str
+) -> None:
     source = tmp_path / "source"
     _write_partition(source, [SID])
     path = _write_hdf5(source, _payload(encoding), attribute=attribute)
@@ -220,7 +272,9 @@ def test_hdf5_consumers_reject_non_json_metadata(tmp_path, attribute, encoding) 
 @pytest.mark.parametrize("suffix", ["meta.pkl", "meta.json"])
 @pytest.mark.parametrize("encoding", ["bytes", "repr", "expression"])
 @pytest.mark.parametrize("bands", [None, ("04 - Red",)])
-def test_sharded_reader_rejects_executable_metadata(tmp_path, suffix, encoding, bands) -> None:
+def test_sharded_reader_rejects_executable_metadata(
+    tmp_path: Path, suffix: str, encoding: str, bands: tuple[str, ...] | None
+) -> None:
     payload = _payload(encoding)
     if isinstance(payload, str):
         payload = payload.encode()
@@ -231,7 +285,7 @@ def test_sharded_reader_rejects_executable_metadata(tmp_path, suffix, encoding, 
 
 
 @pytest.mark.parametrize("legacy_source", [False, True])
-def test_repack_validation_rejects_pickle_metadata(tmp_path, legacy_source) -> None:
+def test_repack_validation_rejects_pickle_metadata(tmp_path: Path, *, legacy_source: bool) -> None:
     source = tmp_path / "source"
     output = tmp_path / "output"
     metadata = json.dumps(_metadata())
@@ -271,7 +325,7 @@ def test_legacy_cache_error_explains_how_to_replace_it(tmp_path: Path) -> None:
         GeoBenchv1Sharded(source.parent, source.name, "train")[0]
 
 
-def test_sharded_reader_rejects_object_band_arrays(tmp_path) -> None:
+def test_sharded_reader_rejects_object_band_arrays(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_shard(source, json.dumps(_metadata()).encode())
     with tarfile.open(source / "shard_00000.tar", "a") as shard:
@@ -285,7 +339,7 @@ def test_sharded_reader_rejects_object_band_arrays(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("nine_coefficients", [False, True])
-def test_geography_reads_json_affine_and_crs(tmp_path, nine_coefficients) -> None:
+def test_geography_reads_json_affine_and_crs(tmp_path: Path, *, nine_coefficients: bool) -> None:
     metadata = _metadata()
     if nine_coefficients:
         metadata[RED]["transform"].extend([0, 0, 1])
@@ -293,7 +347,7 @@ def test_geography_reads_json_affine_and_crs(tmp_path, nine_coefficients) -> Non
     assert _v1_origin(str(path)) == (500000.0, 5200000.0, "EPSG:32631")
 
 
-def test_geography_reports_missing_coordinates(tmp_path) -> None:
+def test_geography_reports_missing_coordinates(tmp_path: Path) -> None:
     path = _write_hdf5(tmp_path, json.dumps({"label": 1, "bands_order": [RED, GREEN]}))
     assert _v1_origin(str(path)) == (None, None, "NOGEO")
 
@@ -320,7 +374,9 @@ def test_geography_reports_non_file_metadata_members(tmp_path: Path) -> None:
     ]
 
 
-def test_geography_prefers_the_json_sharded_cache(tmp_path: Path, monkeypatch) -> None:
+def test_geography_prefers_the_json_sharded_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     sharded_root = tmp_path / "shards"
     directory = sharded_root / "m-eurosat"
     _write_shard(directory, json.dumps(_metadata()).encode())

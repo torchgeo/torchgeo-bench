@@ -76,8 +76,8 @@ optional-dependencies.dev = [
   "pre-commit>=4.3",
   "pyproject-fmt>=2.21",
   "pyrefly==1.2",
-  "pytest>=7.3",
-  "pytest-cov>=4.1",
+  "pytest>=8.2",
+  "pytest-cov>=7",
   "pytest-xdist>=3.6",
   "ruff==0.15.10",
   "ty>=0.0.21",
@@ -136,12 +136,6 @@ extend-exclude = [
   "src/torchgeo_bench/legacy_run.py",
   "src/torchgeo_bench/models/build.py",
   "src/torchgeo_bench/preprocessing.py",
-  "tests/test_config_schema.py",
-  "tests/test_image_cli.py",
-  "tests/test_lazy_commands.py",
-  "tests/test_legacy_run.py",
-  "tests/test_model_build.py",
-  "tests/test_preprocessing.py",
 ]
 lint.select = [
   "A",       # builtin shadowing
@@ -194,7 +188,6 @@ lint.ignore = [
 ]
 lint.per-file-ignores."experiments/scripts/**/*.py" = [ "D" ]
 lint.per-file-ignores."projects/cleanlab/**/*.py" = [ "D" ]
-lint.per-file-ignores."projects/cleanlab/tests/**/*.py" = [ "ARG", "D" ]
 lint.per-file-ignores."src/torchgeo_bench/cli.py" = [ "T201" ]  # CLI payloads go to stdout
 lint.per-file-ignores."src/torchgeo_bench/commands/**/*.py" = [ "T201" ]
 lint.per-file-ignores."src/torchgeo_bench/image_cli.py" = [ "T201" ]
@@ -227,10 +220,27 @@ ignore-missing-imports = [
 
 [tool.pytest]
 ini_options.addopts = [
-  "--verbose",
+  "--strict-config",
+  "--strict-markers",
+  "--import-mode=importlib",
+  "--cov",
+  "--cov-config=pyproject.toml",
+  "--cov-report=term-missing:skip-covered",
+  "--cov-report=xml",
   "-m not slow and not accuracy_check",
 ]
+ini_options.testpaths = [ "tests" ]
+ini_options.pythonpath = [ "src", "." ]
 ini_options.markers = [
-  "slow: integration tests that load real data and run models (use -m slow to include)",
+  "integration: offline workflows using toy data and real application components (included by default)",
+  "slow: optional tests requiring downloaded datasets or pretrained weights (use -m slow to include)",
   "accuracy_check: per-class model accuracy regression tests (use -m accuracy_check to run)",
 ]
+
+[tool.coverage]
+run.branch = true
+run.patch = [ "subprocess" ]
+run.relative_files = true
+run.source = [ "torchgeo_bench" ]
+report.precision = 2
+report.show_missing = true

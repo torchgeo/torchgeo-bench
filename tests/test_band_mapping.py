@@ -3,9 +3,9 @@
 import pytest
 import torch
 
+from torchgeo_bench.bands import BandCompatibilityError
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models._band_mapping import (
-    S2_WAVELENGTHS_UM,
     BandMappingPolicy,
     canonical_band_name,
     map_to_model_bands,
@@ -62,7 +62,7 @@ class TestMapToModelBands:
         src = [_band("red"), _band("green"), _band("blue")]
         x = torch.arange(3 * 4 * 4, dtype=torch.float32).reshape(1, 3, 4, 4)
         target = ["blue", "green", "red", "nir_narrow", "swir1", "swir2"]
-        with pytest.raises(ValueError, match="Missing required model band"):
+        with pytest.raises(BandCompatibilityError, match="Missing required model band"):
             map_to_model_bands(x, src, target)
 
     def test_rgb_to_six_band_zerofills_when_explicitly_allowed(self) -> None:
@@ -76,7 +76,7 @@ class TestMapToModelBands:
         assert torch.equal(out[:, 0], x[:, 2])
         assert torch.equal(out[:, 1], x[:, 1])
         assert torch.equal(out[:, 2], x[:, 0])
-        assert torch.equal(out[:, 3], torch.zeros(1, 4, 4))
+        assert torch.equal(out[:, 3:], torch.zeros(1, 3, 4, 4))
         assert missing == [False, False, False, True, True, True]
 
     def test_missing_coastal_falls_back_to_blue_by_default(self) -> None:
@@ -91,7 +91,7 @@ class TestMapToModelBands:
     def test_band_fallbacks_can_be_disabled(self) -> None:
         src = [_band("red"), _band("green"), _band("blue")]
         x = torch.zeros(1, 3, 4, 4)
-        with pytest.raises(ValueError, match="Missing required model band"):
+        with pytest.raises(BandCompatibilityError, match="Missing required model band"):
             map_to_model_bands(x, src, ["coastal"], policy=BandMappingPolicy(band_fallbacks={}))
 
     def test_alias_resolution(self) -> None:
@@ -106,8 +106,9 @@ class TestMapToModelBands:
     def test_channel_count_mismatch_raises(self) -> None:
         src = [_band("red"), _band("green")]
         x = torch.zeros(1, 3, 4, 4)
-        with pytest.raises(ValueError, match="images has 3 channels"):
+        with pytest.raises(ValueError, match="images has 3 channels") as exc:
             map_to_model_bands(x, src, ["red"])
+        assert not isinstance(exc.value, BandCompatibilityError)
 
     def test_preferred_sensor_wins_slot(self) -> None:
         src = [_band("red", sensor="aerial"), _band("B04")]
@@ -158,16 +159,11 @@ class TestSelectSrcBands:
 
     def test_no_match_raises(self) -> None:
         src = [_band("vv", sensor="sar"), _band("vh", sensor="sar")]
-        with pytest.raises(ValueError, match="none of the target bands"):
+        with pytest.raises(BandCompatibilityError, match="none of the target bands"):
             select_src_bands(src, ["red", "green", "blue"])
 
 
 class TestWavelengthsUm:
-    def test_missing_raises_by_default(self) -> None:
-        bands = [_band("red", 0.665), _band("vv", None)]
-        with pytest.raises(ValueError, match="Missing wavelengths"):
-            wavelengths_um(bands)
-
     def test_default_fill_when_explicitly_provided(self) -> None:
         bands = [_band("red", 0.665), _band("vv", None)]
         wls = wavelengths_um(bands, default_um=1.5)
@@ -180,11 +176,7 @@ class TestWavelengthsUm:
             _band("swir_1", None, sensor="landsat"),
             _band("swir_2", None, sensor="landsat"),
         ]
-        assert wavelengths_um(bands) == [
-            S2_WAVELENGTHS_UM["nir"],
-            S2_WAVELENGTHS_UM["swir1"],
-            S2_WAVELENGTHS_UM["swir2"],
-        ]
+        assert wavelengths_um(bands) == [0.842, 1.610, 2.190]
 
     def test_sar_still_raises_without_s2_default_or_explicit_default(self) -> None:
         """Radar backscatter has no optical wavelength fallback."""

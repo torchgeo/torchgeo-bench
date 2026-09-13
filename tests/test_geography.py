@@ -55,7 +55,9 @@ def test_v1_origin_requires_sample_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("directory_exists", [False, True])
-def test_extract_geography_requires_imagery(tmp_path: Path, monkeypatch, directory_exists) -> None:
+def test_extract_geography_requires_imagery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, directory_exists: bool
+) -> None:
     monkeypatch.chdir(tmp_path)
     if directory_exists:
         (tmp_path / "data/classification_v1.0/m-eurosat").mkdir(parents=True)
@@ -83,15 +85,12 @@ def test_build_index_weights_continents_by_sample_count(tmp_path: Path) -> None:
     assert json.loads((tmp_path / INDEX_NAME).read_text()) == index
 
 
-def test_all_registered_datasets_have_a_record(store: dict[str, GeoRecord]) -> None:
+def test_store_contains_exactly_the_registered_datasets(store: dict[str, GeoRecord]) -> None:
     """Keep every registered dataset represented in the geographic store."""
+    assert set(store) == set(list_datasets())
     assert missing_datasets() == set(), (
         f"registered datasets with no geography record: {sorted(missing_datasets())}"
     )
-
-
-def test_no_extra_records(store: dict[str, GeoRecord]) -> None:
-    assert set(store) <= set(list_datasets())
 
 
 def test_statuses_are_valid(store: dict[str, GeoRecord]) -> None:
@@ -143,12 +142,6 @@ def test_extracted_records_are_wellformed(store: dict[str, GeoRecord]) -> None:
             total = sum(record.continents.values())
             assert 99.0 <= total <= 101.0, f"{record.name}: continents sum to {total}"
 
-
-def test_sampled_points_lie_within_bbox(store: dict[str, GeoRecord]) -> None:
-    for record in store.values():
-        if record.status != "extracted" or record.bbox is None:
-            continue
-        min_lon, min_lat, max_lon, max_lat = record.bbox
         # Bounds are rounded to three decimal places, so allow 0.001 at each edge.
         for lon, lat, *_ in record.points:
             assert min_lon - 0.001 <= lon <= max_lon + 0.001, (
@@ -176,9 +169,30 @@ def test_index_matches_the_records(store: dict[str, GeoRecord]) -> None:
     assert totals["samples"] == sum(r.n for r in store.values())
 
 
-def test_records_roundtrip_through_json(store: dict[str, GeoRecord]) -> None:
-    for record in store.values():
-        assert GeoRecord.from_json(record.to_json()) == record
+@pytest.mark.parametrize(
+    "record",
+    [
+        GeoRecord("unlocated", "no_geo", reason="Coordinates are not published"),
+        GeoRecord("absent", "not_downloaded", reason="Imagery is not installed"),
+        GeoRecord(
+            "located",
+            "extracted",
+            version="v1",
+            n=2,
+            alias_of="original",
+            bbox=[10.0, 20.0, 11.0, 21.0],
+            continents={"Asia": 100.0},
+            bins=[[760, 440, 1], [764, 444, 1]],
+            points=[[10.0, 20.0, "北"], [11.0, 21.0]],
+        ),
+    ],
+)
+def test_records_roundtrip_through_json(tmp_path: Path, record: GeoRecord) -> None:
+    path = write_record(record, tmp_path)
+    assert list_geography(tmp_path) == {record.name: record}
+    payload = json.loads(path.read_text())
+    assert GeoRecord.from_json({**payload, "future_field": True}) == record
+    assert path.read_text() == json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def test_stored_files_are_canonical_json(store: dict[str, GeoRecord]) -> None:

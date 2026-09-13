@@ -1,6 +1,8 @@
 """Behavioral coverage for experiment scripts using the library config API."""
 
 import json
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 import torch
@@ -15,7 +17,7 @@ from torchgeo_bench.models._normalization import UnsupportedNormalizationError
 
 
 @pytest.mark.parametrize("script", [audit_model_native, introspect_seg_layers])
-def test_analysis_scripts_preserve_requested_rgb_order(script) -> None:
+def test_analysis_scripts_preserve_requested_rgb_order(script: ModuleType) -> None:
     bands = script.band_specs("m-eurosat", "rgb")
     assert [band.name for band in bands] == ["red", "green", "blue"]
 
@@ -37,7 +39,7 @@ def test_tuner_builds_packaged_model_config() -> None:
     ],
 )
 def test_native_audit_only_classifies_unsupported_normalization(
-    tmp_path, monkeypatch, error
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
     model_dir = tmp_path / "model"
     model_dir.mkdir()
@@ -46,7 +48,7 @@ def test_native_audit_only_classifies_unsupported_normalization(
     monkeypatch.setattr(audit_model_native, "CONF", model_dir)
     monkeypatch.setattr("sys.argv", ["audit_model_native.py", "--out", str(output)])
 
-    def fail(config, **kwargs) -> None:
+    def fail(config: object, **kwargs: object) -> None:
         raise error
 
     monkeypatch.setattr(audit_model_native, "instantiate", fail)
@@ -67,7 +69,7 @@ def test_native_audit_only_classifies_unsupported_normalization(
     ],
 )
 def test_dataloader_tuning_does_not_report_failed_sweeps_as_success(
-    monkeypatch, error, message
+    monkeypatch: pytest.MonkeyPatch, error: RuntimeError, message: str
 ) -> None:
     monkeypatch.setattr(
         "sys.argv",
@@ -86,7 +88,7 @@ def test_dataloader_tuning_does_not_report_failed_sweeps_as_success(
     monkeypatch.setattr(tune_dataloader, "_build_dataset", lambda *args: [])
     monkeypatch.setattr(tune_dataloader, "_build_model", lambda *args: torch.nn.Identity())
 
-    def fail(*args) -> None:
+    def fail(*args: object) -> None:
         raise error
 
     monkeypatch.setattr(tune_dataloader, "_bench", fail)

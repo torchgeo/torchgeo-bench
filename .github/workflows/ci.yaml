@@ -48,7 +48,14 @@ jobs:
       - name: Install dependencies
         run: uv sync ${{ matrix.extras }} --frozen
       - name: Run tests
-        run: uv run pytest -n auto --dist=loadfile --cov=torchgeo_bench --cov-report=xml
+        run: uv run pytest -n auto --dist=loadfile
+      - name: Save coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: error
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux'
         uses: codecov/codecov-action@v5
