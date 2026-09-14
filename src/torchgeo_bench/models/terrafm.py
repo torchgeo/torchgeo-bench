@@ -21,14 +21,14 @@ import hashlib
 import logging
 import math
 from pathlib import Path
-from typing import Literal
+from typing import Any, ClassVar, Literal
 
 import torch
 import torch.nn as nn
 
 from torchgeo_bench.bands import BandSpec
 
-from ._band_mapping import map_to_model_bands, resolve_src_indices
+from ._band_mapping import BandMappingPolicy, map_to_model_bands, resolve_src_indices
 from ._pooling import pool_tokens
 from .interface import BenchModel
 from .torchgeo_models import _auto_resize
@@ -155,7 +155,7 @@ class _TerraFMPatchEmbed(nn.Module):
         self.s2_l1c_embed = nn.Parameter(torch.zeros(1, attn_dim))
         self.s1_embed = nn.Parameter(torch.zeros(1, attn_dim))
 
-    def forward(self, images: torch.Tensor, is_l2a: bool = False) -> torch.Tensor:
+    def forward(self, images: torch.Tensor, *, is_l2a: bool = False) -> torch.Tensor:
         """Embed ``(B, C, H, W)`` into ``(B, N, D)``, routing on channel count."""
         if images.shape[1] == 2:
             x = self.conv2d_s1(images).flatten(2).transpose(1, 2) + self.s1_embed
@@ -193,11 +193,11 @@ class TerraFMBench(BenchModel):
     """
 
     #: Width, depth, heads.  ``large`` is advertised upstream but unpublished.
-    _VARIANTS: dict[str, tuple[int, int, int]] = {
+    _VARIANTS: ClassVar[dict[str, tuple[int, int, int]]] = {
         "base": (768, 12, 12),
         "large": (1024, 24, 16),
     }
-    _TAP_INDICES: dict[str, tuple[int, ...]] = {
+    _TAP_INDICES: ClassVar[dict[str, tuple[int, ...]]] = {
         "base": (2, 5, 8, 11),
         "large": (5, 11, 17, 23),
     }
@@ -206,7 +206,7 @@ class TerraFMBench(BenchModel):
     #: liable to be reinterpreted as channel-first.
     num_prefix_tokens: int = 1
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],
         *,
@@ -219,7 +219,7 @@ class TerraFMBench(BenchModel):
         pool: str = "cls",
         auto_resize: bool = True,
         target_size: int = TERRAFM_INPUT_SIZE,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> None:
         if variant not in self._VARIANTS:
             raise ValueError(f"Unknown TerraFM variant {variant!r}; choose base or large.")
@@ -309,7 +309,7 @@ class TerraFMBench(BenchModel):
         checkpoint = torch.load(path, map_location="cpu", weights_only=False)
         state = checkpoint.get("model", checkpoint) if isinstance(checkpoint, dict) else checkpoint
         if not isinstance(state, dict):
-            raise ValueError(
+            raise TypeError(
                 "TerraFM checkpoint must be a state dict or contain a 'model' state dict."
             )
         state = {str(key).removeprefix("module."): value for key, value in state.items()}
@@ -358,7 +358,10 @@ class TerraFMBench(BenchModel):
         if self.modality == "s1":
             return images[:, self.s1_indices]
         mapped, _ = map_to_model_bands(
-            images, self.bands, self.model_bands, preferred_sensors=("s2",)
+            images,
+            self.bands,
+            self.model_bands,
+            policy=BandMappingPolicy(preferred_sensors=("s2",)),
         )
         return mapped
 
