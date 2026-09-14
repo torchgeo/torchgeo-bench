@@ -1,7 +1,5 @@
 name: tgeo_scalemae_large_fmow_cls
 target: torchgeo_bench.models.TorchGeoScaleMAEBench
-track: image
-seed_from_run: false
 kwargs:
   factory: scalemae_large_patch16
   weights_class: ScaleMAELarge16_Weights
@@ -10,12 +8,10 @@ kwargs:
   res: 1.0
   pool: cls
 input:
-  image_size: 224
   interpolation: area
 segmentation:
   layers:
-  - blocks.23
-  - blocks.17
-  - blocks.11
-  - blocks.5
-dataset_overrides: {}
+    - blocks.23
+    - blocks.17
+    - blocks.11
+    - blocks.5

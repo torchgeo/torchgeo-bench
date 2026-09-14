@@ -1,7 +1,5 @@
 name: tgeo_croma_base
 target: torchgeo_bench.models.TorchGeoCromaBench
-track: image
-seed_from_run: false
 kwargs:
   factory: croma_base
   weights_class: CROMABase_Weights
@@ -10,8 +8,7 @@ kwargs:
   target_size: 120
 segmentation:
   layers:
-  - s2_encoder.transformer.layers.11.1
-  - s2_encoder.transformer.layers.8.1
-  - s2_encoder.transformer.layers.5.1
-  - s2_encoder.transformer.layers.2.1
-dataset_overrides: {}
+    - s2_encoder.transformer.layers.11.1
+    - s2_encoder.transformer.layers.8.1
+    - s2_encoder.transformer.layers.5.1
+    - s2_encoder.transformer.layers.2.1

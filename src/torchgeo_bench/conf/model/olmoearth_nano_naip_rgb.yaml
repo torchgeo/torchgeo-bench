@@ -1,7 +1,5 @@
 name: olmoearth_v1_nano_naip_rgb
 target: torchgeo_bench.models.OlmoEarthBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_size: nano
   patch_size: 8
@@ -13,4 +11,3 @@ kwargs:
     landsat: aerial
 input:
   image_size: null
-dataset_overrides: {}

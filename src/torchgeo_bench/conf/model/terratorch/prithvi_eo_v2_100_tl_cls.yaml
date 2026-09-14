@@ -1,7 +1,5 @@
 name: tt_prithvi_eo_v2_100_tl_cls
 target: torchgeo_bench.models.TerraTorchPrithviBench
-track: image
-seed_from_run: false
 kwargs:
   backbone_name: prithvi_eo_v2_100_tl
   pretrained: true
@@ -9,8 +7,7 @@ kwargs:
   pool: cls
 segmentation:
   layers:
-  - blocks.11
-  - blocks.8
-  - blocks.5
-  - blocks.2
-dataset_overrides: {}
+    - blocks.11
+    - blocks.8
+    - blocks.5
+    - blocks.2

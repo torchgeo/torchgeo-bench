@@ -1,10 +1,7 @@
 name: tgeo_deo_swin_rgb
 target: torchgeo_bench.models.TorchGeoDEOBench
-track: image
-seed_from_run: false
 kwargs:
   mode: rgb
   normalization: model_native
   auto_resize: true
   target_size: 224
-dataset_overrides: {}

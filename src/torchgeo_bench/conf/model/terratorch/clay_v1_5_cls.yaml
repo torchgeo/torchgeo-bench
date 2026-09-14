@@ -1,7 +1,5 @@
 name: tt_clay_v1_5_base_cls
 target: torchgeo_bench.models.TerraTorchClayBench
-track: image
-seed_from_run: false
 kwargs:
   backbone_name: timm_clay_v1_base
   pretrained: true
@@ -10,8 +8,7 @@ kwargs:
   pool: cls
 segmentation:
   layers:
-  - clay_encoder.transformer.layers.11.1
-  - clay_encoder.transformer.layers.8.1
-  - clay_encoder.transformer.layers.5.1
-  - clay_encoder.transformer.layers.2.1
-dataset_overrides: {}
+    - clay_encoder.transformer.layers.11.1
+    - clay_encoder.transformer.layers.8.1
+    - clay_encoder.transformer.layers.5.1
+    - clay_encoder.transformer.layers.2.1

@@ -1,11 +1,8 @@
 name: efficientnetv2_l
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: tf_efficientnetv2_l
   pretrained: true
   global_pool: avg
   seed: null
   auto_resize: true
-dataset_overrides: {}

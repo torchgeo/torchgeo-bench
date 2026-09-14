@@ -1,7 +1,5 @@
 name: vit_large_patch16_dinov3
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: vit_large_patch16_dinov3.lvd1689m
   pretrained: true
@@ -9,4 +7,3 @@ kwargs:
   seed: null
   auto_resize: true
   use_cls_token: false
-dataset_overrides: {}

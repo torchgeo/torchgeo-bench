@@ -1,7 +1,5 @@
 name: vit_large_patch16_dinov3sat
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: vit_large_patch16_dinov3.sat493m
   pretrained: true
@@ -11,8 +9,7 @@ kwargs:
   use_cls_token: false
 segmentation:
   layers:
-  - blocks.23
-  - blocks.17
-  - blocks.11
-  - blocks.5
-dataset_overrides: {}
+    - blocks.23
+    - blocks.17
+    - blocks.11
+    - blocks.5

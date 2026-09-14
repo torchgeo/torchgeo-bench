@@ -1,7 +1,5 @@
 name: vgg19
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: vgg19
   pretrained: true
@@ -9,8 +7,7 @@ kwargs:
   seed: null
 segmentation:
   layers:
-  - features.36
-  - features.27
-  - features.18
-  - features.9
-dataset_overrides: {}
+    - features.36
+    - features.27
+    - features.18
+    - features.9

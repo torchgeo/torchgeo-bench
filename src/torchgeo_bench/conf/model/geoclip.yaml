@@ -1,7 +1,5 @@
 name: geoclip
 target: torchgeo_bench.coordbench.models.GeoCLIPLocationEncoder
 track: coord
-seed_from_run: false
 kwargs:
   repo: MVRL/geoclip-location-encoder
-dataset_overrides: {}
