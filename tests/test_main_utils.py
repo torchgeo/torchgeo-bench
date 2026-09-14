@@ -9,14 +9,13 @@ from pydantic import ValidationError
 from torch.utils.data import DataLoader, Dataset
 
 from torchgeo_bench.config_schema import RunConfig, SegmentationConfig
-from torchgeo_bench.main import (
-    _completed_run_keys,
-    _expand_dataset_list,
-    _filter_completed_metric_rows,
-    _normalize_bands_value,
-    evaluate_profile,
-)
+from torchgeo_bench.main import _expand_dataset_list, evaluate_profile
 from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput
+from torchgeo_bench.resume import (
+    _completed_run_keys,
+    filter_completed_metric_rows,
+    normalize_bands_value,
+)
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 
@@ -36,9 +35,9 @@ def test_expand_dataset_list_all(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_normalize_bands_value_none_and_list() -> None:
-    assert _normalize_bands_value(None) == "all"
+    assert normalize_bands_value(None) == "all"
     cfg_list = ["red", "green"]
-    assert _normalize_bands_value(cfg_list) == "red,green"
+    assert normalize_bands_value(cfg_list) == "red,green"
 
 
 def test_completed_run_keys_metric_name_absent_returns_empty() -> None:
@@ -52,7 +51,7 @@ def test_filter_completed_metric_rows_partial_filtering() -> None:
         {"dataset": "m-eurosat", "method": "knn5", "metric_name": "f1"},
     ]
     completed = {"accuracy": {("m-eurosat", "knn5")}}
-    filtered = _filter_completed_metric_rows(rows, completed, ["dataset", "method"])
+    filtered = filter_completed_metric_rows(rows, completed, ["dataset", "method"])
     assert filtered == [{"dataset": "m-eurosat", "method": "knn5", "metric_name": "f1"}]
 
 

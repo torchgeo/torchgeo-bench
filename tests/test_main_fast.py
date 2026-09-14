@@ -13,7 +13,7 @@ from torchgeo.datasets import DatasetNotFoundError
 from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import LinearProbeDivergedError, main
 from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset, merge_settings, resolve_run_config
-from torchgeo_bench.resume import _resume_config_hash
+from torchgeo_bench.resume import resume_config_hash
 
 
 class _DictTensorDataset(Dataset):
@@ -90,7 +90,7 @@ def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
 def _hash_for(cfg: RunConfig, ds_name: str = "m-eurosat") -> str:
     """Return the resume hash for a dataset-resolved config."""
     resolved_cfg, preset = resolve_run_config(cfg, ds_name)
-    return _resume_config_hash(resolved_cfg, preset)
+    return resume_config_hash(resolved_cfg, preset)
 
 
 def _resume_row(cfg: RunConfig, *, method: str, metric_name: str) -> dict[str, object]:
@@ -107,7 +107,7 @@ def _resume_row(cfg: RunConfig, *, method: str, metric_name: str) -> dict[str, o
         "partition": cfg.input.partition,
         "bands": cfg.input.bands,
         "num_classes": 10,
-        "config_hash": _resume_config_hash(cfg, preset),
+        "config_hash": resume_config_hash(cfg, preset),
         "metric_name": metric_name,
         "metric_value": 0.1,
     }

@@ -5,7 +5,8 @@ from unittest import mock
 
 import pandas as pd
 
-from torchgeo_bench.main import _profile_metric_names, main
+from torchgeo_bench.main import main
+from torchgeo_bench.resume import _profile_metric_names
 
 from .test_main_fast import _compose_cfg, _resume_row, _synthetic_embeddings, _synthetic_loaders
 
