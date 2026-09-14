@@ -3,7 +3,7 @@ Datasets
 
 ``torchgeo-bench`` supports two generations of GeoBench datasets — V1 and
 V2 — plus wrappers around torchgeo's standalone EuroSAT and NWPU-RESISC45
-datasets.  All datasets share the
+datasets, and AID (rehosted from Hugging Face).  All datasets share the
 :class:`~torchgeo_bench.datasets.BenchDataset` interface and are
 auto-registered on import so they can be selected by their CLI name.
 
@@ -34,6 +34,9 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
    * - ``resisc45``
      - ``data/resisc45/``
      - torchgeo's ``RESISC45`` downloader
+   * - ``aid``
+     - ``data/aid/``
+     - Hugging Face ``isaaccorley/aid``, pinned commit + checksum-verified
 
 Downloading
 -----------
@@ -48,6 +51,7 @@ The bundled :doc:`/api/cli` provides one subcommand per family:
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # V2 subset
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT
    $ torchgeo-bench download resisc45                                 # torchgeo RESISC45
+   $ torchgeo-bench download aid                                      # isaaccorley/aid rehost
    $ torchgeo-bench download geobench_v2 --output-dir /scratch/data   # custom root
 
 The default V2 download set is: ``benv2``, ``burn_scars``, ``caffe``,
@@ -205,6 +209,7 @@ CLI name             Class
 ``eurosat``          :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper, random split)
 ``eurosat-spatial``  :class:`~torchgeo_bench.datasets.EuroSATSpatial`  (longitude-based split)
 ``resisc45``         :class:`~torchgeo_bench.datasets.RESISC45`  (45-class aerial scenes, RGB)
+``aid``              :class:`~torchgeo_bench.datasets.AID`  (30-class aerial scenes, RGB)
 ==================== ============================================================================
 
 ``resisc45`` is 31,500 RGB scenes at 256x256 across 45 classes, on torchgeo's
@@ -214,6 +219,15 @@ linear-probe accuracy by different papers under the same nominal protocol —
 which is why it is worth running under a fixed harness.  The imagery carries
 no geolocation, so it appears on the coverage map as an explicit gap rather
 than being silently omitted.
+
+``aid`` is Xia et al. 2017's Aerial Image Dataset: 10,000 RGB scenes at
+600x600 across 30 classes, one of the three most-used benchmarks in the GFM
+literature alongside EuroSAT and RESISC45.  No official split exists
+upstream, so ``scripts/generate_aid_splits.py`` derives a deterministic,
+stratified 60/20/20 split per class.  Rehosted at Hugging Face
+``isaaccorley/aid``, pinned to a commit and checksum-verified on download;
+license is unspecified upstream.  Like ``resisc45``, the imagery carries no
+geolocation.
 
 Selecting datasets
 ------------------

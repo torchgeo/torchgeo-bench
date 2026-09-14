@@ -21,6 +21,7 @@ from .loading import (
 )
 
 __all__ = [
+    "AID",
     "BENV2",
     "FLAIR2",
     "PASTIS",
@@ -52,6 +53,7 @@ __all__ = [
 ]
 
 _LAZY_CLASSES: dict[str, str] = {
+    "AID": "aid",
     "BENV2": "benv2",
     "BurnScars": "burn_scars",
     "CaFFe": "caffe",

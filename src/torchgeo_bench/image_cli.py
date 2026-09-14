@@ -35,6 +35,7 @@ _DATASETS = (
     "eurosat",
     "eurosat-spatial",
     "resisc45",
+    "aid",
 )
 _SEGMENTATION_DATASETS = frozenset(
     {
