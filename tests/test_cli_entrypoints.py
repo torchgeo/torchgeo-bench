@@ -39,11 +39,11 @@ def run_entrypoint(
         (["run", "--unknown-option"], 2, "unrecognized arguments: --unknown-option"),
     ],
 )
-def test_package_module_matches_image_cli(
+def test_package_module_matches_console_script(
     arguments: list[str], status: int, expected: str, tmp_path: Path
 ) -> None:
     package = run_entrypoint("torchgeo_bench", arguments, tmp_path)
-    canonical = run_entrypoint("torchgeo_bench.image_cli", arguments, tmp_path)
+    canonical = run_entrypoint("torchgeo_bench.cli", arguments, tmp_path)
     assert package.returncode == canonical.returncode == status
     assert package.stdout == canonical.stdout
     assert package.stderr == canonical.stderr
@@ -51,7 +51,7 @@ def test_package_module_matches_image_cli(
 
 
 @pytest.mark.parametrize("use_config", [False, True])
-def test_package_module_dry_run_matches_image_cli(tmp_path: Path, *, use_config: bool) -> None:
+def test_package_module_dry_run_matches_console_script(tmp_path: Path, *, use_config: bool) -> None:
     if use_config:
         path = tmp_path / "run.yaml"
         path.write_text(
@@ -64,7 +64,7 @@ def test_package_module_dry_run_matches_image_cli(tmp_path: Path, *, use_config:
         arguments = ["run", "--model", "rcf", "--dataset", "m-eurosat", "--device", "cpu"]
     arguments.extend(["--seed", "3", "--no-resume", "--dry-run"])
     package = run_entrypoint("torchgeo_bench", arguments, tmp_path)
-    canonical = run_entrypoint("torchgeo_bench.image_cli", arguments, tmp_path)
+    canonical = run_entrypoint("torchgeo_bench.cli", arguments, tmp_path)
     assert package.returncode == canonical.returncode == 0, package.stderr + canonical.stderr
     assert package.stdout == canonical.stdout
     assert package.stderr == canonical.stderr == ""

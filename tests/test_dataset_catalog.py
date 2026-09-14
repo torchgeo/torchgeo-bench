@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 import pytest
 import yaml
 
+from torchgeo_bench.cli import main
 from torchgeo_bench.datasets import (
     BandSpec,
     BenchDataset,
@@ -18,7 +19,6 @@ from torchgeo_bench.datasets import (
     list_datasets,
     loading,
 )
-from torchgeo_bench.image_cli import main
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -140,7 +140,7 @@ def test_unknown_dataset_task_raises() -> None:
 def test_catalog_queries_do_not_import_wrappers_or_ml(arguments: list[str]) -> None:
     code = """
 import sys
-from torchgeo_bench.image_cli import main
+from torchgeo_bench.cli import main
 from torchgeo_bench.datasets.loading import _REGISTRY_SPEC
 _REGISTRY_SPEC['catalog-test'] = ('_unimportable', 'TinyDataset', 'segmentation')
 try:

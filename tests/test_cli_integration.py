@@ -13,8 +13,8 @@ from _pytest.monkeypatch import MonkeyPatch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
+from torchgeo_bench.cli import main as cli_main
 from torchgeo_bench.datasets import BandSpec
-from torchgeo_bench.image_cli import main as cli_main
 
 
 class FakeBench:

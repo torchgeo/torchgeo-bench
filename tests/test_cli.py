@@ -1,6 +1,5 @@
 """Unit tests for CLI entrypoints."""
 
-from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +10,6 @@ from torchgeo_bench import commands
 from torchgeo_bench.cli import main as cli_main
 from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.flops_config import FlopsConfig
-from torchgeo_bench.image_cli import main as image_cli_main
 from torchgeo_bench.presets import ModelPreset
 
 
@@ -224,7 +222,6 @@ def test_download_invalid_target() -> None:
         cli_main(["download", "bogus"])
 
 
-@pytest.mark.parametrize("entrypoint", [cli_main, image_cli_main])
 @pytest.mark.parametrize(
     ("collection", "selection"),
     [
@@ -236,21 +233,18 @@ def test_download_invalid_target() -> None:
 )
 def test_download_invalid_collection_selection(
     tmp_path: Path,
-    entrypoint: Callable[[list[str]], None],
     collection: str,
     selection: str,
 ) -> None:
     output = tmp_path / "downloads"
     with pytest.raises(SystemExit, match="error: Unknown GeoBench"):
-        entrypoint(["download", collection, "--datasets", selection, "--output-dir", str(output)])
+        cli_main(["download", collection, "--datasets", selection, "--output-dir", str(output)])
     assert not output.exists()
 
 
-@pytest.mark.parametrize("entrypoint", [cli_main, image_cli_main])
 @pytest.mark.parametrize("collection", ["geobench_v1", "geobench_v2"])
 def test_download_collection_propagates_unexpected_errors(
     monkeypatch: pytest.MonkeyPatch,
-    entrypoint: Callable[[list[str]], None],
     collection: str,
 ) -> None:
     def fail(*args: object, **kwargs: object) -> None:
@@ -258,7 +252,7 @@ def test_download_collection_propagates_unexpected_errors(
 
     monkeypatch.setattr(f"torchgeo_bench.download.download_{collection}", fail)
     with pytest.raises(RuntimeError, match="unexpected download failure"):
-        entrypoint(["download", collection])
+        cli_main(["download", collection])
 
 
 def test_download_geobench_v1(monkeypatch) -> None:
