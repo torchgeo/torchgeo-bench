@@ -30,7 +30,7 @@ def test_empirical_rcf_receives_run_seed_and_actual_dataset(monkeypatch) -> None
         captured.append((settings, bands, normalization))
         return mock.Mock()
 
-    monkeypatch.setattr("torchgeo_bench.models.build.build_rcf_model", build)
+    monkeypatch.setattr("torchgeo_bench.models.rcf.RCFModelSettings.build", build)
     instantiate_dataset_model(
         config, preset, get_bench_dataset_class("m-eurosat")(), dataset, torch.device("cpu")
     )

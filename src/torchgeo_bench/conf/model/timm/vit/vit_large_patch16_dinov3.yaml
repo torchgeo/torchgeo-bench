@@ -4,6 +4,5 @@ kwargs:
   model_name: vit_large_patch16_dinov3.lvd1689m
   pretrained: true
   global_pool: avg
-  seed: null
   auto_resize: true
   use_cls_token: false

@@ -7,6 +7,7 @@ import pytest
 
 from torchgeo_bench.config import list_model_configs, model_config_path
 from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_yaml
+from torchgeo_bench.models.torchgeo_models import TorchGeoScaleMAEBench
 from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset, resolve_run_config
 
 
@@ -93,9 +94,12 @@ def test_scalemae_constructor_uses_resolved_dataset_grid(
     effective, preset = resolve_run_config(config, "m-eurosat")
     received = {}
 
-    def constructor(**kwargs: object) -> object:
-        received.update(kwargs)
-        return object()
+    class constructor:
+        wants_resolved_image_size = TorchGeoScaleMAEBench.wants_resolved_image_size
+
+        def __new__(cls, **kwargs: object) -> object:
+            received.update(kwargs)
+            return object()
 
     monkeypatch.setattr("torchgeo_bench.models.TorchGeoScaleMAEBench", constructor)
     build_model(preset, bands=[], normalization="identity")
@@ -117,9 +121,12 @@ def test_flops_scalemae_constructor_grid_follows_explicit_synthetic_size(
     effective, preset = config.resolve()
     received = {}
 
-    def constructor(**kwargs: object) -> object:
-        received.update(kwargs)
-        return object()
+    class constructor:
+        wants_resolved_image_size = TorchGeoScaleMAEBench.wants_resolved_image_size
+
+        def __new__(cls, **kwargs: object) -> object:
+            received.update(kwargs)
+            return object()
 
     monkeypatch.setattr("torchgeo_bench.models.TorchGeoScaleMAEBench", constructor)
     build_model(preset, bands=[], normalization="identity")

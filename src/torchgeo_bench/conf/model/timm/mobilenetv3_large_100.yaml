@@ -4,7 +4,6 @@ kwargs:
   model_name: mobilenetv3_large_100
   pretrained: true
   global_pool: avg
-  seed: null
 segmentation:
   layers:
     - blocks.6

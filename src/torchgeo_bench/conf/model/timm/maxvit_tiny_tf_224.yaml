@@ -4,7 +4,6 @@ kwargs:
   model_name: maxvit_tiny_tf_224
   pretrained: true
   global_pool: avg
-  seed: null
 segmentation:
   layers:
     - stages.3

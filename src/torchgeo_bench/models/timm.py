@@ -1,6 +1,7 @@
 """Timm backbone wrapper for patch-level feature extraction."""
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import timm
@@ -76,6 +77,10 @@ class TimmPatchBenchModel(BenchModel):
     _rgb_std: torch.Tensor
     _band_min: torch.Tensor
     _band_range: torch.Tensor
+
+    #: Constructor kwargs come from user YAML, and __init__ ignores unknown
+    #: keys, so validate them instead of silently dropping a typo.
+    validated_settings: "type[TimmModelSettings]"
 
     def __init__(  # noqa: PLR0913 - public YAML options
         self,
@@ -254,3 +259,43 @@ class TimmPatchBenchModel(BenchModel):
     def _has_cls_token_like(self) -> bool:
         """Cheap heuristic for ViT/DeiT/MAE-style backbones with a CLS token."""
         return any(hasattr(self.backbone, attr) for attr in ("cls_token", "dist_token"))
+
+
+@dataclass(frozen=True)
+class TimmModelSettings:
+    """Validated constructor settings for :class:`TimmPatchBenchModel`."""
+
+    model_name: str
+    pretrained: bool = True
+    global_pool: str | None = "avg"
+    input_normalization: str = "bands_zscore"
+    normalize: bool = False
+    auto_resize: bool = False
+    target_size: int | None = None
+    use_cls_token: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate settings before importing or constructing a backbone."""
+        for name in ("pretrained", "normalize", "auto_resize", "use_cls_token"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"{name} must be a boolean")
+        if not self.model_name:
+            raise ValueError("model_name must not be empty")
+        if self.target_size is not None:
+            if not isinstance(self.target_size, int):
+                raise TypeError("target_size must be an integer")
+            if self.target_size <= 0:
+                raise ValueError("target_size must be positive")
+        if self.global_pool not in (None, "", "avg", "max", "avgmax", "catavgmax"):
+            raise ValueError(f"unsupported global_pool: {self.global_pool!r}")
+        if self.input_normalization not in _VALID_INPUT_NORMALIZATIONS:
+            raise ValueError(f"unsupported input_normalization: {self.input_normalization!r}")
+
+    def build(
+        self, bands: list[BandSpec], *, normalization: str = "bandspec_zscore"
+    ) -> TimmPatchBenchModel:
+        """Construct the wrapper these settings describe."""
+        return TimmPatchBenchModel(bands=bands, normalization=normalization, **vars(self))
+
+
+TimmPatchBenchModel.validated_settings = TimmModelSettings

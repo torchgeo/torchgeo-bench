@@ -123,8 +123,8 @@ pip install -e ".[dev]"
 ```bash
 pytest                                    # Unit + offline toy integrations, with coverage
 pytest -m integration                     # Only offline integration tests
-pytest tests/test_model_build.py -v        # Run a single test file
-pytest tests/test_model_build.py::test_model_config_rejects_unknown_fields -v
+pytest tests/test_model_settings.py -v     # Run a single test file
+pytest tests/test_model_settings.py::test_model_config_rejects_unknown_fields -v
 pytest -k "m-eurosat" -v                  # Run tests matching a pattern
 pytest --no-cov                           # Skip coverage for faster iteration
 pytest -m slow                            # Only downloaded-data/weight tests

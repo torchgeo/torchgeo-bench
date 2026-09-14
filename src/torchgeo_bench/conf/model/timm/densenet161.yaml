@@ -4,7 +4,6 @@ kwargs:
   model_name: densenet161
   pretrained: true
   global_pool: avg
-  seed: null
 segmentation:
   layers:
     - features.denseblock4

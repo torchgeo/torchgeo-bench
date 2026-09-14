@@ -386,6 +386,9 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
 
     weights_input_unit = "uint8_div255"
 
+    #: Scale-MAE builds a fixed positional grid, so it needs the resolved input size.
+    wants_resolved_image_size = True
+
     def __init__(  # noqa: PLR0913 - public YAML options
         self,
         bands: list[BandSpec],

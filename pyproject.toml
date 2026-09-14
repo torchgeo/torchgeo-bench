@@ -133,7 +133,6 @@ extend-exclude = [
   "src/torchgeo_bench/commands",
   "src/torchgeo_bench/config_schema.py",
   "src/torchgeo_bench/legacy_run.py",
-  "src/torchgeo_bench/models/build.py",
   "src/torchgeo_bench/preprocessing.py",
 ]
 lint.select = [

@@ -25,6 +25,7 @@ Random Convolutional Features
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: RCFBench
+.. autoclass:: RCFModelSettings
 
 Image statistics baseline
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -35,6 +36,7 @@ timm encoders
 ^^^^^^^^^^^^^
 
 .. autoclass:: TimmPatchBenchModel
+.. autoclass:: TimmModelSettings
 
 torchgeo encoders
 ^^^^^^^^^^^^^^^^^

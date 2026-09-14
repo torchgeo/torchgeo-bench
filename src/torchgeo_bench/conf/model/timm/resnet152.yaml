@@ -4,4 +4,3 @@ kwargs:
   model_name: resnet152
   pretrained: true
   global_pool: avg
-  seed: null
