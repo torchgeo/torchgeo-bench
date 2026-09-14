@@ -9,6 +9,9 @@ from types import ModuleType
 
 import pytest
 
+from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_run_config
+from torchgeo_bench.presets import resolve_run_config
+
 ROOT = Path(__file__).parents[1]
 
 
@@ -44,8 +47,25 @@ def test_representative_sweep_passes_seed_and_rejects_unknown_metadata(tmp_path:
     runner = sweep.SweepRunner(config)
 
     command = runner._command(runner.jobs[0], gpu=0, attempt=1)
-    assert command[:4] == [sys.executable, "-m", "torchgeo_bench.cli", "run"]
-    assert "seed=17" in command
+    assert command[:4] == [sys.executable, "-m", "torchgeo_bench", "run"]
+    assert command[command.index("--seed") + 1] == "17"
+    settings = load_run_config(command[command.index("--config") + 1])
+    assert settings.model.name == runner.jobs[0].model.config
+    assert settings.datasets == [runner.jobs[0].dataset]
+    assert settings.segmentation.head == runner.jobs[0].head
+    assert settings.segmentation.epochs == sweep.EPOCHS
+    assert settings.segmentation.batch_size == runner.jobs[0].model.probe_batch_size
+    assert settings.segmentation.cache_features is True
+    assert settings.segmentation.cache_dtype == "float16"
+    assert "layers" not in settings.segmentation.model_fields_set
+    effective, _ = resolve_run_config(settings, runner.jobs[0].dataset)
+    assert effective.segmentation.layers == ["layer4", "layer3", "layer2", "layer1"]
+    retry = runner._command(runner.jobs[0], gpu=0, attempt=2)
+    assert int(retry[retry.index("--batch-size") + 1]) == (
+        runner.jobs[0].model.loader_batch_size // 2
+    )
+    assert load_run_config(retry[retry.index("--config") + 1]) == settings
+    assert "--resume" in command
     assert sweep.sweep_metadata(ROOT, image_size=224, seed=17)["seed"] == 17
 
     config.output.write_text("dataset\n")
@@ -70,8 +90,22 @@ def test_protocol_study_passes_configured_seed(tmp_path: Path) -> None:
     runner = study.StudyRunner(config)
 
     command = runner._command(runner.jobs[0], gpu=0, attempt=1)
-    assert command[:4] == [sys.executable, "-m", "torchgeo_bench.cli", "run"]
-    assert "seed=23" in command
+    assert command[:4] == [sys.executable, "-m", "torchgeo_bench", "run"]
+    assert command[command.index("--seed") + 1] == "23"
+    settings = load_run_config(command[command.index("--config") + 1])
+    job = runner.jobs[0]
+    assert settings.model.name == job.model.config
+    assert settings.datasets == [job.dataset.name]
+    assert settings.segmentation.head == "fpn"
+    assert settings.segmentation.epochs == job.variant.epochs
+    assert settings.segmentation.learning_rate == job.variant.lr
+    assert settings.segmentation.scheduler == job.variant.scheduler
+    assert settings.segmentation.batch_size == job.model.probe_batch_size
+    assert settings.segmentation.cache_features is True
+    assert settings.segmentation.cache_dtype == "float16"
+    assert "layers" not in settings.segmentation.model_fields_set
+    assert "--verbose" in command
+    assert "--no-resume" in command
     assert study.study_metadata(ROOT, seed=23)["seed"] == 23
 
 
@@ -85,14 +119,21 @@ def test_queue_dry_run_logs_without_launching_jobs(
 
     monkeypatch.setattr(runner.subprocess, "run", fail_if_called)
     caplog.set_level(logging.INFO, logger=runner.__name__)
-    jobs = [runner.Job("first", ["model=rcf"]), runner.Job("second", ["model=timm/resnet18"])]
+    jobs = [
+        runner.Job("first", RunConfig(model=ModelConfig(name="rcf"), datasets=["m-eurosat"])),
+        runner.Job(
+            "second", RunConfig(model=ModelConfig(name="timm/resnet18"), datasets=["m-eurosat"])
+        ),
+    ]
 
     assert runner.run_jobs(jobs, [0, 2], output="results.csv", dry_run=True) == 0
     assert (
-        "-m torchgeo_bench.cli run model=rcf device=cuda:0 output=results.csv resume=true"
+        "-m torchgeo_bench run --config '<job-config.yaml>' --device cuda:0 --output results.csv --resume"
         in caplog.text
     )
-    assert "-m torchgeo_bench.cli run model=timm/resnet18 device=cuda:2" in caplog.text
+    assert "--device cuda:2" in caplog.text
+    assert "name: rcf" in caplog.text
+    assert "name: timm/resnet18" in caplog.text
 
 
 @pytest.mark.parametrize("returncode", [0, 1])
@@ -100,16 +141,31 @@ def test_queue_reports_job_result_at_the_expected_log_level(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, returncode: int
 ) -> None:
     runner = _load_script("../experiments/_runner.py")
+    config_paths: list[Path] = []
+    settings = RunConfig(
+        model=ModelConfig(
+            name="custom-rcf",
+            target="torchgeo_bench.models.RCFBench",
+            kwargs={"features": 8, "mode": "empirical"},
+        ),
+        datasets=["m-eurosat"],
+    )
 
     def run_command(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
-        assert command[:4] == [sys.executable, "-m", "torchgeo_bench.cli", "run"]
+        assert command[:4] == [sys.executable, "-m", "torchgeo_bench", "run"]
+        path = Path(command[command.index("--config") + 1])
+        config_paths.append(path)
+        assert load_run_config(path) == settings
+        assert command[command.index("--device") + 1] == "cuda:0"
+        assert command[command.index("--output") + 1] == "results.csv"
+        assert "--resume" in command
         return subprocess.CompletedProcess(command, returncode, "", "failed to load checkpoint")
 
     monkeypatch.setattr(runner.subprocess, "run", run_command)
     caplog.set_level(logging.INFO, logger=runner.__name__)
-    assert (
-        runner.run_jobs([runner.Job("rcf", ["model=rcf"])], [0], output="results.csv") == returncode
-    )
+    assert runner.run_jobs([runner.Job("rcf", settings)], [0], output="results.csv") == returncode
+    assert len(config_paths) == 1
+    assert not config_paths[0].exists()
     records = [record for record in caplog.records if record.name == runner.__name__]
     assert any("Run complete" in record.message for record in records)
     if returncode:
@@ -130,7 +186,9 @@ def test_queue_logging_uses_stderr_by_default() -> None:
             sys.executable,
             "-c",
             "from experiments._runner import Job, run_jobs; "
-            "run_jobs([Job('rcf', ['model=rcf'])], [0], output='results.csv', dry_run=True)",
+            "from torchgeo_bench.config_schema import ModelConfig, RunConfig; "
+            "config = RunConfig(model=ModelConfig(name='rcf'), datasets=['m-eurosat']); "
+            "run_jobs([Job('rcf', config)], [0], output='results.csv', dry_run=True)",
         ],
         cwd=ROOT,
         capture_output=True,

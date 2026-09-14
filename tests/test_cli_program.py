@@ -1,4 +1,4 @@
-"""Run the installed program against tiny on-disk inputs without mocking its internals."""
+"""Run the canonical CLI against tiny on-disk inputs without mocking its internals."""
 
 import json
 import os
@@ -6,29 +6,34 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import h5py
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.flops_config import FlopsConfig
 
 
 def run_cli(
     *arguments: str, cwd: Path, timeout: int = 120, offline: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    """Invoke the same entry point used by the console command."""
+    """Invoke the public CLI module with an explicitly selected source checkout."""
     env = {
         **os.environ,
         "OMP_NUM_THREADS": "1",
         "MKL_NUM_THREADS": "1",
         "OPENBLAS_NUM_THREADS": "1",
+        "PYTHONPATH": str(Path(__file__).parents[1] / "src"),
     }
     if offline:
         env["HF_HUB_OFFLINE"] = "1"
     return subprocess.run(
-        [sys.executable, "-m", "torchgeo_bench", *arguments],
+        [sys.executable, "-m", "torchgeo_bench.cli", *arguments],
         cwd=cwd,
         env=env,
         capture_output=True,
@@ -77,20 +82,34 @@ def classification_files(tmp_path: Path) -> Path:
     return write_classification_files(tmp_path, "m-eurosat", (2, 7))
 
 
-def classification_arguments(output: Path) -> list[str]:
+def classification_arguments(
+    output: Path,
+    *,
+    dataset_names: tuple[str, ...] = ("m-eurosat",),
+    extra_settings: dict[str, Any] | None = None,
+) -> list[str]:
     """Use a small real feature extractor and the real KNN/linear implementations."""
+    config = RunConfig.model_validate(
+        {
+            "model": {"name": "rcf", "kwargs": {"features": 8}},
+            "datasets": list(dataset_names),
+            "input": {"image_size": 16},
+            "runtime": {"batch_size": 8, "workers": 0, "device": "cpu"},
+            "classification": {
+                "bootstrap_samples": 5,
+                "linear": {"c_log10_start": 1.0, "c_log10_stop": 2.0, "c_count": 2},
+            },
+            **(extra_settings or {}),
+        }
+    )
+    path = output.with_suffix(".yaml")
+    path.write_text(yaml.safe_dump(config.model_dump_yaml()))
     return [
         "run",
-        "model=rcf",
-        "model.features=8",
-        "dataset.names=[m-eurosat]",
-        "dataset.image_size=16",
-        "dataset.batch_size=8",
-        "dataset.num_workers=0",
-        "device=cpu",
-        "eval.bootstrap=5",
-        "eval.c_range=[1,2,2]",
-        f"output={output}",
+        "--config",
+        str(path),
+        "--output",
+        str(output),
     ]
 
 
@@ -98,10 +117,10 @@ def classification_arguments(output: Path) -> list[str]:
 def test_classification_program_handles_noncontiguous_labels(
     tmp_path: Path, classification_files: Path, *, temperature_scaling: bool
 ) -> None:
-    output = tmp_path / "classification.csv"
+    output = tmp_path / "classification=1.csv"
     arguments = classification_arguments(output)
     if temperature_scaling:
-        arguments.extend(["eval.merge_val=false", "eval.calibration.temp_scale=true"])
+        arguments.extend(["--no-refit-train-val", "--temp-scale"])
     completed = run_cli(*arguments, cwd=tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert output.is_file(), completed.stdout + completed.stderr
@@ -117,20 +136,23 @@ def test_classification_program_handles_noncontiguous_labels(
         assert np.isfinite(rows.loc["linear", "temperature"])
         assert rows.loc["linear", "temperature"] > 0
         assert rows.loc["linear", "ece_ts"] < 0.2
+    else:
+        assert rows["temperature"].isna().all()
+    assert not (tmp_path / "results" / "profiles").exists()
+    assert not (tmp_path / "results" / "intrinsic_dim").exists()
 
 
 def test_program_profiles_features_and_resumes_without_input_files(
     tmp_path: Path, classification_files: Path
 ) -> None:
     output = tmp_path / "measurements.csv"
-    arguments = [
-        *classification_arguments(output),
-        "eval.intrinsic_dim.enabled=true",
-        "eval.intrinsic_dim.estimators=[]",
-        "eval.profile.enabled=true",
-        "eval.profile.n_warmup=0",
-        "eval.profile.n_measure=1",
-    ]
+    arguments = classification_arguments(
+        output,
+        extra_settings={
+            "intrinsic_dim": {"enabled": True, "estimators": []},
+            "profile": {"enabled": True, "n_warmup": 0, "n_measure": 1},
+        },
+    )
     completed = run_cli(*arguments, cwd=tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert output.is_file(), completed.stdout + completed.stderr
@@ -144,7 +166,7 @@ def test_program_profiles_features_and_resumes_without_input_files(
 
     before = output.read_bytes()
     shutil.rmtree(classification_files)
-    resumed = run_cli(*arguments, "resume=true", cwd=tmp_path)
+    resumed = run_cli(*arguments, "--resume", cwd=tmp_path)
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert output.read_bytes() == before
 
@@ -156,8 +178,12 @@ def test_program_reinitializes_for_multispectral_and_multilabel_datasets(tmp_pat
     output = tmp_path / "multiple.csv"
     completed = run_cli(
         *classification_arguments(output),
-        "dataset.names=[m-eurosat,m-bigearthnet]",
-        "dataset.bands=all",
+        "--dataset",
+        "m-eurosat",
+        "--dataset",
+        "m-bigearthnet",
+        "--bands",
+        "all",
         cwd=tmp_path,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
@@ -186,8 +212,7 @@ def test_program_fails_when_any_requested_data_is_unavailable(
 ) -> None:
     output = tmp_path / "missing.csv"
     completed = run_cli(
-        *classification_arguments(output),
-        f"dataset.names=[{','.join(dataset_names)}]",
+        *classification_arguments(output, dataset_names=dataset_names),
         cwd=tmp_path,
     )
     assert completed.returncode != 0
@@ -202,18 +227,25 @@ def test_program_fails_when_any_requested_data_is_unavailable(
 
 
 def test_flops_program_writes_both_band_configurations_and_resumes(tmp_path: Path) -> None:
-    output = tmp_path / "flops.csv"
+    output = tmp_path / "flops=1.csv"
+    config = FlopsConfig.model_validate(
+        {
+            "model": {"name": "rcf", "kwargs": {"features": 8}},
+            "runtime": {"device": "cpu"},
+            "input": {"image_size": 16},
+            "timing": {"batch_size": 2, "n_warmup": 0, "n_measure": 1},
+            "segmentation": {"band_configs": []},
+            "output": {"resume": False},
+        }
+    )
+    path = tmp_path / "flops.yaml"
+    path.write_text(yaml.safe_dump(config.model_dump_yaml()))
     arguments = [
         "flops",
-        "model=rcf",
-        "model.features=8",
-        "device=cpu",
-        "image_size=16",
-        "timing_batch_size=2",
-        "n_warmup=0",
-        "n_measure=1",
-        "seg_band_configs=[]",
-        f"output={output}",
+        "--config",
+        str(path),
+        "--output",
+        str(output),
     ]
     completed = run_cli(*arguments, cwd=tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
@@ -221,10 +253,12 @@ def test_flops_program_writes_both_band_configurations_and_resumes(tmp_path: Pat
     rows = pd.read_csv(output).set_index("band_config")
     assert set(rows.index) == {"rgb", "s2"}
     assert (rows["task"] == "classification").all()
+    assert rows.loc["rgb", "n_channels"] == 3
+    assert rows.loc["s2", "n_channels"] == 12
     assert (rows["gflops_total"] > 0).all()
     assert rows.loc["s2", "gflops_backbone"] > rows.loc["rgb", "gflops_backbone"]
     assert (rows["throughput_samples_per_sec"] > 0).all()
     before = output.read_bytes()
-    resumed = run_cli(*arguments, "resume=true", cwd=tmp_path)
+    resumed = run_cli(*arguments, "--resume", cwd=tmp_path)
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert output.read_bytes() == before

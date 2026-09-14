@@ -1,10 +1,12 @@
 """Tests for the CoordBench location-encoder track (network-free)."""
 
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pytest
 import torch
-from omegaconf import OmegaConf
 
 from torchgeo_bench.coordbench import (
     CoordBenchmark,
@@ -16,6 +18,9 @@ from torchgeo_bench.coordbench import (
     spatial_fold_ids,
 )
 from torchgeo_bench.coordbench import datasets as cb_datasets
+from torchgeo_bench.coordbench.config import CoordConfig
+from torchgeo_bench.coordbench.run import _instantiate_encoder
+from torchgeo_bench.presets import ModelPreset
 
 
 @pytest.fixture
@@ -112,10 +117,8 @@ def _synthetic_benchmarks() -> list[CoordBenchmark]:
     return [reg, clf]
 
 
-def _coord_cfg(tmp_path, **coord_overrides) -> OmegaConf:
+def _coord_cfg(tmp_path, **coord_overrides) -> CoordConfig:
     coord = {
-        "output": str(tmp_path / "coord.csv"),
-        "names": "all",
         "methods": ["knn", "linear"],
         "split": "random",
         "folds": 5,
@@ -123,17 +126,12 @@ def _coord_cfg(tmp_path, **coord_overrides) -> OmegaConf:
         "knn_k": 5,
     }
     coord.update(coord_overrides)
-    return OmegaConf.create(
+    return CoordConfig.model_validate(
         {
-            "seed": 0,
-            "device": "cpu",
-            "resume": False,
-            "mode": "coord",
-            "model": {
-                "_target_": "torchgeo_bench.coordbench.models.SinCosLocationEncoder",
-                "name": "sincos",
-            },
-            "coord": coord,
+            "runtime": {"seed": 0, "device": "cpu"},
+            "output": {"file": str(tmp_path / "coord.csv"), "resume": False},
+            "model": {"name": "sincos"},
+            "evaluation": coord,
         }
     )
 
@@ -145,7 +143,7 @@ def test_run_coordbench_end_to_end(tmp_path, monkeypatch) -> None:
     cfg = _coord_cfg(tmp_path, split="both")
     run_coordbench(cfg)
 
-    df = pd.read_csv(cfg.coord.output)
+    df = pd.read_csv(cfg.output.file)
     assert {"dataset", "task", "method", "split", "metric_name", "metric_value"} <= set(df.columns)
     reg = df[df.dataset == "synthetic-reg"]
     clf = df[df.dataset == "synthetic-clf"]
@@ -164,11 +162,11 @@ def test_run_coordbench_resume_skips(tmp_path, monkeypatch) -> None:
     )
     cfg = _coord_cfg(tmp_path)
     run_coordbench(cfg)
-    n_first = len(pd.read_csv(cfg.coord.output))
+    n_first = len(pd.read_csv(cfg.output.file))
 
-    cfg.resume = True
+    cfg.output.resume = True
     run_coordbench(cfg)
-    assert len(pd.read_csv(cfg.coord.output)) == n_first
+    assert len(pd.read_csv(cfg.output.file)) == n_first
 
 
 def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> None:
@@ -181,7 +179,7 @@ def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> No
     cfg = _coord_cfg(tmp_path, split="both")
     run_coordbench(cfg)
 
-    df = pd.read_csv(cfg.coord.output)
+    df = pd.read_csv(cfg.output.file)
     assert set(df.split) == {"official"}
     assert set(df.n_test) == {int(test_mask.sum())}
 
@@ -252,3 +250,170 @@ def test_family_index_matches_loaders() -> None:
     assert len(all_names) == len(set(all_names))
     assert "pdfm-conus27" in all_names
     assert sum(n.startswith("dm-") for n in all_names) == 15
+
+
+@pytest.mark.parametrize("methods", [["linear"], ["knn"], ["knn", "linear"]])
+def test_runtime_method_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, methods: list[str]
+) -> None:
+    monkeypatch.setattr(
+        "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
+    )
+    calls = []
+
+    def knn(*args: Any, **kwargs: Any) -> tuple[float, list[float]]:
+        calls.append(("knn", kwargs))
+        return 0.8, [0.7, 0.9]
+
+    def linear(*args: Any, **kwargs: Any) -> tuple[float, list[float]]:
+        calls.append(("linear", kwargs))
+        return 0.6, [0.5, 0.7]
+
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.knn_probe_score", knn)
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", linear)
+    config = _coord_cfg(tmp_path, methods=methods, knn_k=7, knn_device="cpu")
+    run_coordbench(config)
+    rows = pd.read_csv(config.output.file)
+    assert {kind for kind, _ in calls} == set(methods)
+    assert set(rows.method) == {"knn7" if method == "knn" else "linear" for method in methods}
+    assert all(options["device"] == "cpu" for _, options in calls)
+    assert set(rows.model_target) == {"torchgeo_bench.coordbench.models.SinCosLocationEncoder"}
+    assert set(rows.model_name) == {"sincos"}
+    assert list(rows.columns) == [
+        "dataset",
+        "task",
+        "task_type",
+        "method",
+        "split",
+        "metric_name",
+        "metric_value",
+        "ci_lower",
+        "ci_upper",
+        "n_folds",
+        "cell_deg",
+        "feature_dim",
+        "n_samples",
+        "n_test",
+        "seed",
+        "model_name",
+        "model_target",
+    ]
+
+
+def test_resume_skips_encoding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
+    )
+    config = _coord_cfg(tmp_path)
+    run_coordbench(config)
+    before = Path(config.output.file).read_bytes()
+
+    def unexpected_encode(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("Completed benchmarks must not be encoded again")
+
+    monkeypatch.setattr(SinCosLocationEncoder, "encode", unexpected_encode)
+    config.output.resume = True
+    run_coordbench(config)
+    assert Path(config.output.file).read_bytes() == before
+
+
+def test_partial_results_survive_failure_and_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bench = _synthetic_benchmarks()[0]
+    bench.tasks["second"] = bench.tasks["target"].copy()
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.load_benchmarks", lambda names: [bench])
+    calls = []
+
+    def failing_linear(*args: Any, **kwargs: Any) -> tuple[float, list[float]]:
+        calls.append("linear")
+        if len(calls) == 2:
+            raise RuntimeError("second task failed")
+        return 0.8, [0.8]
+
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", failing_linear)
+    config = _coord_cfg(tmp_path, methods=["linear"])
+    with pytest.raises(RuntimeError, match="second task failed"):
+        run_coordbench(config)
+    assert pd.read_csv(config.output.file).task.tolist() == ["target"]
+    config.output.resume = True
+    run_coordbench(config)
+    assert pd.read_csv(config.output.file).task.tolist() == ["target", "second"]
+    assert len(calls) == 3
+
+
+def test_knn_only_skips_regression(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "torchgeo_bench.coordbench.run.load_benchmarks",
+        lambda names: [_synthetic_benchmarks()[0]],
+    )
+
+    def unexpected_encode(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("KNN-only regression must not encode or probe")
+
+    monkeypatch.setattr(SinCosLocationEncoder, "encode", unexpected_encode)
+    config = _coord_cfg(tmp_path, methods=["knn"])
+    run_coordbench(config)
+    assert not Path(config.output.file).exists()
+
+
+class FixtureEncoder(SinCosLocationEncoder):
+    def __init__(self, payload: dict[str, Any], device: str) -> None:
+        super().__init__(device=device)
+        self.payload = payload
+
+
+def test_custom_encoder_preserves_ordinary_nested_kwargs() -> None:
+    payload = {"_target_": "not_imported.Missing", "options": {"enabled": True}}
+    preset = ModelPreset(
+        name="my-encoder",
+        target=f"{__name__}.FixtureEncoder",
+        kwargs={"payload": payload},
+    )
+    encoder = _instantiate_encoder(preset, "cpu")
+    assert isinstance(encoder, FixtureEncoder)
+    assert encoder.payload == payload
+    assert encoder.device == "cpu"
+
+
+def test_rejects_non_location_custom_target() -> None:
+    preset = ModelPreset(name="not-an-encoder", target="builtins.dict")
+    with pytest.raises(TypeError, match="LocationEncoder"):
+        _instantiate_encoder(preset, "cpu")
+
+
+def test_auto_device_resolves_on_cpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+    monkeypatch.setattr(
+        "torchgeo_bench.coordbench.run.load_benchmarks",
+        lambda names: [_synthetic_benchmarks()[0]],
+    )
+    devices = []
+
+    def linear(*args: Any, **kwargs: Any) -> tuple[float, list[float]]:
+        devices.append(kwargs["device"])
+        return 0.5, [0.5]
+
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", linear)
+    config = _coord_cfg(tmp_path)
+    config.runtime.device = "auto"
+    run_coordbench(config)
+    assert devices == ["cpu"]
+    assert config.runtime.device == "auto"
+
+
+def test_runtime_seeds_encoder_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.load_benchmarks", lambda names: [])
+    random_values = []
+
+    def build(preset: ModelPreset, *, device: str) -> SinCosLocationEncoder:
+        random_values.append(torch.rand(4))
+        return SinCosLocationEncoder(device=device)
+
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.build_model", build)
+    config = _coord_cfg(tmp_path)
+    run_coordbench(config)
+    run_coordbench(config)
+    assert torch.equal(random_values[0], random_values[1])

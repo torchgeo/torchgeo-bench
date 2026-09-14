@@ -191,20 +191,28 @@ def test_audit_model_name_comes_from_the_artifact_name(
 
 
 @pytest.mark.parametrize("dataset", ["m-eurosat", "m-bigearthnet"])
+@pytest.mark.parametrize("custom_model", [False, True])
 def test_probability_writer_emits_no_object_arrays(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dataset: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dataset: str,
+    *,
+    custom_model: bool,
 ) -> None:
     import cleanlab_extract_probs
     import torch
     from torch.utils.data import DataLoader
 
+    from torchgeo_bench.presets import ModelPreset
+
+    model_name = "custom-rcf" if custom_model else "rcf"
     results = tmp_path / "results.csv"
     pd.DataFrame(
         [
             {
                 "dataset": dataset,
                 "method": "linear",
-                "name": "rcf",
+                "name": model_name,
                 "metric_value": 0.9,
                 "normalization": "bandspec_zscore",
                 "bands": "rgb",
@@ -216,20 +224,34 @@ def test_probability_writer_emits_no_object_arrays(
         ]
     ).to_csv(results, index=False)
     output = tmp_path / "probs"
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "cleanlab_extract_probs.py",
-            "--dataset",
-            dataset,
-            "--results",
-            str(results),
-            "--out",
-            str(output),
-            "--device",
-            "cpu",
-        ],
-    )
+    argv = [
+        "cleanlab_extract_probs.py",
+        "--dataset",
+        dataset,
+        "--results",
+        str(results),
+        "--out",
+        str(output),
+        "--device",
+        "cpu",
+    ]
+    if custom_model:
+        config = tmp_path / "run.yaml"
+        config.write_text(
+            "model:\n"
+            "  name: custom-rcf\n"
+            "  target: torchgeo_bench.models.RCFBench\n"
+            "  kwargs:\n"
+            "    features: 8\n"
+            "    seed: 17\n"
+            "    mode: empirical\n"
+            f"datasets: [{dataset}]\n"
+            "input:\n"
+            "  image_size: null\n"
+            "  time_steps: 2\n"
+        )
+        argv.extend(["--config", str(config)])
+    monkeypatch.setattr("sys.argv", argv)
     labels = np.array([0, 1, 0, 1], dtype=np.int64)
     if dataset == "m-bigearthnet":
         labels = np.eye(2, dtype=np.float32)[labels]
@@ -238,12 +260,29 @@ def test_probability_writer_emits_no_object_arrays(
         for label in labels
     ]
     loader = DataLoader(samples, batch_size=2)
-    monkeypatch.setattr(
-        cleanlab_extract_probs, "get_datasets", lambda **kwargs: (samples, loader, loader, loader)
-    )
-    monkeypatch.setattr(
-        cleanlab_extract_probs, "instantiate", lambda *args, **kwargs: torch.nn.Identity()
-    )
+
+    def datasets(**kwargs: object) -> tuple:
+        assert kwargs["dataset_name"] == dataset
+        assert kwargs["image_size"] == 16
+        assert kwargs["interpolation"] == "bilinear"
+        assert kwargs["bands"] == "rgb"
+        assert kwargs["partition_name"] == "default"
+        assert kwargs["time_steps"] == (2 if custom_model else None)
+        return samples, loader, loader, loader
+
+    def build(preset: ModelPreset, **kwargs: object) -> torch.nn.Module:
+        assert preset.name == model_name
+        assert kwargs["normalization"] == "bandspec_zscore"
+        assert preset.kwargs["seed"] == (17 if custom_model else 0)
+        if custom_model:
+            assert kwargs["dataset"] is samples
+            assert preset.kwargs["features"] == 8
+        else:
+            assert "dataset" not in kwargs
+        return torch.nn.Identity()
+
+    monkeypatch.setattr(cleanlab_extract_probs, "get_datasets", datasets)
+    monkeypatch.setattr("torchgeo_bench.main.build_model", build)
     monkeypatch.setattr(
         cleanlab_extract_probs,
         "embed_split",
@@ -263,11 +302,11 @@ def test_probability_writer_emits_no_object_arrays(
     monkeypatch.setattr(cleanlab_extract_probs, "LogisticRegression", Probe)
     cleanlab_extract_probs.main()
     for split in ("train", "test"):
-        path = output / f"{dataset}__rcf_{split}.npz"
+        path = output / f"{dataset}__{model_name}_{split}.npz"
         with np.load(path, allow_pickle=False) as archive:
             assert all(not archive[name].dtype.hasobject for name in archive.files)
             assert archive["meta"].dtype.kind == "U"
-            assert archive["meta"][1] == "rcf"
+            assert archive["meta"][1] == model_name
             assert archive["meta"][-1] == split
             np.testing.assert_array_equal(archive["indices"], np.arange(len(labels)))
             np.testing.assert_array_equal(archive["labels"], labels)

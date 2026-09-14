@@ -11,6 +11,9 @@ import sys
 
 from _runner import Job, add_devices_argument, default_output, run_jobs
 
+from torchgeo_bench.config_schema import ModelConfig, RunConfig
+from torchgeo_bench.datasets import list_datasets
+
 OUTPUT = default_output(__file__)
 
 MODELS = [
@@ -91,7 +94,10 @@ MODELS = [
 def build_jobs() -> list[Job]:
     """Create one all-dataset job for each model."""
     return [
-        Job(label=model.split("/")[-1], overrides=[f"model={model}", "dataset.names=all"])
+        Job(
+            label=model.split("/")[-1],
+            config=RunConfig(model=ModelConfig(name=model), datasets=list_datasets()),
+        )
         for model in MODELS
     ]
 

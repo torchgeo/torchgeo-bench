@@ -1,4 +1,4 @@
-"""Report which model configs support ``dataset.normalization=model_native``.
+"""Report which model configs support ``--normalization model``.
 
 Check that each model supplies training-time preprocessing, not just unit conversion.
 
@@ -12,19 +12,20 @@ import logging
 from pathlib import Path
 
 import torch
-import yaml
 
-from torchgeo_bench.config import CONF_DIR, compose_config, instantiate
+from torchgeo_bench.config import list_model_configs
+from torchgeo_bench.config_schema import InputConfig, ModelConfig, RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError
+from torchgeo_bench.presets import build_model, load_model_preset, resolve_run_config
 
 logger = logging.getLogger(__name__)
 
-CONF = CONF_DIR / "model"
 SKIP_TARGETS = {"SAM3Encoder"}
 
 
-def band_specs(dataset: str, bands: str):
+def band_specs(dataset: str, bands: str) -> list[BandSpec]:
     """Return the BandSpec list a model would receive for this dataset."""
     bench = get_bench_dataset_class(dataset)()
     return bench.select_band_specs(tuple(bench.rgb_bands) if bands == "rgb" else None)
@@ -39,19 +40,33 @@ def main() -> None:
     args = ap.parse_args()
 
     results: dict[str, dict] = {}
-    for path in sorted(CONF.rglob("*.yaml")):
-        conf = yaml.safe_load(path.read_text()) or {}
-        name, target = conf.get("name"), conf.get("_target_", "")
-        if not name or not target or "coordbench" in target:
+    for config_name in list_model_configs():
+        selection = ModelConfig(name=config_name)
+        preset = load_model_preset(selection)
+        if preset.track != "image":
             continue
-        if target.rsplit(".", 1)[-1] in SKIP_TARGETS:
+        if preset.target.rsplit(".", 1)[-1] in SKIP_TARGETS:
             continue
+        _, preset = resolve_run_config(
+            RunConfig(
+                model=selection,
+                datasets=[args.dataset],
+                input=InputConfig(bands=args.bands, normalization="model"),
+            ),
+            args.dataset,
+        )
         bands = band_specs(args.dataset, args.bands)
-        config_name = path.relative_to(CONF).with_suffix("").as_posix()
-        cfg = compose_config([f"model={config_name}"]).model
+        runtime_options = {}
+        if preset.kwargs.get("mode") == "empirical":
+            bench = get_bench_dataset_class(args.dataset)()
+            runtime_options["dataset"] = bench.get_dataset(
+                "train", bands=tuple(band.name for band in bands)
+            )
         entry: dict = {"config": config_name}
         try:
-            model = instantiate(cfg, bands=bands, normalization="model_native")
+            model = build_model(
+                preset, bands=bands, normalization="model_native", **runtime_options
+            )
             sample = torch.rand(2, len(bands), 32, 32) * 3000
             model.normalize_inputs(sample)
             entry["model_native"] = "supported"
@@ -60,8 +75,8 @@ def main() -> None:
         ) as exc:  # allow-except: record unsupported native normalization
             entry["model_native"] = "unsupported"
             entry["reason"] = str(exc)[:160]
-        results[name] = entry
-        logger.info("%-38s %s", name, entry["model_native"])
+        results[preset.name] = entry
+        logger.info("%-38s %s", preset.name, entry["model_native"])
 
     args.out.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
     unsupported = sorted(n for n, v in results.items() if v["model_native"] == "unsupported")

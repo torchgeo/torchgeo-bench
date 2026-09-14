@@ -19,7 +19,7 @@ Glossary
 
    bootstrap
        Resampling technique used to estimate a confidence interval
-       around a metric.  ``eval.bootstrap`` controls the number of
+       around a metric.  ``classification.bootstrap_samples`` controls the number of
        resamples; per-dataset CIs are reported as ``(ci_lower, ci_upper)``
        in the results CSV.
 
@@ -33,15 +33,14 @@ Glossary
        directory per dataset under ``data/geobenchv2/``.  V2 datasets
        use no prefix (``benv2``, ``treesatai``, ``pastis``, ...).
 
-   OmegaConf
-       The YAML configuration library used to compose model and run
-       configs.  See :doc:`configuration` for the override syntax and
-       https://omegaconf.readthedocs.io for the full documentation.
+   Pydantic
+       The strict validation library used for run settings and model presets.
+       See :doc:`configuration` for explicit CLI flags and safe YAML input.
 
    intrinsic dimension
        The geometric / statistical dimension of a manifold of feature
        embeddings, estimated by methods such as TwoNN, MLE, or lPCA.
-       Optional in ``torchgeo-bench`` via ``eval.intrinsic_dim`` and the
+       Optional in ``torchgeo-bench`` via ``intrinsic_dim`` and the
        ``[id]`` extra; see :mod:`torchgeo_bench.intrinsic_dim`.
 
    KNN-5
@@ -50,7 +49,7 @@ Glossary
 
    linear probe
        Logistic regression trained on frozen backbone features. We sweep
-       ``C`` over ``eval.c_range`` and report the best test-set
+       ``C`` over the range in ``classification.linear`` and report test-set
        performance with ``best_c``. Method label: ``linear``.
 
    mIoU
@@ -59,6 +58,6 @@ Glossary
        :func:`~torchgeo_bench.main.evaluate_segmentation`.
 
    resume mode
-       When ``resume=true``, the runner skips any
+       When ``--resume`` is supplied, the runner skips any
        ``(dataset, method, model, config)`` combination already present
        in the output CSV.  See :doc:`results-format` for the exact key.

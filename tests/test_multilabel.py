@@ -3,14 +3,15 @@
 import builtins
 import logging
 import sys
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
-from omegaconf import OmegaConf
 
 import torchgeo_bench.knn as knn
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits
@@ -102,6 +103,7 @@ class TestKNNClassifierSingleLabel:
                 del X, y
 
         monkeypatch.setattr(knn, "gpu_faiss_available", lambda: True)
+        monkeypatch.setattr(knn.torch.cuda, "device", lambda _device: nullcontext())
         monkeypatch.setitem(
             sys.modules,
             "faissknn",
@@ -302,7 +304,7 @@ class TestKNNGPUPath:
         monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
         d = singlelabel_data
         clf = KNNClassifier(n_neighbors=5, device="cuda")
-        with pytest.raises(RuntimeError, match=r"eval\.knn_device=cpu"):
+        with pytest.raises(RuntimeError, match="--knn-device cpu"):
             clf.fit(d["x_train"], d["y_train"])
 
 
@@ -338,14 +340,14 @@ class TestUnifiedEvaluateKNN:
         score, lo, hi, cal, _ = evaluate_knn(
             FeatureSplit(d["x_train"], d["y_train"]),
             FeatureSplit(d["x_test"], d["y_test"]),
-            OmegaConf.create(
+            RunConfig.model_validate(
                 {
-                    "seed": 42,
-                    "device": "cpu",
-                    "verbose": False,
-                    "eval": {
-                        "bootstrap": 50,
-                        "merge_val": False,
+                    "model": {"name": "rcf"},
+                    "datasets": ["m-eurosat"],
+                    "runtime": {"device": "cpu", "seed": 42},
+                    "classification": {
+                        "bootstrap_samples": 50,
+                        "linear": {"refit_train_val": False},
                         "calibration": {"temp_scale": True},
                     },
                 }
@@ -364,14 +366,14 @@ class TestUnifiedEvaluateKNN:
         score, lo, hi, cal, _ = evaluate_knn(
             FeatureSplit(d["x_train"], d["y_train"]),
             FeatureSplit(d["x_test"], d["y_test"]),
-            OmegaConf.create(
+            RunConfig.model_validate(
                 {
-                    "seed": 42,
-                    "device": "cpu",
-                    "verbose": False,
-                    "eval": {
-                        "bootstrap": 50,
-                        "merge_val": False,
+                    "model": {"name": "rcf"},
+                    "datasets": ["m-eurosat"],
+                    "runtime": {"device": "cpu", "seed": 42},
+                    "classification": {
+                        "bootstrap_samples": 50,
+                        "linear": {"refit_train_val": False},
                         "calibration": {"temp_scale": True},
                     },
                 }
@@ -394,14 +396,14 @@ class TestUnifiedEvaluateLogistic:
                 FeatureSplit(d["x_test"][15:], d["y_test"][15:]),
             ),
             c_values=[0.1, 1.0],
-            cfg=OmegaConf.create(
+            cfg=RunConfig.model_validate(
                 {
-                    "seed": 42,
-                    "device": "cpu",
-                    "verbose": False,
-                    "eval": {
-                        "bootstrap": 50,
-                        "merge_val": False,
+                    "model": {"name": "rcf"},
+                    "datasets": ["m-eurosat"],
+                    "runtime": {"device": "cpu", "seed": 42},
+                    "classification": {
+                        "bootstrap_samples": 50,
+                        "linear": {"refit_train_val": False},
                         "calibration": {"temp_scale": True},
                     },
                 }
@@ -425,15 +427,15 @@ class TestUnifiedEvaluateLogistic:
                 FeatureSplit(d["x_test"], d["y_test"]),
             ),
             c_values=[0.01, 0.1, 1.0],
-            cfg=OmegaConf.create(
+            cfg=RunConfig.model_validate(
                 {
-                    "seed": 42,
-                    "device": "cpu",
-                    "verbose": True,
-                    "eval": {
-                        "bootstrap": 50,
-                        "merge_val": True,
-                        "calibration": {"temp_scale": True},
+                    "model": {"name": "rcf"},
+                    "datasets": ["m-bigearthnet"],
+                    "runtime": {"device": "cpu", "seed": 42, "verbose": True},
+                    "classification": {
+                        "bootstrap_samples": 50,
+                        "linear": {"refit_train_val": True},
+                        "calibration": {"temp_scale": False},
                     },
                 }
             ),

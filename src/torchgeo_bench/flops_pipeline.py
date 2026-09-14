@@ -11,28 +11,28 @@ import logging
 import os
 import warnings
 from collections.abc import Iterator
-from dataclasses import dataclass
 from datetime import UTC
+from typing import Any
 
 import pandas as pd
 import torch
 from filelock import FileLock
-from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
 from torchgeo_bench.bands import BandCompatibilityError
-from torchgeo_bench.config import instantiate
+from torchgeo_bench.config_schema import SegmentationConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.flops_config import FlopsConfig, FlopsSegmentationConfig
 from torchgeo_bench.model_profile import (
     ProfileTiming,
     _count_gflops,
     _count_params,
     measure_profile,
 )
+from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset, build_model
 from torchgeo_bench.results import append_rows_atomic
 from torchgeo_bench.segmentation_probe import SegmentationProbe
-from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
-from torchgeo_bench.utils import resolve_device
 
 warnings.filterwarnings("ignore", message="Dataset has no geotransform", category=UserWarning)
 
@@ -60,20 +60,33 @@ def _load_completed(path: str) -> frozenset[tuple]:
     )
 
 
-def _is_terramind(cfg_model: DictConfig) -> bool:
-    return "TerraMind" in str(cfg_model._target_)
+def _is_terramind(preset: ModelPreset) -> bool:
+    return "TerraMind" in preset.target
+
+
+def _resolve_device(requested: str) -> torch.device:
+    """Resolve auto, but never report CPU timing for an explicitly requested GPU."""
+    if requested == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(requested)
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise ValueError("CUDA requested but not available; use --device cpu or auto")
+        if device.index is not None and device.index >= torch.cuda.device_count():
+            raise ValueError(f"CUDA device index {device.index} is not available")
+    return device
 
 
 def _build_model(
-    cfg_model: DictConfig,
-    band_specs: list,
+    preset: ModelPreset,
+    band_specs: list[BandSpec],
     normalization: str,
     band_config: str,
 ) -> nn.Module | None:
     """Instantiate the model, skipping only explicitly incompatible band selections."""
-    if _is_terramind(cfg_model):
+    if _is_terramind(preset):
         # A modality/channel mismatch can silently select the wrong band table.
-        declared = str(cfg_model.get("modality", "S2L2A"))
+        declared = str(preset.kwargs.get("modality", "S2L2A"))
         expected = _MODALITY_FOR_BAND_CONFIG[band_config]
         if declared != expected:
             raise ValueError(
@@ -82,11 +95,11 @@ def _build_model(
                 f"Measuring this pair would map through the wrong band table."
             )
     try:
-        return instantiate(cfg_model, bands=band_specs, normalization=normalization)
+        return build_model(preset, bands=band_specs, normalization=normalization)
     except BandCompatibilityError as exc:  # allow-except: Skip explicitly unsupported bands.
         logger.warning(
             "Skipping %s/%s: model is incompatible with this band config: %s",
-            cfg_model.get("name", cfg_model._target_),
+            preset.name,
             band_config,
             exc,
         )
@@ -241,7 +254,7 @@ def _flops_row(
 
 
 def classification_row(
-    cfg: DictConfig, model: nn.Module, base_meta: dict, device: torch.device
+    cfg: FlopsConfig, model: nn.Module, base_meta: dict[str, Any], device: torch.device
 ) -> dict | None:
     """Measure classification cost, skipping incompatible input bands."""
     model_name = base_meta["name"]
@@ -255,9 +268,9 @@ def classification_row(
             image_size,
             device,
             ProfileTiming(
-                batch_size=int(cfg.timing_batch_size),
-                n_warmup=int(cfg.n_warmup),
-                n_measure=int(cfg.n_measure),
+                batch_size=cfg.timing.batch_size,
+                n_warmup=cfg.timing.n_warmup,
+                n_measure=cfg.timing.n_measure,
             ),
         )
         gflops_backbone = metrics["gflops"]
@@ -265,8 +278,8 @@ def classification_row(
             model,
             (n_channels, image_size, image_size),
             device,
-            str(cfg.probe_head),
-            int(cfg.probe_num_classes),
+            cfg.classification.head,
+            cfg.classification.num_classes,
         )
     except BandCompatibilityError as exc:  # allow-except: Skip explicitly unsupported bands.
         logger.warning(
@@ -306,19 +319,22 @@ def classification_row(
     return row
 
 
-@dataclass(frozen=True, kw_only=True)
-class SegmentationProfileOptions:
-    """Segmentation configuration for compute-cost measurements."""
-
-    eval_cfg: DictConfig
-    band_configs: set[str]
-    head_types: list[str]
-    num_classes: int
-    layers: list[str]
+def _build_seg_probe(
+    model: nn.Module, num_classes: int, settings: SegmentationConfig
+) -> SegmentationProbe:
+    """Use the benchmark probe without allocating an unused training solver."""
+    return SegmentationProbe(
+        backbone=model,
+        layer_names=list(settings.layers),
+        num_classes=num_classes,
+        head_type=settings.head,
+        freeze_backbone=True,
+        temporal_pool=settings.temporal_pool,
+    )
 
 
 def segmentation_rows(
-    options: SegmentationProfileOptions,
+    options: FlopsSegmentationConfig,
     model: nn.Module,
     base_meta: dict,
     device: torch.device,
@@ -327,38 +343,39 @@ def segmentation_rows(
     """Yield each completed segmentation measurement before starting the next head."""
     model_name = base_meta["name"]
     band_config = base_meta["band_config"]
-    n_channels = base_meta["n_channels"]
-    image_size = base_meta["image_size"]
-    if band_config not in options.band_configs or not options.layers:
-        if band_config in options.band_configs and not options.layers:
+    if band_config not in options.band_configs or not options.probe.layers:
+        if band_config in options.band_configs and not options.probe.layers:
             logger.info(
-                "No eval.segmentation.layers for %s — skipping segmentation cells", model_name
+                "No segmentation.probe.layers for %s — skipping segmentation cells", model_name
             )
         return
 
-    for head_type in options.head_types:
+    for head_type in options.heads:
         seg_key = (model_name, band_config, "segmentation", head_type)
         if seg_key in completed:
             logger.info("Skip (%s, %s, %s) — already done", model_name, band_config, head_type)
             continue
-        head_cfg = OmegaConf.merge(
-            options.eval_cfg,
-            OmegaConf.create({"segmentation": {"head_type": head_type}}),
+        settings = options.probe.model_copy(update={"head": head_type})
+        yield _segmentation_row(
+            model, settings, {**base_meta, "num_classes": options.num_classes}, device
         )
-        assert isinstance(head_cfg, DictConfig)
-        probe, _solver = build_seg_probe_and_solver(
-            model, options.num_classes, head_cfg, device, 1e-3
-        )
-        probe.to(device).eval()
 
+
+def _segmentation_row(
+    model: nn.Module, settings: SegmentationConfig, base_meta: dict[str, Any], device: torch.device
+) -> dict[str, Any]:
+    """Measure one head, releasing captured features and hooks before the next cell."""
+    probe = _build_seg_probe(model, base_meta["num_classes"], settings)
+    probe.to(device).eval()
+    n_channels, image_size = base_meta["n_channels"], base_meta["image_size"]
+    try:
         gflops_head = _seg_head_gflops(probe, n_channels, image_size, device)
-        yield _flops_row(
+        row = _flops_row(
             base_meta,
             model,
             image_size,
             task="segmentation",
-            head_type=head_type,
-            num_classes=options.num_classes,
+            head_type=settings.head,
             gflops_head=gflops_head,
             params_backbone_m=_count_params(model),
             params_head_m=_count_params(probe.head),
@@ -366,62 +383,55 @@ def segmentation_rows(
         )
         logger.info(
             "%s/%s segmentation head=%s: head=%.4f GF (taps=%s)",
-            model_name,
-            band_config,
-            head_type,
+            base_meta["name"],
+            base_meta["band_config"],
+            settings.head,
             gflops_head,
             probe.channels_list,
         )
+        return row
+    finally:
+        for hook in probe.hooks:
+            hook.remove()
+        probe._features.clear()
         del probe
         _free(device)
 
 
-def main(cfg: DictConfig) -> None:
+def main(config: FlopsConfig) -> None:
     """Measure per-sample compute cost for one model config."""
-    output_path = str(cfg.output)
+    cfg, preset = config.resolve()
+    device = _resolve_device(cfg.runtime.device)
+    output_path = cfg.output.file
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    device = resolve_device(str(cfg.device))
-    image_size = int(cfg.image_size)
-    normalization = str(cfg.normalization)
-    model_target = str(cfg.model._target_)
-    config_name = str(cfg.model.get("name", model_target.split(".")[-1]))
-    model_name = _TERRAMIND_MERGED_NAME.get(config_name, config_name)
+    torch.manual_seed(cfg.runtime.seed)
+    image_size = cfg.input.image_size
+    normalization = NORMALIZATIONS[cfg.input.normalization]
+    model_target = preset.target
+    model_name = _TERRAMIND_MERGED_NAME.get(preset.name, preset.name)
 
-    bench = get_bench_dataset_class(str(cfg.band_source))()
+    bench = get_bench_dataset_class(cfg.input.band_source)()
     band_specs_for = {
         "rgb": bench.select_band_specs(bench.rgb_bands),
         "s2": bench.select_band_specs(None),
     }
 
-    completed = _load_completed(output_path) if bool(cfg.resume) else frozenset()
-
-    # Model eval blocks may include unrelated keys such as c_range; allow them during the merge.
-    seg_eval_cfg = DictConfig(OmegaConf.to_container(cfg.eval, resolve=True))
-    OmegaConf.set_struct(seg_eval_cfg, False)
-    if "eval" in cfg.model and cfg.model.eval is not None:
-        seg_eval_cfg.merge_with(cfg.model.eval)
-    seg_options = SegmentationProfileOptions(
-        eval_cfg=seg_eval_cfg,
-        band_configs=set(cfg.seg_band_configs),
-        head_types=list(cfg.seg_head_types),
-        num_classes=int(cfg.seg_num_classes),
-        layers=list(seg_eval_cfg.segmentation.get("layers", [])),
-    )
+    completed = _load_completed(output_path) if cfg.output.resume else frozenset()
 
     n_written = 0
     n_skipped = 0
 
-    for band_config in list(cfg.band_configs):
-        if _is_terramind(cfg.model):
-            declared = str(cfg.model.get("modality", "S2L2A"))
+    for band_config in cfg.input.band_configs:
+        if _is_terramind(preset):
+            declared = str(preset.kwargs.get("modality", "S2L2A"))
             if declared != _MODALITY_FOR_BAND_CONFIG[band_config]:
                 continue
 
         band_specs = band_specs_for[band_config]
         n_channels = len(band_specs)
 
-        model = _build_model(cfg.model, band_specs, normalization, band_config)
+        model = _build_model(preset, band_specs, normalization, band_config)
         if model is None:
             n_skipped += 1
             continue
@@ -433,7 +443,7 @@ def main(cfg: DictConfig) -> None:
             "band_config": band_config,
             "n_channels": n_channels,
             "image_size": image_size,
-            "num_classes": int(cfg.probe_num_classes),
+            "num_classes": cfg.classification.num_classes,
         }
 
         cls_key = (model_name, band_config, "classification", "")
@@ -449,7 +459,7 @@ def main(cfg: DictConfig) -> None:
             append_rows_atomic(output_path, [row])
             n_written += 1
 
-        for row in segmentation_rows(seg_options, model, base_meta, device, completed):
+        for row in segmentation_rows(cfg.segmentation, model, base_meta, device, completed):
             append_rows_atomic(output_path, [row])
             n_written += 1
 

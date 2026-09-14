@@ -1,195 +1,157 @@
-"""Command-line interface for ``torchgeo-bench``.
+# Copyright (c) TorchGeo Contributors. All rights reserved.
+# Licensed under the MIT License.
 
-Run benchmarks with ``run``, measure cost with ``flops``, or fetch data with ``download``.
-
-Load command dependencies lazily so ``--help`` stays fast.
-"""
+"""Command line interface: benchmark runs, catalogs, downloads, and measurements."""
 
 import argparse
+import pathlib
+import sys
+from collections.abc import Callable, Sequence
 
-_RUN_EPILOG = """\
-examples:
-  python -m torchgeo_bench.cli run -m timm/resnet50 -d m-eurosat
-  python -m torchgeo_bench.cli run -m torchgeo/scalemae_large_fmow -d m-eurosat --device cuda:1
-  python -m torchgeo_bench.cli run -m rcf dataset.batch_size=128 eval.knn_k=10
-
-Any key=value pair overrides the config (values parse as YAML, e.g.
-dataset.names=[m-eurosat]). Flags are shorthand for common overrides and win
-over positional key=value pairs. Use --print-config to see the merged result.
-"""
+from . import commands
+from .commands.coord_arguments import add_coord_arguments
+from .commands.flops_arguments import add_flops_arguments
+from .commands.profile_arguments import add_profile_arguments
+from .datasets import get_dataset_task, list_datasets
 
 
-def _add_override_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "overrides",
-        nargs="*",
-        metavar="key=value",
-        help="Config overrides, e.g. dataset.batch_size=128 (values parse as YAML)",
+def _model_names() -> list[str]:
+    """Return preset names from packaged YAML files without importing models."""
+    root = pathlib.Path(__file__).parent / "conf" / "model"
+    return sorted(
+        path.relative_to(root).with_suffix("").as_posix() for path in root.rglob("*.yaml")
     )
 
 
-def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
-    """Share the fixed-batch profiling options between both entry points."""
-    parser.add_argument("-m", "--model", required=True, help="Model preset")
-    parser.add_argument("-d", "--dataset", required=True, help="One dataset name")
-    parser.add_argument("--partition", default="default", help="Dataset partition")
-    parser.add_argument("--device", default="cpu", help="cpu, cuda, or cuda:<index>")
-    parser.add_argument("--bands", default="rgb", help="rgb, all, or comma-separated bands")
-    parser.add_argument("--image-size", type=int, default=None)
-    parser.add_argument(
-        "--interpolation", choices=("area", "bilinear", "bicubic", "nearest"), default=None
-    )
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--warmup", type=int, default=3)
-    parser.add_argument("--measurements", type=int, default=20)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument(
-        "--normalization",
-        choices=("bandspec_zscore", "model_native", "minmax", "minmax_zscore", "identity"),
-        default=None,
-    )
-    parser.add_argument(
-        "--precision", choices=("float32", "float16", "bfloat16"), default="float32"
-    )
-    parser.add_argument("--count-flops", action="store_true")
+def _model_detail(name: str) -> str:
+    """Return the packaged model preset for a catalog detail request."""
+    path = pathlib.Path(__file__).parent / "conf" / "model" / f"{name}.yaml"
+    return path.read_text(encoding="utf-8")
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m torchgeo_bench.cli",
-        description="Benchmark geospatial foundation models on GeoBench datasets.",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
+def _dataset_detail(name: str) -> str:
+    """Return lightweight metadata for a dataset catalog detail request."""
+    task = get_dataset_task(name)
+    return f"name: {name}\ntask: {task}\n"
 
-    run = sub.add_parser(
-        "run",
-        help="Run KNN / linear-probe / segmentation benchmarks",
-        epilog=_RUN_EPILOG,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    run.add_argument(
-        "-m",
-        "--model",
-        default=None,
-        help="Model config, e.g. timm/resnet50 (default: rcf)",
-    )
-    run.add_argument(
-        "-d", "--datasets", default=None, help="Comma-separated dataset names, or 'all'"
-    )
-    run.add_argument("--device", default=None, help="Torch device, e.g. cuda:1 or cpu")
-    run.add_argument(
-        "-o",
-        "--output",
-        default=None,
-        help="Results CSV path (default: results/models/<model name>.csv)",
-    )
-    run.add_argument(
-        "--resume",
-        action="store_true",
-        help="Skip (dataset, method, config) combos already in the output CSV",
-    )
-    run.add_argument("--seed", type=int, default=None, help="Random seed (default: 0)")
-    run.add_argument("--partition", default=None, help="GeoBench partition (default: 'default')")
-    run.add_argument("--bands", default=None, help="rgb | all | comma-separated band names")
-    run.add_argument(
-        "--batch-size",
-        type=int,
-        default=None,
-        help="Dataloader batch size (default: 64)",
-    )
-    run.add_argument(
-        "--image-size", type=int, default=None, help="Resize edge in px (default: 224)"
-    )
-    run.add_argument(
-        "--normalization",
-        choices=[
-            "bandspec_zscore",
-            "model_native",
-            "minmax",
-            "minmax_zscore",
-            "identity",
-        ],
-        default=None,
-        help="Input normalization strategy (default: bandspec_zscore)",
-    )
-    run.add_argument("--skip-linear", action="store_true", help="Skip the linear probe (KNN only)")
-    run.add_argument(
-        "--bootstrap",
-        type=int,
-        default=None,
-        help="Bootstrap resamples for CIs (default: 200)",
-    )
-    run.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging")
-    run.add_argument("--print-config", action="store_true", help="Print the merged config and exit")
-    run.add_argument(
-        "--list-models",
-        action="store_true",
-        help="List available model configs and exit",
-    )
-    run.add_argument(
-        "--list-datasets",
-        action="store_true",
-        help="List available dataset names and exit",
-    )
-    run.add_argument(
-        "--model-help",
-        metavar="MODEL",
-        default=None,
-        help="Print a model config's YAML (available key=value overrides) and exit",
-    )
-    _add_override_arg(run)
-    run.set_defaults(func="run")
 
-    flops = sub.add_parser("flops", help="Measure per-sample compute cost (GFLOPs)")
-    flops.add_argument(
-        "-m", "--model", required=False, default=None, help="Model config (required)"
+def _parser() -> argparse.ArgumentParser:
+    """Build the CLI parser without importing numerical dependencies."""
+    parser = argparse.ArgumentParser(prog="torchgeo-bench")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    run = subcommands.add_parser(
+        "run", help="Run image benchmarks", argument_default=argparse.SUPPRESS
     )
-    flops.add_argument("--device", default=None, help="Torch device")
-    flops.add_argument("-o", "--output", default=None, help="Results CSV path")
-    flops.add_argument(
-        "--print-config", action="store_true", help="Print the merged config and exit"
+    run.add_argument("--config", type=pathlib.Path, help="YAML configuration file")
+    run.add_argument("-m", "--model", help="Model preset name")
+    run.add_argument(
+        "-d", "--dataset", action="append", dest="datasets", help="Dataset (repeatable)"
     )
-    _add_override_arg(flops)
-    flops.set_defaults(func="flops")
-
-    profile = sub.add_parser("profile", help="Measure one real inference batch")
+    run.add_argument("--device")
+    run.add_argument("--batch-size", type=int)
+    run.add_argument("--workers", type=int)
+    run.add_argument("--seed", type=int)
+    run.add_argument("--bands", help="rgb, all, or comma-separated band names")
+    run.add_argument("--interpolation", choices=("area", "bilinear", "bicubic", "nearest"))
+    run.add_argument("--image-size", type=_image_size, metavar="PX|none")
+    run.add_argument(
+        "--normalization", choices=("dataset", "model", "minmax", "minmax_zscore", "none")
+    )
+    run.add_argument("--partition")
+    run.add_argument("--time-steps", type=int)
+    run.add_argument("--methods", nargs="+", choices=("knn", "linear"))
+    run.add_argument("--knn-k", type=int)
+    run.add_argument("--knn-device")
+    run.add_argument("--bootstrap-samples", type=int)
+    run.add_argument("--refit-train-val", action=argparse.BooleanOptionalAction)
+    run.add_argument("--temp-scale", action=argparse.BooleanOptionalAction)
+    run.add_argument("--resume", action=argparse.BooleanOptionalAction)
+    run.add_argument("-o", "--output", help="CSV for all image result kinds")
+    run.add_argument("--results-dir", help="Directory for per-model metric CSVs")
+    run.add_argument("--verbose", action=argparse.BooleanOptionalAction)
+    run.add_argument(
+        "--dry-run", action="store_true", help="Validate and print reusable YAML without running"
+    )
+    run.add_argument("--config-help", action="store_true", help="Print the JSON schema and exit")
+    for name, help_text in (
+        ("models", "List model presets or show one preset"),
+        ("datasets", "List datasets or show one dataset"),
+    ):
+        command = subcommands.add_parser(name, help=help_text)
+        command.add_argument("name", nargs="?")
+    download = subcommands.add_parser("download", help="Download benchmark datasets")
+    download.add_argument("target", nargs="+")
+    download.add_argument("--output-dir", default="data")
+    download.add_argument("--datasets")
+    profile = subcommands.add_parser("profile", help="Measure one real inference batch")
     add_profile_arguments(profile)
-    profile.set_defaults(func="profile")
-
-    download = sub.add_parser("download", help="Download benchmark datasets")
-    download.add_argument(
-        "target",
-        nargs="+",
-        metavar="DATASET",
-        help="Dataset names, or one legacy collection target",
-    )
-    download.add_argument(
-        "-o", "--output-dir", default="data", help="Benchmark data root (default: data)"
-    )
-    download.add_argument(
-        "--datasets", default=None, help="(GeoBench only) comma-separated dataset names"
-    )
-    download.set_defaults(func="download")
-
+    flops = subcommands.add_parser("flops", help="Measure synthetic compute cost")
+    add_flops_arguments(flops)
+    coord = subcommands.add_parser("coord", help="Run coordinate encoder benchmarks")
+    add_coord_arguments(coord)
     return parser
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Entry point for the ``torchgeo-bench`` console script."""
-    parser = _build_parser()
-    args, extras = parser.parse_known_args(argv)
-    # argparse can leave interleaved positionals and their "--" separator unconsumed.
-    if hasattr(args, "overrides") and "--" in extras:
-        extras.remove("--")
-    if extras:
-        if not hasattr(args, "overrides") or any(
-            token.startswith("-") or "=" not in token for token in extras
-        ):
-            parser.error(f"unrecognized arguments: {' '.join(extras)}")
-        args.overrides.extend(extras)
-    from torchgeo_bench import commands
+def _image_size(value: str) -> int | None:
+    """Parse a positive image size or the explicit ``none`` value."""
+    if value == "none":
+        return None
+    size = int(value)
+    if size <= 0:
+        raise argparse.ArgumentTypeError("image size must be positive or none")
+    return size
 
-    getattr(commands, args.func)(args)
+
+def _run(args: argparse.Namespace) -> None:
+    """Validate and execute one image benchmark."""
+    commands._image.run(args, tuple(list_datasets()))
+
+
+def _show_catalog(
+    name: str | None, choices: Sequence[str], detail: Callable[[str], str], kind: str
+) -> None:
+    """Print a catalog or one entry without loading its runtime."""
+    if name is None:
+        print("\n".join(choices))
+    elif name not in choices:
+        raise SystemExit(f"unknown {kind} {name!r}")
+    else:
+        print(detail(name), end="")
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """Reject retired override syntax without confusing equals signs in flag values."""
+    parser = _parser()
+    args, extras = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
+    if extras:
+        if any("=" in value and not value.startswith("--") for value in extras):
+            parser.error(
+                "key=value and +key=value overrides have been retired; use explicit flags "
+                "(for example --model rcf --dataset m-eurosat) or --config run.yaml"
+            )
+        parser.error(f"unrecognized arguments: {' '.join(extras)}")
+    return args
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Run image, coordinate, download, and compute commands."""
+    args = _parse_args(argv)
+    if args.command == "run":
+        _run(args)
+    elif args.command == "models":
+        _show_catalog(args.name, _model_names(), _model_detail, "model")
+    elif args.command == "datasets":
+        _show_catalog(args.name, list_datasets(), _dataset_detail, "dataset")
+    elif args.command == "download":
+        commands.download(args)
+    elif args.command == "profile":
+        commands.profile(args)
+    elif args.command == "flops":
+        commands.flops(args)
+    elif args.command == "coord":
+        commands.coord(args)
+    else:
+        raise SystemExit(f"{args.command} is not implemented by the image CLI yet")
 
 
 if __name__ == "__main__":

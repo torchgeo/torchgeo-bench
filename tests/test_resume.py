@@ -1,45 +1,78 @@
-"""Regression tests for resume-mode config fingerprinting."""
+"""Regression tests for resume hashing."""
 
-from torchgeo_bench.config import compose_config
-from torchgeo_bench.resume import _resume_config_hash
+import pytest
 
-
-def _cfg(overrides):
-    return compose_config(["model=rcf", "dataset.names=[m-eurosat]", *overrides])
-
-
-def test_config_hash_ignores_profile_toggle():
-    """Adding profile rows must not rerun completed probes."""
-    without_profile = _cfg([])
-    with_profile = _cfg(["eval.profile.enabled=true", "eval.profile.cpu_throughput.enabled=true"])
-
-    assert _resume_config_hash(without_profile) == _resume_config_hash(with_profile)
+from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.presets import merge_settings, resolve_run_config
+from torchgeo_bench.resume import resume_config_hash
 
 
-def test_config_hash_ignores_intrinsic_dim_toggle():
-    """Adding intrinsic-dimension rows must not rerun completed probes."""
-    without_id = _cfg([])
-    with_id = _cfg(["eval.intrinsic_dim.enabled=true"])
-
-    assert _resume_config_hash(without_id) == _resume_config_hash(with_id)
-
-
-def test_config_hash_changes_with_normalization():
-    """Normalization changes the evaluated inputs, so it must change the resume key."""
-    zscore = _cfg(["dataset.normalization=bandspec_zscore"])
-    minmax = _cfg(["dataset.normalization=minmax"])
-
-    assert _resume_config_hash(zscore) != _resume_config_hash(minmax)
-
-
-def test_removed_plot_defaults_keep_existing_resume_keys() -> None:
-    current = _cfg([])
-    previous = _cfg(
-        [
-            "+eval.segmentation.save_viz=false",
-            "+eval.segmentation.viz_dir=viz",
-            "+eval.segmentation.n_viz_samples=8",
-        ]
+def _cfg(**sections) -> RunConfig:
+    return RunConfig.model_validate(
+        merge_settings({"model": {"name": "rcf"}, "datasets": ["m-eurosat"]}, sections)
     )
-    assert _resume_config_hash(current) == _resume_config_hash(previous)
-    assert not {"save_viz", "viz_dir", "n_viz_samples"} & set(current.eval.segmentation)
+
+
+def _hash(config: RunConfig, dataset: str = "m-eurosat") -> str:
+    resolved, preset = resolve_run_config(config, dataset)
+    return resume_config_hash(resolved, preset)
+
+
+def test_config_hash_ignores_profile_toggle() -> None:
+    assert _hash(_cfg()) == _hash(
+        _cfg(profile={"enabled": True, "cpu_throughput": {"enabled": True}})
+    )
+
+
+def test_config_hash_ignores_intrinsic_dim_toggle() -> None:
+    assert _hash(_cfg()) == _hash(_cfg(intrinsic_dim={"enabled": True}))
+
+
+def test_dataset_selection_does_not_change_hash() -> None:
+    assert _hash(_cfg()) == _hash(_cfg(datasets=["m-forestnet"]))
+
+
+def test_config_hash_ignores_output_paths_and_method_selection() -> None:
+    assert _hash(_cfg()) == _hash(
+        _cfg(
+            classification={"methods": ["linear"]},
+            output={"directory": "other-results", "file": "custom.csv", "resume": True},
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"runtime": {"seed": 1}},
+        {"runtime": {"device": "cpu"}},
+        {"runtime": {"batch_size": 8}},
+        {"runtime": {"workers": 0}},
+        {"input": {"bands": "all"}},
+        {"input": {"normalization": "minmax"}},
+        {"classification": {"knn_k": 7}},
+        {"classification": {"knn_device": "cpu"}},
+        {"classification": {"linear": {"c_log10_start": -5.0}}},
+        {"classification": {"calibration": {"n_bins_linear": 10}}},
+        {"classification": {"bootstrap_samples": 100}},
+        {"segmentation": {"head": "linear"}},
+        {"segmentation": {"learning_rate": 0.01}},
+        {"model": {"name": "rcf", "kwargs": {"mode": "empirical"}}},
+    ],
+)
+def test_config_hash_changes_with_result_affecting_settings(overrides: dict) -> None:
+    assert _hash(_cfg()) != _hash(_cfg(**overrides))
+
+
+def test_config_hash_includes_resolved_model_target_and_kwargs() -> None:
+    custom = _cfg(model={"name": "custom", "target": "example.Model", "kwargs": {"width": 4}})
+    wider = _cfg(model={"name": "custom", "target": "example.Model", "kwargs": {"width": 8}})
+    other_target = _cfg(model={"name": "custom", "target": "example.Other", "kwargs": {"width": 4}})
+
+    assert _hash(custom) != _hash(wider)
+    assert _hash(custom) != _hash(other_target)
+
+
+def test_config_hash_reflects_dataset_resolved_preset_overrides() -> None:
+    config = _cfg(model={"name": "torchgeo/scalemae_large_fmow"})
+    assert _hash(config, "m-eurosat") != _hash(config, "forestnet")

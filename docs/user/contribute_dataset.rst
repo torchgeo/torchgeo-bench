@@ -13,18 +13,17 @@ Clone the repository and install the development dependencies:
 
    $ git clone https://github.com/torchgeo/torchgeo-bench.git
    $ cd torchgeo-bench
-   $ conda activate torchgeo-bench
    $ uv sync --extra dev
 
-This is the same setup used in :doc:`eval_own_model`.  Download the dataset
-files so you can test loading locally.  ``download`` takes a *family*, not an
-individual dataset name; GeoBench families accept ``--datasets`` to narrow the
-fetch:
+Use ``uv run`` for commands in that environment. Alternatively, activate the conda environment and run ``pip install -e ".[dev]"``; do not use ``uv sync`` to install into conda.
+
+Download the data before loading it. ``download`` accepts one or more dataset names, including names from different families. GeoBench collection aliases also accept ``--datasets``:
 
 .. code-block:: console
 
-   $ torchgeo-bench download geobench_v2 --datasets burn_scars
-   $ torchgeo-bench download resisc45
+   $ uv run torchgeo-bench download burn_scars
+   $ uv run torchgeo-bench download m-eurosat burn_scars resisc45
+   $ uv run torchgeo-bench download geobench_v2 --datasets burn_scars
 
 If you are adding a dataset that no existing family covers, you will wire up
 its own download target below.
@@ -37,18 +36,24 @@ Create a new module under :file:`src/torchgeo_bench/datasets/` and subclass
 
 .. code-block:: python
 
-   from pathlib import Path
    from collections.abc import Callable
+   from pathlib import Path
+   from typing import ClassVar
 
-   from torchgeo_bench.datasets.base import BenchDataset, BandSpec
+   from torch import Tensor
+   from torch.utils.data import Dataset
+
+   from torchgeo_bench.datasets.base import BandSpec, BenchDataset
 
    class MyDataset(BenchDataset):
        name = "my_dataset"
        task = "classification"        # or "segmentation"
        num_classes = 10
-       bands: list[BandSpec] = [...]
-       rgb_bands = ["red", "green", "blue"]
-       split_sizes = {"train": 5000, "val": 1000, "test": 2000}
+       multilabel = False
+       supports_partitions = False
+       bands: ClassVar[list[BandSpec]] = [...]  # Supply measured BandSpecs.
+       rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
+       split_sizes: ClassVar[dict[str, int]] = {"train": 5000, "val": 1000, "test": 2000}
 
        @classmethod
        def data_root(cls) -> Path:
@@ -60,9 +65,9 @@ Create a new module under :file:`src/torchgeo_bench/datasets/` and subclass
            *,
            partition: str = "default",
            bands: tuple[str, ...] | None = None,
-           transform: Callable | None = None,
-       ) -> torch.utils.data.Dataset:
-           ...  # return a Dataset yielding {"image": tensor, "label": tensor} samples
+           transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
+       ) -> Dataset[dict[str, Tensor]]:
+           raise NotImplementedError("Implement loading and apply the requested bands/transform")
 
 Required class-level attributes:
 
@@ -74,12 +79,12 @@ Required class-level attributes:
   `Compute the band statistics`_ — these must be measured, not copied.
 * ``rgb_bands`` — short names of the bands used in RGB-only mode
 * ``split_sizes`` — dict with ``train``, ``val``, and ``test`` keys
-* ``multilabel`` — ``True`` for multi-hot labels (BigEarthNet, TreeSatAI).
+* ``multilabel`` — ``True`` for multi-hot labels (``m-bigearthnet``, ``benv2``, ``treesatai``).
   Selects micro-mAP over accuracy as the reported metric, so getting it wrong
   silently reports the wrong number.
 * ``supports_partitions`` — ``True`` only for V1 GeoBench datasets, which ship
   partition JSON files.  When ``False``, ``get_datasets`` warns and ignores a
-  non-default ``dataset.partition``.
+  non-default ``input.partition``.
 
 The ``get_dataset`` method takes ``split`` (``"train"``, ``"val"``, or
 ``"test"``) plus the keyword-only arguments ``partition``, ``bands`` (the
@@ -95,13 +100,9 @@ If you inherit from ``_V1Dataset`` or ``_V2Dataset``, both ``data_root`` and
 
 .. note::
 
-   **V1 vs V2 loader patterns.** V1 datasets (``m-`` prefix) read images
-   directly from HDF5 files via
-   :class:`~torchgeo_bench.datasets.geobench_v1._V1Dataset`.  V2 datasets use
-   torchgeo dataset classes as the underlying loader and inherit from
-   :class:`~torchgeo_bench.datasets.geobench_v2._V2Dataset`.  When adding a
-   genuinely new dataset, prefer the V2 torchgeo pattern so the loader can
-   participate in torchgeo's transform pipeline.
+   **Loader families.** V1 datasets (``m-`` prefix) inherit from :class:`~torchgeo_bench.datasets.geobench_v1._V1Dataset` and normally use JSON-metadata tar shards under ``data/classification_v1.0_wds/``. Custom HDF5 with JSON metadata is also supported; pickle metadata is not. V2 wrappers inherit from :class:`~torchgeo_bench.datasets.geobench_v2._V2Dataset` and dispatch to ``geobench_v2.datasets`` classes over ``.tortilla`` files. A standalone torchgeo dataset, such as RESISC45, implements ``BenchDataset`` directly.
+
+   For V2 loaders that accept bands grouped by modality, set ``band_order_strategy = "by_sensor"``. Override ``canonicalize_sample`` only when upstream image/mask keys or temporal shapes need adapting. Confirm the emitted channel order matches the selected ``BandSpec`` objects.
 
 Band selection when the loader has no ``bands`` argument
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -117,25 +118,20 @@ built.  How you honour that subset depends on the upstream loader:
   fixed-channel ``ImageFolder`` wrappers with no band argument at all, so the
   subset has to be applied in *your* wrapper, as a transform that indexes the
   channel axis.  :class:`~torchgeo_bench.datasets.RESISC45` is the worked
-  example: see ``_make_band_select`` and ``_compose`` in
+  example: see ``_make_band_select`` and the ``Compose`` call in
   :file:`src/torchgeo_bench/datasets/resisc45.py`.
 
 Two details matter in the second case.  Compose your selection **before** the
 ``transform`` the caller handed you — that argument is the resize built by
 :func:`~torchgeo_bench.datasets.get_datasets`, and it should only see channels
 that survive selection.  And return ``None`` rather than an identity transform
-when the selection is a no-op, so the common ``bands=rgb`` / ``bands=all``
+when the selection is a no-op, so the common ``--bands rgb`` / ``--bands all``
 paths add no per-sample work.
 
 Compute the band statistics
 ---------------------------
 
-Each :class:`~torchgeo_bench.datasets.BandSpec` carries ``mean``, ``std``,
-``min``, and ``max``.  These are not decoration: they back ``bandspec_zscore``,
-the benchmark's default normalisation strategy, and in raw units they are what
-``detect_input_unit`` reads to decide whether a dataset is Sentinel-2 DN,
-uint8, or reflectance under ``model_native``.  Wrong statistics mis-normalize
-every model evaluated on your dataset, and nothing will fail loudly.
+Each :class:`~torchgeo_bench.datasets.BandSpec` carries ``mean``, ``std``, ``min``, and ``max``. They supply the default ``input.normalization: dataset`` strategy (``bandspec_zscore`` inside the model). Raw magnitudes also inform unit detection for ``input.normalization: model``. Incorrect statistics can silently mis-normalize inputs.
 
 So measure them.  Two rules:
 
@@ -148,33 +144,24 @@ Once your class is registered with placeholder statistics and loads, run:
 
 .. code-block:: console
 
-   $ python scripts/compute_band_statistics.py --dataset my_dataset
+   $ uv run python scripts/compute_band_statistics.py --dataset my_dataset
 
-It accumulates in float64 over the train split and prints a paste-ready
-``bands = [...]`` block.  Record in a comment that the numbers came from this
-script, so the next person knows they are measured rather than copied from a
-paper.
+It accumulates in float64 over the train split and prints a ``bands = [...]`` block. Copy the generated values into your wrapper while retaining the ``bands: ClassVar[list[BandSpec]]`` annotation required for mutable class metadata. Record in a comment that the numbers came from this script, so the next person knows they are measured rather than copied from a paper.
 
 Register and configure
 ----------------------
 
 **1. Register the class** by adding an entry to ``_REGISTRY_SPEC`` in
 :file:`src/torchgeo_bench/datasets/loading.py`, mapping the dataset name to
-its ``(submodule, class_name)``:
+its ``(submodule, class_name, task)``:
 
 .. code-block:: python
 
-   _REGISTRY_SPEC: dict[str, tuple[str, str]] = {
-       ...,
-       "my_dataset": ("my_dataset", "MyDataset"),
-   }
+   "my_dataset": ("my_dataset", "MyDataset", "classification"),
 
-This is the step that actually makes the dataset available — it backs
-``get_bench_dataset_class``, :func:`~torchgeo_bench.datasets.list_datasets`,
-and the CLI.  There is no per-dataset Hydra config; datasets are selected by
-name on the command line. The registry is kept as module/class-name strings
-rather than imported classes so that importing ``loading`` stays cheap;
-``get_bench_dataset_class`` imports only the one module it needs.
+This entry enables loading, CLI listing/details, and run selection. Its task must be ``"classification"`` or ``"segmentation"`` and match the wrapper's ``task``. ``list_datasets()`` and ``get_dataset_task(name)`` read the registry without importing dataset wrappers. There is no second list to update in ``image_cli.py`` and no per-dataset YAML config.
+
+The registry stores strings rather than imported classes so metadata queries stay cheap. ``get_bench_dataset_class`` imports only the requested wrapper.
 
 **2. Export the class** from :file:`src/torchgeo_bench/datasets/__init__.py`
 by adding an ``__all__`` entry and a matching ``_LAZY_CLASSES`` mapping:
@@ -182,12 +169,12 @@ by adding an ``__all__`` entry and a matching ``_LAZY_CLASSES`` mapping:
 .. code-block:: python
 
    __all__ = [
-       ...,
+       # Keep the existing exports.
        "MyDataset",
    ]
 
    _LAZY_CLASSES: dict[str, str] = {
-       ...,
+       # Keep the existing lazy mappings.
        "MyDataset": "my_dataset",
    }
 
@@ -204,12 +191,9 @@ than by the loader.
 * **GeoBench V2** — add the name → upstream class mapping to ``_V2_REGISTRY``
   in :file:`src/torchgeo_bench/datasets/geobench_v2.py`.
   ``DEFAULT_V2_DATASETS`` is derived from that registry automatically.
-* **A torchgeo wrapper or anything else** — add a ``download_<name>`` function
-  to :file:`src/torchgeo_bench/download.py`, then add your target to the
-  ``choices=`` list of the ``download`` subparser and dispatch to it in
-  ``_cmd_download``, both in :file:`src/torchgeo_bench/cli.py`.  Without the
-  ``choices`` entry the CLI rejects your target name.  ``download_resisc45``
-  is the reference implementation.
+* **A standalone torchgeo wrapper** — add a ``download_<name>`` helper in :file:`src/torchgeo_bench/download.py`, include its name in ``TORCHGEO_DATASETS``, and route it in ``download_datasets``. ``DOWNLOADABLE_DATASETS`` is derived from the family lists. ``download_resisc45`` is the reference implementation. For a different download backend, extend the same explicit name validation and dispatch rather than adding parser-specific choices.
+
+The CLI delegates through :file:`src/torchgeo_bench/commands/_download.py`; there is no ``_cmd_download`` function or download-target ``choices`` list to edit in ``cli.py``. Also verify the missing-data hint produced by ``download_command`` in ``datasets/loading.py`` points to a working download invocation. Downloading somewhere other than ``data/`` does not change the loader's fixed paths.
 
 **4. Add the expected split sizes** to ``EXPECTED_SIZES`` in
 :file:`tests/test_split_sizes.py`.  Those cases are marked
@@ -237,18 +221,19 @@ and produces sensible results:
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run -m timm/resnet50 -d my_dataset --skip-linear --bootstrap 10
+   $ uv run torchgeo-bench datasets my_dataset
+   $ uv run torchgeo-bench run --model imagestats --dataset my_dataset --device cpu \
+       --methods knn --bootstrap-samples 10 --dry-run
+   $ uv run torchgeo-bench run --model imagestats --dataset my_dataset --device cpu \
+       --methods knn --bootstrap-samples 10
 
-The config default is ``device: cuda:0``.  On a machine without a GPU, pass
-``--device cpu`` or the run fails inside feature extraction with a bare CUDA
-driver error rather than anything that names the real problem.  ``-m
-imagestats`` is a useful first pass either way: it is a 12-dimensional colour
-baseline that runs in seconds, so a score comfortably above chance tells you
-the plumbing is right before you spend time on a real backbone.
+These are classification smoke commands. ``imagestats`` computes four summary statistics per channel, so RGB inputs produce 12-dimensional embeddings without downloading weights. Use a separate ``output.file`` in a run YAML when recording exploratory results. The default runtime device is ``cuda:0``; pass ``--device cpu`` when no GPU is available.
 
-Write down the chance level for your dataset and compare against it.  A
-45-class dataset where ``imagestats`` scores 0.34 against a 0.022 chance level
-is loading correctly; one that scores 0.02 is not.
+Compare class counts, sample labels, image channels, and the reported score with a simple baseline. Above-chance accuracy is a useful sanity check, not proof of correct loading; near-chance results can also mean the features are unsuitable.
+
+For segmentation, use a spatial backbone with a compatible head and feature layers, not ``imagestats``. Configure ``segmentation`` in the run YAML, check masks and ignore labels on a small sample, and exercise the loader with the existing segmentation tests. See :doc:`segmentation-layers` for backbone layers.
+
+Add fast tests using tiny local fixtures for split selection, band order, raw dtype, label/mask shape, and missing-data errors. Keep real-data tests marked ``slow`` and run the applicable ones locally.
 
 Add the geographic metadata
 ---------------------------
@@ -259,7 +244,7 @@ coverage map.  Generate yours:
 
 .. code-block:: console
 
-   $ python experiments/scripts/extract_dataset_geography.py --dataset my_dataset
+   $ uv run python experiments/scripts/extract_dataset_geography.py --dataset my_dataset
 
 Commit the resulting :file:`docs/_static/_dataset_geography/my_dataset.json`
 together with the regenerated :file:`index.json`.
@@ -270,9 +255,7 @@ answer.  If the dataset genuinely carries no geolocation, add it to ``NO_GEO``
 in :file:`src/torchgeo_bench/geography.py` with the reason you verified, and
 the map will disclose the gap rather than quietly omit the dataset.
 
-Coordinates are read from the raw files (V2 ``.tortilla`` metadata columns, V1
-HDF5 affine transforms).  A dataset stored in some other layout needs a branch
-in ``extract_geography``.
+Coordinates are read from V2 ``.tortilla`` metadata or V1 JSON affine/CRS metadata in shards and custom HDF5. A different storage layout needs an explicit extraction path in ``extract_geography``.
 
 Once results look sensible, follow the PR workflow described in
 :doc:`contribute_model` to open a pull request.

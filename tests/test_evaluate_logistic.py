@@ -4,8 +4,8 @@ from unittest import mock
 
 import numpy as np
 import pytest
-from omegaconf import OmegaConf
 
+from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import LinearProbeDivergedError, evaluate_logistic
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits
 
@@ -54,14 +54,14 @@ def test_nan_candidate_c_does_not_crash_sweep():
                 FeatureSplit(x_test, y_test),
             ),
             c_values=[0.1, 1.0, 10.0],
-            cfg=OmegaConf.create(
+            cfg=RunConfig.model_validate(
                 {
-                    "seed": 0,
-                    "device": "cpu",
-                    "verbose": False,
-                    "eval": {
-                        "bootstrap": 5,
-                        "merge_val": False,
+                    "model": {"name": "rcf"},
+                    "datasets": ["m-eurosat"],
+                    "runtime": {"device": "cpu"},
+                    "classification": {
+                        "bootstrap_samples": 5,
+                        "linear": {"refit_train_val": False},
                         "calibration": {"temp_scale": False},
                     },
                 }
@@ -93,14 +93,14 @@ def test_total_divergence_raises_named_error_not_bare_assert():
                 FeatureSplit(x_test, y_test),
             ),
             c_values=[0.1, 1.0, 10.0],
-            cfg=OmegaConf.create(
+            cfg=RunConfig.model_validate(
                 {
-                    "seed": 0,
-                    "device": "cpu",
-                    "verbose": False,
-                    "eval": {
-                        "bootstrap": 5,
-                        "merge_val": False,
+                    "model": {"name": "rcf"},
+                    "datasets": ["m-eurosat"],
+                    "runtime": {"device": "cpu"},
+                    "classification": {
+                        "bootstrap_samples": 5,
+                        "linear": {"refit_train_val": False},
                         "calibration": {"temp_scale": False},
                     },
                 }

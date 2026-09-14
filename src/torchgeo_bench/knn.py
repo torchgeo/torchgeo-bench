@@ -51,11 +51,11 @@ def resolve_knn_device(requested_device: str | None, model_device: str) -> str:
     if requested_device is not None:
         raise RuntimeError(
             f"GPU-enabled FAISS is unavailable for explicit KNN device {requested_device!r}. "
-            "Set eval.knn_device=cpu or install a GPU-enabled FAISS backend."
+            "Set --knn-device cpu or install a GPU-enabled FAISS backend."
         )
     logger.warning(
         "GPU-enabled FAISS is unavailable; using CPU for KNN while the model remains on %s. "
-        "Set eval.knn_device=cpu to make this choice explicit.",
+        "Set --knn-device cpu to make this choice explicit.",
         model_device,
     )
     return "cpu"
@@ -92,7 +92,7 @@ class KNNClassifier:
             raise ValueError(f"n_neighbors must be a positive integer, got {n_neighbors!r}.")
         self.n_neighbors = n_neighbors
         self._effective_n_neighbors: int | None = None
-        self.device = device
+        self.device = "cuda:0" if device == "cuda" else device
         self.metric = metric
         self.use_fp16 = use_fp16
 
@@ -176,7 +176,7 @@ class KNNClassifier:
         if not gpu_faiss_available():
             raise RuntimeError(
                 f"KNNClassifier(device={self.device!r}): GPU-enabled FAISS is unavailable. "
-                "Set eval.knn_device=cpu for CLI runs or request device='cpu'."
+                "Set --knn-device cpu for CLI runs or request device='cpu'."
             )
 
         assert self._effective_n_neighbors is not None
@@ -193,7 +193,8 @@ class KNNClassifier:
             # Gaps in class IDs require max(y) + 1 slots, not faissknn's unique-label count.
             self._n_classes = int(np.max(y)) + 1
             self._impl = FaissKNNClassifier(n_classes=self._n_classes, **kwargs)
-        self._impl.fit(X, y.astype(np.int64))
+        with torch.cuda.device(self.device):
+            self._impl.fit(X, y.astype(np.int64))
 
     def _to_gpu_tensor(self, X: np.ndarray) -> torch.Tensor:
         """Give faissknn a CUDA tensor so it can use device memory directly."""
@@ -213,7 +214,9 @@ class KNNClassifier:
         if _is_cpu_device(self.device):
             return self._predict_cpu(X)
         assert self._impl is not None, "Call fit() first."
-        result = self._impl.predict(self._to_gpu_tensor(X))
+        # FAISS's Torch wrapper uses the current device to choose its CUDA stream.
+        with torch.cuda.device(self.device):
+            result = self._impl.predict(self._to_gpu_tensor(X))
         return result.cpu().numpy() if isinstance(result, torch.Tensor) else result
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
@@ -221,5 +224,6 @@ class KNNClassifier:
         if _is_cpu_device(self.device):
             return self._predict_proba_cpu(X)
         assert self._impl is not None, "Call fit() first."
-        result = self._impl.predict_proba(self._to_gpu_tensor(X))
+        with torch.cuda.device(self.device):
+            result = self._impl.predict_proba(self._to_gpu_tensor(X))
         return result.cpu().numpy() if isinstance(result, torch.Tensor) else result

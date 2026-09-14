@@ -1,7 +1,4 @@
-"""Resume keys and plans for unfinished benchmark work.
-
-Use :func:`_canonical_key_cell` to make equivalent config and CSV values compare equal.
-"""
+"""Resume keys and plans for unfinished benchmark work."""
 
 import hashlib
 import json
@@ -10,9 +7,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 import pandas as pd
-from omegaconf import DictConfig, OmegaConf
 
+from torchgeo_bench.config_schema import FeatureProfileConfig, RunConfig
 from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
+from torchgeo_bench.presets import ModelPreset
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +33,30 @@ KEY_COLS = (
 )
 
 
-def _normalize_bands_value(bands: Iterable[object] | None) -> str:
+def resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
+    """Fingerprint result-affecting settings for one resolved image run."""
+    payload = {
+        "schema_version": config.schema_version,
+        "model": {
+            "name": model_cfg.name,
+            "target": model_cfg.target,
+            "kwargs": model_cfg.kwargs,
+        },
+        "input": config.input.model_dump(mode="json"),
+        "classification": config.classification.model_dump(mode="json", exclude={"methods"}),
+        "segmentation": config.segmentation.model_dump(mode="json"),
+        "runtime": config.runtime.model_dump(
+            mode="json", include={"seed", "device", "batch_size", "workers"}
+        ),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+
+
+def normalize_bands_value(bands: Iterable[object] | None) -> str:
     """Convert a band selection to a stable string for logs, CSVs, and resume keys.
 
-    Accept ``"rgb"``/``"all"``, explicit lists (``ListConfig`` or ``list[str]``), or ``None``.
+    Accept ``"rgb"``/``"all"``, explicit lists, or ``None``.
     Lists become comma-separated names; ``None`` becomes ``"all"``.
     """
     if bands is None:
@@ -46,36 +64,6 @@ def _normalize_bands_value(bands: Iterable[object] | None) -> str:
     if isinstance(bands, str):
         return bands
     return ",".join(str(b) for b in bands)
-
-
-def _resume_config_hash(cfg: DictConfig) -> str:
-    """Return a stable fingerprint of settings that can change a result row.
-
-    Excluding ``eval.profile`` and ``eval.intrinsic_dim`` preserves existing probe keys.
-    These passes have separate completion checks and do not change probe scores.
-    """
-    dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
-    assert isinstance(dataset_cfg, dict)
-    dataset_cfg.pop("names", None)
-    eval_cfg = OmegaConf.to_container(cfg.eval, resolve=True)
-    assert isinstance(eval_cfg, dict)
-    eval_cfg.pop("profile", None)
-    eval_cfg.pop("intrinsic_dim", None)
-    # Keep removed defaults only in the hash payload so existing CSV keys remain valid.
-    if "segmentation" in eval_cfg:
-        eval_cfg["segmentation"].setdefault("save_viz", False)
-        eval_cfg["segmentation"].setdefault("viz_dir", "viz")
-        eval_cfg["segmentation"].setdefault("n_viz_samples", 8)
-    payload = {
-        "version": 1,
-        "seed": cfg.seed,
-        "device": cfg.device,
-        "dataset": dataset_cfg,
-        "eval": eval_cfg,
-        "model": OmegaConf.to_container(cfg.model, resolve=True),
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
 def _canonical_key_cell(value: object) -> str:
@@ -115,7 +103,7 @@ def _row_key(row: dict, key_cols: Sequence[str]) -> tuple[str, ...]:
     return tuple(_canonical_key_cell(row.get(col, "")) for col in key_cols)
 
 
-def _filter_completed_metric_rows(
+def filter_completed_metric_rows(
     rows: list[dict],
     completed_metrics: dict[str, set[tuple[str, ...]]],
     key_cols: Sequence[str],
@@ -131,15 +119,14 @@ def _filter_completed_metric_rows(
     return filtered
 
 
-def _profile_metric_names(profile_cfg: DictConfig | None) -> list[str]:
+def _profile_metric_names(profile_cfg: FeatureProfileConfig | None) -> list[str]:
     """Return the required profile metrics for resume completeness checks."""
     names = [
         "throughput_samples_per_sec",
         "latency_ms_per_batch_p50",
         "params_m",
     ]
-    cpu_cfg = profile_cfg.get("cpu_throughput", {}) if profile_cfg else {}
-    if bool(cpu_cfg.get("enabled", False)):
+    if profile_cfg is not None and profile_cfg.cpu_throughput.enabled:
         names.extend(["throughput_samples_per_sec_cpu", "latency_ms_per_batch_p50_cpu"])
     return names
 
@@ -184,45 +171,49 @@ class DatasetRunPlan:
     knn_device: str | None = None
 
 
-def _plan_dataset_run(
-    cfg: DictConfig,
+def plan_dataset_run(
+    cfg: RunConfig,
     ds_cls: type,
     common_meta: Mapping[str, object],
     completed: ResumeState,
-    eval_cfg: DictConfig,
 ) -> DatasetRunPlan:
     """Plan which work remains for a dataset before loading data or a model."""
     ds_name = common_meta["dataset"]
     model_key = (
-        cfg.model._target_,
-        cfg.model.name,
+        common_meta["model"],
+        common_meta["name"],
         *(_canonical_key_cell(common_meta[key]) for key in KEY_COLS[4:]),
     )
     completed_runs, completed_metrics = completed.completed_runs, completed.completed_metrics
 
     if ds_cls.task == "segmentation":
-        seg_key = (ds_name, f"seg-{eval_cfg.segmentation.head_type}", *model_key)
+        seg_key = (ds_name, f"seg-{cfg.segmentation.head}", *model_key)
         return DatasetRunPlan(
             metric_name="mIoU",
-            skip_dataset=bool(cfg.resume and seg_key in completed_runs),
+            skip_dataset=bool(cfg.output.resume and seg_key in completed_runs),
             skip_knn=True,
             skip_linear=True,
             skip_id=True,
             skip_profile=True,
         )
 
-    knn_key = (ds_name, f"knn{int(eval_cfg.get('knn_k', 5))}", *model_key)
+    knn_key = (ds_name, f"knn{cfg.classification.knn_k}", *model_key)
     linear_key = (ds_name, "linear", *model_key)
     id_key = (ds_name, "intrinsic_dim", *model_key)
     profile_key = (ds_name, "profile", *model_key)
 
-    skip_knn = bool(cfg.resume and knn_key in completed_runs)
-    skip_linear = bool((cfg.resume and linear_key in completed_runs) or cfg.eval.skip_linear)
+    skip_knn = bool(
+        "knn" not in cfg.classification.methods or (cfg.output.resume and knn_key in completed_runs)
+    )
+    skip_linear = bool(
+        (cfg.output.resume and linear_key in completed_runs)
+        or "linear" not in cfg.classification.methods
+    )
 
-    id_cfg = getattr(cfg.eval, "intrinsic_dim", None)
-    id_enabled = bool(id_cfg and id_cfg.get("enabled", False))
+    id_cfg = cfg.intrinsic_dim
+    id_enabled = id_cfg.enabled
     id_metric_names = []
-    if id_cfg is not None and id_enabled:
+    if id_enabled:
         for split in id_cfg.splits:
             id_metric_names.extend(f"id_{est}_{split}" for est in id_cfg.estimators)
             id_metric_names.extend(
@@ -232,15 +223,15 @@ def _plan_dataset_run(
     id_missing_metrics = frozenset(
         metric
         for metric in id_metric_names
-        if not (cfg.resume and id_key in completed_metrics.get(metric, set()))
+        if not (cfg.output.resume and id_key in completed_metrics.get(metric, set()))
     )
     skip_id = (not id_enabled) or bool(id_metric_names and not id_missing_metrics)
 
-    profile_cfg = getattr(cfg.eval, "profile", None)
-    profile_enabled = bool(profile_cfg and profile_cfg.get("enabled", False))
+    profile_cfg = cfg.profile
+    profile_enabled = profile_cfg.enabled
     profile_metric_names = _profile_metric_names(profile_cfg) if profile_enabled else []
     skip_profile = (not profile_enabled) or bool(
-        cfg.resume
+        cfg.output.resume
         and profile_metric_names
         and all(
             profile_key in completed_metrics.get(metric, set()) for metric in profile_metric_names

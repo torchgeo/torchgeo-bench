@@ -1,7 +1,8 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: vit_tiny_patch16_224
-pretrained: true
-global_pool: avg
-seed: null
 name: vit_tiny_patch16_224
-use_cls_token: false
+target: torchgeo_bench.models.TimmPatchBenchModel
+kwargs:
+  model_name: vit_tiny_patch16_224
+  pretrained: true
+  global_pool: avg
+  seed: null
+  use_cls_token: false

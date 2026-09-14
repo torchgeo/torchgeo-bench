@@ -1,4 +1,3 @@
-# Coordinate baseline: [sin(lat), cos(lat), sin(lon), cos(lon)].
-# No pretrained weights or optional model dependencies.
-_target_: torchgeo_bench.coordbench.models.SinCosLocationEncoder
 name: sincos
+target: torchgeo_bench.coordbench.models.SinCosLocationEncoder
+track: coord
