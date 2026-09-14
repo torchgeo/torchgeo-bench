@@ -163,3 +163,29 @@ Config: `layers: ["s4", "s3", "s2", "s1"]`
 3. Run the discovery script above to confirm spatial sizes
 4. Add to the model config in coarse-to-fine order (deepest first)
 5. Note any stages that share spatial size (common in EfficientNet/MobileNet)
+
+## Comparing optimization and layer connections
+
+The standalone study scripts run from a development checkout, discover all visible GPUs by default, and schedule one process per GPU. They use frozen FP32 features, full dataset splits, and training-loss stopping criteria rather than a wall-clock budget. Run `--dry-run` to inspect the grid without downloading data or starting jobs.
+
+```bash
+# Sweep Adam learning rates to a training-loss plateau, then compare full-batch L-BFGS.
+python scripts/run_segmentation_optimizer_study.py --gpus all --resume
+
+# Compare equally sized layer sets across three decoder families.
+python scripts/run_segmentation_layer_study.py --gpus all --resume \
+    --heads linear conv_block fpn \
+    --layer-groups late_four spread_four early_four
+```
+
+Both scripts default to Burn Scars with a pretrained ViT-Small/16 backbone and RGB inputs at 224 pixels. Adam and L-BFGS use the same fixed minibatch membership so training-mode BatchNorm sees a shared objective; Adam shuffles batch order, not the images within batches. The layer study extracts the union of the requested intermediate features once, then selects the appropriate tensors for each decoder. Four-layer comparisons keep the number of connections fixed; comparing one layer with four also changes decoder capacity. Parameter counts and exact layer names are included in the results.
+
+Each output directory contains `combined.csv` with raw outcomes and timings, `validation_selected.csv` with learning rates selected by mean validation mIoU across seeds, and per-trial learning curves, checkpoints, and logs. Optimization-only time is separate from convergence checks, validation, and checkpoint I/O. Test data never selects learning rates or checkpoints. Convergence requires a flat recent training-loss window, not merely failure to beat a historical minimum. A plateau is an operational stopping rule, not proof of stationarity; unsuccessful learning rates, numerical stalls, and optional `--max-iterations` safety limits are labeled as nonconvergence.
+
+The default check cadence is five Adam epochs versus up to twenty L-BFGS iterations. Consequently, ten-check stopping windows cover different numbers of full-data passes, and validation checkpoints are sampled at different intervals. Report these settings with runtime and accuracy comparisons. Use the recorded `optimization_data_passes` and loss curves to assess stopping-rule sensitivity before attributing small timing differences to the optimizer itself.
+
+Use `--gpus 0,2` to restrict resources, `--seeds` and `--adam-lrs` to change the sweep, and `--help` for convergence controls or custom layer groups. DPT requires four connections and the patch-linear decoder uses one. DPT also requires the optional `transformers` dependency, available through `pip install "torchgeo-bench[sam3]"`. Resume only a compatible configuration; scientific changes require a new output directory.
+
+For Adam, optional `--adam-schedule plateau` reduces the learning rate on a nonrecovering `no_best_improvement` window instead of ending the fit. `--adam-lr-factor` defaults to `0.1` and `--adam-min-lr` to `1e-8`. Each reduction retains momentum and the validation-selected checkpoint, resets training-loss reference/window/patience, and waits for a full new window without adding another minimum-epoch delay. Recovery does not trigger reductions. A flat window is still required for convergence; inability to reduce further is explicitly `not_converged/lr_floor`. Constant LR remains the default.
+
+To avoid repeating a completed constant-Adam fit, use `--continue-from PRIOR_STUDY --phase adam --adam-schedule plateau` with a **new output directory**. Each requested head/initial-LR/seed/layer combination must uniquely match an uncapped terminal `not_converged/no_best_improvement` parent; all nonschedule settings, including tolerances, must match. A **fresh cache** must reproduce the parent's entire layer union, tensor checksum, backbone checksum, and feature geometry. Only explicit continuation permits compatible source evolution; dependencies and initialization must match, and ordinary cache loading/resume remain strict. Parent files are read-only. The child records parent result/checkpoint hashes and identity, preserves optimizer/RNG/validation-best state and counters, and reports cumulative times alongside `incremental_optimization_seconds` and `incremental_training_wall_seconds`. Curve `learning_rate` describes the completed block and `next_learning_rate` any newly selected rate. Repeat the same continuation command with `--resume` to restore the child's own checkpoint.
