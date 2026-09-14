@@ -42,19 +42,15 @@ from torchgeo_bench.results import (
     bootstrap_miou,
     model_results_path,
 )
-from torchgeo_bench.resume import (  # noqa: F401  (re-exported for back-compat)
+from torchgeo_bench.resume import (
     KEY_COLS,
     DatasetRunPlan,
     ResumeState,
-    _canonical_key_cell,
-    _completed_run_keys,
-    _filter_completed_metric_rows,
-    _normalize_bands_value,
-    _plan_dataset_run,
-    _profile_metric_names,
-    _resume_config_hash,
-    _row_key,
+    filter_completed_metric_rows,
     load_completed,
+    normalize_bands_value,
+    plan_dataset_run,
+    resume_config_hash,
 )
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
 
@@ -867,7 +863,7 @@ def dataset_metadata(
     """Collect result metadata before loading data or initializing the model."""
     linear = cfg.classification.linear
     normalization = NORMALIZATIONS[cfg.input.normalization]
-    bands_value = _normalize_bands_value(cfg.input.bands)
+    bands_value = normalize_bands_value(cfg.input.bands)
     return {
         "dataset": ds_name,
         "seed": cfg.runtime.seed,
@@ -901,9 +897,9 @@ def run_dataset(
     ds_cls = get_bench_dataset_class(ds_name)
 
     cfg, model_cfg = resolve_run_config(cfg, ds_name)
-    config_hash = _resume_config_hash(cfg, model_cfg)
+    config_hash = resume_config_hash(cfg, model_cfg)
     common_meta = dataset_metadata(cfg, ds_name, ds_cls, model_cfg, config_hash)
-    plan = _plan_dataset_run(cfg, ds_cls, common_meta, completed)
+    plan = plan_dataset_run(cfg, ds_cls, common_meta, completed)
     if plan.skip_dataset:
         if cfg.runtime.verbose:
             logger.info("[%s] Resume preflight: all requested work already complete", ds_name)
@@ -941,8 +937,8 @@ def run_dataset(
         cfg, plan, model, loaders, common_meta, strict=strict
     ):
         if cfg.output.resume:
-            id_rows = _filter_completed_metric_rows(id_rows, completed.completed_metrics, KEY_COLS)
-            profile_rows = _filter_completed_metric_rows(
+            id_rows = filter_completed_metric_rows(id_rows, completed.completed_metrics, KEY_COLS)
+            profile_rows = filter_completed_metric_rows(
                 profile_rows, completed.completed_metrics, KEY_COLS
             )
         yield rows, id_rows, profile_rows

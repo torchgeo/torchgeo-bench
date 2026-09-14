@@ -33,7 +33,7 @@ KEY_COLS = (
 )
 
 
-def _resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
+def resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
     """Fingerprint result-affecting settings for one resolved image run."""
     payload = {
         "schema_version": config.schema_version,
@@ -53,7 +53,7 @@ def _resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
-def _normalize_bands_value(bands: Iterable[object] | None) -> str:
+def normalize_bands_value(bands: Iterable[object] | None) -> str:
     """Convert a band selection to a stable string for logs, CSVs, and resume keys.
 
     Accept ``"rgb"``/``"all"``, explicit lists, or ``None``.
@@ -103,7 +103,7 @@ def _row_key(row: dict, key_cols: Sequence[str]) -> tuple[str, ...]:
     return tuple(_canonical_key_cell(row.get(col, "")) for col in key_cols)
 
 
-def _filter_completed_metric_rows(
+def filter_completed_metric_rows(
     rows: list[dict],
     completed_metrics: dict[str, set[tuple[str, ...]]],
     key_cols: Sequence[str],
@@ -171,7 +171,7 @@ class DatasetRunPlan:
     knn_device: str | None = None
 
 
-def _plan_dataset_run(
+def plan_dataset_run(
     cfg: RunConfig,
     ds_cls: type,
     common_meta: Mapping[str, object],

@@ -4,7 +4,7 @@ import pytest
 
 from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.presets import merge_settings, resolve_run_config
-from torchgeo_bench.resume import _resume_config_hash
+from torchgeo_bench.resume import resume_config_hash
 
 
 def _cfg(**sections) -> RunConfig:
@@ -15,7 +15,7 @@ def _cfg(**sections) -> RunConfig:
 
 def _hash(config: RunConfig, dataset: str = "m-eurosat") -> str:
     resolved, preset = resolve_run_config(config, dataset)
-    return _resume_config_hash(resolved, preset)
+    return resume_config_hash(resolved, preset)
 
 
 def test_config_hash_ignores_profile_toggle() -> None:

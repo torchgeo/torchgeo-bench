@@ -193,7 +193,7 @@ class EvaluationResult:
     partition: str
     bands: str
     num_classes: int
-    # Config fingerprint for resume; see resume._resume_config_hash.
+    # Config fingerprint for resume; see resume.resume_config_hash.
     config_hash: str
     c_range_start: float
     c_range_stop: float

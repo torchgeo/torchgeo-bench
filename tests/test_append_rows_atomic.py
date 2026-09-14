@@ -5,7 +5,8 @@ import csv
 import pandas as pd
 import pytest
 
-from torchgeo_bench.main import _completed_run_keys, _profile_metric_names, append_rows_atomic
+from torchgeo_bench.main import append_rows_atomic
+from torchgeo_bench.resume import _completed_run_keys, _profile_metric_names
 
 
 def _read_csv(path: str) -> list[list[str]]:
