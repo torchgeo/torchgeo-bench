@@ -87,9 +87,14 @@ def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
     return [(x_train, y_train), (x_val, y_val), (x_test, y_test)]
 
 
+def _hash_for(cfg: RunConfig, ds_name: str = "m-eurosat") -> str:
+    """Return the resume hash for a dataset-resolved config."""
+    resolved_cfg, preset = resolve_run_config(cfg, ds_name)
+    return _resume_config_hash(resolved_cfg, preset)
+
+
 def _resume_row(cfg: RunConfig, *, method: str, metric_name: str) -> dict[str, object]:
     """Seed the CSV with a row matching this configuration."""
-    config_hash = _resume_config_hash(cfg)
     cfg, preset = resolve_run_config(cfg, "m-eurosat")
     return {
         "dataset": "m-eurosat",
@@ -102,7 +107,7 @@ def _resume_row(cfg: RunConfig, *, method: str, metric_name: str) -> dict[str, o
         "partition": cfg.input.partition,
         "bands": cfg.input.bands,
         "num_classes": 10,
-        "config_hash": config_hash,
+        "config_hash": _resume_config_hash(cfg, preset),
         "metric_name": metric_name,
         "metric_value": 0.1,
     }
@@ -343,7 +348,7 @@ def test_completed_knn_survives_later_linear_failure(
     row = df.iloc[0]
     assert (row["metric_value"], row["ci_lower"], row["ci_upper"]) == (0.5, 0.45, 0.55)
     assert row["ece"] == 0.05
-    assert row["config_hash"] == _resume_config_hash(cfg)
+    assert row["config_hash"] == _hash_for(cfg)
 
 
 def test_resume_skips_completed_knn_row(tmp_path: Path):

@@ -1,8 +1,7 @@
-"""Resume keys and plans for unfinished benchmark work.
+"""Resume keys and plans for unfinished benchmark work."""
 
-Use :func:`_canonical_key_cell` to make equivalent config and CSV values compare equal.
-"""
-
+import hashlib
+import json
 import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -10,11 +9,8 @@ from dataclasses import dataclass
 import pandas as pd
 
 from torchgeo_bench.config_schema import FeatureProfileConfig, RunConfig
-from torchgeo_bench.image_hash import (  # noqa: F401 - stable resume API
-    _resume_config_hash,
-    compatible_hashes,
-)
 from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
+from torchgeo_bench.presets import ModelPreset
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +31,26 @@ KEY_COLS = (
     # Include result-affecting settings not represented by the other columns.
     "config_hash",
 )
+
+
+def _resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
+    """Fingerprint result-affecting settings for one resolved image run."""
+    payload = {
+        "schema_version": config.schema_version,
+        "model": {
+            "name": model_cfg.name,
+            "target": model_cfg.target,
+            "kwargs": model_cfg.kwargs,
+        },
+        "input": config.input.model_dump(mode="json"),
+        "classification": config.classification.model_dump(mode="json", exclude={"methods"}),
+        "segmentation": config.segmentation.model_dump(mode="json"),
+        "runtime": config.runtime.model_dump(
+            mode="json", include={"seed", "device", "batch_size", "workers"}
+        ),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
 def _normalize_bands_value(bands: Iterable[object] | None) -> str:
@@ -139,21 +155,6 @@ class ResumeState:
 
     completed_runs: set[tuple[str, ...]]
     completed_metrics: dict[str, set[tuple[str, ...]]]
-
-    def with_hash_aliases(self, canonical: str, aliases: set[str]) -> "ResumeState":
-        """Match compatible historical hashes without rewriting stored result rows."""
-        index = KEY_COLS.index("config_hash")
-
-        def normalize(keys: set[tuple[str, ...]]) -> set[tuple[str, ...]]:
-            return {
-                (*key[:index], canonical, *key[index + 1 :]) if key[index] in aliases else key
-                for key in keys
-            }
-
-        return ResumeState(
-            normalize(self.completed_runs),
-            {metric: normalize(keys) for metric, keys in self.completed_metrics.items()},
-        )
 
 
 @dataclass(frozen=True)

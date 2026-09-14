@@ -120,7 +120,7 @@ def test_dataset_eval_resolution_preserves_explicit_values_and_original_config(
     )
     monkeypatch.setattr("torchgeo_bench.main.run_segmentation", capture_eval)
 
-    assert list(run_dataset(cfg, "burn_scars", "test", ResumeState(set(), {}))) == []
+    assert list(run_dataset(cfg, "burn_scars", ResumeState(set(), {}))) == []
 
     assert captured[0].segmentation.learning_rate == 0.002
     assert captured[0].segmentation.epochs == 3

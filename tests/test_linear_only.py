@@ -10,9 +10,14 @@ import pandas as pd
 import pytest
 
 from torchgeo_bench.main import main
-from torchgeo_bench.resume import _resume_config_hash
 
-from .test_main_fast import _chainable_model_mock, _compose_cfg, _resume_row, _synthetic_loaders
+from .test_main_fast import (
+    _chainable_model_mock,
+    _compose_cfg,
+    _hash_for,
+    _resume_row,
+    _synthetic_loaders,
+)
 
 
 def _embeddings(kind: str) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -76,7 +81,7 @@ def test_only_linear_runs_and_resumes_without_knn(tmp_path: Path, kind: str) -> 
 def test_linear_resume_reuses_existing_linear_row_without_knn(tmp_path: Path) -> None:
     config = _compose_cfg(tmp_path / "linear.csv", {"classification": {"methods": ["linear"]}})
     combined = _compose_cfg(tmp_path / "linear.csv")
-    assert _resume_config_hash(config) == _resume_config_hash(combined)
+    assert _hash_for(config) == _hash_for(combined)
     pd.DataFrame([_resume_row(combined, method="linear", metric_name="accuracy")]).to_csv(
         config.output.file, index=False
     )
@@ -141,7 +146,7 @@ sys.meta_path.insert(0, BlockKNN())
 
 from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import dataset_metadata, run_dataset
-from torchgeo_bench.resume import ResumeState, _resume_config_hash
+from torchgeo_bench.resume import ResumeState
 from tests.test_main_fast import _synthetic_loaders, _synthetic_embeddings, _chainable_model_mock
 config = RunConfig.model_validate({
     'model': {'name': 'rcf'}, 'datasets': ['m-eurosat'],
@@ -155,7 +160,7 @@ with (
     patch.object(module, 'build_model', return_value=_chainable_model_mock()),
     patch.object(module, 'embed_split', side_effect=_synthetic_embeddings()),
 ):
-    rows = list(run_dataset(config, 'm-eurosat', _resume_config_hash(config), ResumeState(set(), {})))
+    rows = list(run_dataset(config, 'm-eurosat', ResumeState(set(), {})))
 assert [row['method'] for batch, _, _ in rows for row in batch] == ['linear']
 """
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True)
