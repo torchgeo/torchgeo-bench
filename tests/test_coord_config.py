@@ -183,6 +183,15 @@ def test_invalid_model_selection(name: str) -> None:
         load_config(_parse("--model", name))
 
 
+def test_run_reports_config_errors_with_argparse_status(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as error:
+        run(_parse("--model", "timm/resnet50", "--dry-run"))
+    assert error.value.code == 2
+    assert "image model" in capsys.readouterr().err
+
+
 def test_dry_run_roundtrip(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     run(_parse("--model", "sincos", "--methods", "linear", "--dry-run"))
     path = tmp_path / "coord.yaml"

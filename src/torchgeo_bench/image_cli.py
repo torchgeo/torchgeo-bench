@@ -104,7 +104,7 @@ def _image_size(value: str) -> int | None:
 
 def _run(args: argparse.Namespace) -> None:
     """Validate and execute one image benchmark."""
-    commands._image.run(args, _model_names(), tuple(list_datasets()))
+    commands._image.run(args, tuple(list_datasets()))
 
 
 def _show_catalog(

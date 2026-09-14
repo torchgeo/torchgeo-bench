@@ -436,10 +436,14 @@ def test_profile_dispatches_typed_config_through_lazy_runtime(
 
 
 def test_profile_reports_validation_errors_without_loading_runtime(
-    profile_args: argparse.Namespace, monkeypatch: pytest.MonkeyPatch
+    profile_args: argparse.Namespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.delattr(commands, "_profile_runtime")
     profile_args.batch_size = 0
 
-    with pytest.raises(SystemExit, match="batch_size"):
+    with pytest.raises(SystemExit) as error:
         profile(profile_args)
+    assert error.value.code == 2
+    assert "batch_size" in capsys.readouterr().err

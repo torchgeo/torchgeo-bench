@@ -262,22 +262,32 @@ def test_all_argument_categories_dispatch_typed_config(monkeypatch: pytest.Monke
         "model: {name: rcf}\ninput: {band_source: missing}",
     ],
 )
-def test_bad_yaml_has_concise_errors(tmp_path: Path, text: str) -> None:
+def test_bad_yaml_has_concise_errors(
+    tmp_path: Path, text: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     path = tmp_path / "bad.yaml"
     path.write_text(text)
-    with pytest.raises(SystemExit, match="error:"):
+    with pytest.raises(SystemExit) as error:
         _flops.run(parser().parse_args(["--config", str(path), "--dry-run"]))
+    assert error.value.code == 2
+    assert "error:" in capsys.readouterr().err
 
 
-def test_missing_yaml_is_a_config_error(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="No such file"):
+def test_missing_yaml_is_a_config_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
         _flops.run(parser().parse_args(["--config", str(tmp_path / "missing"), "--dry-run"]))
+    assert error.value.code == 2
+    assert "No such file" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("kwargs", ["[1]", "{x: 1, x: 2}", "{x: !!python/object:os.system {}}"])
-def test_constructor_options_use_strict_safe_yaml(kwargs: str) -> None:
-    with pytest.raises(SystemExit, match="error:"):
+def test_constructor_options_use_strict_safe_yaml(
+    kwargs: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as error:
         _flops.run(parser().parse_args(["--model", "rcf", "--model-kwargs", kwargs, "--dry-run"]))
+    assert error.value.code == 2
+    assert "error:" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("arguments", [["model=rcf"], ["+model.features=8"], ["++device=cpu"]])

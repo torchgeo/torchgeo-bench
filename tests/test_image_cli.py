@@ -16,7 +16,7 @@ import yaml
 from _pytest.capture import CaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
 
-from torchgeo_bench.commands._image import _set
+from torchgeo_bench.commands._config import set_path
 from torchgeo_bench.config_schema import validate_run_config
 from torchgeo_bench.image_cli import _image_size, _model_names, main
 from torchgeo_bench.presets import resolve_run_config
@@ -65,8 +65,8 @@ def test_config_values_are_overridden_by_explicit_flags(
 
 def test_nested_flag_mapping_and_image_size_validation() -> None:
     mapping = {}
-    _set(mapping, "classification.linear", "refit_train_val", False)
-    _set(mapping, "runtime", "workers", 0)
+    set_path(mapping, ("classification", "linear", "refit_train_val"), False)
+    set_path(mapping, ("runtime", "workers"), 0)
     assert mapping == {
         "classification": {"linear": {"refit_train_val": False}},
         "runtime": {"workers": 0},

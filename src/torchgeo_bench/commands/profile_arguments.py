@@ -1,11 +1,27 @@
 """Explicit arguments and YAML loading for standalone profiling."""
 
 import argparse
-from typing import Any
 
-from ..config_schema import load_yaml
-from ..presets import NORMALIZATIONS, merge_settings
+from ..presets import NORMALIZATIONS
 from ..profile_config import ProfileConfig
+from ._config import FlagOverride, comma_separated_bands, load_from_flags
+
+_FLAG_OVERRIDES = (
+    FlagOverride("model", ("model", "name"), replace_roots=("model",)),
+    FlagOverride("dataset", ("dataset",)),
+    FlagOverride("warmup", ("warmup",)),
+    FlagOverride("measurements", ("measurements",)),
+    FlagOverride("precision", ("precision",)),
+    FlagOverride("count_flops", ("count_flops",)),
+    FlagOverride("device", ("runtime", "device")),
+    FlagOverride("batch_size", ("runtime", "batch_size")),
+    FlagOverride("seed", ("runtime", "seed")),
+    FlagOverride("bands", ("input", "bands"), comma_separated_bands),
+    FlagOverride("partition", ("input", "partition")),
+    FlagOverride("image_size", ("input", "image_size")),
+    FlagOverride("interpolation", ("input", "interpolation")),
+    FlagOverride("normalization", ("input", "normalization")),
+)
 
 
 def _image_size(value: str) -> int | None:
@@ -55,38 +71,6 @@ def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS)
 
 
-def _input_mapping(args: argparse.Namespace) -> dict[str, Any]:
-    """Map explicitly supplied preprocessing flags."""
-    values: dict[str, Any] = {}
-    for name in ("bands", "partition", "image_size", "interpolation", "normalization"):
-        if not hasattr(args, name):
-            continue
-        value = getattr(args, name)
-        if name == "bands" and isinstance(value, str) and value not in {"rgb", "all"}:
-            value = [band.strip() for band in value.split(",")]
-        values[name] = value
-    return values
-
-
 def load_profile_config(args: argparse.Namespace) -> ProfileConfig:
     """Load strict YAML, then apply only supplied command-line settings."""
-    path = getattr(args, "config", None)
-    base = load_yaml(path) if path is not None else {}
-    overrides: dict[str, Any] = {}
-    if getattr(args, "model", None) is not None:
-        # Selecting a preset replaces a custom target and its constructor options.
-        base = {**base, "model": {"name": args.model}}
-    for name in ("dataset", "warmup", "measurements", "precision", "count_flops"):
-        if hasattr(args, name):
-            overrides[name] = getattr(args, name)
-    runtime = {
-        name: getattr(args, name)
-        for name in ("device", "batch_size", "seed")
-        if hasattr(args, name)
-    }
-    if runtime:
-        overrides["runtime"] = runtime
-    inputs = _input_mapping(args)
-    if inputs:
-        overrides["input"] = inputs
-    return ProfileConfig.model_validate(merge_settings(base, overrides))
+    return load_from_flags(args, _FLAG_OVERRIDES, ProfileConfig.model_validate)
