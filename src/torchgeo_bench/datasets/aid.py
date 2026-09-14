@@ -52,7 +52,7 @@ class AID(BenchDataset):
         bands: tuple[str, ...] | None = None,
         transform: Callable[[Sample], Sample] | None = None,
     ) -> NonGeoClassificationDataset:
-        """Return the split as a :class:`NonGeoClassificationDataset`."""
+        """Return the split as a ``NonGeoClassificationDataset``."""
         del partition
         if split not in ("train", "val", "test"):
             raise ValueError(f"Unknown split {split!r}. Expected train, val, or test.")
