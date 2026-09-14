@@ -54,7 +54,6 @@ from torchgeo_bench.resume import (  # noqa: F401  (re-exported for back-compat)
     _profile_metric_names,
     _resume_config_hash,
     _row_key,
-    compatible_hashes,
     load_completed,
 )
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
@@ -894,7 +893,6 @@ def dataset_metadata(
 def run_dataset(
     cfg: RunConfig,
     ds_name: str,
-    config_hash: str,
     completed: ResumeState,
     *,
     strict: bool = False,
@@ -902,10 +900,9 @@ def run_dataset(
     """Load and evaluate one dataset unless resume marks it complete."""
     ds_cls = get_bench_dataset_class(ds_name)
 
-    aliases = compatible_hashes(cfg, ds_name, segmentation=ds_cls.task == "segmentation")
     cfg, model_cfg = resolve_run_config(cfg, ds_name)
+    config_hash = _resume_config_hash(cfg, model_cfg)
     common_meta = dataset_metadata(cfg, ds_name, ds_cls, model_cfg, config_hash)
-    completed = completed.with_hash_aliases(config_hash, aliases)
     plan = _plan_dataset_run(cfg, ds_cls, common_meta, completed)
     if plan.skip_dataset:
         if cfg.runtime.verbose:
@@ -991,11 +988,10 @@ def main(cfg: RunConfig, *, strict: bool = False) -> None:
     completed_runs, completed_metrics = load_completed_outputs(
         cfg, output_path, profile_output_path, intrinsic_dim_output_path
     )
-    config_hash = _resume_config_hash(cfg)
     completed = ResumeState(completed_runs, completed_metrics)
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         for all_rows, id_out_rows, profile_out_rows in run_dataset(
-            cfg, ds_name, config_hash, completed, strict=strict
+            cfg, ds_name, completed, strict=strict
         ):
             append_rows_atomic(output_path, all_rows)
             append_rows_atomic(intrinsic_dim_output_path, id_out_rows)
