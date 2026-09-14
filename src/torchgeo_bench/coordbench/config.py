@@ -6,10 +6,12 @@ from typing import Any, Literal
 from pydantic import Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
 
 from torchgeo_bench.config_schema import (
-    ClassificationConfig,
+    Device,
+    KnnDevice,
+    Methods,
     ModelConfig,
-    RuntimeConfig,
     StrictModel,
+    default_methods,
     load_yaml,
 )
 from torchgeo_bench.coordbench.catalog import FAMILY_BENCHMARKS
@@ -19,14 +21,8 @@ from torchgeo_bench.presets import ModelPreset, load_model_preset
 class CoordRuntimeConfig(StrictModel):
     """Coordinate encoder and linear-probe execution settings."""
 
-    device: StrictStr = "cpu"
+    device: Device = "cpu"
     seed: StrictInt = Field(default=0, ge=0, le=2**64 - 1)
-
-    @field_validator("device")
-    @classmethod
-    def validate_device(cls, value: str) -> str:
-        """Validate a Torch device without importing Torch."""
-        return RuntimeConfig.validate_device(value)
 
 
 class CoordOutputConfig(StrictModel):
@@ -44,35 +40,15 @@ class CoordOutputConfig(StrictModel):
         return value
 
 
-def _default_methods() -> list[Literal["knn", "linear"]]:
-    """Return the supported default probe selection."""
-    return ["knn", "linear"]
-
-
 class CoordEvaluationConfig(StrictModel):
     """Random/spatial cross-validation and coordinate probe settings."""
 
-    methods: list[Literal["knn", "linear"]] = Field(default_factory=_default_methods, min_length=1)
+    methods: Methods = Field(default_factory=default_methods, min_length=1)
     split: Literal["random", "spatial", "both"] = "random"
     folds: StrictInt = Field(default=5, ge=2)
     cell_deg: StrictFloat = Field(default=10.0, gt=0)
     knn_k: StrictInt = Field(default=5, gt=0)
-    knn_device: StrictStr = "cpu"
-
-    @field_validator("methods")
-    @classmethod
-    def validate_methods(
-        cls, value: list[Literal["knn", "linear"]]
-    ) -> list[Literal["knn", "linear"]]:
-        """Reject repeated method selections."""
-        return ClassificationConfig.validate_methods(value)
-
-    @field_validator("knn_device")
-    @classmethod
-    def validate_knn_device(cls, value: str) -> str:
-        """Validate the KNN device without importing its backend."""
-        ClassificationConfig.validate_knn_device(value)
-        return value
+    knn_device: KnnDevice = "cpu"
 
 
 class CoordConfig(StrictModel):

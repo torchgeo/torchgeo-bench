@@ -5,8 +5,8 @@ from typing import Any, Literal, Self
 from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
 
 from .config_schema import (
+    Device,
     ModelConfig,
-    RuntimeConfig,
     SegmentationConfig,
     StrictModel,
 )
@@ -30,15 +30,9 @@ def _heads() -> list[Head]:
 class FlopsRuntimeConfig(StrictModel):
     """Device and reproducible model initialization."""
 
-    device: StrictStr = "cuda"
+    device: Device = "cuda"
     seed: StrictInt = 0
     verbose: StrictBool = True
-
-    @field_validator("device")
-    @classmethod
-    def validate_device(cls, value: str) -> str:
-        """Validate the device without importing Torch."""
-        return RuntimeConfig.validate_device(value)
 
 
 class FlopsInputConfig(StrictModel):

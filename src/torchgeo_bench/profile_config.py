@@ -4,7 +4,14 @@ from typing import Any, Literal
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
 
-from .config_schema import InputConfig, ModelConfig, RunConfig, RuntimeConfig, StrictModel
+from .config_schema import (
+    Device,
+    InputConfig,
+    ModelConfig,
+    RunConfig,
+    RuntimeConfig,
+    StrictModel,
+)
 from .datasets import list_datasets
 from .presets import ModelPreset, resolve_run_config
 
@@ -12,7 +19,7 @@ from .presets import ModelPreset, resolve_run_config
 class ProfileRuntimeConfig(RuntimeConfig):
     """Execution defaults for a bounded standalone measurement."""
 
-    device: StrictStr = "cpu"
+    device: Device = "cpu"
     batch_size: StrictInt = Field(default=32, gt=0)
     workers: StrictInt = Field(default=0, ge=0)
     seed: StrictInt = Field(default=0, ge=0, le=2**32 - 1)

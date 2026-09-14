@@ -12,6 +12,11 @@ import yaml
 from pydantic import ValidationError
 
 from torchgeo_bench.config_schema import RunConfig, load_run_config, validate_run_config
+from torchgeo_bench.coordbench.config import CoordRuntimeConfig
+from torchgeo_bench.flops_config import FlopsRuntimeConfig
+from torchgeo_bench.profile_config import ProfileRuntimeConfig
+
+_RUNTIME_SECTIONS = (CoordRuntimeConfig, FlopsRuntimeConfig, ProfileRuntimeConfig)
 
 
 def valid_config() -> dict:
@@ -185,3 +190,25 @@ def test_round_trip_dump_is_valid() -> None:
     restored = RunConfig.model_validate(config.model_dump(mode="json"), strict=True)
     assert restored == config
     assert config.model_dump_yaml()["model"]["name"] == "timm/resnet50"
+
+
+# Every command declares its own device default, and redeclaring the field would
+# drop the shared annotation's validation.
+@pytest.mark.parametrize(
+    "section", [RunConfig.model_fields["runtime"].annotation, *_RUNTIME_SECTIONS]
+)
+@pytest.mark.parametrize("device", ["gpu", "cuda:nope", "mps", " "])
+def test_every_runtime_section_validates_its_device(section: type, device: str) -> None:
+    with pytest.raises(ValidationError, match="device"):
+        section(device=device)
+
+
+@pytest.mark.parametrize(
+    "section", [RunConfig.model_fields["runtime"].annotation, *_RUNTIME_SECTIONS]
+)
+def test_every_runtime_section_accepts_supported_devices(section: type) -> None:
+    assert [section(device=name).device for name in ("cpu", "cuda", "cuda:1")] == [
+        "cpu",
+        "cuda",
+        "cuda:1",
+    ]
