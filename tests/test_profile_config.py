@@ -269,17 +269,26 @@ def test_parser_rejects_invalid_resize_values(parser: argparse.ArgumentParser, s
     ["[]", "model: [", "model: {name: rcf, name: rcf}", "model: !!python/object:bad {}"],
 )
 def test_profile_reports_expected_yaml_errors(
-    parser: argparse.ArgumentParser, tmp_path: Path, content: str
+    parser: argparse.ArgumentParser,
+    tmp_path: Path,
+    content: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = tmp_path / "profile.yaml"
     path.write_text(content)
-    with pytest.raises(SystemExit, match="error:"):
+    with pytest.raises(SystemExit) as error:
         profile(parser.parse_args(["--config", str(path), "--dry-run"]))
+    assert error.value.code == 2
+    assert "error:" in capsys.readouterr().err
 
 
-def test_profile_reports_missing_files(parser: argparse.ArgumentParser, tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="No such file"):
+def test_profile_reports_missing_files(
+    parser: argparse.ArgumentParser, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as error:
         profile(parser.parse_args(["--config", str(tmp_path / "missing.yaml"), "--dry-run"]))
+    assert error.value.code == 2
+    assert "No such file" in capsys.readouterr().err
 
 
 def test_profile_dry_run_round_trip_is_lightweight(

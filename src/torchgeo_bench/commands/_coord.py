@@ -5,49 +5,41 @@ from typing import Any
 
 import yaml
 
-from torchgeo_bench.config_schema import load_yaml
 from torchgeo_bench.coordbench.config import CoordConfig, resolve_coord_preset
-from torchgeo_bench.presets import merge_settings
+
+from ._config import FlagOverride, load_config_or_exit, load_from_flags
+
+_FLAG_OVERRIDES = (
+    FlagOverride("model", ("model", "name"), replace_roots=("model",)),
+    FlagOverride("datasets", ("datasets",)),
+    FlagOverride("methods", ("evaluation", "methods")),
+    FlagOverride("split", ("evaluation", "split")),
+    FlagOverride("folds", ("evaluation", "folds")),
+    FlagOverride("cell_deg", ("evaluation", "cell_deg")),
+    FlagOverride("knn_k", ("evaluation", "knn_k")),
+    FlagOverride("knn_device", ("evaluation", "knn_device")),
+    FlagOverride("device", ("runtime", "device")),
+    FlagOverride("seed", ("runtime", "seed")),
+    FlagOverride("resume", ("output", "resume")),
+    FlagOverride("output", ("output", "file")),
+)
 
 
-def _coord_mapping(args: argparse.Namespace) -> dict[str, Any]:
-    """Translate explicitly supplied flags into coordinate settings."""
-    values: dict[str, Any] = {}
-    if hasattr(args, "model"):
-        values["model"] = {"name": args.model}
-    if hasattr(args, "datasets"):
-        values["datasets"] = args.datasets
-    for section, names in (
-        ("evaluation", ("methods", "split", "folds", "cell_deg", "knn_k", "knn_device")),
-        ("runtime", ("device", "seed")),
-        ("output", ("resume",)),
-    ):
-        for name in names:
-            if hasattr(args, name):
-                values.setdefault(section, {})[name] = getattr(args, name)
-    if hasattr(args, "output"):
-        values.setdefault("output", {})["file"] = args.output
-    return values
-
-
-def load_config(args: argparse.Namespace) -> CoordConfig:
-    """Apply flag precedence and validate configuration before importing the runtime."""
-    path = getattr(args, "config", None)
-    values = load_yaml(path) if path is not None else {}
-    overrides = _coord_mapping(args)
-    if "model" in overrides:
-        values.pop("model", None)
-    config = CoordConfig.model_validate(merge_settings(values, overrides))
+def _validate_config(values: dict[str, Any]) -> CoordConfig:
+    """Validate configuration and resolve presets without importing runtime code."""
+    config = CoordConfig.model_validate(values)
     resolve_coord_preset(config)
     return config
 
 
+def load_config(args: argparse.Namespace) -> CoordConfig:
+    """Apply flag precedence and validate configuration before importing the runtime."""
+    return load_from_flags(args, _FLAG_OVERRIDES, _validate_config)
+
+
 def run(args: argparse.Namespace) -> None:
     """Validate YAML/flags, print a dry run, or execute coordinate evaluation."""
-    try:
-        config = load_config(args)
-    except (OSError, ValueError, yaml.YAMLError) as error:  # allow-except: CLI configuration errors
-        raise SystemExit(f"error: {error}") from error
+    config = load_config_or_exit(args, load_config)
     if getattr(args, "dry_run", False):
         print(yaml.safe_dump(config.model_dump_yaml(), sort_keys=False), end="")
         return

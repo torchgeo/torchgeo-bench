@@ -353,11 +353,13 @@ def test_download_rejects_datasets_for_eurosat() -> None:
         cli_main(["download", "eurosat", "--datasets", "m-eurosat"])
 
 
-def test_flops_without_model_errors_cleanly() -> None:
+def test_flops_without_model_errors_cleanly(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as error:
         cli_main(["flops"])
-    assert "model" in str(error.value)
-    assert "Field required" in str(error.value)
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert "model" in message
+    assert "Field required" in message
 
 
 def test_flops_dispatches_typed_config(monkeypatch: pytest.MonkeyPatch) -> None:
