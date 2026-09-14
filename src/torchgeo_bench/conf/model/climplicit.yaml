@@ -1,7 +1,5 @@
 name: climplicit
 target: torchgeo_bench.coordbench.models.ClimplicitLocationEncoder
 track: coord
-seed_from_run: false
 kwargs:
   repo: Jobedo/climplicit
-dataset_overrides: {}

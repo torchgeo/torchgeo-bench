@@ -1,7 +1,5 @@
 name: resnet50
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: resnet50
   pretrained: true
@@ -9,8 +7,7 @@ kwargs:
   seed: null
 segmentation:
   layers:
-  - layer4
-  - layer3
-  - layer2
-  - layer1
-dataset_overrides: {}
+    - layer4
+    - layer3
+    - layer2
+    - layer1

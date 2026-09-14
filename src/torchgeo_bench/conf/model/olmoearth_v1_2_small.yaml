@@ -1,7 +1,5 @@
 name: olmoearth_v1_2_small
 target: torchgeo_bench.models.OlmoEarthBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_size: small
   version: v1_2
@@ -15,8 +13,7 @@ input:
   image_size: null
 segmentation:
   layers:
-  - encoder_model.encoder.blocks.11
-  - encoder_model.encoder.blocks.8
-  - encoder_model.encoder.blocks.5
-  - encoder_model.encoder.blocks.2
-dataset_overrides: {}
+    - encoder_model.encoder.blocks.11
+    - encoder_model.encoder.blocks.8
+    - encoder_model.encoder.blocks.5
+    - encoder_model.encoder.blocks.2

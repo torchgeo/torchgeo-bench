@@ -5,8 +5,8 @@ import sys
 
 import pytest
 
-from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.config_schema import ModelConfig, RunConfig
+from torchgeo_bench.config import list_model_configs, model_config_path
+from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_yaml
 from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset, resolve_run_config
 
 
@@ -21,6 +21,13 @@ def test_packaged_preset_is_typed_without_loading_weights(name: str) -> None:
     assert "image_size" not in preset.kwargs
     assert "interpolation" not in preset.kwargs
     assert "${" not in str(preset.model_dump())
+
+
+@pytest.mark.parametrize("name", list_model_configs())
+def test_packaged_preset_omits_schema_defaults(name: str) -> None:
+    raw = load_yaml(model_config_path(name))
+    preset = ModelPreset.model_validate(raw)
+    assert raw == preset.model_dump(mode="json", exclude_defaults=True)
 
 
 def test_rcf_seed_is_explicit_and_overridable() -> None:

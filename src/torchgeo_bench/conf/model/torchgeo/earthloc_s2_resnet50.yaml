@@ -1,7 +1,5 @@
 name: tgeo_earthloc_s2_resnet50
 target: torchgeo_bench.models.TorchGeoEarthLocBench
-track: image
-seed_from_run: false
 kwargs:
   factory: earthloc
   weights_class: EarthLoc_Weights
@@ -10,8 +8,7 @@ kwargs:
   target_size: 320
 segmentation:
   layers:
-  - backbone.layer4
-  - backbone.layer3
-  - backbone.layer2
-  - backbone.layer1
-dataset_overrides: {}
+    - backbone.layer4
+    - backbone.layer3
+    - backbone.layer2
+    - backbone.layer1

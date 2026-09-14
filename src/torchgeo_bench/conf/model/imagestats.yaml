@@ -1,6 +1,2 @@
 name: imagestats
 target: torchgeo_bench.models.ImageStatsBench
-track: image
-seed_from_run: false
-kwargs: {}
-dataset_overrides: {}

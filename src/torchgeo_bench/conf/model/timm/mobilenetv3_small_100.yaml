@@ -1,7 +1,5 @@
 name: mobilenetv3_small_100
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: mobilenetv3_small_100
   pretrained: true
@@ -9,8 +7,7 @@ kwargs:
   seed: null
 segmentation:
   layers:
-  - blocks.5
-  - blocks.4
-  - blocks.2
-  - blocks.1
-dataset_overrides: {}
+    - blocks.5
+    - blocks.4
+    - blocks.2
+    - blocks.1

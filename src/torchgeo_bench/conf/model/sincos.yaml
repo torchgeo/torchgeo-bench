@@ -1,6 +1,3 @@
 name: sincos
 target: torchgeo_bench.coordbench.models.SinCosLocationEncoder
 track: coord
-seed_from_run: false
-kwargs: {}
-dataset_overrides: {}

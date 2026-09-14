@@ -1,7 +1,5 @@
 name: olmoearth_v1_nano_sar_db
 target: torchgeo_bench.models.OlmoEarthBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_size: nano
   patch_size: 8
@@ -12,4 +10,3 @@ kwargs:
   sar_log_scale: true
 input:
   image_size: null
-dataset_overrides: {}

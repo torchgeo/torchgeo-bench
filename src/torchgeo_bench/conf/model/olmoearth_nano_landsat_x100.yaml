@@ -1,7 +1,5 @@
 name: olmoearth_v1_nano_lsat_x100
 target: torchgeo_bench.models.OlmoEarthBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_size: nano
   patch_size: 8
@@ -12,4 +10,3 @@ kwargs:
   landsat_scale_factor: 2.55
 input:
   image_size: null
-dataset_overrides: {}

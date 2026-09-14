@@ -1,10 +1,7 @@
 name: densenet169
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: densenet169
   pretrained: true
   global_pool: avg
   seed: null
-dataset_overrides: {}

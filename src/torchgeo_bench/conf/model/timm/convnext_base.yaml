@@ -1,7 +1,5 @@
 name: convnext_base
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: convnext_base
   pretrained: true
@@ -9,8 +7,7 @@ kwargs:
   seed: null
 segmentation:
   layers:
-  - stages.3
-  - stages.2
-  - stages.1
-  - stages.0
-dataset_overrides: {}
+    - stages.3
+    - stages.2
+    - stages.1
+    - stages.0

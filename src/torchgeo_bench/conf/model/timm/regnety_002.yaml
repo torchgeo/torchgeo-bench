@@ -1,7 +1,5 @@
 name: regnety_002
 target: torchgeo_bench.models.TimmPatchBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_name: regnety_002
   pretrained: true
@@ -9,8 +7,7 @@ kwargs:
   seed: null
 segmentation:
   layers:
-  - s4
-  - s3
-  - s2
-  - s1
-dataset_overrides: {}
+    - s4
+    - s3
+    - s2
+    - s1

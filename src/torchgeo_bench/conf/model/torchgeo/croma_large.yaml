@@ -1,7 +1,5 @@
 name: tgeo_croma_large
 target: torchgeo_bench.models.TorchGeoCromaBench
-track: image
-seed_from_run: false
 kwargs:
   factory: croma_large
   weights_class: CROMALarge_Weights
@@ -10,13 +8,11 @@ kwargs:
   target_size: 120
 classification:
   linear:
-    c_log10_start: -6.0
     c_log10_stop: 5.0
     c_count: 60
 segmentation:
   layers:
-  - s2_encoder.transformer.layers.23.1
-  - s2_encoder.transformer.layers.17.1
-  - s2_encoder.transformer.layers.11.1
-  - s2_encoder.transformer.layers.5.1
-dataset_overrides: {}
+    - s2_encoder.transformer.layers.23.1
+    - s2_encoder.transformer.layers.17.1
+    - s2_encoder.transformer.layers.11.1
+    - s2_encoder.transformer.layers.5.1

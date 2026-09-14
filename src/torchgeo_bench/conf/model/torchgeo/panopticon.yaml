@@ -1,7 +1,5 @@
 name: tgeo_panopticon
 target: torchgeo_bench.models.TorchGeoPanopticonBench
-track: image
-seed_from_run: false
 kwargs:
   factory: panopticon_vitb14
   weights_class: Panopticon_Weights
@@ -10,8 +8,7 @@ kwargs:
   target_size: 224
 segmentation:
   layers:
-  - model.blocks.11
-  - model.blocks.8
-  - model.blocks.5
-  - model.blocks.2
-dataset_overrides: {}
+    - model.blocks.11
+    - model.blocks.8
+    - model.blocks.5
+    - model.blocks.2

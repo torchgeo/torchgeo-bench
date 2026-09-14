@@ -1,7 +1,5 @@
 name: tt_terramind_v1_large
 target: torchgeo_bench.models.TerraTorchTerraMindBench
-track: image
-seed_from_run: false
 kwargs:
   backbone_name: terramind_v1_large
   pretrained: true
@@ -9,13 +7,11 @@ kwargs:
   modality: S2L2A
 classification:
   linear:
-    c_log10_start: -6.0
     c_log10_stop: 5.0
     c_count: 60
 segmentation:
   layers:
-  - encoder.23
-  - encoder.17
-  - encoder.11
-  - encoder.5
-dataset_overrides: {}
+    - encoder.23
+    - encoder.17
+    - encoder.11
+    - encoder.5

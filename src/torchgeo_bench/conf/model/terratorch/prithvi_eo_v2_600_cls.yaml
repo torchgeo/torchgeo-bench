@@ -1,7 +1,5 @@
 name: tt_prithvi_eo_v2_600_cls
 target: torchgeo_bench.models.TerraTorchPrithviBench
-track: image
-seed_from_run: false
 kwargs:
   backbone_name: prithvi_eo_v2_600
   pretrained: true
@@ -9,13 +7,11 @@ kwargs:
   pool: cls
 classification:
   linear:
-    c_log10_start: -6.0
     c_log10_stop: 5.0
     c_count: 60
 segmentation:
   layers:
-  - blocks.31
-  - blocks.23
-  - blocks.15
-  - blocks.7
-dataset_overrides: {}
+    - blocks.31
+    - blocks.23
+    - blocks.15
+    - blocks.7

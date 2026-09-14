@@ -1,7 +1,5 @@
 name: olmoearth_v1_2_tiny_landsat_as_s2
 target: torchgeo_bench.models.OlmoEarthBenchModel
-track: image
-seed_from_run: false
 kwargs:
   model_size: tiny
   version: v1_2
@@ -17,8 +15,7 @@ input:
   image_size: null
 segmentation:
   layers:
-  - encoder_model.encoder.blocks.11
-  - encoder_model.encoder.blocks.8
-  - encoder_model.encoder.blocks.5
-  - encoder_model.encoder.blocks.2
-dataset_overrides: {}
+    - encoder_model.encoder.blocks.11
+    - encoder_model.encoder.blocks.8
+    - encoder_model.encoder.blocks.5
+    - encoder_model.encoder.blocks.2

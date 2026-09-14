@@ -1,7 +1,5 @@
 name: tt_terramind_v1_base
 target: torchgeo_bench.models.TerraTorchTerraMindBench
-track: image
-seed_from_run: false
 kwargs:
   backbone_name: terramind_v1_base
   pretrained: true
@@ -9,8 +7,7 @@ kwargs:
   modality: S2L2A
 segmentation:
   layers:
-  - encoder.11
-  - encoder.8
-  - encoder.5
-  - encoder.2
-dataset_overrides: {}
+    - encoder.11
+    - encoder.8
+    - encoder.5
+    - encoder.2

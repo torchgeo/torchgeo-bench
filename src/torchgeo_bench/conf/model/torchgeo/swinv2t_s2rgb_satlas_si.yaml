@@ -1,7 +1,5 @@
 name: tgeo_swinv2t_s2rgb_satlas_si
 target: torchgeo_bench.models.TorchGeoSwinBench
-track: image
-seed_from_run: false
 kwargs:
   factory: swin_v2_t
   weights_class: Swin_V2_T_Weights
@@ -10,8 +8,7 @@ kwargs:
   target_size: 256
 segmentation:
   layers:
-  - features.7
-  - features.5
-  - features.3
-  - features.1
-dataset_overrides: {}
+    - features.7
+    - features.5
+    - features.3
+    - features.1

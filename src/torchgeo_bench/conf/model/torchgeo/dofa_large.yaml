@@ -1,7 +1,5 @@
 name: tgeo_dofa_large
 target: torchgeo_bench.models.TorchGeoDOFABench
-track: image
-seed_from_run: false
 kwargs:
   factory: dofa_large_patch16_224
   weights_class: DOFALarge16_Weights
@@ -10,8 +8,7 @@ kwargs:
   target_size: 224
 segmentation:
   layers:
-  - blocks.23
-  - blocks.17
-  - blocks.11
-  - blocks.5
-dataset_overrides: {}
+    - blocks.23
+    - blocks.17
+    - blocks.11
+    - blocks.5
