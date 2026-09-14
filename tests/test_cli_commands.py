@@ -18,7 +18,7 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from torchgeo_bench.commands._config import set_path
 from torchgeo_bench.config_schema import validate_run_config
-from torchgeo_bench.image_cli import _image_size, _model_names, main
+from torchgeo_bench.cli import _image_size, _model_names, main
 from torchgeo_bench.presets import resolve_run_config
 
 
@@ -262,7 +262,7 @@ def test_unknown_config_field_fails_before_execution(tmp_path: Path) -> None:
     "error_type",
     [FileNotFoundError, PermissionError, ValueError, yaml.YAMLError, RuntimeError, TypeError],
 )
-def test_runtime_failure_propagates_from_image_cli(
+def test_runtime_failure_propagates_from_cli(
     monkeypatch: MonkeyPatch, error_type: type[Exception]
 ) -> None:
     def fail(_: object) -> None:
@@ -297,7 +297,7 @@ def test_config_errors_exit_without_tracebacks(
         [
             sys.executable,
             "-m",
-            "torchgeo_bench.image_cli",
+            "torchgeo_bench.cli",
             "run",
             "--config",
             str(path),
@@ -474,7 +474,7 @@ def test_unknown_catalog_entries_fail_before_execution() -> None:
 
 def test_help_and_catalog_subprocesses_do_not_import_ml() -> None:
     code = (
-        "import sys; from torchgeo_bench.image_cli import main; "
+        "import sys; from torchgeo_bench.cli import main; "
         "main(sys.argv[1:]); "
         "print([n for n in ('torch','torchgeo','pandas','numpy') if n in sys.modules])"
     )
@@ -501,7 +501,7 @@ def test_main_rejects_unknown_parser_command(monkeypatch: MonkeyPatch) -> None:
     import argparse
 
     monkeypatch.setattr(
-        "torchgeo_bench.image_cli._parse_args",
+        "torchgeo_bench.cli._parse_args",
         lambda _: argparse.Namespace(command="other"),
     )
     with pytest.raises(SystemExit, match="not implemented"):
@@ -510,7 +510,7 @@ def test_main_rejects_unknown_parser_command(monkeypatch: MonkeyPatch) -> None:
 
 def test_module_entrypoint(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["torchgeo-bench", "models", "rcf"])
-    runpy.run_module("torchgeo_bench.image_cli", run_name="__main__")
+    runpy.run_module("torchgeo_bench.cli", run_name="__main__")
 
 
 @pytest.mark.parametrize("value", ["null", "3", "[]"])
