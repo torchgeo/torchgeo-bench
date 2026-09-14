@@ -24,7 +24,6 @@ from torchgeo_bench.coordbench.config import (
     resolve_coord_preset,
 )
 from torchgeo_bench.coordbench.datasets import CoordBenchmark, load_benchmarks
-from torchgeo_bench.coordbench.legacy import accepts_legacy_config
 from torchgeo_bench.coordbench.models import LocationEncoder
 from torchgeo_bench.coordbench.probe import (
     knn_probe_score,
@@ -124,7 +123,6 @@ def _evaluation_split(
     return None, None, "random"
 
 
-@accepts_legacy_config
 def run_coordbench(cfg: CoordConfig) -> None:
     """Run the CoordBench location-encoder benchmark for the configured model."""
     preset = resolve_coord_preset(cfg)

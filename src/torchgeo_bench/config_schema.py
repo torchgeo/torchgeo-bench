@@ -323,6 +323,8 @@ class RunConfig(StrictModel):
             raise ValueError("datasets must contain non-empty names")
         if len(set(value)) != len(value):
             raise ValueError("datasets must not contain duplicates")
+        if "all" in value and len(value) != 1:
+            raise ValueError("'all' cannot be combined with other datasets")
         return value
 
     def model_dump_yaml(self) -> dict[str, Any]:

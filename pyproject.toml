@@ -45,7 +45,6 @@ dependencies = [
   "huggingface-hub>=0.20",
   "lazy-loader>=0.4",
   "numpy>=1.24",
-  "omegaconf>=2.3",
   "pandas>=2",
   "pyarrow>=14",                                                               # Required for CoordBench's Parquet files.
   "pydantic>=2",

@@ -1,46 +1,147 @@
-Command-line interface
-======================
+Command-line interface and configuration
+========================================
 
 .. module:: torchgeo_bench.cli
 
-The ``torchgeo-bench`` console script exposes three subcommands:
+The installed ``torchgeo-bench`` command, ``python -m torchgeo_bench``, and
+``python -m torchgeo_bench.cli`` share one explicit-flags/YAML interface:
 
-``torchgeo-bench run [flags] [key=value ...]``
-    Runs the benchmark pipeline. Common settings have flags (``--model``,
-    ``--datasets``, ``--device``, ``--resume``, ...; see ``run --help``), and
-    any value in :file:`src/torchgeo_bench/conf/config.yaml` (or any model
-    preset under :file:`conf/model/`) can be overridden with ``key=value``
-    pairs, e.g. ``model=timm/resnet50 dataset.names=[m-eurosat]``. Output is
-    quiet by default; pass ``-v``/``--verbose`` for INFO-level progress logs.
-    ``--list-models``/``--list-datasets`` list valid ``model=``/``dataset.names=``
-    values, and ``--model-help <name>`` prints that model config's YAML
-    (its available ``model.*`` overrides) without running anything.
+``run``
+    Evaluate image backbones with classification and segmentation probes.
+    Select a preset with ``--model`` and repeat ``--dataset`` for multiple
+    datasets, or supply ``--config``. ``--methods linear`` runs only the
+    linear classifier. ``--dry-run`` prints reusable YAML;
+    ``--config-help`` prints the JSON schema.
 
-``torchgeo-bench download {geobench_v1|geobench_v2|eurosat}``
-    Downloads benchmark datasets into ``./data/`` (or a custom location with
-    ``--output-dir``). For GeoBench V1 and V2, individual datasets can be
-    selected with ``--datasets a,b,c``.
+``models [name]`` / ``datasets [name]``
+    List packaged presets or registered image datasets, or show one entry.
+    Discovery does not construct models or load samples.
 
-``torchgeo-bench flops [flags] [key=value ...]``
-    Measures per-sample backbone, head, and probe compute. Overrides are
-    composed from :file:`src/torchgeo_bench/conf/flops_config.yaml`.
+``download <name> [<name> ...]``
+    Download named datasets. Collection aliases ``geobench_v1`` and
+    ``geobench_v2`` accept ``--datasets a,b,c``. ``--output-dir`` changes
+    the download destination, not the benchmark's fixed ``./data/`` paths.
 
-Config composition
-------------------
+``profile``
+    Measure a fixed real dataset batch and emit JSON to stdout. Accepts
+    ``--config``, input/runtime flags, warmup/measurement counts,
+    precision, and optional FLOP counting.
 
-.. currentmodule:: torchgeo_bench.config
+``flops``
+    Measure backbone/probe compute using synthetic inputs and append to
+    a CSV. Accepts its own ``--config``, ``--config-help``, band/head
+    selections, timing, output, and resume flags.
 
-.. autofunction:: compose_config
-.. autofunction:: list_model_configs
+``coord``
+    Evaluate location encoders under random/spatial or official splits.
+    Accepts coordinate YAML or explicit model, dataset, method, split,
+    runtime, and output flags.
+
+All measurement commands support ``--dry-run``. See
+:doc:`/user/configuration` for exact YAML fields and :doc:`/user/coordbench`
+for coordinate examples. Legacy ``key=value`` / ``+key=value`` syntax is
+rejected; it is not available through an alternate module entry point.
+
+Strict image configuration
+--------------------------
+
+Load and validate a YAML file without importing model implementations:
+
+.. code-block:: python
+
+   from torchgeo_bench.config_schema import load_run_config
+   from torchgeo_bench.presets import resolve_run_config
+
+   config = load_run_config("examples/image-run.yaml")
+   effective, preset = resolve_run_config(config, "m-eurosat")
+
+``resolve_run_config`` applies model and dataset defaults beneath explicitly
+supplied values. ``RunConfig.model_dump_yaml()`` preserves omission by
+excluding unset fields; dumping all schema defaults and reloading them would
+turn those defaults into explicit overrides.
+
+.. currentmodule:: torchgeo_bench.config_schema
+
+.. autoclass:: RunConfig
+   :members: model_dump_yaml
+   :no-show-inheritance:
+
+.. autoclass:: ModelConfig
+   :members:
+   :no-show-inheritance:
+
+.. autoclass:: SegmentationConfig
+   :members:
+   :no-show-inheritance:
+
+.. autofunction:: load_run_config
+.. autofunction:: validate_run_config
+.. autofunction:: load_yaml
+
+Preset resolution and construction
+----------------------------------
+
+Preset metadata is separate from constructor kwargs. Runtime objects such
+as ``BandSpec`` instances or an empirical-RCF training dataset must be
+passed explicitly to ``build_model``. The normal image runner handles
+band selection, normalization-name mapping, and per-dataset construction.
+``kwargs`` are ordinary constructor values, not recursively instantiated
+target mappings.
+
+.. currentmodule:: torchgeo_bench.presets
+
+.. autoclass:: ModelPreset
+   :members: for_dataset
+   :no-show-inheritance:
+
+.. autofunction:: load_model_preset
+.. autofunction:: resolve_run_config
+.. autofunction:: build_model
 
 Benchmark entry point
 ---------------------
 
-The benchmark loop lives in :mod:`torchgeo_bench.main`; the CLI composes
-the config with :func:`torchgeo_bench.config.compose_config` and calls it:
+The image loop consumes a ``RunConfig`` directly:
+
+.. code-block:: python
+
+   from torchgeo_bench.config_schema import load_run_config
+   from torchgeo_bench.main import main
+
+   config = load_run_config("examples/image-run.yaml")
+   main(config)
+
+Unlike loading or resolving configuration, calling ``main`` executes the
+benchmark and may load data or weights and append results.
 
 .. currentmodule:: torchgeo_bench.main
 .. autofunction:: main
+
+Standalone measurement settings
+--------------------------------
+
+Standalone profiling uses singular ``dataset`` plus top-level timing fields;
+synthetic compute measurements use band-source metadata, head selections,
+and a ``timing`` block. Neither takes an image ``RunConfig``.
+
+.. currentmodule:: torchgeo_bench.profile_config
+
+.. autoclass:: ProfileConfig
+   :members: model_dump_yaml
+   :no-show-inheritance:
+
+.. autofunction:: resolve_profile_config
+
+.. currentmodule:: torchgeo_bench.flops_config
+
+.. autoclass:: FlopsConfig
+   :members: model_dump_yaml, resolve
+   :no-show-inheritance:
+
+.. currentmodule:: torchgeo_bench.flops_pipeline
+.. autofunction:: main
+
+See :doc:`coordbench` for the separate coordinate configuration and runner.
 
 Download helpers
 ----------------

@@ -51,11 +51,11 @@ def resolve_knn_device(requested_device: str | None, model_device: str) -> str:
     if requested_device is not None:
         raise RuntimeError(
             f"GPU-enabled FAISS is unavailable for explicit KNN device {requested_device!r}. "
-            "Set eval.knn_device=cpu or install a GPU-enabled FAISS backend."
+            "Set --knn-device cpu or install a GPU-enabled FAISS backend."
         )
     logger.warning(
         "GPU-enabled FAISS is unavailable; using CPU for KNN while the model remains on %s. "
-        "Set eval.knn_device=cpu to make this choice explicit.",
+        "Set --knn-device cpu to make this choice explicit.",
         model_device,
     )
     return "cpu"
@@ -176,7 +176,7 @@ class KNNClassifier:
         if not gpu_faiss_available():
             raise RuntimeError(
                 f"KNNClassifier(device={self.device!r}): GPU-enabled FAISS is unavailable. "
-                "Set eval.knn_device=cpu for CLI runs or request device='cpu'."
+                "Set --knn-device cpu for CLI runs or request device='cpu'."
             )
 
         assert self._effective_n_neighbors is not None

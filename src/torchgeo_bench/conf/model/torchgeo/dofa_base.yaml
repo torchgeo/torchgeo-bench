@@ -1,13 +1,17 @@
-# MAE-pretrained DOFA uses a wavelength for each selected band.
-
-_target_: torchgeo_bench.models.TorchGeoDOFABench
-factory: dofa_base_patch16_224
-weights_class: DOFABase16_Weights
-weights_member: DOFA_MAE
-auto_resize: true
-target_size: 224
 name: tgeo_dofa_base
-eval:
-  segmentation:
-    # All blocks keep a 14x14 patch grid; use four depths, deepest first. SegmentationProbe strips the backbone.* prefix.
-    layers: ["blocks.11", "blocks.8", "blocks.5", "blocks.2"]
+target: torchgeo_bench.models.TorchGeoDOFABench
+track: image
+seed_from_run: false
+kwargs:
+  factory: dofa_base_patch16_224
+  weights_class: DOFABase16_Weights
+  weights_member: DOFA_MAE
+  auto_resize: true
+  target_size: 224
+segmentation:
+  layers:
+  - blocks.11
+  - blocks.8
+  - blocks.5
+  - blocks.2
+dataset_overrides: {}

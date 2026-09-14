@@ -22,7 +22,10 @@ from _seg_sweep_common import (
     run_exclusively,
     torchgeo_bench_cli,
     write_json_atomic,
+    write_run_config,
 )
+
+from torchgeo_bench.config_schema import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -219,26 +222,45 @@ class SweepRunner(BaseGpuRunner):
         divisor = 2 ** (attempt - 1)
         loader_batch = max(1, job.model.loader_batch_size // divisor)
         probe_batch = job.model.probe_batch_size
+        config_path = self.config.state_dir / "configs" / f"{job.job_id}.yaml"
+        write_run_config(
+            config_path,
+            RunConfig.model_validate(
+                {
+                    "model": {"name": job.model.config},
+                    "datasets": [job.dataset],
+                    "segmentation": {
+                        "head": job.head,
+                        "epochs": EPOCHS,
+                        "batch_size": probe_batch,
+                        "cache_features": True,
+                        "cache_dtype": "float16",
+                    },
+                }
+            ),
+        )
         return [
             sys.executable,
             "-m",
-            "torchgeo_bench.cli",
+            "torchgeo_bench",
             "run",
-            f"model={job.model.config}",
-            f"dataset.names=[{job.dataset}]",
-            f"dataset.bands={job.bands}",
-            f"dataset.image_size={self.config.image_size}",
-            f"dataset.batch_size={loader_batch}",
-            f"dataset.num_workers={self.config.num_workers}",
-            f"seed={self.config.seed}",
-            f"device=cuda:{gpu}",
-            f"eval.segmentation.head_type={job.head}",
-            f"eval.segmentation.epochs={EPOCHS}",
-            f"eval.segmentation.batch_size={probe_batch}",
-            "eval.segmentation.cache_features=true",
-            "eval.segmentation.cache_dtype=float16",
-            f"output={self.config.output}",
-            "resume=true",
+            "--config",
+            str(config_path),
+            "--bands",
+            job.bands,
+            "--image-size",
+            str(self.config.image_size),
+            "--batch-size",
+            str(loader_batch),
+            "--workers",
+            str(self.config.num_workers),
+            "--seed",
+            str(self.config.seed),
+            "--device",
+            f"cuda:{gpu}",
+            "--output",
+            str(self.config.output),
+            "--resume",
         ]
 
     def run(self) -> None:

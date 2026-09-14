@@ -1,7 +1,10 @@
-_target_: torchgeo_bench.models.RCFBench
-features: 512
-kernel_size: 3
-mode: gaussian         # or empirical
-stats_mode: mean       # mean | stdev | all
-seed: ${seed}
 name: rcf
+target: torchgeo_bench.models.RCFBench
+track: image
+seed_from_run: true
+kwargs:
+  features: 512
+  kernel_size: 3
+  mode: gaussian
+  stats_mode: mean
+dataset_overrides: {}

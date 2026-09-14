@@ -1,14 +1,17 @@
-# Sentinel-2 place-recognition weights with a 4096-dimensional descriptor.
-
-_target_: torchgeo_bench.models.TorchGeoEarthLocBench
-factory: earthloc
-weights_class: EarthLoc_Weights
-weights_member: SENTINEL2_RESNET50
-auto_resize: true
-target_size: 320
 name: tgeo_earthloc_s2_resnet50
-eval:
-  segmentation:
-    # Keep one backbone. prefix: EarthLoc nests its ResNet, and SegmentationProbe strips only the outer prefix.
-    # layer4 does not downsample, so layer3 and layer4 both have 20x20 grids at 320px input.
-    layers: ["backbone.layer4", "backbone.layer3", "backbone.layer2", "backbone.layer1"]
+target: torchgeo_bench.models.TorchGeoEarthLocBench
+track: image
+seed_from_run: false
+kwargs:
+  factory: earthloc
+  weights_class: EarthLoc_Weights
+  weights_member: SENTINEL2_RESNET50
+  auto_resize: true
+  target_size: 320
+segmentation:
+  layers:
+  - backbone.layer4
+  - backbone.layer3
+  - backbone.layer2
+  - backbone.layer1
+dataset_overrides: {}

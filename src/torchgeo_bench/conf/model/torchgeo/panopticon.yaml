@@ -1,12 +1,17 @@
-_target_: torchgeo_bench.models.TorchGeoPanopticonBench
-factory: panopticon_vitb14
-weights_class: Panopticon_Weights
-weights_member: VIT_BASE14
-auto_resize: true
-target_size: 224
 name: tgeo_panopticon
-eval:
-  segmentation:
-    # All blocks keep a 16x16 grid; use four depths, deepest first.
-    # Keep model. in layer names: SegmentationProbe removes only a leading backbone. prefix.
-    layers: ["model.blocks.11", "model.blocks.8", "model.blocks.5", "model.blocks.2"]
+target: torchgeo_bench.models.TorchGeoPanopticonBench
+track: image
+seed_from_run: false
+kwargs:
+  factory: panopticon_vitb14
+  weights_class: Panopticon_Weights
+  weights_member: VIT_BASE14
+  auto_resize: true
+  target_size: 224
+segmentation:
+  layers:
+  - model.blocks.11
+  - model.blocks.8
+  - model.blocks.5
+  - model.blocks.2
+dataset_overrides: {}

@@ -7,6 +7,12 @@ This module provides the abstract :class:`BenchModel` interface and a
 collection of concrete backbones that can be benchmarked across the
 :mod:`torchgeo_bench.datasets` registry.
 
+Model construction is exposed through
+:func:`~torchgeo_bench.presets.load_model_preset` and
+:func:`~torchgeo_bench.presets.build_model`. Preset ``kwargs`` contain
+constructor options; the runner supplies selected ``BandSpec`` objects
+and normalization explicitly. See :doc:`cli` for typed preset resolution.
+
 Interface
 ---------
 
@@ -55,7 +61,7 @@ Segmentation heads
 These heads attach to a frozen :class:`BenchModel` backbone to produce
 dense per-pixel predictions.  See :class:`~torchgeo_bench.segmentation_probe.SegmentationProbe`
 for the wiring layer, and :doc:`/user/segmentation-layers` for the
-verified ``eval.segmentation.layers`` values for each supported timm
+verified ``segmentation.layers`` values for each supported timm
 backbone family.
 
 .. autoclass:: LinearHead

@@ -1,0 +1,120 @@
+[
+  {
+    "first_typed_hash": "3f107d7f31ff0094",
+    "hash": "9f565bb8c0a2099f",
+    "id": "rcf-default",
+    "input": {
+      "datasets": [
+        "m-eurosat"
+      ],
+      "model": {
+        "name": "rcf"
+      },
+      "runtime": {
+        "device": "cpu"
+      }
+    }
+  },
+  {
+    "first_typed_hash": "89c042e627d06a70",
+    "hash": "ec230ab4ab4a9f64",
+    "id": "real-imagestats",
+    "input": {
+      "classification": {
+        "bootstrap_samples": 2,
+        "knn_device": "cpu",
+        "linear": {
+          "c_count": 2,
+          "c_log10_start": 0.0,
+          "c_log10_stop": 1.0
+        }
+      },
+      "datasets": [
+        "m-eurosat"
+      ],
+      "input": {
+        "image_size": 32,
+        "partition": "0.01x_train"
+      },
+      "model": {
+        "name": "imagestats"
+      },
+      "runtime": {
+        "batch_size": 64,
+        "device": "cpu",
+        "workers": 0
+      }
+    }
+  },
+  {
+    "first_typed_hash": "89485fa0cc4f459c",
+    "hash": "6f8be61c367c780a",
+    "id": "scalemae-overrides",
+    "input": {
+      "datasets": [
+        "m-eurosat",
+        "caffe"
+      ],
+      "model": {
+        "name": "torchgeo/scalemae_large_fmow"
+      },
+      "runtime": {
+        "device": "cpu",
+        "seed": 7
+      }
+    }
+  },
+  {
+    "first_typed_hash": "efbcb152c690e75a",
+    "hash": "30874c86a82a81bd",
+    "id": "explicit-null-and-empty-layers",
+    "input": {
+      "datasets": [
+        "caffe"
+      ],
+      "input": {
+        "image_size": null,
+        "interpolation": "nearest",
+        "normalization": "none"
+      },
+      "model": {
+        "name": "timm/resnet18"
+      },
+      "runtime": {
+        "device": "cpu",
+        "workers": 0
+      },
+      "segmentation": {
+        "epochs": 1,
+        "head": "linear",
+        "layers": [],
+        "learning_rate": 0.01
+      }
+    }
+  },
+  {
+    "first_typed_hash": "74c0cc662eba8cd6",
+    "hash": "0f1b5d856a8ea089",
+    "id": "all-band-multilabel-knn",
+    "input": {
+      "classification": {
+        "methods": [
+          "knn"
+        ]
+      },
+      "datasets": [
+        "m-bigearthnet"
+      ],
+      "input": {
+        "bands": "all"
+      },
+      "model": {
+        "name": "rcf"
+      },
+      "runtime": {
+        "device": "cpu",
+        "seed": 42
+      }
+    }
+  }
+]

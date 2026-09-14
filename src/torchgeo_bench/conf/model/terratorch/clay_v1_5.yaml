@@ -1,14 +1,16 @@
-_target_: torchgeo_bench.models.TerraTorchClayBench
-backbone_name: timm_clay_v1_base
-pretrained: true
-target_size: 256  # pretrained position embeddings require 32x32 patches at patch_size=8
-modality: sentinel-2-l2a
 name: tt_clay_v1_5_base
-eval:
-  segmentation:
-    # All blocks keep a 32x32 grid; hook four feed-forward outputs (.N.1), deepest first. Each block is an attention/feed-forward pair.
-    layers:
-      - "clay_encoder.transformer.layers.11.1"
-      - "clay_encoder.transformer.layers.8.1"
-      - "clay_encoder.transformer.layers.5.1"
-      - "clay_encoder.transformer.layers.2.1"
+target: torchgeo_bench.models.TerraTorchClayBench
+track: image
+seed_from_run: false
+kwargs:
+  backbone_name: timm_clay_v1_base
+  pretrained: true
+  target_size: 256
+  modality: sentinel-2-l2a
+segmentation:
+  layers:
+  - clay_encoder.transformer.layers.11.1
+  - clay_encoder.transformer.layers.8.1
+  - clay_encoder.transformer.layers.5.1
+  - clay_encoder.transformer.layers.2.1
+dataset_overrides: {}

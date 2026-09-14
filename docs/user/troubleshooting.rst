@@ -30,24 +30,26 @@ CUDA out of memory
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run dataset.batch_size=32
+   $ torchgeo-bench run --model rcf --dataset m-eurosat --batch-size 32
    $ # or run on CPU
-   $ python -m torchgeo_bench.cli run device=cpu
+   $ torchgeo-bench run --model rcf --dataset m-eurosat --device cpu
 
 For segmentation, also try
 
-.. code-block:: console
+.. code-block:: yaml
 
-   $ python -m torchgeo_bench.cli run \
-       eval.segmentation.cache_dtype=float32 \
-       eval.segmentation.cache_features=false
+   model: {name: timm/resnet18}
+   datasets: [caffe]
+   segmentation:
+     cache_features: false
 
-if RAM (rather than GPU memory) is the bottleneck.
+in a file passed through ``--config`` if RAM (rather than GPU memory) is
+the bottleneck.
 
 GPU run crashes immediately
 ---------------------------
 
-The default config is ``device: cuda:0``, so the first documented run uses the
+The image default is ``runtime.device: cuda:0``, so an unmodified image run uses the
 GPU.  ``uv sync`` installs the latest ``torch``, whose bundled CUDA and kernel
 architectures may not match your GPU or driver.  Two distinct failures:
 
@@ -64,7 +66,7 @@ Either way you can fall back to CPU (slower, but always works):
 
 .. code-block:: console
 
-   $ python -m torchgeo_bench.cli run dataset.names=[m-eurosat] device=cpu
+   $ torchgeo-bench run --model rcf --dataset m-eurosat --device cpu
 
 CPU is fine for the small V1 splits, but large V2 datasets (e.g. ``benv2`` /
 BigEarthNet) can take far longer — prefer a working GPU for those.
@@ -74,7 +76,7 @@ BigEarthNet) can take far longer — prefer a working GPU for those.
 
 A known V2 issue: ``geobench_v2.rearrange_bands`` expects modality keys
 (``'s2'``, ``'s1'``, …) that aren't present when a flat band list is
-requested.  Workaround: use ``dataset.bands=all`` for affected V2
+requested.  Workaround: use ``--bands all`` for affected V2
 datasets.
 
 ``eurosat-spatial`` reports ``Dataset not found``

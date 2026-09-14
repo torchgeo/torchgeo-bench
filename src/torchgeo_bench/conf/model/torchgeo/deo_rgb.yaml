@@ -1,9 +1,10 @@
-# TorchGeo DEO Swin-B, native high-resolution RGB pathway (1024-dim output).
-_target_: torchgeo_bench.models.TorchGeoDEOBench
-mode: rgb
-normalization: model_native
-auto_resize: true
-target_size: 224
 name: tgeo_deo_swin_rgb
-
-# No segmentation layers are configured; the wrapper returns a pooled descriptor.
+target: torchgeo_bench.models.TorchGeoDEOBench
+track: image
+seed_from_run: false
+kwargs:
+  mode: rgb
+  normalization: model_native
+  auto_resize: true
+  target_size: 224
+dataset_overrides: {}

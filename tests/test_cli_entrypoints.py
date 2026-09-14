@@ -33,7 +33,7 @@ def run_entrypoint(
     [
         (["--help"], 0, "Run image benchmarks"),
         (["run", "--help"], 0, "--config"),
-        (["models", "rcf"], 0, "_target_:"),
+        (["models", "rcf"], 0, "target:"),
         (["datasets", "m-eurosat"], 0, "task: classification"),
         ([], 2, "required: command"),
         (["run", "--unknown-option"], 2, "unrecognized arguments: --unknown-option"),

@@ -1,56 +1,78 @@
-# fMoW-pretrained Scale-MAE requires exactly three ordered RGB bands.
-
-_target_: torchgeo_bench.models.TorchGeoScaleMAEBench
-factory: scalemae_large_patch16
-weights_class: ScaleMAELarge16_Weights
-weights_member: FMOW_RGB
-auto_resize: false
-image_size: 224
-interpolation: area
-res: 1.0
-pool: cls
 name: tgeo_scalemae_large_fmow
-
-# Selected on validation data only. Values are partial overrides of this
-# model config and are applied independently for each benchmark dataset.
+target: torchgeo_bench.models.TorchGeoScaleMAEBench
+track: image
+seed_from_run: false
+kwargs:
+  factory: scalemae_large_patch16
+  weights_class: ScaleMAELarge16_Weights
+  weights_member: FMOW_RGB
+  auto_resize: false
+  res: 1.0
+  pool: cls
+input:
+  image_size: 224
+  interpolation: area
+segmentation:
+  layers:
+  - blocks.23
+  - blocks.17
+  - blocks.11
+  - blocks.5
 dataset_overrides:
   m-eurosat:
-    image_size: 64
-    res: 3.5
+    kwargs:
+      res: 3.5
+    input:
+      image_size: 64
   so2sat:
-    image_size: 32
-    res: 7.0
+    kwargs:
+      res: 7.0
+    input:
+      image_size: 32
   m-so2sat:
-    image_size: 32
-    res: 7.0
+    kwargs:
+      res: 7.0
+    input:
+      image_size: 32
   eurosat-spatial:
-    image_size: 64
-    res: 3.5
+    kwargs:
+      res: 3.5
+    input:
+      image_size: 64
   m-brick-kiln:
-    image_size: 64
-    res: 10.0
+    kwargs:
+      res: 10.0
+    input:
+      image_size: 64
   m-bigearthnet:
-    image_size: 112
-    res: 2.0
+    kwargs:
+      res: 2.0
+    input:
+      image_size: 112
   treesatai:
-    image_size: 144
-    res: 1.5555556
-    pool: mean
+    kwargs:
+      res: 1.5555556
+      pool: mean
+    input:
+      image_size: 144
   m-pv4ger:
-    image_size: 96
-    res: 0.3333333
+    kwargs:
+      res: 0.3333333
+    input:
+      image_size: 96
   benv2:
-    image_size: 112
-    res: 2.0
+    kwargs:
+      res: 2.0
+    input:
+      image_size: 112
   forestnet:
-    image_size: 128
-    res: 1.75
-    pool: mean
+    kwargs:
+      res: 1.75
+      pool: mean
+    input:
+      image_size: 128
   m-forestnet:
-    image_size: 288
-    res: 0.7777778
-
-eval:
-  segmentation:
-    # Use four encoder depths, deepest first; SegmentationProbe strips the backbone.* prefix.
-    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+    kwargs:
+      res: 0.7777778
+    input:
+      image_size: 288

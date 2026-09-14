@@ -32,6 +32,7 @@ class _ImageOnlyDataset(Dataset):
 def test_expand_dataset_list_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("torchgeo_bench.main.list_datasets", lambda: ["m-eurosat", "benv2"])
     assert _expand_dataset_list("all") == ["m-eurosat", "benv2"]
+    assert _expand_dataset_list(["all"]) == ["m-eurosat", "benv2"]
 
 
 def test_normalize_bands_value_none_and_list() -> None:

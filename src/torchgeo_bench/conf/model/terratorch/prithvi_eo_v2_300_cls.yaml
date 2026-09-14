@@ -1,11 +1,21 @@
-_target_: torchgeo_bench.models.TerraTorchPrithviBench
-backbone_name: prithvi_eo_v2_300
-pretrained: true
-target_size: 224
 name: tt_prithvi_eo_v2_300_cls
-eval:
-  segmentation:
-    # Blocks share one spatial grid; use four depths, deepest first (verified with experiments/scripts/introspect_seg_layers.py).
-    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
-  c_range: [-6, 5, 60]
-pool: cls
+target: torchgeo_bench.models.TerraTorchPrithviBench
+track: image
+seed_from_run: false
+kwargs:
+  backbone_name: prithvi_eo_v2_300
+  pretrained: true
+  target_size: 224
+  pool: cls
+classification:
+  linear:
+    c_log10_start: -6.0
+    c_log10_stop: 5.0
+    c_count: 60
+segmentation:
+  layers:
+  - blocks.23
+  - blocks.17
+  - blocks.11
+  - blocks.5
+dataset_overrides: {}

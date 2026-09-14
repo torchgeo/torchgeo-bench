@@ -22,7 +22,10 @@ from _seg_sweep_common import (
     run_exclusively,
     torchgeo_bench_cli,
     write_json_atomic,
+    write_run_config,
 )
+
+from torchgeo_bench.config_schema import RunConfig
 
 logger = logging.getLogger(__name__)
 VAL_PATTERN = re.compile(r"Epoch (\d+) Val mIoU: (\S+)")
@@ -211,29 +214,48 @@ class StudyRunner(BaseGpuRunner):
 
     def _command(self, job: Job, gpu: int, attempt: int) -> list[str]:
         loader_batch = max(1, job.model.loader_batch_size // (2 ** (attempt - 1)))
+        config_path = self.config.state_dir / "configs" / f"{job.job_id}.yaml"
+        write_run_config(
+            config_path,
+            RunConfig.model_validate(
+                {
+                    "model": {"name": job.model.config},
+                    "datasets": [job.dataset.name],
+                    "segmentation": {
+                        "head": "fpn",
+                        "epochs": job.variant.epochs,
+                        "learning_rate": job.variant.lr,
+                        "scheduler": job.variant.scheduler,
+                        "batch_size": job.model.probe_batch_size,
+                        "cache_features": True,
+                        "cache_dtype": "float16",
+                    },
+                }
+            ),
+        )
         return [
             sys.executable,
             "-m",
-            "torchgeo_bench.cli",
+            "torchgeo_bench",
             "run",
-            f"model={job.model.config}",
-            f"dataset.names=[{job.dataset.name}]",
-            f"dataset.bands={job.dataset.bands}",
-            "dataset.image_size=224",
-            f"dataset.batch_size={loader_batch}",
-            f"dataset.num_workers={self.config.num_workers}",
-            f"seed={self.config.seed}",
-            f"device=cuda:{gpu}",
-            "eval.segmentation.head_type=fpn",
-            f"eval.segmentation.epochs={job.variant.epochs}",
-            f"eval.segmentation.lr={job.variant.lr}",
-            f"eval.segmentation.lr_scheduler={job.variant.scheduler}",
-            f"eval.segmentation.batch_size={job.model.probe_batch_size}",
-            "eval.segmentation.cache_features=true",
-            "eval.segmentation.cache_dtype=float16",
-            "verbose=true",
-            f"output={self._output_path(job)}",
-            "resume=false",
+            "--config",
+            str(config_path),
+            "--bands",
+            job.dataset.bands,
+            "--image-size",
+            "224",
+            "--batch-size",
+            str(loader_batch),
+            "--workers",
+            str(self.config.num_workers),
+            "--seed",
+            str(self.config.seed),
+            "--device",
+            f"cuda:{gpu}",
+            "--verbose",
+            "--output",
+            str(self._output_path(job)),
+            "--no-resume",
         ]
 
     def _run_job(self, job: Job, gpu: int) -> bool:

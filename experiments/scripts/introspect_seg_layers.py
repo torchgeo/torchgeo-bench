@@ -15,15 +15,20 @@ import re
 from pathlib import Path
 
 import torch
-import yaml
 
-from torchgeo_bench.config import CONF_DIR, compose_config, instantiate
+from torchgeo_bench.config import list_model_configs
+from torchgeo_bench.config_schema import InputConfig, ModelConfig, RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.presets import (
+    NORMALIZATIONS,
+    build_model,
+    load_model_preset,
+    resolve_run_config,
+)
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 
 logger = logging.getLogger(__name__)
-
-CONF = CONF_DIR / "model"
 
 CANDIDATE = re.compile(r"^(.*\b(?:blocks|encoder|layers|stages|features))\.(\d+)$|^(layer)(\d+)$")
 
@@ -31,7 +36,7 @@ CANDIDATE = re.compile(r"^(.*\b(?:blocks|encoder|layers|stages|features))\.(\d+)
 SKIP_TARGETS = {"ImageStatsBench", "RCFBench", "SAM3Encoder"}
 
 
-def band_specs(dataset: str, bands: str):
+def band_specs(dataset: str, bands: str) -> list[BandSpec]:
     """Return the BandSpec list a model would receive for this dataset."""
     bench = get_bench_dataset_class(dataset)()
     return bench.select_band_specs(tuple(bench.rgb_bands) if bands == "rgb" else None)
@@ -120,20 +125,31 @@ def main() -> None:
 
     only = set(args.only.split(",")) if args.only else None
     results: dict[str, dict] = {}
-    for path in sorted(CONF.rglob("*.yaml")):
-        conf = yaml.safe_load(path.read_text()) or {}
-        name, target = conf.get("name"), conf.get("_target_", "")
-        if not name or not target or "coordbench" in target:
+    for config_name in list_model_configs():
+        selection = ModelConfig(name=config_name)
+        preset = load_model_preset(selection)
+        name = preset.name
+        if preset.track != "image":
             continue
-        if target.rsplit(".", 1)[-1] in SKIP_TARGETS:
+        if preset.target.rsplit(".", 1)[-1] in SKIP_TARGETS:
             continue
         if only and name not in only:
             continue
-        config_name = path.relative_to(CONF).with_suffix("").as_posix()
-        cfg = compose_config([f"model={config_name}"]).model
-        model = instantiate(cfg, bands=band_specs(args.dataset, args.bands))
+        config, preset = resolve_run_config(
+            RunConfig(
+                model=selection,
+                datasets=[args.dataset],
+                input=InputConfig(bands=args.bands),
+            ),
+            args.dataset,
+        )
+        model = build_model(
+            preset,
+            bands=band_specs(args.dataset, args.bands),
+            normalization=NORMALIZATIONS[config.input.normalization],
+        )
         model.eval()
-        seen = measure(model)
+        seen = measure(model, size=config.input.image_size or 224)
         if not seen:
             # Record the incompatibility and fail after writing the report.
             results[name] = {
@@ -146,7 +162,7 @@ def main() -> None:
         picks, strategy = choose(seen)
         results[name] = {
             "config": config_name,
-            "existing": ((conf.get("eval") or {}).get("segmentation") or {}).get("layers"),
+            "existing": config.segmentation.layers,
             "strategy": strategy,
             "layers": picks,
             "shapes": {p: list(seen[p]) for p in picks},

@@ -1,5 +1,7 @@
-# Equal-Earth coordinates with random Fourier features; 512-dimensional output.
-# Requires the `coordbench` extra: pip install -e ".[coordbench]"
-_target_: torchgeo_bench.coordbench.models.GeoCLIPLocationEncoder
-repo: MVRL/geoclip-location-encoder
 name: geoclip
+target: torchgeo_bench.coordbench.models.GeoCLIPLocationEncoder
+track: coord
+seed_from_run: false
+kwargs:
+  repo: MVRL/geoclip-location-encoder
+dataset_overrides: {}

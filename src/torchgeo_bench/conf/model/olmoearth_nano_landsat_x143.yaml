@@ -1,11 +1,15 @@
-_target_: torchgeo_bench.models.OlmoEarthBenchModel
-model_size: nano
-patch_size: 8
-input_res: null
-time_steps: 1
-std_multiplier: 2.0
-normalize: false
-image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
-# Only used with norm_from_pretrained=true; the default auto path uses Landsat dataset statistics.
-landsat_scale_factor: 3.643  # uint8*(10000/255)*3.643 ≈ uint8*142.9 ≈ uint8/255/0.0000275 (invert LC2 SR scale)
 name: olmoearth_v1_nano_lsat_x143
+target: torchgeo_bench.models.OlmoEarthBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_size: nano
+  patch_size: 8
+  input_res: null
+  time_steps: 1
+  std_multiplier: 2.0
+  normalize: false
+  landsat_scale_factor: 3.643
+input:
+  image_size: null
+dataset_overrides: {}

@@ -7,9 +7,9 @@ import pandas as pd
 import pytest
 import torch
 
-from torchgeo_bench.config import compose_config, instantiate
+from torchgeo_bench.config_schema import ModelConfig, RunConfig, RuntimeConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.main import resolve_model_config
+from torchgeo_bench.presets import build_model, resolve_run_config
 
 
 @pytest.mark.parametrize(
@@ -31,12 +31,19 @@ def test_extraction_discovers_and_builds_packaged_model_configs() -> None:
     model_name = cleanlab_extract_probs.build_name_to_config_map()["rcf"]
     bench = get_bench_dataset_class("m-eurosat")()
     bands = cleanlab_extract_probs.band_specs(bench, "rgb")
-    cfg = compose_config([f"model={model_name}", "seed=17"])
-    model_cfg = resolve_model_config(cfg.model, "m-eurosat")
-    model = instantiate(model_cfg, bands=bands, normalization="identity")
+    cfg, model_cfg = resolve_run_config(
+        RunConfig(
+            model=ModelConfig(name=model_name),
+            datasets=["m-eurosat"],
+            runtime=RuntimeConfig(seed=17),
+        ),
+        "m-eurosat",
+    )
+    model = build_model(model_cfg, bands=bands, normalization="identity")
     features = model(torch.zeros(1, 3, 16, 16))
-    assert model_cfg.seed == 17
-    assert features.shape == (1, cfg.model.features)
+    assert model_cfg.kwargs["seed"] == 17
+    assert cfg.runtime.seed == 17
+    assert features.shape == (1, model_cfg.kwargs["features"])
     assert torch.isfinite(features).all()
 
 
@@ -85,3 +92,30 @@ def test_extraction_defaults_use_repository_results(monkeypatch: pytest.MonkeyPa
     repo_root = Path(__file__).resolve().parents[3]
     assert args.results == repo_root / "results" / "models"
     assert args.out == repo_root / "results" / "cleanlab" / "probs"
+
+
+def test_extraction_loads_strict_custom_model_config(tmp_path: Path) -> None:
+    path = tmp_path / "run.yaml"
+    path.write_text(
+        "model:\n"
+        "  name: custom-rcf\n"
+        "  target: torchgeo_bench.models.RCFBench\n"
+        "  kwargs:\n"
+        "    features: 8\n"
+        "    seed: 17\n"
+        "datasets: [m-eurosat]\n"
+        "input:\n"
+        "  image_size: null\n"
+        "  time_steps: 2\n"
+    )
+    cfg = cleanlab_extract_probs.source_config(path, "custom-rcf", "m-eurosat")
+    effective, preset = resolve_run_config(cfg, "m-eurosat")
+    assert effective.input.image_size is None
+    assert effective.input.time_steps == 2
+    assert preset.kwargs == {"features": 8, "seed": 17}
+    bands = cleanlab_extract_probs.band_specs(get_bench_dataset_class("m-eurosat")(), "rgb")
+    model = build_model(preset, bands=bands, normalization="identity")
+    assert model(torch.zeros(1, 3, 16, 16)).shape == (1, 8)
+    path.write_text(path.read_text() + "unknown: true\n")
+    with pytest.raises(ValueError, match="Extra inputs"):
+        cleanlab_extract_probs.source_config(path, "custom-rcf", "m-eurosat")

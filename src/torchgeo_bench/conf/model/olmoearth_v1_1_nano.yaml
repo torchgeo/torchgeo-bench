@@ -1,19 +1,22 @@
-_target_: torchgeo_bench.models.OlmoEarthBenchModel
-model_size: nano
-version: v1_1
-patch_size: 8
-input_res: null
-time_steps: 1
-std_multiplier: 2.0
-normalize: false
-image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
-min_image_size: 64
 name: olmoearth_v1_1_nano
-eval:
-  segmentation:
-    # All four encoder blocks share a 28x28 grid at 224px; use each block, deepest first.
-    layers:
-      - "encoder_model.encoder.blocks.3"
-      - "encoder_model.encoder.blocks.2"
-      - "encoder_model.encoder.blocks.1"
-      - "encoder_model.encoder.blocks.0"
+target: torchgeo_bench.models.OlmoEarthBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_size: nano
+  version: v1_1
+  patch_size: 8
+  input_res: null
+  time_steps: 1
+  std_multiplier: 2.0
+  normalize: false
+  min_image_size: 64
+input:
+  image_size: null
+segmentation:
+  layers:
+  - encoder_model.encoder.blocks.3
+  - encoder_model.encoder.blocks.2
+  - encoder_model.encoder.blocks.1
+  - encoder_model.encoder.blocks.0
+dataset_overrides: {}

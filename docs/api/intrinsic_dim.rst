@@ -7,8 +7,12 @@ Wrapper around the `torchid <https://github.com/jacobpennington/torchid>`__
 intrinsic-dimension estimators plus dependency-free centered feature-spectrum
 diagnostics.  Used by
 :func:`torchgeo_bench.main.evaluate_intrinsic_dim` to attach
-``method="intrinsic_dim"`` rows to the standard results CSV alongside the
-KNN and linear-probe metrics.
+``method="intrinsic_dim"`` rows to
+``output.intrinsic_dim_directory/<model name>.csv``. An explicit
+``output.file`` combines them with the image-run metrics instead.
+
+Enable the pass with ``intrinsic_dim.enabled: true`` in image YAML.
+``intrinsic_dim.estimators: []`` requests only feature-spectrum diagnostics.
 
 The ``torchid`` dependency is optional and gated behind the ``[id]`` extra
 in :file:`pyproject.toml` (it requires Python ≥ 3.13).  When the dependency

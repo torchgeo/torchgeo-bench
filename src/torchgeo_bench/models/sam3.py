@@ -140,7 +140,7 @@ class SAM3Encoder(BenchModel):
         if self.num_channels != 3:
             raise ValueError(
                 f"SAM3Encoder only supports 3-channel RGB input, got {self.num_channels}. "
-                "Run with dataset.bands=[red,green,blue] or skip this dataset."
+                "Run with --bands red,green,blue or skip this dataset."
             )
 
         from transformers import Sam3Model

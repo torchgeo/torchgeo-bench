@@ -1,7 +1,11 @@
-_target_: torchgeo_bench.models.TimmPatchBenchModel
-model_name: swinv2_tiny_window8_256
-pretrained: true
-global_pool: avg
-seed: null
 name: swinv2_tiny_window8_256
-auto_resize: true
+target: torchgeo_bench.models.TimmPatchBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_name: swinv2_tiny_window8_256
+  pretrained: true
+  global_pool: avg
+  seed: null
+  auto_resize: true
+dataset_overrides: {}

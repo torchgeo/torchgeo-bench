@@ -1,21 +1,22 @@
-# Routes S2/SAR/Landsat/NAIP bands by sensor.
-
-_target_: torchgeo_bench.models.OlmoEarthBenchModel
-model_size: base
-version: v1_1
-patch_size: 8
-input_res: null
-time_steps: 1
-std_multiplier: 2.0
-normalize: false
-image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
-min_image_size: 64
 name: olmoearth_v1_1_base
-eval:
-  segmentation:
-    # All encoder blocks keep a 28x28 grid at 224px; use four depths, deepest first, not decoder or target_encoder layers.
-    layers:
-      - "encoder_model.encoder.blocks.11"
-      - "encoder_model.encoder.blocks.8"
-      - "encoder_model.encoder.blocks.5"
-      - "encoder_model.encoder.blocks.2"
+target: torchgeo_bench.models.OlmoEarthBenchModel
+track: image
+seed_from_run: false
+kwargs:
+  model_size: base
+  version: v1_1
+  patch_size: 8
+  input_res: null
+  time_steps: 1
+  std_multiplier: 2.0
+  normalize: false
+  min_image_size: 64
+input:
+  image_size: null
+segmentation:
+  layers:
+  - encoder_model.encoder.blocks.11
+  - encoder_model.encoder.blocks.8
+  - encoder_model.encoder.blocks.5
+  - encoder_model.encoder.blocks.2
+dataset_overrides: {}

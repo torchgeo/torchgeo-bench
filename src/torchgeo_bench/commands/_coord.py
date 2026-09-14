@@ -44,10 +44,16 @@ def load_config(args: argparse.Namespace) -> CoordConfig:
 
 def run(args: argparse.Namespace) -> None:
     """Validate YAML/flags, print a dry run, or execute coordinate evaluation."""
-    config = load_config(args)
+    try:
+        config = load_config(args)
+    except (OSError, ValueError, yaml.YAMLError) as error:  # allow-except: CLI configuration errors
+        raise SystemExit(f"error: {error}") from error
     if getattr(args, "dry_run", False):
         print(yaml.safe_dump(config.model_dump_yaml(), sort_keys=False), end="")
         return
     from torchgeo_bench.coordbench.run import run_coordbench
 
     run_coordbench(config)
+
+
+coord = run

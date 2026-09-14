@@ -302,7 +302,7 @@ class TestKNNGPUPath:
         monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
         d = singlelabel_data
         clf = KNNClassifier(n_neighbors=5, device="cuda")
-        with pytest.raises(RuntimeError, match=r"eval\.knn_device=cpu"):
+        with pytest.raises(RuntimeError, match="--knn-device cpu"):
             clf.fit(d["x_train"], d["y_train"])
 
 

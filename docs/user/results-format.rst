@@ -15,7 +15,7 @@ across three directories, keyed by ``<model name>.csv``:
      - Contents
    * - ``results/models/``
      - ``knn5``, ``linear``, ``seg-*``
-     - Classification/segmentation metrics -- rewritten on every metrics rerun.
+     - Classification/segmentation metrics -- appended on each metrics run.
    * - ``results/profiles/``
      - ``profile``
      - Throughput/latency/param-count measurements -- one-time per model+hardware.
@@ -41,7 +41,9 @@ Sample rows
 
 Datasets emit unnormalized tensors; each model wrapper normalises inside
 :meth:`~torchgeo_bench.models.BenchModel.normalize_inputs` according to
-the strategy selected by ``cfg.dataset.normalization``.  Allowed values:
+the strategy selected by ``input.normalization``. The CSV retains the internal
+names below: ``dataset`` maps to ``bandspec_zscore``, ``model`` to ``model_native``,
+and ``none`` to ``identity``.
 
 .. list-table::
    :header-rows: 1
@@ -75,12 +77,12 @@ Method values
 ``intrinsic_dim``  Optional intrinsic-dimension metrics on extracted embeddings (requires
                    the ``[id]`` extra) plus dependency-free centered feature-spectrum
                    diagnostics. Both are emitted when
-                   ``eval.intrinsic_dim.enabled=true``; set ``estimators=[]`` for
+                   YAML ``intrinsic_dim: {enabled: true}``; set ``estimators: []`` for
                    spectrum-only output without ``torchid``. -> ``results/intrinsic_dim/``
 ``profile``        Optional throughput/latency/param-count measurement (requires
-                   ``eval.profile.enabled=true``). -> ``results/profiles/``
+                   YAML ``profile: {enabled: true}``). -> ``results/profiles/``
 ``seg-<head>``     Segmentation probe with the configured head (``linear`` / ``conv_block`` /
-                   ``fpn`` / ``dpt``). -> ``results/models/``
+                   ``fpn`` / ``dpt`` / ``patch_linear``). -> ``results/models/``
 ================== ==================================================================================
 
 CSV schema
@@ -106,8 +108,8 @@ Column               Description
 ``n_val``            Validation-split sample count.
 ``n_test``           Test-split sample count.
 ``seed``             RNG seed used for the run.
-``model``            Fully-qualified model class (``cfg.model._target_``).
-``name``             Human-readable model name (``cfg.model.name``).
+``model``            Fully-qualified class from the resolved preset's ``target``.
+``name``             Human-readable model name from the resolved preset.
 ``normalization``    Strategy applied by the model wrapper (see table above).
 ``image_size``       Input resize size (``None`` if no resizing).
 ``interpolation``    Resize interpolation mode.
@@ -115,9 +117,9 @@ Column               Description
 ``bands``            ``rgb`` / ``all`` / a sorted comma-joined list.
 ``num_classes``      Dataset label count. It is also part of the resume key so
                      label-schema changes cannot reuse stale rows.
-``c_range_start``    ``eval.c_range[0]``.
-``c_range_stop``     ``eval.c_range[1]``.
-``c_range_num``      ``eval.c_range[2]``.
+``c_range_start``    ``classification.linear.c_log10_start``.
+``c_range_stop``     ``classification.linear.c_log10_stop``.
+``c_range_num``      ``classification.linear.c_count``.
 ``merge_val``        Whether ``train+val`` was merged before final logistic fit.
 ``bootstrap``        Number of bootstrap resamples used for CIs.
 ``fw_iou``           Frequency-weighted IoU (segmentation only).
@@ -137,7 +139,7 @@ per GPU or per dataset) at the same output file without corrupting it.
 Resume mode
 -----------
 
-When ``resume=true``, the runner reads the existing CSV(s) at startup and
+With ``--resume`` or YAML ``output: {resume: true}``, the runner reads existing CSVs and
 skips any combination that already has a matching row.  Since profile and
 intrinsic-dim rows may live in their own files (see above), resume reads
 all three files -- ``results/models/<name>.csv``,
@@ -146,13 +148,15 @@ all three files -- ``results/models/<name>.csv``,
 
 .. code-block:: python
 
-   (dataset, method, model._target_, model.name,
-    normalization, image_size, interpolation, partition, bands, num_classes)
+   (dataset, method, model, name, normalization, image_size, interpolation,
+    partition, bands, num_classes, res, pool, config_hash)
 
 Note that ``method`` is per-method (``knn5`` / ``linear`` /
 ``intrinsic_dim`` / ``seg-<head_type>``), so re-running with
-``eval.skip_linear=false`` after a ``skip_linear=true`` run will fill in
-just the linear-probe rows.
+``--methods linear`` never requires a KNN row. Resume accepts historical
+configuration hashes only when their effective preprocessing and evaluation
+settings match. Changed evaluation settings can require a new run; additive
+profile and intrinsic-dimension passes do not invalidate probe hashes.
 
 Rows written before version 0.5.0 do not have ``num_classes`` and are treated
 as incomplete by resume mode. The checked-in SpaceNet2/7 rows produced under

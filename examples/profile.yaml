@@ -1,0 +1,15 @@
+# Repeated measurements of one real batch; JSON is written to stdout.
+schema_version: 1
+model:
+  name: rcf
+dataset: m-eurosat
+input:
+  bands: rgb
+runtime:
+  device: cpu
+  batch_size: 8
+  seed: 0
+warmup: 1
+measurements: 5
+precision: float32
+count_flops: false

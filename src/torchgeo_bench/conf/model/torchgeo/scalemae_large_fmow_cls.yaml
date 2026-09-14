@@ -1,16 +1,21 @@
-# fMoW-pretrained Scale-MAE requires exactly three ordered RGB bands.
-
-_target_: torchgeo_bench.models.TorchGeoScaleMAEBench
-factory: scalemae_large_patch16
-weights_class: ScaleMAELarge16_Weights
-weights_member: FMOW_RGB
-auto_resize: false
-image_size: 224
-interpolation: area
-res: 1.0
 name: tgeo_scalemae_large_fmow_cls
-pool: cls
-eval:
-  segmentation:
-    # Use four encoder depths, deepest first; SegmentationProbe strips the backbone.* prefix.
-    layers: ["blocks.23", "blocks.17", "blocks.11", "blocks.5"]
+target: torchgeo_bench.models.TorchGeoScaleMAEBench
+track: image
+seed_from_run: false
+kwargs:
+  factory: scalemae_large_patch16
+  weights_class: ScaleMAELarge16_Weights
+  weights_member: FMOW_RGB
+  auto_resize: false
+  res: 1.0
+  pool: cls
+input:
+  image_size: 224
+  interpolation: area
+segmentation:
+  layers:
+  - blocks.23
+  - blocks.17
+  - blocks.11
+  - blocks.5
+dataset_overrides: {}
