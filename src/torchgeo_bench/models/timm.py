@@ -8,7 +8,7 @@ import timm
 import torch
 import torch.nn.functional as F
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from ._normalization import InputUnit, NormalizationStrategy
 from .interface import BenchModel

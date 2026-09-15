@@ -16,22 +16,22 @@ from PIL import Image
 from rasterio.io import MemoryFile
 from rasterio.transform import Affine
 
-from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets import V1Source, get_dataset_spec
 
 
 def require_dataset_data(name: str) -> None:
     """Skip absent optional real data, never an incompatible existing cache."""
-    if name.startswith("m-"):
+    spec = get_dataset_spec(name)
+    source = spec.source
+    if isinstance(source, V1Source):
         paths = [
-            Path("data/classification_v1.0") / name,
-            Path("data/classification_v1.0_wds") / name,
+            Path(source.hdf5_root) / spec.storage_name,
+            Path(source.root) / spec.storage_name,
         ]
-    elif name in ("eurosat", "eurosat-spatial"):
-        paths = [Path("data/eurosat")]
-    elif name == "resisc45":
-        paths = [Path("data/resisc45")]
+    elif source.kind == "torchgeo":
+        paths = [Path(source.root)]
     else:
-        paths = [Path("data/geobenchv2") / name]
+        paths = [Path(source.root) / spec.storage_name]
     if not any(path.exists() for path in paths):
         pytest.skip(f"{name} data not supplied; expected one of {paths}")
 
@@ -46,7 +46,7 @@ def write_classification_files(
     """Write separable V1 JSON-HDF5 samples with distinct IDs and pixels in each split."""
     directory = root / "data" / "classification_v1.0" / dataset_name
     directory.mkdir(parents=True)
-    bench = get_bench_dataset_class(dataset_name)()
+    bench = get_dataset_spec(dataset_name)
     specs = bench.select_band_specs(None if all_bands else tuple(bench.rgb_bands))
     partition: dict[str, list[str]] = {}
     for split_index, (split, per_class) in enumerate((("train", 12), ("valid", 4), ("test", 4))):

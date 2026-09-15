@@ -16,6 +16,7 @@ from pathlib import Path
 
 import torch
 
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.config import list_model_configs
 from torchgeo_bench.config.presets import (
     NORMALIZATIONS,
@@ -25,8 +26,7 @@ from torchgeo_bench.config.presets import (
 )
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import InputConfig, ModelConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets import get_dataset_spec
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,8 @@ SKIP_TARGETS = {"ImageStatsBench", "RCFBench", "SAM3Encoder"}
 
 def band_specs(dataset: str, bands: str) -> list[BandSpec]:
     """Return the BandSpec list a model would receive for this dataset."""
-    bench = get_bench_dataset_class(dataset)()
-    return bench.select_band_specs(tuple(bench.rgb_bands) if bands == "rgb" else None)
+    bench = get_dataset_spec(dataset)
+    return list(bench.select_band_specs(bench.rgb_bands if bands == "rgb" else None))
 
 
 class _Stub:

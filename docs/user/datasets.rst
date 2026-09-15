@@ -1,11 +1,7 @@
 Datasets
 ========
 
-``torchgeo-bench`` supports two generations of GeoBench datasets — V1 and
-V2 — plus wrappers around torchgeo's standalone EuroSAT and NWPU-RESISC45
-datasets.  All datasets share the
-:class:`~torchgeo_bench.datasets.BenchDataset` interface and are
-registered by name so they can be selected without importing every loader.
+``torchgeo-bench`` supports two generations of GeoBench datasets — V1 and V2 — plus torchgeo's standalone EuroSAT and NWPU-RESISC45 datasets. Each has a lightweight, immutable :class:`~torchgeo_bench.datasets.DatasetSpec`. Full metadata lookup and listing work without importing any loader.
 
 Filesystem layout
 -----------------
@@ -103,43 +99,43 @@ Supported V1 datasets
      - bands
      - multilabel
      - sensor
-     - Class
+     - Definition module
    * - ``m-bigearthnet``
      - 43
      - 12
      - **yes**
      - Sentinel-2
-     - :class:`~torchgeo_bench.datasets.MBigEarthNet`
+     - ``m_bigearthnet.SPEC``
    * - ``m-brick-kiln``
      - 2
      - 13
      - no
      - Sentinel-2
-     - :class:`~torchgeo_bench.datasets.MBrickKiln`
+     - ``m_brick_kiln.SPEC``
    * - ``m-eurosat``
      - 10
      - 13
      - no
      - Sentinel-2
-     - :class:`~torchgeo_bench.datasets.MEurosat`
+     - ``m_eurosat.SPEC``
    * - ``m-forestnet``
      - 12
      - 6
      - no
      - Landsat
-     - :class:`~torchgeo_bench.datasets.MForestnet`
+     - ``m_forestnet.SPEC``
    * - ``m-pv4ger``
      - 2
      - 3
      - no
      - Aerial RGB
-     - :class:`~torchgeo_bench.datasets.MPv4ger`
+     - ``m_pv4ger.SPEC``
    * - ``m-so2sat``
      - 17
      - 18
      - no
      - Sentinel-1 + S2
-     - :class:`~torchgeo_bench.datasets.MSo2Sat`
+     - ``m_so2sat.SPEC``
 
 Multi-label datasets (``m-bigearthnet``) report the ``micro_mAP`` metric
 instead of accuracy.
@@ -148,12 +144,12 @@ GeoBench V2 — classification
 ----------------------------
 
 ================== ====== ===== ============ ====================================== =====================================
-CLI name           #cls   bands multilabel   sensor                                 Class
+CLI name           #cls   bands multilabel   sensor                                 Definition module
 ================== ====== ===== ============ ====================================== =====================================
-``benv2``          19     14    **yes**      Sentinel-1 + Sentinel-2 (multi-modal)  :class:`~torchgeo_bench.datasets.BENV2`
-``forestnet``      12     6     no           Sentinel-2                             :class:`~torchgeo_bench.datasets.Forestnet`
-``so2sat``         17     12    no           Sentinel-1 + Sentinel-2                :class:`~torchgeo_bench.datasets.So2Sat`
-``treesatai``      13     19    **yes**      Aerial + S2 + S1 (multi-modal)         :class:`~torchgeo_bench.datasets.TreeSatAI`
+``benv2``          19     14    **yes**      Sentinel-1 + Sentinel-2 (multi-modal)  ``benv2.SPEC``
+``forestnet``      12     6     no           Sentinel-2                             ``forestnet.SPEC``
+``so2sat``         17     12    no           Sentinel-1 + Sentinel-2                ``so2sat.SPEC``
+``treesatai``      15     19    **yes**      Aerial + S2 + S1 (multi-modal)         ``treesatai.SPEC``
 ================== ====== ===== ============ ====================================== =====================================
 
 V2 datasets are stored as a single ``.tortilla`` file each, hosted under
@@ -185,29 +181,29 @@ GeoBench V2 — segmentation
 --------------------------
 
 ==================== ====== ===== ============================================ ==============================================================
-CLI name             #cls   bands notes                                        Class
+CLI name             #cls   bands notes                                        Definition module
 ==================== ====== ===== ============================================ ==============================================================
-``burn_scars``       3      6                                                  :class:`~torchgeo_bench.datasets.BurnScars`
-``caffe``            4      1     aerial grayscale                             :class:`~torchgeo_bench.datasets.CaFFe`
-``cloudsen12``       4      12                                                 :class:`~torchgeo_bench.datasets.CloudSEN12`
-``dynamic_earthnet`` 7      16                                                 :class:`~torchgeo_bench.datasets.DynamicEarthNet`
-``flair2``           13     5     aerial + Sentinel-2                          :class:`~torchgeo_bench.datasets.FLAIR2`
-``fotw``             4      4     Fields of the World                          :class:`~torchgeo_bench.datasets.FieldsOfTheWorld`
-``kuro_siwo``        4      3     SAR ``vv`` / ``vh`` + DEM (no RGB triplet)   :class:`~torchgeo_bench.datasets.KuroSiwo`
-``pastis``           20     16    Sentinel-2 + Sentinel-1 (multi-modal)        :class:`~torchgeo_bench.datasets.PASTIS`
-``spacenet2``        2      9     WorldView 8-band + pan                       :class:`~torchgeo_bench.datasets.SpaceNet2`
-``spacenet7``        2      3                                                  :class:`~torchgeo_bench.datasets.SpaceNet7`
+``burn_scars``       3      6                                                  ``burn_scars.SPEC``
+``caffe``            4      1     aerial grayscale                             ``caffe.SPEC``
+``cloudsen12``       4      12                                                 ``cloudsen12.SPEC``
+``dynamic_earthnet`` 7      16                                                 ``dynamic_earthnet.SPEC``
+``flair2``           13     5     aerial + Sentinel-2                          ``flair2.SPEC``
+``fotw``             4      4     Fields of the World                          ``fotw.SPEC``
+``kuro_siwo``        4      3     SAR ``vv`` / ``vh`` + DEM (no RGB triplet)   ``kuro_siwo.SPEC``
+``pastis``           20     16    Sentinel-2 + Sentinel-1 (multi-modal)        ``pastis.SPEC``
+``spacenet2``        2      9     WorldView 8-band + pan                       ``spacenet2.SPEC``
+``spacenet7``        2      3                                                  ``spacenet7.SPEC``
 ==================== ====== ===== ============================================ ==============================================================
 
 Other
 -----
 
 ==================== ============================================================================
-CLI name             Class
+CLI name             Definition module
 ==================== ============================================================================
-``eurosat``          :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper, random split)
-``eurosat-spatial``  :class:`~torchgeo_bench.datasets.EuroSATSpatial`  (longitude-based split)
-``resisc45``         :class:`~torchgeo_bench.datasets.RESISC45`  (45-class aerial scenes, RGB)
+``eurosat``          ``eurosat.SPEC`` (TorchGeo reader, random split)
+``eurosat-spatial``  ``eurosat.SPATIAL_SPEC`` (longitude-based split)
+``resisc45``         ``resisc45.SPEC`` (45-class aerial scenes, RGB)
 ==================== ============================================================================
 
 ``resisc45`` is 31,500 RGB scenes at 256x256 across 45 classes, on torchgeo's
@@ -233,11 +229,11 @@ evaluate every registered dataset. YAML accepts ``datasets: [m-eurosat, caffe]``
 Bands selection
 ---------------
 
-Each dataset declares an ordered list of :class:`~torchgeo_bench.datasets.BandSpec`
+Each dataset declares an ordered tuple of :class:`~torchgeo_bench.datasets.BandSpec`
 objects.  Three modes are supported:
 
 * ``--bands rgb`` *(default)* — only the bands listed in
-  :attr:`~torchgeo_bench.datasets.BenchDataset.rgb_bands`.
+  :attr:`~torchgeo_bench.datasets.DatasetSpec.rgb_bands`.
 * ``--bands all`` — every band the dataset exposes.
 * ``--bands red,green,blue,nir`` — an explicit subset.
 

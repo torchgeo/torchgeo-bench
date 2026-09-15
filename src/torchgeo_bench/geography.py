@@ -33,13 +33,14 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal
 
 import numpy as np
 
-from .datasets import get_bench_dataset_class, list_datasets
+from .datasets import V1Source, get_dataset_spec, list_datasets
 from .datasets._metadata import read_hdf5_metadata
-from .datasets.loading import download_command
+from .datasets.catalog import download_command
 
 logger = logging.getLogger(__name__)
 
@@ -48,17 +49,22 @@ INDEX_NAME = "index.json"
 
 Status = Literal["extracted", "no_geo", "not_downloaded"]
 
-NO_GEO: dict[str, str] = {
-    "so2sat": "tortilla metadata has no lon/lat columns",
-    "m-so2sat": "every sample has transform=None and crs=None",
-    "resisc45": (
-        "scene-classification JPEGs with no georeferencing: no sampled image "
-        "carries any EXIF block, and the upstream release ships no coordinate table"
-    ),
-}
+NO_GEO = MappingProxyType(
+    {
+        name: reason
+        for name in list_datasets()
+        if (reason := get_dataset_spec(name).geography.reason) is not None
+    }
+)
 
 # Re-splits reuse coordinates from the dataset with the same imagery.
-GEO_ALIAS: dict[str, str] = {"eurosat-spatial": "m-eurosat", "eurosat": "m-eurosat"}
+GEO_ALIAS = MappingProxyType(
+    {
+        name: alias
+        for name in list_datasets()
+        if (alias := get_dataset_spec(name).geography.alias_of) is not None
+    }
+)
 
 BIN_RES = 0.25  # Degrees per density-map cell.
 POINT_CAP = 2000  # per-dataset cap on individually plotted samples
@@ -291,22 +297,20 @@ def _attribute_continents(lon: np.ndarray, lat: np.ndarray) -> Counter:
 def _dataset_dir(name: str) -> Path | None:
     """Return the on-disk directory for a dataset, or ``None`` if absent.
 
-    V1 prefers the same sharded cache as the benchmark; other layouts use
-    the dataset's fixed ``data_root()``.
+    V1 prefers the same sharded cache as the benchmark; roots come from the spec.
     """
-    from .datasets.geobench_v1 import V1_SHARDED_ROOT, _V1Dataset
-
-    cls = get_bench_dataset_class(name)
-    if issubclass(cls, _V1Dataset):
-        sharded = V1_SHARDED_ROOT / name
+    spec = get_dataset_spec(name)
+    source = spec.source
+    if isinstance(source, V1Source):
+        sharded = Path(source.root) / spec.storage_name
         if any(sharded.glob("shard_*.tar")):
             return sharded
-    root = cls.data_root()
-    # V1/V2 roots contain dataset subdirectories; torchgeo roots point directly to a dataset.
-    candidate = root / name
-    if candidate.is_dir():
-        return candidate
-    return root if root.is_dir() else None
+        candidate = Path(source.hdf5_root) / spec.storage_name
+    else:
+        candidate = Path(source.root)
+        if source.kind == "v2":
+            candidate /= spec.storage_name
+    return candidate if candidate.is_dir() else None
 
 
 def _build_record(name: str, data: dict, continents: Counter) -> GeoRecord:
@@ -370,17 +374,16 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
     """
     workers = workers or min(32, os.cpu_count() or 8)
 
-    if name in NO_GEO:
-        return GeoRecord(name=name, status="no_geo", reason=NO_GEO[name])
+    spec = get_dataset_spec(name)
+    if spec.geography.reason is not None:
+        return GeoRecord(name=name, status="no_geo", reason=spec.geography.reason)
 
-    if name in GEO_ALIAS:
-        target = GEO_ALIAS[name]
+    if spec.geography.alias_of is not None:
+        target = spec.geography.alias_of
         record = extract_geography(target, workers=workers)
         return replace(record, name=name, alias_of=target)
 
-    command = (
-        "torchgeo-bench download geobench_v1" if name.startswith("m-") else download_command(name)
-    )
+    command = download_command(spec)
     directory = _dataset_dir(name)
     if directory is None:
         raise FileNotFoundError(f"No imagery for {name!r}. Run `{command}`.")

@@ -17,7 +17,7 @@ from typing import ClassVar, Protocol, Self, cast
 import torch
 import torch.nn.functional as F
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from ._normalization import NormalizationStrategy
 from .interface import BenchModel

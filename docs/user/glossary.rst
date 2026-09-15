@@ -4,12 +4,8 @@ Glossary
 .. glossary::
    :sorted:
 
-   BenchDataset
-       Abstract base class implemented by every dataset wrapper in
-       :mod:`torchgeo_bench.datasets`.  Declares static metadata (bands,
-       number of classes, task type, default split sizes). The public
-       :func:`~torchgeo_bench.datasets.load_split` API returns one PyTorch
-       ``Dataset`` with immutable resolved input and target metadata.
+   DatasetSpec
+       Immutable definition in :mod:`torchgeo_bench.datasets`. Declares bands, number of classes, task type, default split sizes, source policies, capabilities, and geography metadata. The public :func:`~torchgeo_bench.datasets.load_split` API returns one PyTorch ``Dataset`` with immutable resolved input and target metadata.
 
    BenchModel
        Abstract base class implemented by every backbone in

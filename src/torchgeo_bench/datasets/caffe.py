@@ -1,23 +1,20 @@
 """CaFFe (GeoBench V2) benchmark dataset."""
 
-from typing import ClassVar
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec
-from .geobench_v2 import _V2Dataset
+from .spec import DatasetSpec, SplitSizes, V2Source
 
+# fmt: off
+SPEC = DatasetSpec(
+    name="caffe",
+    task="segmentation",
+    num_classes=4,
+    multilabel=False,
+    rgb_bands=("gray",),
+    split_sizes=SplitSizes(train=4000, val=1000, test=2000),
+    source=V2Source("GeoBenchCaFFe"),
 
-class CaFFe(_V2Dataset):
-    """Aerial grayscale calving-front segmentation (4 classes)."""
-
-    name = "caffe"
-    task = "segmentation"
-    num_classes = 4
-    multilabel = False
-    rgb_bands: ClassVar[list[str]] = ["gray"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 4000, "val": 1000, "test": 2000}
-
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("aerial", "gray", "gray", mean=68.4868, std=82.7774, min=0, max=255),
-    ]
-    # fmt: on
+    ),
+)

@@ -5,10 +5,12 @@ from typing import TYPE_CHECKING, Literal
 
 from torchgeo_bench.bands import BandSpec
 
+from .spec import DatasetSpec, Split, Task
+
 if TYPE_CHECKING:
     from torch.utils.data import Dataset
 
-type Split = Literal["train", "val", "test"]
+__all__ = ["LoadedSplit", "ResolvedInput", "Split"]
 
 
 @dataclass(frozen=True)
@@ -44,13 +46,30 @@ class LoadedSplit:
     """
 
     dataset: "Dataset"
-    dataset_name: str
+    spec: DatasetSpec
     split: Split
     partition: str
     input: ResolvedInput
-    task: Literal["classification", "segmentation"]
-    num_classes: int
-    multilabel: bool
+
+    @property
+    def dataset_name(self) -> str:
+        """Return the authoritative benchmark identity."""
+        return self.spec.name
+
+    @property
+    def task(self) -> Task:
+        """Return the authoritative task."""
+        return self.spec.task
+
+    @property
+    def num_classes(self) -> int:
+        """Return the declared target count."""
+        return self.spec.num_classes
+
+    @property
+    def multilabel(self) -> bool:
+        """Return whether labels are multi-hot vectors."""
+        return self.spec.multilabel
 
     @property
     def bands(self) -> tuple[BandSpec, ...]:
@@ -60,4 +79,4 @@ class LoadedSplit:
     @property
     def target_key(self) -> Literal["label", "mask"]:
         """Return the existing canonical target key without changing target values."""
-        return "mask" if self.task == "segmentation" else "label"
+        return self.spec.target_key

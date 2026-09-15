@@ -18,15 +18,15 @@ from tests.support.data import write_classification_files
 from tests.support.runner import _compose_cfg, _synthetic_splits
 from torchgeo_bench.commands import _profile_runtime
 from torchgeo_bench.config.profile import ProfileConfig
-from torchgeo_bench.datasets import get_bench_dataset_class, load_split
+from torchgeo_bench.datasets import DatasetSpec, get_dataset_spec, load_split
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
-from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
+from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1, load_v1_split
 from torchgeo_bench.main import run_dataset
 from torchgeo_bench.resume import ResumeState
 
 
 def _write_train_only(root: Path, dataset_name: str, storage: str) -> None:
-    bench = get_bench_dataset_class(dataset_name)()
+    bench = get_dataset_spec(dataset_name)
     family = "classification_v1.0_wds" if storage == "shards" else "classification_v1.0"
     directory = root / "data" / family / dataset_name
     directory.mkdir(parents=True)
@@ -72,21 +72,23 @@ def train_only(
 def test_train_only_constructs_no_unrelated_splits_loaders_or_sample_probes(
     train_only: str,
 ) -> None:
-    bench_cls = get_bench_dataset_class("m-eurosat")
+    bench = get_dataset_spec("m-eurosat")
     backend = GeoBenchv1 if train_only == "hdf5" else GeoBenchv1Sharded
-    bench = bench_cls()
     state = torch.get_rng_state()
     with (
-        mock.patch.object(bench_cls, "_load_split", wraps=bench._load_split) as source,
+        mock.patch(
+            "torchgeo_bench.datasets.geobench_v1.load_v1_split", wraps=load_v1_split
+        ) as source,
         mock.patch.object(
-            bench_cls, "resolve_band_specs", wraps=bench.resolve_band_specs
+            DatasetSpec, "resolve_band_specs", wraps=bench.resolve_band_specs
         ) as select,
         mock.patch.object(backend, "__getitem__", side_effect=AssertionError("sample probe")),
         mock.patch("torch.utils.data.DataLoader", side_effect=AssertionError("batching")),
     ):
         train = load_split("m-eurosat", "train", bands=("nir", "red"))
     source.assert_called_once()
-    assert source.call_args.args == ("train",)
+    assert source.call_args.args == (bench, "train")
+    assert train.spec is bench
     assert source.call_args.kwargs["inputs"] is train.input
     select.assert_called_once_with(("nir", "red"))
     assert train.bands == (bench.bands[7], bench.bands[3])
@@ -111,7 +113,7 @@ def test_ordered_metadata_and_raw_targets_are_preserved(
     train_only: str, dataset_name: str, selection: str | tuple[str, ...] | None
 ) -> None:
     loaded = load_split(dataset_name, "train", bands=selection, image_size=8)
-    bench = get_bench_dataset_class(dataset_name)()
+    bench = get_dataset_spec(dataset_name)
     sample = loaded.dataset[0]
     expected = torch.tensor([1000 + bench.bands.index(band) for band in loaded.bands]).float()
     torch.testing.assert_close(
@@ -128,7 +130,7 @@ def test_ordered_metadata_and_raw_targets_are_preserved(
         assert sample["label"].dtype == torch.long
         assert sample["label"].item() == 2
     if selection == "rgb":
-        assert [band.name for band in loaded.bands] == bench.rgb_bands
+        assert tuple(band.name for band in loaded.bands) == bench.rgb_bands
     elif selection is None or selection == "all":
         assert loaded.bands == tuple(bench.bands)
     else:
@@ -146,6 +148,21 @@ def test_resolved_metadata_is_immutable(train_only: str) -> None:
         loaded.dataset_name = "different"
     with pytest.raises(FrozenInstanceError):
         loaded.bands[0].mean = 0
+
+
+def test_definition_input_keeps_scientific_and_storage_identity_separate(train_only: str) -> None:
+    original = get_dataset_spec("m-eurosat")
+    spec = replace(
+        original,
+        name="custom-eurosat",
+        source=replace(original.source, storage_name=original.name),
+    )
+    loaded = load_split(spec, "train", bands=("nir", "red"))
+    assert loaded.spec is spec
+    assert loaded.dataset_name == "custom-eurosat"
+    assert loaded.dataset.dataset_dir.name == "m-eurosat"
+    assert loaded.bands == (original.bands[7], original.bands[3])
+    assert len(loaded.dataset) == 4
 
 
 @pytest.mark.parametrize("dataset_name", ["m-eurosat", "burn_scars", "eurosat", "resisc45"])
@@ -176,10 +193,10 @@ def test_resolved_metadata_is_immutable(train_only: str) -> None:
 def test_invalid_options_fail_before_source_or_filesystem_access(
     dataset_name: str, options: dict, error: type[Exception], message: str
 ) -> None:
-    bench_cls = get_bench_dataset_class(dataset_name)
     with (
-        mock.patch.object(
-            bench_cls, "_load_split", side_effect=AssertionError("constructed")
+        mock.patch(
+            "torchgeo_bench.datasets.loading._load_source",
+            side_effect=AssertionError("constructed"),
         ) as source,
         mock.patch.object(Path, "exists", side_effect=AssertionError("data access")),
         pytest.raises(error, match=message),
@@ -190,9 +207,8 @@ def test_invalid_options_fail_before_source_or_filesystem_access(
 
 @pytest.mark.parametrize("dataset_name", ["burn_scars", "pastis", "eurosat", "resisc45"])
 def test_unsupported_partition_is_never_ignored(dataset_name: str) -> None:
-    bench_cls = get_bench_dataset_class(dataset_name)
     with (
-        mock.patch.object(bench_cls, "_load_split") as source,
+        mock.patch("torchgeo_bench.datasets.loading._load_source") as source,
         pytest.raises(ValueError, match="does not support custom partitions"),
     ):
         load_split(dataset_name, "train", partition="small")
@@ -243,7 +259,7 @@ def test_image_runner_owns_batching_partition_policy_and_model_metadata(
             "classification": {"methods": ["linear"]},
         },
     )
-    bench_cls = get_bench_dataset_class("m-eurosat")
+    bench = get_dataset_spec("m-eurosat")
     captures = {}
 
     def build(preset, **kwargs):
@@ -257,7 +273,7 @@ def test_image_runner_owns_batching_partition_policy_and_model_metadata(
     with (
         mock.patch("torchgeo_bench.main.load_split", wraps=load_split) as load,
         mock.patch.object(
-            bench_cls, "resolve_band_specs", wraps=bench_cls().resolve_band_specs
+            DatasetSpec, "resolve_band_specs", wraps=bench.resolve_band_specs
         ) as select,
         mock.patch("torchgeo_bench.main.build_model", side_effect=build),
         mock.patch("torchgeo_bench.main.run_classification", side_effect=evaluate),
@@ -290,7 +306,7 @@ def test_image_runner_owns_batching_partition_policy_and_model_metadata(
         assert loader.pin_memory == torch.cuda.is_available()
         assert loader.generator is None
     assert captures["model"]["dataset"] is loaders.train.dataset
-    expected = [bench_cls.bands[7], bench_cls.bands[3]]
+    expected = [bench.bands[7], bench.bands[3]]
     assert all(a is b for a, b in zip(captures["model"]["bands"], expected, strict=True))
 
 

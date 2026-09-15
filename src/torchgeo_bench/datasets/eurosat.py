@@ -1,39 +1,24 @@
 """EuroSAT and spatially disjoint EuroSAT splits from torchgeo."""
 
-from collections.abc import Callable
-from pathlib import Path
-from typing import ClassVar
+from dataclasses import replace
 
-from torch.utils.data import Dataset
-from torchgeo.datasets import EuroSAT as TGEuroSAT
-from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec, BenchDataset
-from .input import ResolvedInput, Split
+from .spec import DatasetSpec, GeographySpec, SplitSizes, TorchGeoSource
 
-
-class EuroSAT(BenchDataset):
-    """Sentinel-2 land-use classification (10 classes), via torchgeo.
-
-    13 Sentinel-2 spectral bands. Identical task and class set as
-    :class:`~torchgeo_bench.datasets.MEurosat` (GeoBench V1) but loads
-    data through :class:`torchgeo.datasets.EuroSAT`, so file layout and
-    download behaviour are managed by torchgeo.
-    """
-
-    _tg_class: ClassVar[type[TGEuroSAT]] = TGEuroSAT
-
-    name = "eurosat"
-    task = "classification"
-    num_classes = 10
-    multilabel = False
-    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 16200, "val": 5400, "test": 5400}
-    supports_partitions = False
+# fmt: off
+SPEC = DatasetSpec(
+    name="eurosat",
+    task="classification",
+    num_classes=10,
+    multilabel=False,
+    rgb_bands=("red", "green", "blue"),
+    split_sizes=SplitSizes(train=16200, val=5400, test=5400),
+    source=TorchGeoSource("EuroSAT", root="data/eurosat"),
+    geography=GeographySpec(alias_of="m-eurosat"),
 
     # Raw EuroSAT pixel statistics, separate from the GeoBench V1 subset's statistics.
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("s2", "coastal_aerosol", "B01", mean=1354.41, std=245.718, min=816, max=17720, wavelength_um=0.443),
         BandSpec("s2", "blue", "B02", mean=1118.24, std=333.009, min=0, max=28000, wavelength_um=0.49),
         BandSpec("s2", "green", "B03", mean=1042.93, std=395.094, min=0, max=28000, wavelength_um=0.56),
@@ -47,44 +32,12 @@ class EuroSAT(BenchDataset):
         BandSpec("s2", "swir_1", "B11", mean=1819.01, std=1002.59, min=5, max=24704, wavelength_um=1.61),
         BandSpec("s2", "swir_2", "B12", mean=1118.92, std=761.305, min=1, max=22210, wavelength_um=2.19),
         BandSpec("s2", "red_edge_4", "B8A", mean=2594.14, std=1231.59, min=91, max=28000, wavelength_um=0.865),
-    ]
-    # fmt: on
+    ),
+)
 
-    @classmethod
-    def data_root(cls) -> Path:
-        """Return ``Path("data/eurosat")`` (torchgeo manages its own layout below).
-
-        :class:`EuroSATSpatial` shares the image archive; only split files differ.
-        """
-        return Path("data/eurosat")
-
-    def _load_split(
-        self,
-        split: Split,
-        *,
-        inputs: ResolvedInput,
-        partition: str = "default",
-        transform: Callable | None = None,
-    ) -> Dataset:
-        """Return the wrapped torchgeo dataset (``_tg_class``) for the split."""
-        del partition
-        band_codes = tuple(spec.source_name for spec in inputs.bands)
-        return self._tg_class(
-            root=str(self.data_root()),
-            split=split,
-            bands=band_codes,
-            transforms=transform,
-            download=False,
-        )
-
-
-class EuroSATSpatial(EuroSAT):
-    """EuroSAT with longitude-based 60/20/20 train/val/test splits.
-
-    The same 27,000 images, classes, bands, and stats as :class:`EuroSAT`, with disjoint regions.
-    """
-
-    _tg_class = TGEuroSATSpatial
-
-    name = "eurosat-spatial"
-    split_sizes: ClassVar[dict[str, int]] = {"train": 16200, "val": 5400, "test": 5400}
+# Longitude-based splits share the archive and original frozen band metadata.
+SPATIAL_SPEC = replace(
+    SPEC,
+    name="eurosat-spatial",
+    source=TorchGeoSource("EuroSATSpatial", root="data/eurosat", storage_name="eurosat"),
+)

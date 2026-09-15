@@ -13,12 +13,12 @@ from pathlib import Path
 
 import torch
 
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.config import list_model_configs
 from torchgeo_bench.config.presets import build_model, load_model_preset, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import InputConfig, ModelConfig
-from torchgeo_bench.datasets import get_bench_dataset_class, load_split
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets import get_dataset_spec, load_split
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError
 
 logger = logging.getLogger(__name__)
@@ -28,8 +28,8 @@ SKIP_TARGETS = {"SAM3Encoder"}
 
 def band_specs(dataset: str, bands: str) -> list[BandSpec]:
     """Return the BandSpec list a model would receive for this dataset."""
-    bench = get_bench_dataset_class(dataset)()
-    return bench.select_band_specs(tuple(bench.rgb_bands) if bands == "rgb" else None)
+    bench = get_dataset_spec(dataset)
+    return list(bench.select_band_specs(bench.rgb_bands if bands == "rgb" else None))
 
 
 def main() -> None:

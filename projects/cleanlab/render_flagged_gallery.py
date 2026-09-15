@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from torchgeo_bench.datasets import LoadedSplit, get_bench_dataset_class, load_split
+from torchgeo_bench.datasets import LoadedSplit, get_dataset_spec, load_split
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def render_gallery(
 
     loaded = _load_gallery_split(dataset, split)
     names = [band.name for band in loaded.bands]
-    rgb_names = get_bench_dataset_class(dataset).rgb_bands
+    rgb_names = get_dataset_spec(dataset).rgb_bands
     rgb_idx = [names.index(name) for name in rgb_names if name in names] or [0, 1, 2]
 
     rows = (len(flagged) + cols - 1) // cols

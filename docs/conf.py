@@ -40,10 +40,6 @@ needs_sphinx = "5.3"
 nitpicky = True
 nitpick_ignore = [
     # Private types shown by the API documentation.
-    ("py:class", "torchgeo_bench.datasets.geobench_v1._V1Dataset"),
-    ("py:class", "torchgeo_bench.datasets.geobench_v2._V2Dataset"),
-    ("py:class", "torchgeo_bench.datasets.geobench_v2._OffsetMaskV2Dataset"),
-    ("py:meth", "_OffsetMaskV2Dataset.canonicalize_sample"),
     ("py:class", "torchgeo_bench.models.torchgeo_models._TorchGeoBackboneBench"),
     ("py:class", "torchgeo_bench.models._normalization.NormalizationStrategy"),
     ("py:class", "torchgeo_bench.models._input_units.InputUnit"),
@@ -66,7 +62,6 @@ nitpick_ignore = [
     ("py:class", "DPTFeatureFusionLayer"),
     ("py:attr", "BenchModel.bands"),
     ("py:attr", "num_channels"),
-    ("py:attr", "base.BenchDataset.supports_partitions"),
     ("py:meth", "_forward_patch_features"),
     ("py:meth", "SegmentationProbe.extract_segmentation_features"),
     ("py:mod", "torchgeo_bench.main"),

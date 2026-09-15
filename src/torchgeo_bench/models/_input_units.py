@@ -8,7 +8,7 @@ from enum import StrEnum
 
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 
 class InputUnit(StrEnum):

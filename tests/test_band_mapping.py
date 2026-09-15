@@ -3,8 +3,7 @@
 import pytest
 import torch
 
-from torchgeo_bench.bands import BandCompatibilityError
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandCompatibilityError, BandSpec
 from torchgeo_bench.models._band_mapping import (
     BandMappingPolicy,
     canonical_band_name,

@@ -1,98 +1,34 @@
-"""Benchmark dataset registry for torchgeo-bench.
+"""Lightweight dataset definitions and single-split loading."""
 
-Dataset classes load only when requested, keeping imports and CLI startup fast.
+from torchgeo_bench.bands import BandSpec
 
-Public API
-----------
-.. autofunction:: load_split
-.. autoclass:: LoadedSplit
-.. autoclass:: ResolvedInput
-.. autofunction:: get_bench_dataset_class
-.. autofunction:: get_dataset_task
-.. autofunction:: list_datasets
-.. autoclass:: BandSpec
-.. autoclass:: BenchDataset
-"""
-
-from importlib import import_module
-
-from .base import BandSpec, BenchDataset
+from .catalog import get_dataset_spec, get_dataset_task, list_datasets, list_v2_datasets
 from .input import LoadedSplit, ResolvedInput
-from .loading import (
-    get_bench_dataset_class,
-    get_dataset_task,
-    list_datasets,
-    load_split,
+from .loading import load_split
+from .spec import (
+    DatasetCapabilities,
+    DatasetSpec,
+    GeographySpec,
+    SplitSizes,
+    TorchGeoSource,
+    V1Source,
+    V2Source,
 )
 
 __all__ = [
-    "BENV2",
-    "FLAIR2",
-    "PASTIS",
-    "RESISC45",
     "BandSpec",
-    "BenchDataset",
-    "BurnScars",
-    "CaFFe",
-    "CloudSEN12",
-    "DynamicEarthNet",
-    "EuroSAT",
-    "EuroSATSpatial",
-    "FieldsOfTheWorld",
-    "Forestnet",
-    "KuroSiwo",
+    "DatasetCapabilities",
+    "DatasetSpec",
+    "GeographySpec",
     "LoadedSplit",
-    "MBigEarthNet",
-    "MBrickKiln",
-    "MEurosat",
-    "MForestnet",
-    "MPv4ger",
-    "MSo2Sat",
     "ResolvedInput",
-    "So2Sat",
-    "SpaceNet2",
-    "SpaceNet7",
-    "TreeSatAI",
-    "get_bench_dataset_class",
+    "SplitSizes",
+    "TorchGeoSource",
+    "V1Source",
+    "V2Source",
+    "get_dataset_spec",
     "get_dataset_task",
     "list_datasets",
+    "list_v2_datasets",
     "load_split",
 ]
-
-_LAZY_CLASSES: dict[str, str] = {
-    "BENV2": "benv2",
-    "BurnScars": "burn_scars",
-    "CaFFe": "caffe",
-    "CloudSEN12": "cloudsen12",
-    "DynamicEarthNet": "dynamic_earthnet",
-    "EuroSAT": "eurosat",
-    "EuroSATSpatial": "eurosat",
-    "FLAIR2": "flair2",
-    "Forestnet": "forestnet",
-    "FieldsOfTheWorld": "fotw",
-    "KuroSiwo": "kuro_siwo",
-    "MBigEarthNet": "m_bigearthnet",
-    "MBrickKiln": "m_brick_kiln",
-    "MEurosat": "m_eurosat",
-    "MForestnet": "m_forestnet",
-    "MPv4ger": "m_pv4ger",
-    "MSo2Sat": "m_so2sat",
-    "PASTIS": "pastis",
-    "RESISC45": "resisc45",
-    "So2Sat": "so2sat",
-    "SpaceNet2": "spacenet2",
-    "SpaceNet7": "spacenet7",
-    "TreeSatAI": "treesatai",
-}
-
-
-def __getattr__(name: str) -> object:
-    if name in _LAZY_CLASSES:
-        cls = getattr(import_module(f".{_LAZY_CLASSES[name]}", __name__), name)
-        globals()[name] = cls
-        return cls
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(_LAZY_CLASSES))

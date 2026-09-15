@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from .interface import BenchModel
 

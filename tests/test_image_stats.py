@@ -2,7 +2,7 @@
 
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.models.image_stats import ImageStatsBench
 
 

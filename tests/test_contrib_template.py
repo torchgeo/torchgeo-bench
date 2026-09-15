@@ -8,7 +8,7 @@ import pytest
 import torch
 from torch import nn
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError
 from torchgeo_bench.models.interface import BenchModel
 

@@ -1,25 +1,20 @@
 """Dynamic EarthNet (GeoBench V2) benchmark dataset."""
 
-from typing import ClassVar
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec
-from .geobench_v2 import _V2Dataset
+from .spec import DatasetSpec, SplitSizes, V2Source
 
+# fmt: off
+SPEC = DatasetSpec(
+    name="dynamic_earthnet",
+    task="segmentation",
+    num_classes=7,
+    multilabel=False,
+    rgb_bands=("r", "g", "b"),
+    split_sizes=SplitSizes(train=700, val=100, test=200),
+    source=V2Source("GeoBenchDynamicEarthNet", band_order_strategy="by_sensor"),
 
-class DynamicEarthNet(_V2Dataset):
-    """Planet + Sentinel-2 land-cover change segmentation (7 classes)."""
-
-    band_order_strategy = "by_sensor"
-
-    name = "dynamic_earthnet"
-    task = "segmentation"
-    num_classes = 7
-    multilabel = False
-    rgb_bands: ClassVar[list[str]] = ["r", "g", "b"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 700, "val": 100, "test": 200}
-
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("planet", "b", "b", mean=664.423, std=639.946, min=10, max=10051),
         BandSpec("planet", "g", "g", mean=929.265, std=805.98, min=17, max=10039),
         BandSpec("planet", "r", "r", mean=1031.28, std=1072.23, min=9, max=10057),
@@ -36,5 +31,5 @@ class DynamicEarthNet(_V2Dataset):
         BandSpec("s2", "b10", "B10", mean=1732.49, std=1393.75, min=1, max=15547, wavelength_um=1.375),
         BandSpec("s2", "b11", "B11", mean=1049.82, std=1654.71, min=0, max=15633, wavelength_um=1.61),
         BandSpec("s2", "b12", "B12", mean=3192, std=2299.15, min=0, max=16726, wavelength_um=2.19),
-    ]
-    # fmt: on
+    ),
+)

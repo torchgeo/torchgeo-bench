@@ -6,10 +6,10 @@ import pytest
 import torch
 
 from tests.support.runner import _DictTensorDataset, _synthetic_splits, make_loaded_split
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.config.presets import resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets import DatasetSpec
 from torchgeo_bench.main import instantiate_dataset_model
 from torchgeo_bench.models.interface import BenchModel
 
@@ -110,12 +110,13 @@ def test_loaded_band_objects_reach_model_without_another_selection() -> None:
     config, preset = resolve_run_config(config, "m-eurosat")
     dataset = _DictTensorDataset(torch.zeros(2, 2, 8, 8), torch.zeros(2))
     train = make_loaded_split(dataset, bands=("nir", "red"))
-    bench_cls = get_bench_dataset_class("m-eurosat")
     with (
         mock.patch.object(
-            bench_cls, "resolve_band_specs", side_effect=AssertionError("reselected")
+            DatasetSpec, "resolve_band_specs", side_effect=AssertionError("reselected")
         ),
-        mock.patch.object(bench_cls, "select_band_specs", side_effect=AssertionError("reselected")),
+        mock.patch.object(
+            DatasetSpec, "select_band_specs", side_effect=AssertionError("reselected")
+        ),
     ):
         model = instantiate_dataset_model(config, preset, train, torch.device("cpu"))
     assert [band.name for band in model.bands] == ["nir", "red"]

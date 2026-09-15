@@ -3,7 +3,7 @@
 
 Exclude validation/test data so evaluation samples cannot affect input scaling.
 
-Use raw sensor values; print a ready-to-paste ``bands = [...]`` block.
+Use raw sensor values; print a ready-to-paste ``bands=(...)`` definition field.
 
 Usage::
 
@@ -20,7 +20,7 @@ import sys
 import torch
 from torch.utils.data import DataLoader
 
-from torchgeo_bench.datasets import get_bench_dataset_class, load_split
+from torchgeo_bench.datasets import get_dataset_spec, load_split
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def compute_statistics(
         if images.shape[1] != n_bands:
             raise ValueError(
                 f"{dataset_name}: loader returned {images.shape[1]} channels but the "
-                f"wrapper declares {n_bands} BandSpec entries"
+                f"loaded split declares {n_bands} BandSpec entries"
             )
         count += images.shape[0] * images.shape[2] * images.shape[3]
         total += images.sum(dim=(0, 2, 3))
@@ -85,9 +85,9 @@ def compute_statistics(
 
 
 def format_bandspec_block(dataset_name: str, stats: list[dict[str, float]]) -> str:
-    """Render the statistics as a ``bands = [...]`` block for the wrapper."""
-    bench = get_bench_dataset_class(dataset_name)()
-    lines = ["    # fmt: off", "    bands = ["]
+    """Render the statistics as a ``bands=(...)`` field for the definition."""
+    bench = get_dataset_spec(dataset_name)
+    lines = ["    bands=("]
     for spec, values in zip(bench.bands, stats, strict=True):
         wavelength = "" if spec.wavelength_um is None else f", wavelength_um={spec.wavelength_um}"
         lines.append(
@@ -95,7 +95,7 @@ def format_bandspec_block(dataset_name: str, stats: list[dict[str, float]]) -> s
             f"mean={values['mean']:.4f}, std={values['std']:.4f}, "
             f"min={_format_stat(values['min'])}, max={_format_stat(values['max'])}{wavelength}),"
         )
-    lines += ["    ]", "    # fmt: on"]
+    lines += ["    ),"]
     return "\n".join(lines)
 
 
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             values["min"],
             values["max"],
         )
-    logger.info("Paste into the wrapper:")
+    logger.info("Paste into the DatasetSpec definition:")
     print(format_bandspec_block(args.dataset, stats))  # noqa: T201
     return 0
 

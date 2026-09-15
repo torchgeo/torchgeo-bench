@@ -9,10 +9,8 @@ import torch.nn as nn
 from torchvision.transforms import Normalize
 from torchvision.transforms.v2 import Normalize as NormalizeV2
 
-from torchgeo_bench.datasets.base import BandSpec, BenchDataset
-from torchgeo_bench.datasets.m_eurosat import MEurosat
-from torchgeo_bench.datasets.m_so2sat import MSo2Sat
-from torchgeo_bench.datasets.resisc45 import RESISC45
+from torchgeo_bench.bands import BandSpec
+from torchgeo_bench.datasets import DatasetSpec, get_dataset_spec
 from torchgeo_bench.models._input_units import InputUnit
 from torchgeo_bench.models.torchgeo_models import (
     TorchGeoCromaBench,
@@ -592,12 +590,17 @@ def test_resnet_can_convert_to_reflectance_before_skipping_weight_scale(
 
 
 @pytest.mark.parametrize(
-    ("dataset_cls", "value"), [(MEurosat, 5000.0), (MSo2Sat, 0.5), (RESISC45, 127.5)]
+    ("dataset", "value"),
+    [
+        (get_dataset_spec("m-eurosat"), 5000.0),
+        (get_dataset_spec("m-so2sat"), 0.5),
+        (get_dataset_spec("resisc45"), 127.5),
+    ],
 )
 @pytest.mark.parametrize("normalize_cls", [Normalize, NormalizeV2])
 def test_resnet_native_normalization_converts_source_units(
     monkeypatch: pytest.MonkeyPatch,
-    dataset_cls: type[BenchDataset],
+    dataset: DatasetSpec,
     value: float,
     normalize_cls: type[nn.Module],
 ) -> None:
@@ -621,7 +624,6 @@ def test_resnet_native_normalization_converts_source_units(
         "_resolve_torchgeo_weights",
         lambda *_: SimpleNamespace(transforms=transforms),
     )
-    dataset = dataset_cls()
     model = TorchGeoResNetBench(
         bands=dataset.select_band_specs(tuple(dataset.rgb_bands)), normalization="model_native"
     )

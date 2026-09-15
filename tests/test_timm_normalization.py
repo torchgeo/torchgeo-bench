@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 
 def _rgb_bands(

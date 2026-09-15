@@ -126,7 +126,7 @@ Extract the metadata you need from ``bands`` in ``__init__``, then use it in ``_
 
    import torch
 
-   from torchgeo_bench.datasets.base import BandSpec
+   from torchgeo_bench.bands import BandSpec
    from torchgeo_bench.models.interface import BenchModel
 
    class NewModel(BenchModel):

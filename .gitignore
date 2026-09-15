@@ -130,6 +130,7 @@ data/
 !**/normalizer.json
 !docs/_static/_results_snapshots/*.json
 !docs/_static/_dataset_geography/*.json
+!tests/fixtures/dataset_metadata.json
 
 # Logs
 *.log

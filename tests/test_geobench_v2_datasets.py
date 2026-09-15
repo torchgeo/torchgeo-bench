@@ -13,9 +13,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from tests.support.data import require_dataset_data
-from torchgeo_bench.datasets import get_bench_dataset_class, load_split
-from torchgeo_bench.datasets.burn_scars import BurnScars
-from torchgeo_bench.datasets.geobench_v2 import _V2_REGISTRY
+from torchgeo_bench.datasets import DatasetSpec, V2Source, get_dataset_spec, load_split
 
 
 class MockV2Dataset:
@@ -101,7 +99,7 @@ class TestV2Loading:
 
         assert isinstance(train_dl, DataLoader)
         assert len(ds) == 10
-        assert get_bench_dataset_class("benv2").task == "classification"
+        assert get_dataset_spec("benv2").task == "classification"
 
         batch = next(iter(train_dl))
         assert batch["image"].shape == (4, 3, 32, 32)
@@ -115,7 +113,7 @@ class TestV2Loading:
         train = load_split("burn_scars", "train")
         train_dl = DataLoader(train.dataset, batch_size=2, num_workers=0)
 
-        assert get_bench_dataset_class("burn_scars").task == "segmentation"
+        assert get_dataset_spec("burn_scars").task == "segmentation"
         batch = next(iter(train_dl))
         assert batch["image"].shape == (2, 3, 32, 32)
         assert batch["mask"].shape == (2, 32, 32)
@@ -249,7 +247,7 @@ class TestKuroSiwoCanonicalization:
         bands: tuple[str, ...] | None,
         expected_values: list[float],
     ) -> None:
-        bench = get_bench_dataset_class("kuro_siwo")()
+        bench = get_dataset_spec("kuro_siwo")
         loaded = load_split("kuro_siwo", "train", bands=bands)
         ds = loaded.dataset
         sample = ds[0]
@@ -361,7 +359,7 @@ class MockPASTIS:
 
 
 class TestPASTISSampleConstruction:
-    """PASTIS must build samples through the shared ``_V2Dataset`` path."""
+    """PASTIS must build samples through the common V2 source factory."""
 
     @pytest.fixture
     def mocked_pastis(self):
@@ -412,7 +410,9 @@ def _synthetic_sensor_sources(
     import geobench_v2.datasets as upstream
     from geobench_v2.datasets.base import GeoBenchBaseDataset
 
-    cls = getattr(upstream, _V2_REGISTRY[dataset_name])
+    source = get_dataset_spec(dataset_name).source
+    assert isinstance(source, V2Source)
+    cls = getattr(upstream, source.upstream_class)
     file_sensors = {
         "treesatai": ("aerial", "s1", "s2"),
         "benv2": ("s1", "s2"),
@@ -507,7 +507,7 @@ def test_installed_backend_preserves_requested_channels(
     time_steps: int | None,
 ) -> None:
     sources = _synthetic_sensor_sources(monkeypatch, dataset_name)
-    bench = get_bench_dataset_class(dataset_name)()
+    bench = get_dataset_spec(dataset_name)
     loaded = load_split(
         dataset_name,
         "train",
@@ -598,7 +598,7 @@ def test_backend_resolved_sensor_order_is_used(monkeypatch: pytest.MonkeyPatch) 
     assert list(ds._inner.band_order) == ["aerial", "s2"]
     upstream = ds._inner[0]["image"]
     torch.testing.assert_close(ds[0]["image"], upstream[[2, 0, 1]], rtol=0, atol=0)
-    bench = get_bench_dataset_class("treesatai")()
+    bench = get_dataset_spec("treesatai")
     expected = bench.select_band_specs(("b04", "red", "green"))
     assert all(actual is spec for actual, spec in zip(ds.band_specs, expected, strict=True))
 
@@ -624,15 +624,15 @@ def test_fotw_load_path_keeps_later_acquisition(monkeypatch: pytest.MonkeyPatch)
     )
     mask = (torch.arange(36).reshape(6, 6) % 4).repeat_interleave(2, 0).repeat_interleave(2, 1)
     torch.testing.assert_close(sample["mask"], mask)
-    bench = get_bench_dataset_class("fotw")()
+    bench = get_dataset_spec("fotw")
     expected = bench.select_band_specs(("nir", "red"))
     assert all(actual is spec for actual, spec in zip(ds.band_specs, expected, strict=True))
 
 
 def test_band_selection_is_resolved_once(mock_v2_env: dict[str, MagicMock]) -> None:
-    bench = BurnScars()
-    with patch.object(BurnScars, "select_band_specs", wraps=bench.select_band_specs) as select:
-        loaded = load_split("burn_scars", "train", bands=("b04", "b03"))
+    bench = get_dataset_spec("burn_scars")
+    with patch.object(DatasetSpec, "select_band_specs", wraps=bench.select_band_specs) as select:
+        loaded = load_split(bench, "train", bands=("b04", "b03"))
     select.assert_called_once_with(("b04", "b03"))
     assert loaded.bands is loaded.dataset.band_specs
     assert loaded.bands[0] is next(spec for spec in bench.bands if spec.name == "b04")

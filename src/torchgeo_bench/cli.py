@@ -7,6 +7,9 @@ import argparse
 import pathlib
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import asdict
+
+import yaml
 
 from . import __version__, commands
 from .commands.coord_arguments import add_coord_arguments
@@ -14,7 +17,7 @@ from .commands.flops_arguments import add_flops_arguments
 from .commands.profile_arguments import add_profile_arguments
 from .commands.run_arguments import add_run_arguments
 from .config import list_model_configs
-from .datasets import get_dataset_task, list_datasets
+from .datasets import get_dataset_spec, list_datasets
 
 
 def _model_detail(name: str) -> str:
@@ -25,8 +28,7 @@ def _model_detail(name: str) -> str:
 
 def _dataset_detail(name: str) -> str:
     """Return lightweight metadata for a dataset catalog detail request."""
-    task = get_dataset_task(name)
-    return f"name: {name}\ntask: {task}\n"
+    return yaml.safe_dump(asdict(get_dataset_spec(name)), sort_keys=False)
 
 
 def _setup_parser() -> argparse.ArgumentParser:

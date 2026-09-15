@@ -1,29 +1,21 @@
 """PASTIS (GeoBench V2) benchmark dataset."""
 
-from typing import ClassVar
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec
-from .geobench_v2 import _V2Dataset
+from .spec import DatasetCapabilities, DatasetSpec, SplitSizes, V2Source
 
+# fmt: off
+SPEC = DatasetSpec(
+    name="pastis",
+    task="segmentation",
+    num_classes=20,
+    multilabel=False,
+    rgb_bands=("b04", "b03", "b02"),
+    split_sizes=SplitSizes(train=1455, val=482, test=496),
+    source=V2Source("GeoBenchPASTIS", band_order_strategy="by_sensor"),
+    capabilities=DatasetCapabilities(multi_temporal=True),
 
-class PASTIS(_V2Dataset):
-    """Sentinel-2 + SAR crop type segmentation (20 classes).
-
-    Includes ascending and descending SAR orbit passes (``s1_asc``, ``s1_desc``).
-    """
-
-    band_order_strategy = "by_sensor"
-    multi_temporal = True
-
-    name = "pastis"
-    task = "segmentation"
-    num_classes = 20
-    multilabel = False
-    rgb_bands: ClassVar[list[str]] = ["b04", "b03", "b02"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 1455, "val": 482, "test": 496}
-
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("s2", "b02", "B02", mean=982.691, std=1778.79, min=-951, max=15720, wavelength_um=0.49),
         BandSpec("s2", "b03", "B03", mean=1200.18, std=1748.09, min=0, max=15300, wavelength_um=0.56),
         BandSpec("s2", "b04", "B04", mean=1279.17, std=1815.64, min=-847, max=14267, wavelength_um=0.665),
@@ -40,5 +32,5 @@ class PASTIS(_V2Dataset):
         BandSpec("s1_desc", "vv_desc", "VV_desc", mean=-12.1929, std=3.3645, min=-36.0312, max=29.0781),
         BandSpec("s1_desc", "vh_desc", "VH_desc", mean=-18.382, std=3.3468, min=-39.5312, max=18.6562),
         BandSpec("s1_desc", "vv_vh_desc", "VV/VH_desc", mean=6.189, std=3.2708, min=-21.0469, max=44.75),
-    ]
-    # fmt: on
+    ),
+)

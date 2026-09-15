@@ -1,282 +1,110 @@
 Add a Dataset
 =============
 
-This page explains how to wire a new geospatial dataset into torchgeo-bench
-so that any registered model can be evaluated on it automatically.
+Dataset definitions are lightweight, immutable records. Runtime readers, sample conversion, preprocessing, and caller-owned batching are separate.
 
 Prerequisites
 -------------
 
-Clone the repository and install the development dependencies:
+Install with ``uv sync --extra dev`` and use ``uv run`` for commands, or activate the conda environment and install with ``pip install -e ".[dev]"``. These are separate environments; do not use ``uv sync`` to install into conda.
+
+Download explicitly before loading. Individual names may span families:
 
 .. code-block:: console
 
-   $ git clone https://github.com/torchgeo/torchgeo-bench.git
-   $ cd torchgeo-bench
-   $ uv sync --extra dev
-
-Use ``uv run`` for commands in that environment. Alternatively, activate the conda environment and run ``pip install -e ".[dev]"``; do not use ``uv sync`` to install into conda.
-
-Download the data before loading it. ``download`` accepts one or more dataset names, including names from different families. GeoBench collection aliases also accept ``--datasets``:
-
-.. code-block:: console
-
-   $ uv run torchgeo-bench download burn_scars
    $ uv run torchgeo-bench download m-eurosat burn_scars resisc45
    $ uv run torchgeo-bench download geobench_v2 --datasets burn_scars
 
-If you are adding a dataset that no existing family covers, you will wire up
-its own download target below.
+Define the scientific metadata
+------------------------------
 
-Implement BenchDataset
-----------------------
-
-Create a new module under :file:`src/torchgeo_bench/datasets/` and subclass
-:class:`~torchgeo_bench.datasets.base.BenchDataset`:
+Create a module under :file:`src/torchgeo_bench/datasets/` containing a ``SPEC``. Use frozen nested records and tuples, not mutable class attributes or dictionaries. For example, a new V2 definition has this structure (replace the illustrative bands, counts, and upstream class with verified metadata):
 
 .. code-block:: python
 
-   from collections.abc import Callable
-   from pathlib import Path
-   from typing import ClassVar
+   from torchgeo_bench.bands import BandSpec
+   from torchgeo_bench.datasets.spec import DatasetSpec, SplitSizes, V2Source
 
-   from torch import Tensor
-   from torch.utils.data import Dataset
+   SPEC = DatasetSpec(
+       name="my_dataset",
+       task="classification",
+       num_classes=10,
+       multilabel=False,
+       bands=(
+           BandSpec("aerial", "red", "R", mean=100, std=40, min=0, max=255),
+           BandSpec("aerial", "green", "G", mean=100, std=40, min=0, max=255),
+           BandSpec("aerial", "blue", "B", mean=100, std=40, min=0, max=255),
+       ),
+       rgb_bands=("red", "green", "blue"),
+       split_sizes=SplitSizes(train=5000, val=1000, test=2000),
+       source=V2Source("GeoBenchMyDataset"),
+   )
 
-   from torchgeo_bench.datasets.base import BandSpec, BenchDataset
-   from torchgeo_bench.datasets.input import ResolvedInput, Split
+The canonical ``name`` identifies a benchmark, not necessarily a unique archive. Use ``source.storage_name`` when another benchmark shares the same source files. For example, standard/spatial TorchGeo EuroSAT share imagery and band objects, but their upstream classes select different splits. Do not merge their scientific identities, or replace GeoBench V1 EuroSAT's separate statistics.
 
-   class MyDataset(BenchDataset):
-       name = "my_dataset"
-       task = "classification"        # or "segmentation"
-       num_classes = 10
-       multilabel = False
-       supports_partitions = False
-       bands: ClassVar[list[BandSpec]] = [...]  # Supply measured BandSpecs.
-       rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
-       split_sizes: ClassVar[dict[str, int]] = {"train": 5000, "val": 1000, "test": 2000}
+Declare the exact task, class count, and multilabel semantics from verified source metadata. ``multilabel=True`` selects micro-mAP rather than accuracy (``m-bigearthnet``, ``benv2``, and ``treesatai``). Do not infer a class vocabulary from a count or change labels while moving metadata. ``split_sizes`` describes the default partition; a requested subset may have different lengths.
 
-       @classmethod
-       def data_root(cls) -> Path:
-           return Path("data/my_dataset")
+``BandSpec`` stores source names, sensor tags, statistics, and available wavelengths in tensor order. ``rgb_bands`` currently preserves the benchmark's existing selector, including CaFFe grayscale and KuroSiwo SAR. Do not change those choices incidentally. Normalization remains model-owned.
 
-       def _load_split(
-           self,
-           split: Split,
-           *,
-           partition: str = "default",
-           inputs: ResolvedInput,
-           transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
-       ) -> Dataset[dict[str, Tensor]]:
-           raise NotImplementedError("Implement loading and apply the requested bands/transform")
+Source policies and capabilities
+-------------------------------
 
-Required class-level attributes:
+* ``V1Source`` selects verified JSON shards, with a retained custom JSON-metadata HDF5 fallback. Pickle metadata is not supported. ``DatasetCapabilities(supports_partitions=True)`` enables non-default partitions.
+* ``V2Source`` contains the upstream class identifier, split-name policy, and typed options. Set ``band_order_strategy="by_sensor"`` when the upstream reader groups channels by modality. Declare an existing named sample adapter for nonstandard image or mask keys; do not import runtime adapter functions into the definition module.
+* ``TorchGeoSource`` identifies the upstream reader, fixed root, optional shared storage name, and download-checksum policy.
 
-* ``name`` — unique string identifier used by the dataset registry and CLI
-* ``task`` — ``"classification"`` or ``"segmentation"``
-* ``num_classes`` — integer label count
-* ``bands`` — list of :class:`~torchgeo_bench.datasets.BandSpec` objects
-  supplying per-channel sensor / wavelength / normalisation stats.  See
-  `Compute the band statistics`_ — these must be measured, not copied.
-* ``rgb_bands`` — short names of the bands used in RGB-only mode
-* ``split_sizes`` — dict with ``train``, ``val``, and ``test`` keys
-* ``multilabel`` — ``True`` for multi-hot labels (``m-bigearthnet``, ``benv2``, ``treesatai``).
-  Selects micro-mAP over accuracy as the reported metric, so getting it wrong
-  silently reports the wrong number.
-* ``supports_partitions`` — ``True`` only for V1 GeoBench datasets, which ship
-  partition JSON files. When ``False``, ``load_split`` rejects a non-default
-  partition before source construction.
-* ``multi_temporal`` — supports explicit ``time_steps`` (currently PASTIS).
-  Unsupported temporal requests fail before data access.
+``DatasetCapabilities(multi_temporal=True)`` enables explicit ``time_steps`` (currently PASTIS). Unsupported partitions, splits, temporal requests, and band selections must fail before source construction or filesystem access. Preserve the common V2 temporal path rather than adding a PASTIS-specific loader.
 
-The private ``_load_split`` method takes a validated ``split`` (``"train"``,
-``"val"``, or ``"test"``) plus keyword-only ``partition``, ``inputs`` (the
-immutable ``ResolvedInput``), and ``transform``. Derive source band requests
-from ``inputs.bands`` without resolving names a second time. Load only that
-split; do not construct or validate unrelated splits. It returns a
-:class:`torch.utils.data.Dataset` whose ``__getitem__`` yields **dict**
-samples — ``{"image": tensor, "label": tensor}`` for classification, with
-``"mask"`` in place of ``"label"`` for segmentation.  Datasets always emit
-raw float32 values; normalization is the model's job.
+Readers receive the same ``ResolvedInput`` returned to callers and derive source requests from ``inputs.bands`` without resolving names again. The source must emit channels in that order, even when its backend stacks in a different sensor order. Preserve sensor alignment, acquisition selection, and categorical mask semantics.
 
-If you inherit from ``_V1Dataset`` or ``_V2Dataset``, both ``data_root`` and
-``_load_split`` are already implemented — your subclass is pure metadata. See
-:file:`src/torchgeo_bench/datasets/m_eurosat.py` for a minimal example.
+Each reader loads only the requested split, with downloading disabled. Samples use ``image`` plus ``label`` for classification, or ``mask`` for segmentation. Images retain raw float32 values. Single-acquisition inputs are CHW; supported explicit multi-step inputs are TCHW. No sample probing is needed for metadata. The public ``LoadedSplit`` contains its authoritative ``spec`` and ``input``; callers construct DataLoaders and pass ``list(loaded.bands)`` to model construction.
 
-.. note::
-
-   **Loader families.** V1 datasets (``m-`` prefix) inherit from :class:`~torchgeo_bench.datasets.geobench_v1._V1Dataset` and normally use JSON-metadata tar shards under ``data/classification_v1.0_wds/``. Custom HDF5 with JSON metadata is also supported; pickle metadata is not. V2 wrappers inherit from :class:`~torchgeo_bench.datasets.geobench_v2._V2Dataset` and dispatch to ``geobench_v2.datasets`` classes over ``.tortilla`` files. A standalone torchgeo dataset, such as RESISC45, implements ``BenchDataset`` directly.
-
-   For V2 loaders that accept bands grouped by modality, set ``band_order_strategy = "by_sensor"``. Override ``canonicalize_sample`` only when upstream image/mask keys or temporal shapes need adapting. Confirm the emitted channel order matches the selected ``BandSpec`` objects.
-
-Band selection when the loader has no ``bands`` argument
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-``load_split`` resolves the band subset once and passes it to ``_load_split``.
-The runner uses the returned ``LoadedSplit.bands`` for model construction,
-checking the tensor's channels and layout without selecting bands again.
-How you honour that subset depends on the upstream loader:
-
-* **The loader accepts bands.** Forward them and you are done —
-  :class:`~torchgeo_bench.datasets.EuroSAT` passes ``source_name`` codes
-  straight to :class:`torchgeo.datasets.EuroSAT`.
-* **The loader does not.** Most torchgeo classification datasets are
-  fixed-channel ``ImageFolder`` wrappers with no band argument at all, so the
-  subset has to be applied in *your* wrapper, as a transform that indexes the
-  channel axis.  :class:`~torchgeo_bench.datasets.RESISC45` is the worked
-  example: see ``_make_band_select`` and the ``Compose`` call in
-  :file:`src/torchgeo_bench/datasets/resisc45.py`.
-
-Two details matter in the second case.  Compose your selection **before** the
-``transform`` the caller handed you — that argument is the resize built by
-:func:`~torchgeo_bench.datasets.load_split`, and it should only see channels
-that survive selection.  And return ``None`` rather than an identity transform
-when the selection is a no-op, so the common ``--bands rgb`` / ``--bands all``
-paths add no per-sample work.
-
-The public result contains a Dataset and immutable metadata, never a DataLoader.
-Batching, shuffling, workers, pinning, collation, and seeding belong to callers.
-Do not sample data to infer metadata: describe the actual source layout,
-including CHW for squeezed single-step temporal requests.
+For readers without a band argument, apply channel selection before resizing. The RESISC45 implementation in :file:`src/torchgeo_bench/datasets/torchgeo.py` demonstrates this, including avoiding a copy for identity selection.
 
 Compute the band statistics
----------------------------
+--------------------------
 
-Each :class:`~torchgeo_bench.datasets.BandSpec` carries ``mean``, ``std``, ``min``, and ``max``. They supply the default ``input.normalization: dataset`` strategy (``bandspec_zscore`` inside the model). Raw magnitudes also inform unit detection for ``input.normalization: model``. Incorrect statistics can silently mis-normalize inputs.
-
-So measure them.  Two rules:
-
-* **Train split only.**  Statistics that include val or test leak evaluation
-  data into the normalisation every model sees.
-* **Raw sensor units.**  Do not pre-scale to ``[0, 1]``; unit detection depends
-  on the raw magnitudes.
-
-Once your class is registered with placeholder statistics and loads, run:
+Measure ``mean``, ``std``, ``min``, and ``max`` over the **train split only**, in **raw sensor units**. Validation/test statistics would leak evaluation data. Statistics drive dataset normalization and model-native unit detection.
 
 .. code-block:: console
 
    $ uv run python scripts/compute_band_statistics.py --dataset my_dataset
 
-It accumulates in float64 over the train split and prints a ``bands = [...]`` block. Copy the generated values into your wrapper while retaining the ``bands: ClassVar[list[BandSpec]]`` annotation required for mutable class metadata. Record in a comment that the numbers came from this script, so the next person knows they are measured rather than copied from a paper.
+The script accumulates in float64. Copy its measured BandSpec values into the definition's tuple, and retain a short provenance comment. Do not infer missing physical calibration or borrow another dataset's statistics.
 
-Register and configure
-----------------------
+Register, download, and document
+-------------------------------
 
-**1. Register the class** by adding an entry to ``_REGISTRY_SPEC`` in
-:file:`src/torchgeo_bench/datasets/loading.py`, mapping the dataset name to
-its ``(submodule, class_name, task)``:
+Import the definition module in :file:`src/torchgeo_bench/datasets/catalog.py` and include its ``SPEC`` in ``_make_catalog``. The catalog derives IDs from the records; do not add another name/task/routing registry or export wrapper classes. ``list_datasets()``, ``get_dataset_spec(name)``, CLI details, config validation, FLOPs metadata, downloads, and geography all use this catalog.
 
-.. code-block:: python
+Existing V2 download coverage is derived automatically, for both classification and segmentation. Shared TorchGeo downloads include the sibling split definitions once per storage identity. A new source family requires an explicit typed source record and runtime/download factory, not a generic kwargs bag in the spec. Definitions and full catalog lookups must never import Torch, TorchGeo, upstream readers, model weights, or samples.
 
-   "my_dataset": ("my_dataset", "MyDataset", "classification"),
+Use the existing dataset catalog tests as the parity pattern. The committed :file:`tests/fixtures/dataset_metadata.json` freezes the 23 definitions before the spec migration; do not regenerate it from changed metadata to conceal a scientific change. Add fixture-backed tests for genuinely new definitions. Verify split counts against local data using the slow split-size tests.
 
-This entry enables loading, CLI listing/details, and run selection. Its task must be ``"classification"`` or ``"segmentation"`` and match the wrapper's ``task``. ``list_datasets()`` and ``get_dataset_task(name)`` read the registry without importing dataset wrappers. There is no second list to update in ``image_cli.py`` and no per-dataset YAML config.
+Update :file:`docs/user/datasets.rst`, relevant API documentation, and :file:`docs/user/changelog.rst` for a new dataset.
 
-The registry stores strings rather than imported classes so metadata queries stay cheap. ``get_bench_dataset_class`` imports only the requested wrapper.
+Validate the loading contract
+----------------------------
 
-**2. Export the class** from :file:`src/torchgeo_bench/datasets/__init__.py`
-by adding an ``__all__`` entry and a matching ``_LAZY_CLASSES`` mapping:
-
-.. code-block:: python
-
-   __all__ = [
-       # Keep the existing exports.
-       "MyDataset",
-   ]
-
-   _LAZY_CLASSES: dict[str, str] = {
-       # Keep the existing lazy mappings.
-       "MyDataset": "my_dataset",
-   }
-
-Individual dataset classes load lazily through module ``__getattr__`` so that
-``import torchgeo_bench.datasets`` — and CLI startup — stays fast.  Do not add
-an eager ``from .my_dataset import MyDataset`` import; register the name in
-``_LAZY_CLASSES`` instead.
-
-Keep both lists alphabetically sorted; they are read by humans far more often
-than by the loader.
-
-**3. Wire up the download.** Which files you touch depends on the family:
-
-* **GeoBench V2** — add the name → upstream class mapping to ``_V2_REGISTRY``
-  in :file:`src/torchgeo_bench/datasets/geobench_v2.py`.
-  ``DEFAULT_V2_DATASETS`` is derived from that registry automatically.
-* **A standalone torchgeo wrapper** — add a ``download_<name>`` helper in :file:`src/torchgeo_bench/download.py`, include its name in ``TORCHGEO_DATASETS``, and route it in ``download_datasets``. ``DOWNLOADABLE_DATASETS`` is derived from the family lists. ``download_resisc45`` is the reference implementation. For a different download backend, extend the same explicit name validation and dispatch rather than adding parser-specific choices.
-
-The CLI delegates through :file:`src/torchgeo_bench/commands/_download.py`; there is no ``_cmd_download`` function or download-target ``choices`` list to edit in ``cli.py``. Also verify the missing-data hint produced by ``download_command`` in ``datasets/loading.py`` points to a working download invocation. Downloading somewhere other than ``data/`` does not change the loader's fixed paths.
-
-**4. Add the expected split sizes** to ``EXPECTED_SIZES`` in
-:file:`tests/test_split_sizes.py`.  Those cases are marked
-``@pytest.mark.slow`` and the default ``addopts`` deselect them, so verify
-yours against the data on disk explicitly:
-
-.. code-block:: console
-
-   $ uv run pytest tests/test_split_sizes.py -m slow -k my_dataset
-
-**5. Document it.** Three files, none optional:
-
-* :file:`docs/user/datasets.rst` — a row in the relevant family table, plus
-  the filesystem-layout table and the ``download`` command block if you added
-  a new target.
-* :file:`docs/api/datasets.rst` — an ``.. autoclass::`` entry, or your class
-  gets no API page.
-* :file:`docs/user/changelog.rst` — an entry under ``Unreleased``.
-
-Run the smoke test
-------------------
-
-With the dataset on disk, run a quick benchmark to verify the dataset loads
-and produces sensible results:
+Add fast tests with tiny local files for requested-split isolation, input-option validation, channel values and metadata identity/order, raw dtype, targets, source-specific adapters, and visible missing-data failures. Keep real-data tests marked ``slow``. Exercise applicable offline integrations.
 
 .. code-block:: console
 
    $ uv run torchgeo-bench datasets my_dataset
    $ uv run torchgeo-bench run --model imagestats --dataset my_dataset --device cpu \
        --methods knn --bootstrap-samples 10 --dry-run
-   $ uv run torchgeo-bench run --model imagestats --dataset my_dataset --device cpu \
-       --methods knn --bootstrap-samples 10
 
-These are classification smoke commands. ``imagestats`` computes four summary statistics per channel, so RGB inputs produce 12-dimensional embeddings without downloading weights. Use a separate ``output.file`` in a run YAML when recording exploratory results. The default runtime device is ``cuda:0``; pass ``--device cpu`` when no GPU is available.
+For classification, remove ``--dry-run`` once local data is ready. For segmentation, use a spatial backbone with compatible feature layers and head instead of ``imagestats``; inspect masks and ignore labels on a small sample. See :doc:`segmentation-layers`. Do not treat above-chance accuracy as proof of correct loading; assert channels and labels directly.
 
-Compare class counts, sample labels, image channels, and the reported score with a simple baseline. Above-chance accuracy is a useful sanity check, not proof of correct loading; near-chance results can also mean the features are unsuitable.
+Add geographic metadata
+-----------------------
 
-For segmentation, use a spatial backbone with a compatible head and feature layers, not ``imagestats``. Configure ``segmentation`` in the run YAML, check masks and ignore labels on a small sample, and exercise the loader with the existing segmentation tests. See :doc:`segmentation-layers` for backbone layers.
-
-Add fast tests using tiny local fixtures for split selection, band order, raw dtype, label/mask shape, and missing-data errors. Keep real-data tests marked ``slow`` and run the applicable ones locally.
-
-Add the geographic metadata
----------------------------
-
-Every registered dataset carries a record in the committed geographic store
-under :file:`docs/_static/_dataset_geography/`, which drives the spatial
-coverage map.  Generate yours:
+Every registered dataset needs a JSON record and index entry under :file:`docs/_static/_dataset_geography/`. If coordinates are unavailable, declare the verified explanation in ``GeographySpec(reason=...)``. If a re-split shares imagery, declare ``GeographySpec(alias_of=...)``. Geography routing derives from the source record; do not add a class check or a separate identity list.
 
 .. code-block:: console
 
    $ uv run python experiments/scripts/extract_dataset_geography.py --dataset my_dataset
 
-Commit the resulting :file:`docs/_static/_dataset_geography/my_dataset.json`
-together with the regenerated :file:`index.json`.
+Commit the new record and regenerated index. Existing records must keep exact catalog coverage and reasons for absent coordinates; :file:`tests/test_geography.py` checks these requirements. V2 reads tortilla coordinate metadata; V1 reads JSON affine/CRS metadata from shards or custom HDF5. A different format needs an explicit extraction implementation.
 
-:file:`tests/test_geography.py` fails when a registered dataset has no record,
-so this step is not optional — but "no coordinates" is a perfectly valid
-answer.  If the dataset genuinely carries no geolocation, add it to ``NO_GEO``
-in :file:`src/torchgeo_bench/geography.py` with the reason you verified, and
-the map will disclose the gap rather than quietly omit the dataset.
-
-Coordinates are read from V2 ``.tortilla`` metadata or V1 JSON affine/CRS metadata in shards and custom HDF5. A different storage layout needs an explicit extraction path in ``extract_geography``.
-
-Once results look sensible, follow the PR workflow described in
-:doc:`contribute_model` to open a pull request.
-
-A worked example
-----------------
-
-`#234 <https://github.com/torchgeo/torchgeo-bench/pull/234>`__ adds NWPU-RESISC45
-and touches every step on this page: a torchgeo wrapper whose loader takes no
-``bands`` argument, measured band statistics, its own download target, a
-``no_geo`` record with the check that justified it, and unit tests that run
-without the data on disk.  Read
-:file:`src/torchgeo_bench/datasets/resisc45.py` alongside this guide.
+See :file:`src/torchgeo_bench/datasets/resisc45.py` and its runtime factory for a TorchGeo example, and :doc:`contribute_model` for the PR workflow.

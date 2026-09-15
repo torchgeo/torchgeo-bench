@@ -19,7 +19,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from .interface import BenchModel
 

@@ -16,11 +16,8 @@ import torch
 from torch.utils.data import Dataset
 
 from ._metadata import read_hdf5_metadata
-from .base import BenchDataset
 from .input import ResolvedInput, Split
-
-V1_ROOT = Path("data/classification_v1.0")
-V1_SHARDED_ROOT = Path("data/classification_v1.0_wds")
+from .spec import DatasetSpec, V1Source
 
 
 class GeoBenchv1(Dataset):
@@ -130,58 +127,41 @@ class GeoBenchv1(Dataset):
         return sample
 
 
-class _V1Dataset(BenchDataset):
-    """Load GeoBench V1 splits for wrappers that declare dataset metadata."""
+def load_v1_split(
+    spec: DatasetSpec,
+    split: Split,
+    *,
+    inputs: ResolvedInput,
+    partition: str = "default",
+    transform: Callable | None = None,
+) -> Dataset:
+    """Load local shards first, retaining the custom JSON-metadata HDF5 fallback."""
+    source = spec.source
+    assert isinstance(source, V1Source)
+    v1_split: Literal["train", "valid", "test"] = (
+        source.validation_split if split == "val" else split
+    )
+    source_bands = tuple(band.source_name for band in inputs.bands)
+    sharded_dir = Path(source.root) / spec.storage_name
+    hdf5_dir = Path(source.hdf5_root) / spec.storage_name
+    if sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")):
+        from ._v1_webdataset import GeoBenchv1Sharded
 
-    supports_partitions = True
-
-    @classmethod
-    def data_root(cls) -> Path:
-        return V1_ROOT
-
-    def _load_split(
-        self,
-        split: Split,
-        *,
-        inputs: ResolvedInput,
-        partition: str = "default",
-        transform: Callable | None = None,
-    ) -> Dataset:
-        """Return a torch :class:`Dataset` for the split (raw values).
-
-        Loaders are tried in this order:
-
-        1. **Sharded WebDataset** at :data:`V1_SHARDED_ROOT` if shards exist locally.
-        2. **Custom JSON-metadata HDF5** at :data:`V1_ROOT` if present.
-
-        Missing data must be downloaded with ``torchgeo-bench download`` first.
-        """
-        v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split
-        source_bands = tuple(spec.source_name for spec in inputs.bands)
-
-        sharded_dir = V1_SHARDED_ROOT / self.name
-        hdf5_dir = self.data_root() / self.name
-        if sharded_dir.exists() and any(sharded_dir.glob("shard_*.tar")):
-            from ._v1_webdataset import GeoBenchv1Sharded
-
-            return GeoBenchv1Sharded(
-                root=V1_SHARDED_ROOT,
-                dataset_name=self.name,
-                split=v1_split,
-                partition=partition,
-                bands=source_bands,
-                transform=transform,
-            )
-        if not hdf5_dir.exists():
-            raise FileNotFoundError(
-                f"GeoBench V1 dataset '{self.name}' is not downloaded. "
-                f"Run `torchgeo-bench download {self.name}` first."
-            )
-        return GeoBenchv1(
-            root=self.data_root(),
-            dataset_name=self.name,
+        return GeoBenchv1Sharded(
+            root=source.root,
+            dataset_name=spec.storage_name,
             split=v1_split,
             partition=partition,
             bands=source_bands,
             transform=transform,
         )
+    if not hdf5_dir.exists():
+        raise FileNotFoundError(f"GeoBench V1 dataset '{spec.name}' is not downloaded.")
+    return GeoBenchv1(
+        root=source.hdf5_root,
+        dataset_name=spec.storage_name,
+        split=v1_split,
+        partition=partition,
+        bands=source_bands,
+        transform=transform,
+    )

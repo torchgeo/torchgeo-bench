@@ -22,7 +22,7 @@ src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
   ├── resume.py            # config_hash-based resume/skip logic
   ├── results.py            # EvaluationResult schema + atomic per-model CSV writes
   ├── download.py          # Dataset downloads (geobench_v1/v2 + torchgeo eurosat)
-  ├── datasets/            # Per-dataset BenchDataset wrappers + V1/V2 base classes
+  ├── datasets/            # Immutable DatasetSpec catalog + runtime source readers
   ├── linear.py            # Custom LogisticRegression (PyTorch-based)
   ├── knn.py               # FAISS-backed KNN via faissknn
   ├── segmentation_task.py # Segmentation task solver
@@ -190,6 +190,10 @@ torchgeo-bench coord --model sincos --dataset california_housing --methods linea
 
 All datasets are loaded from `./data/<canonical-subdir>` relative to the current working directory (no env vars, no overrides — keep it simple).
 
+Per-dataset modules declare frozen `DatasetSpec` records (`SPEC`), not metadata classes. Add the record to `datasets/catalog.py`; names, tasks, source families, downloads, CLI/config discovery, and geography derive from that one read-only catalog. `get_dataset_spec(name)` returns complete metadata without importing Torch, TorchGeo, or readers. Use tuples and frozen source/capability records. Keep scientific identity separate from shared `source.storage_name`.
+
+`load_split(spec_or_name, split, ...)` validates options, resolves input once, and constructs only that split. `LoadedSplit.spec` owns the authoritative metadata; callers pass `list(loaded.bands)` to model construction and own their DataLoaders. Keep source-specific policies in typed records and runtime adapters, not definition-module loader imports or scattered dataset-name conditions. Preserve the pre-migration metadata fixture and exact geography JSON/index coverage. Do not change labels, statistics, sensor tags, or RGB selections as part of metadata refactoring.
+
 ### GeoBench V1 (Classification) - use `m-` prefix
 `m-eurosat`, `m-forestnet`, `m-so2sat`, `m-pv4ger`, `m-brick-kiln`, `m-bigearthnet`
 
@@ -242,7 +246,7 @@ Always annotate function signatures:
 
 ```python
 def load_split(
-    dataset_name: str,
+    dataset_name: DatasetSpec | str,
     split: str,
     *,
     partition: str = "default",
@@ -251,12 +255,7 @@ def load_split(
     ...
 ```
 
-`load_split` loads only the requested split. Callers construct DataLoaders and
-use `LoadedSplit.bands` for model construction, never independently reselecting
-bands. Family implementations receive the same immutable `ResolvedInput` through
-their private `_load_split` hook. Unsupported splits, partitions, bands, and
-temporal requests fail before source construction. The image runner applies
-non-default partitions only to train; val/test use the default partition.
+`load_split` loads only the requested split. Callers construct DataLoaders and use `LoadedSplit.bands` for model construction, never independently reselecting bands. Runtime source factories receive the same immutable `ResolvedInput` returned to callers. Unsupported splits, partitions, bands, and temporal requests fail before source construction. The image runner applies non-default partitions only to train; val/test use the default partition.
 
 ### Documentation Style (Google-style)
 

@@ -11,7 +11,7 @@ import pytest
 from tests.support.runner import _resume_row
 from torchgeo_bench.config.presets import merge_settings, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets import get_dataset_spec
 from torchgeo_bench.resume import (
     DATASET_INPUT_PROTOCOL_VERSION,
     ResumeState,
@@ -113,7 +113,7 @@ def test_dataset_input_protocol_controls_resume(tmp_path: Path, *, unversioned: 
     before = path.read_bytes()
     completed = ResumeState(*load_completed(str(path)))
     resolved, _ = resolve_run_config(config, "m-eurosat")
-    plan = plan_dataset_run(resolved, get_bench_dataset_class("m-eurosat"), metadata, completed)
+    plan = plan_dataset_run(resolved, get_dataset_spec("m-eurosat"), metadata, completed)
     assert plan.skip_knn is not unversioned
     assert plan.skip_dataset is not unversioned
     assert path.read_bytes() == before
@@ -149,7 +149,7 @@ def test_profile_resume_requires_every_enabled_metric(tmp_path: Path, *, cpu_ena
     rows = [_resume_row(config, method="profile", metric_name=name) for name in sorted(expected)]
     pd.DataFrame(rows).to_csv(path, index=False)
     completed = ResumeState(*load_completed(str(path)))
-    dataset = get_bench_dataset_class("m-eurosat")
+    dataset = get_dataset_spec("m-eurosat")
     assert plan_dataset_run(config, dataset, metadata, completed).skip_profile
     for name in expected:
         partial = ResumeState(

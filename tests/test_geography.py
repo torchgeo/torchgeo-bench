@@ -7,13 +7,14 @@ import h5py
 import numpy as np
 import pytest
 
-from torchgeo_bench.datasets import list_datasets
+from torchgeo_bench.datasets import V1Source, get_dataset_spec, list_datasets
 from torchgeo_bench.geography import (
     GEO_ALIAS,
     INDEX_NAME,
     NO_GEO,
     STORE_DIR,
     GeoRecord,
+    _dataset_dir,
     _v1_origin,
     build_index,
     extract_geography,
@@ -62,8 +63,34 @@ def test_extract_geography_requires_imagery(
     if directory_exists:
         (tmp_path / "data/classification_v1.0/m-eurosat").mkdir(parents=True)
 
-    with pytest.raises(FileNotFoundError, match="`torchgeo-bench download geobench_v1`"):
+    with pytest.raises(
+        FileNotFoundError, match="`torchgeo-bench download geobench_v1 --datasets m-eurosat`"
+    ):
         extract_geography("m-eurosat")
+
+
+@pytest.mark.parametrize("name", list_datasets())
+def test_geography_routes_from_source_identity(
+    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    spec = get_dataset_spec(name)
+    source = spec.source
+    directory = Path(source.root)
+    if source.kind != "torchgeo":
+        directory /= spec.storage_name
+    directory.mkdir(parents=True)
+    if isinstance(source, V1Source):
+        (directory / "shard_00000.tar").touch()
+    assert _dataset_dir(name) == directory
+
+
+def test_geography_never_reads_a_sibling_dataset_as_the_missing_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("data/geobenchv2/burn_scars").mkdir(parents=True)
+    assert _dataset_dir("caffe") is None
 
 
 def test_build_index_weights_continents_by_sample_count(tmp_path: Path) -> None:

@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from ._input_units import InputUnit, _detect_band_group_unit, to_s2_dn
 from .interface import BenchModel

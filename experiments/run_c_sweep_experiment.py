@@ -23,11 +23,11 @@ from sklearn.metrics import accuracy_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.config.presets import build_model, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig, RuntimeConfig
-from torchgeo_bench.datasets import get_bench_dataset_class, load_split
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets import get_dataset_spec, load_split
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
 
@@ -115,8 +115,8 @@ def run_c_sweep(
 
 def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[dict]) -> list[dict]:
     """Evaluate unfinished models for one dataset and append their results to ``all_rows``."""
-    bench_cls = get_bench_dataset_class(dataset_name)
-    if bench_cls.multilabel:
+    spec = get_dataset_spec(dataset_name)
+    if spec.multilabel:
         logger.warning(
             "Skipping %s: this script is single-label only (uses accuracy_score + "
             "single-label LogisticRegression).",

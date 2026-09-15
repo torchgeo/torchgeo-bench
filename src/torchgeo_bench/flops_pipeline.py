@@ -19,12 +19,11 @@ import torch
 from filelock import FileLock
 from torch import nn
 
-from torchgeo_bench.bands import BandCompatibilityError
+from torchgeo_bench.bands import BandCompatibilityError, BandSpec
 from torchgeo_bench.config.flops import FlopsConfig, FlopsSegmentationConfig
 from torchgeo_bench.config.presets import NORMALIZATIONS, ModelPreset, build_model
 from torchgeo_bench.config.schema import SegmentationConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets import get_dataset_spec
 from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.model_profile import (
     ProfileTiming,
@@ -399,7 +398,7 @@ def main(config: FlopsConfig) -> None:
     model_target = preset.target
     model_name = _TERRAMIND_MERGED_NAME.get(preset.name, preset.name)
 
-    bench = get_bench_dataset_class(cfg.input.band_source)()
+    bench = get_dataset_spec(cfg.input.band_source)
     band_specs_for = {
         "rgb": bench.select_band_specs(bench.rgb_bands),
         "s2": bench.select_band_specs(None),
@@ -416,7 +415,7 @@ def main(config: FlopsConfig) -> None:
             if declared != _MODALITY_FOR_BAND_CONFIG[band_config]:
                 continue
 
-        band_specs = band_specs_for[band_config]
+        band_specs = list(band_specs_for[band_config])
         n_channels = len(band_specs)
 
         model = _build_model(preset, band_specs, normalization, band_config)

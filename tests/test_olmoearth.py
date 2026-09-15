@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel, _build_sensor_groups
 
 olmoearth_available = find_spec("olmoearth_pretrain_minimal") is not None

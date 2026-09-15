@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from ._band_mapping import BandMappingPolicy, map_to_model_bands, select_src_bands
 from ._input_units import InputUnit, convert_unit, detect_input_unit

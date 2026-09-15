@@ -1,26 +1,21 @@
 """MEurosat (GeoBench V1) benchmark dataset."""
 
-from typing import ClassVar
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec
-from .geobench_v1 import _V1Dataset
+from .spec import DatasetCapabilities, DatasetSpec, SplitSizes, V1Source
 
+# fmt: off
+SPEC = DatasetSpec(
+    name="m-eurosat",
+    task="classification",
+    num_classes=10,
+    multilabel=False,
+    rgb_bands=("red", "green", "blue"),
+    split_sizes=SplitSizes(train=2000, val=1000, test=1000),
+    source=V1Source(),
+    capabilities=DatasetCapabilities(supports_partitions=True),
 
-class MEurosat(_V1Dataset):
-    """Sentinel-2 land-use classification (10 classes).
-
-    Based on the EuroSAT dataset with 13 Sentinel-2 spectral bands.
-    """
-
-    name = "m-eurosat"
-    task = "classification"
-    num_classes = 10
-    multilabel = False
-    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 2000, "val": 1000, "test": 1000}
-
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("s2", "coastal_aerosol", "01 - Coastal aerosol", mean=1359.95, std=251.332, min=858, max=6805, wavelength_um=0.443),
         BandSpec("s2", "blue", "02 - Blue", mean=1125.53, std=339.685, min=0, max=28000, wavelength_um=0.49),
         BandSpec("s2", "green", "03 - Green", mean=1055, std=396.733, min=0, max=28000, wavelength_um=0.56),
@@ -34,5 +29,5 @@ class MEurosat(_V1Dataset):
         BandSpec("s2", "swir_cirrus", "10 - SWIR - Cirrus", mean=1848.9, std=978.83, min=7, max=24704, wavelength_um=1.375),
         BandSpec("s2", "swir_1", "11 - SWIR", mean=1131.27, std=745.284, min=1, max=22210, wavelength_um=1.61),
         BandSpec("s2", "swir_2", "12 - SWIR", mean=2665.44, std=1223.88, min=95, max=25752, wavelength_um=2.19),
-    ]
-    # fmt: on
+    ),
+)

@@ -224,7 +224,12 @@ def test_dataset_catalog_details(
     dataset: str, task: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cli_main(["datasets", dataset])
-    assert yaml.safe_load(capsys.readouterr().out) == {"name": dataset, "task": task}
+    detail = yaml.safe_load(capsys.readouterr().out)
+    assert detail["name"] == dataset
+    assert detail["task"] == task
+    assert detail["bands"]
+    assert detail["split_sizes"]
+    assert detail["source"]
 
 
 def test_download_invalid_target() -> None:
@@ -317,7 +322,7 @@ def test_download_rejects_mixed_collection_targets(names: list[str]) -> None:
 def test_download_named_dataset_rejects_unknown_before_backend(monkeypatch, invalid: str) -> None:
     calls: list[object] = []
     monkeypatch.setattr(
-        "torchgeo_bench.download.snapshot_download", lambda *args, **kwargs: calls.append(args)
+        "huggingface_hub.snapshot_download", lambda *args, **kwargs: calls.append(args)
     )
     with pytest.raises(SystemExit, match="Unknown dataset"):
         cli_main(["download", "m-eurosat", invalid])
@@ -327,7 +332,7 @@ def test_download_named_dataset_rejects_unknown_before_backend(monkeypatch, inva
 def test_download_eurosat(monkeypatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(
-        "torchgeo_bench.download.download_eurosat", lambda path: calls.append(str(path))
+        "torchgeo_bench.download._download_torchgeo", lambda spec, path: calls.append(str(path))
     )
     cli_main(["download", "eurosat"])
     assert calls == ["data"]
@@ -341,7 +346,7 @@ def test_download_rejects_empty_dataset_list() -> None:
 def test_download_resisc45(monkeypatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(
-        "torchgeo_bench.download.download_resisc45", lambda path: calls.append(str(path))
+        "torchgeo_bench.download._download_torchgeo", lambda spec, path: calls.append(str(path))
     )
     cli_main(["download", "resisc45"])
     assert calls == ["data"]

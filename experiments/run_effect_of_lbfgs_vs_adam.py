@@ -28,11 +28,11 @@ from sklearn.metrics import accuracy_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.config.presets import build_model, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig, RuntimeConfig
-from torchgeo_bench.datasets import get_bench_dataset_class, load_split
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets import get_dataset_spec, load_split
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import extract_features
 
@@ -131,7 +131,7 @@ def run_dataset(
         logger.info("Resume: %d existing rows for %s", len(completed), dataset_name)
 
     logger.info("Loading %s dataset...", dataset_name)
-    bench = get_bench_dataset_class(dataset_name)()
+    bench = get_dataset_spec(dataset_name)
     if bench.multilabel:
         logger.info(
             "=== %s === skipping (multi-label not supported by this comparison)", dataset_name

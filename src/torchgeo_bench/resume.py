@@ -10,6 +10,7 @@ import pandas as pd
 
 from torchgeo_bench.config.presets import ModelPreset
 from torchgeo_bench.config.run import FeatureProfileConfig, RunConfig
+from torchgeo_bench.datasets import DatasetSpec
 from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
 
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ class DatasetRunPlan:
 
 def plan_dataset_run(
     cfg: RunConfig,
-    ds_cls: type,
+    spec: DatasetSpec,
     common_meta: Mapping[str, object],
     completed: ResumeState,
 ) -> DatasetRunPlan:
@@ -190,7 +191,7 @@ def plan_dataset_run(
     )
     completed_runs, completed_metrics = completed.completed_runs, completed.completed_metrics
 
-    if ds_cls.task == "segmentation":
+    if spec.task == "segmentation":
         seg_key = (ds_name, f"seg-{cfg.segmentation.head}", *model_key)
         return DatasetRunPlan(
             metric_name="mIoU",
@@ -243,7 +244,7 @@ def plan_dataset_run(
     )
 
     return DatasetRunPlan(
-        metric_name="micro_mAP" if ds_cls.multilabel else "accuracy",
+        metric_name="micro_mAP" if spec.multilabel else "accuracy",
         skip_dataset=skip_knn and skip_linear and skip_id and skip_profile,
         skip_knn=skip_knn,
         skip_linear=skip_linear,

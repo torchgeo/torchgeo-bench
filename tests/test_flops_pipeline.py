@@ -13,12 +13,11 @@ from torch import nn
 
 from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench import flops_pipeline
-from torchgeo_bench.bands import BandCompatibilityError
+from torchgeo_bench.bands import BandCompatibilityError, BandSpec
 from torchgeo_bench.config.flops import FlopsConfig, FlopsSegmentationConfig
 from torchgeo_bench.config.presets import ModelPreset, build_model, load_model_preset
 from torchgeo_bench.config.schema import ModelConfig, SegmentationConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.datasets import get_dataset_spec
 from torchgeo_bench.flops_pipeline import (
     _MODALITY_FOR_BAND_CONFIG,
     _build_model,
@@ -597,7 +596,7 @@ def test_main_rejects_malformed_layers_before_measurement(
 @pytest.mark.slow
 def test_panopticon_yields_finite_gflops():
     """Count the real Panopticon backbone without replacing PyTorch hooks."""
-    bench = get_bench_dataset_class("cloudsen12")()
+    bench = get_dataset_spec("cloudsen12")
     preset = load_model_preset(ModelConfig(name="torchgeo/panopticon"))
     model = build_model(
         preset,
@@ -613,7 +612,7 @@ def test_panopticon_yields_finite_gflops():
 @pytest.mark.slow
 def test_vit_gflops_ordering_and_tokens():
     """ViT-L costs more than ViT-B, with patch tokens following (image_size / patch_size)^2."""
-    bench = get_bench_dataset_class("cloudsen12")()
+    bench = get_dataset_spec("cloudsen12")
     rgb = bench.select_band_specs(bench.rgb_bands)
 
     def build(name):
@@ -770,7 +769,7 @@ def _custom_backbone(*, bands: list[BandSpec], normalization: str, width: int) -
 
 
 def test_importable_custom_constructor_receives_only_model_options() -> None:
-    bench = get_bench_dataset_class("cloudsen12")()
+    bench = get_dataset_spec("cloudsen12")
     preset = ModelPreset(name="custom", target=f"{__name__}._custom_backbone", kwargs={"width": 6})
     model = _build_model(preset, bench.bands, "identity", "s2")
     assert model is not None
@@ -779,7 +778,7 @@ def test_importable_custom_constructor_receives_only_model_options() -> None:
 
 
 def test_real_rcf_construction_uses_run_seed() -> None:
-    bench = get_bench_dataset_class("cloudsen12")()
+    bench = get_dataset_spec("cloudsen12")
     bands = bench.select_band_specs(bench.rgb_bands)
     sample = torch.randn(2, 3, 16, 16)
     outputs = []

@@ -25,7 +25,7 @@ from enum import StrEnum
 
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from ._input_units import InputUnit, detect_input_unit, to_reflectance, to_s2_dn
 

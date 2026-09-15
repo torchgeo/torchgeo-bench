@@ -17,7 +17,7 @@ import torchgeo.models as tgm
 from torchvision.transforms import Normalize as NormalizeV1
 from torchvision.transforms.v2 import Normalize as NormalizeV2
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from ._band_mapping import (
     BandMappingPolicy,

@@ -23,7 +23,6 @@ from tests.support.data import (
     write_torchgeo_download_files,
     write_v1_shards,
 )
-from torchgeo_bench import download
 from torchgeo_bench.cli import main
 from torchgeo_bench.datasets import _v1_webdataset as v1
 from torchgeo_bench.datasets import load_split
@@ -65,7 +64,7 @@ def local_download_sources(
         return str(target)
 
     monkeypatch.setattr(v1, "snapshot_download", snapshot_download)
-    monkeypatch.setattr(download, "snapshot_download", snapshot_download)
+    monkeypatch.setattr("huggingface_hub.snapshot_download", snapshot_download)
     checksums = {"m-eurosat/shard_00000.tar": _sha256(v1_directory / "shard_00000.tar")}
     monkeypatch.setattr(v1, "_shard_checksums", lambda: checksums)
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_FixtureHandler, directory=str(source)))

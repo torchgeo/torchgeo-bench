@@ -13,7 +13,7 @@ import yaml
 
 from tests.support.cli import cli_output, run_cli
 from tests.support.data import require_dataset_data
-from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets import get_dataset_spec
 
 pytestmark = pytest.mark.slow
 
@@ -60,7 +60,7 @@ def test_real_classification_program(
     assert set(rows["method"]) == {"knn5", "linear"}
     assert (rows["dataset"] == dataset).all()
     assert (rows["bands"] == bands).all()
-    assert (rows["num_classes"] == get_bench_dataset_class(dataset).num_classes).all()
+    assert (rows["num_classes"] == get_dataset_spec(dataset).num_classes).all()
     assert (rows["feature_dim"] == 32).all()
     assert (rows[["n_train", "n_val", "n_test"]] > 0).all().all()
     assert np.isfinite(rows[["metric_value", "ci_lower", "ci_upper"]]).all().all()

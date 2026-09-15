@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from scripts import compute_band_statistics as statistics
+from torchgeo_bench.datasets import get_dataset_spec
 
 
 @pytest.mark.parametrize(
@@ -59,3 +60,13 @@ def test_statistics_reject_inconsistent_channel_metadata(two_band_dataset: Magic
     two_band_dataset.bands.append(SimpleNamespace(name="missing"))
     with pytest.raises(ValueError, match=r"2 channels.*3 BandSpec"):
         statistics.compute_statistics("toy", batch_size=2, num_workers=0)
+
+
+def test_generated_band_field_matches_immutable_definition_syntax() -> None:
+    spec = get_dataset_spec("caffe")
+    values = [{"mean": 1.0, "std": 2.0, "min": -0.49, "max": 33.25}]
+    block = statistics.format_bandspec_block(spec.name, values)
+    assert block.startswith("    bands=(\n")
+    assert block.endswith("    ),")
+    assert 'BandSpec("aerial", "gray", "gray"' in block
+    assert "min=-0.49, max=33.25" in block

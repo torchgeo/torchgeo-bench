@@ -11,7 +11,7 @@ import logging
 import torch
 import torch.nn as nn
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.models.interface import BenchModel
 
 logger = logging.getLogger(__name__)

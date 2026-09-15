@@ -14,7 +14,7 @@ import pytest
 import torch
 
 from experiments.scripts.repack_geobench_v1 import repack, validate
-from torchgeo_bench.datasets import geobench_v1, load_split
+from torchgeo_bench.datasets import load_split
 from torchgeo_bench.datasets._metadata import decode_metadata
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
 from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
@@ -195,18 +195,17 @@ def test_hdf5_repack_and_sharded_reader_round_trip(
 
 
 @pytest.mark.parametrize("sharded", [False, True])
-def test_v1_wrapper_loads_data_only_metadata(
+def test_v1_source_loads_data_only_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, sharded: bool
 ) -> None:
-    hdf_root = tmp_path / "hdf5"
-    shard_root = tmp_path / "shards"
+    hdf_root = tmp_path / "data/classification_v1.0"
+    shard_root = tmp_path / "data/classification_v1.0_wds"
     source = hdf_root / "m-eurosat"
     _write_partition(source, [SID])
     _write_hdf5(source, json.dumps(_metadata()))
     if sharded:
         repack(source, shard_root / source.name)
-    monkeypatch.setattr(geobench_v1, "V1_ROOT", hdf_root)
-    monkeypatch.setattr(geobench_v1, "V1_SHARDED_ROOT", shard_root)
+    monkeypatch.chdir(tmp_path)
     dataset = load_split("m-eurosat", "train", bands=("red", "green")).dataset
     assert dataset[0]["image"].shape == (2, 2, 3)
     assert dataset[0]["label"].item() == 1
@@ -376,13 +375,12 @@ def test_geography_reports_non_file_metadata_members(tmp_path: Path) -> None:
 def test_geography_prefers_the_json_sharded_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    sharded_root = tmp_path / "shards"
+    sharded_root = tmp_path / "data/classification_v1.0_wds"
     directory = sharded_root / "m-eurosat"
     _write_shard(directory, json.dumps(_metadata()).encode())
-    hdf5_root = tmp_path / "hdf5"
+    hdf5_root = tmp_path / "data/classification_v1.0"
     _write_hdf5(hdf5_root / "m-eurosat", _payload("repr"), attribute="pickle")
-    monkeypatch.setattr(geobench_v1, "V1_SHARDED_ROOT", sharded_root)
-    monkeypatch.setattr(geobench_v1, "V1_ROOT", hdf5_root)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("torchgeo_bench.geography._attribute_continents", lambda *_args: Counter())
     record = extract_geography("m-eurosat", workers=1)
     assert record.status == "extracted"

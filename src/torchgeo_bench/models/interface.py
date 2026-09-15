@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 from ._input_units import InputUnit
 from ._normalization import NormalizationStrategy, build_normalizer

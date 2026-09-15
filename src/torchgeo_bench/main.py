@@ -24,9 +24,9 @@ from torchgeo_bench.config.presets import (
 )
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.datasets import (
-    BenchDataset,
+    DatasetSpec,
     LoadedSplit,
-    get_bench_dataset_class,
+    get_dataset_spec,
     list_datasets,
     load_split,
 )
@@ -854,7 +854,7 @@ def instantiate_dataset_model(
 def dataset_metadata(
     cfg: RunConfig,
     ds_name: str,
-    ds_cls: type[BenchDataset],
+    spec: DatasetSpec,
     model_cfg: ModelPreset,
     config_hash: str,
 ) -> ResultMetadata:
@@ -872,7 +872,7 @@ def dataset_metadata(
         "interpolation": cfg.input.interpolation,
         "partition": cfg.input.partition,
         "bands": bands_value,
-        "num_classes": ds_cls.num_classes,
+        "num_classes": spec.num_classes,
         "config_hash": config_hash,
         "c_range_start": linear.c_log10_start,
         "c_range_stop": linear.c_log10_stop,
@@ -905,12 +905,12 @@ def run_dataset(
     device: torch.device | None = None,
 ) -> Iterator[tuple[list[dict], list[dict], list[dict]]]:
     """Load and evaluate one dataset unless resume marks it complete."""
-    ds_cls = get_bench_dataset_class(ds_name)
+    spec = get_dataset_spec(ds_name)
 
     cfg, model_cfg = resolve_run_config(cfg, ds_name)
     config_hash = resume_config_hash(cfg, model_cfg)
-    common_meta = dataset_metadata(cfg, ds_name, ds_cls, model_cfg, config_hash)
-    plan = plan_dataset_run(cfg, ds_cls, common_meta, completed)
+    common_meta = dataset_metadata(cfg, ds_name, spec, model_cfg, config_hash)
+    plan = plan_dataset_run(cfg, spec, common_meta, completed)
     if plan.skip_dataset:
         if cfg.runtime.verbose:
             logger.info("[%s] Resume preflight: all requested work already complete", ds_name)
@@ -921,7 +921,7 @@ def run_dataset(
         cfg = cfg.model_copy(
             update={"runtime": cfg.runtime.model_copy(update={"device": str(device)})}
         )
-    if ds_cls.task != "segmentation" and not plan.skip_knn:
+    if spec.task != "segmentation" and not plan.skip_knn:
         from torchgeo_bench.knn import resolve_knn_device
 
         plan = replace(

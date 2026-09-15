@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.models import UniverSatBenchModel
 from torchgeo_bench.models.universat import _build_sensor_groups, _sar_code
 

@@ -1,27 +1,21 @@
 """MBigEarthNet (GeoBench V1) benchmark dataset."""
 
-from typing import ClassVar
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec
-from .geobench_v1 import _V1Dataset
+from .spec import DatasetCapabilities, DatasetSpec, SplitSizes, V1Source
 
+# fmt: off
+SPEC = DatasetSpec(
+    name="m-bigearthnet",
+    task="classification",
+    num_classes=43,
+    multilabel=True,
+    rgb_bands=("red", "green", "blue"),
+    split_sizes=SplitSizes(train=20000, val=1000, test=1000),
+    source=V1Source(),
+    capabilities=DatasetCapabilities(supports_partitions=True),
 
-class MBigEarthNet(_V1Dataset):
-    """Sentinel-2 multi-label land-cover classification (43 classes).
-
-    Based on the BigEarthNet dataset with 12 Sentinel-2 spectral bands.
-    Uses multi-hot label encoding.
-    """
-
-    name = "m-bigearthnet"
-    task = "classification"
-    num_classes = 43
-    multilabel = True
-    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 20000, "val": 1000, "test": 1000}
-
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("s2", "coastal_aerosol", "01 - Coastal aerosol", mean=378.402, std=462.463, min=1, max=18268, wavelength_um=0.443),
         BandSpec("s2", "blue", "02 - Blue", mean=482.274, std=519.331, min=0, max=20545, wavelength_um=0.49),
         BandSpec("s2", "green", "03 - Green", mean=706.537, std=552.357, min=0, max=18989, wavelength_um=0.56),
@@ -34,5 +28,5 @@ class MBigEarthNet(_V1Dataset):
         BandSpec("s2", "water_vapour", "09 - Water vapour", mean=2368.32, std=1166.83, min=1, max=15593, wavelength_um=0.945),
         BandSpec("s2", "swir_1", "11 - SWIR", mean=1875.26, std=1092.42, min=0, max=15422, wavelength_um=1.61),
         BandSpec("s2", "swir_2", "12 - SWIR", mean=1229.38, std=862.716, min=0, max=15258, wavelength_um=2.19),
-    ]
-    # fmt: on
+    ),
+)

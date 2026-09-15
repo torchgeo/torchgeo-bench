@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.models._input_units import InputUnit
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError, build_normalizer
 

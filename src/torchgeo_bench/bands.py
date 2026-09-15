@@ -1,6 +1,6 @@
 """Spectral band metadata shared by datasets and models.
 
-Importing :class:`BandSpec` here or via ``datasets.base`` does not load torch or torchgeo.
+Importing :class:`BandSpec` here or via ``datasets`` does not load torch or torchgeo.
 """
 
 from dataclasses import dataclass

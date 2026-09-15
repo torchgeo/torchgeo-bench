@@ -1,31 +1,25 @@
-"""TreeSatAI (GeoBench V2) benchmark dataset."""
+"""TreeSatAI (GeoBench V2) benchmark dataset.
 
-from typing import ClassVar
+Class indices follow the upstream ``GeoBenchTreeSatAI.classes`` ordering:
+Abies, Acer, Alnus, Betula, Cleared, Fagus, Fraxinus, Larix, Picea, Pinus,
+Populus, Prunus, Pseudotsuga, Quercus, Tilia.
+"""
 
-from .base import BandSpec
-from .geobench_v2 import _V2Dataset
+from torchgeo_bench.bands import BandSpec
 
+from .spec import DatasetSpec, SplitSizes, V2Source
 
-class TreeSatAI(_V2Dataset):
-    """Aerial + Sentinel-2 + SAR tree species classification (15 classes).
+# fmt: off
+SPEC = DatasetSpec(
+    name="treesatai",
+    task="classification",
+    num_classes=15,
+    multilabel=True,
+    rgb_bands=("red", "green", "blue"),
+    split_sizes=SplitSizes(train=4000, val=1000, test=2000),
+    source=V2Source("GeoBenchTreeSatAI", band_order_strategy="by_sensor"),
 
-    Multi-sensor dataset with aerial RGB+NIR, 12 Sentinel-2 bands, and 3 SAR bands.
-    Class indices follow the upstream ``GeoBenchTreeSatAI.classes`` ordering:
-    Abies, Acer, Alnus, Betula, Cleared, Fagus, Fraxinus, Larix, Picea, Pinus,
-    Populus, Prunus, Pseudotsuga, Quercus, Tilia.
-    """
-
-    band_order_strategy = "by_sensor"
-
-    name = "treesatai"
-    task = "classification"
-    num_classes = 15
-    multilabel = True
-    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 4000, "val": 1000, "test": 2000}
-
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         # German DOP ortho-aerial centre wavelengths (R/G/B/NIR).
         BandSpec("aerial", "red", "red", mean=154.416, std=48.5986, min=0, max=255, wavelength_um=0.66),
         BandSpec("aerial", "green", "green", mean=92.4992, std=33.6488, min=0, max=255, wavelength_um=0.55),
@@ -46,5 +40,5 @@ class TreeSatAI(_V2Dataset):
         BandSpec("s1", "vv", "vv", mean=60197.8, std=17913.3, min=0, max=65535),
         BandSpec("s1", "vh", "vh", mean=65496.9, std=1326.41, min=0, max=65535),
         BandSpec("s1", "vv_vh", "vv/vh", mean=88.73, std=2409.44, min=0, max=65535),
-    ]
-    # fmt: on
+    ),
+)

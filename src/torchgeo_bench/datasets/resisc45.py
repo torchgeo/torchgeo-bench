@@ -1,96 +1,36 @@
-"""NWPU-RESISC45 aerial scene classification via torchgeo."""
+"""NWPU-RESISC45 aerial scene classification via torchgeo.
 
-from collections.abc import Callable
-from pathlib import Path
-from typing import ClassVar
+31,500 RGB images at 256x256, with 700 images per class, sourced from Google Earth.
+8-bit imagery has no per-image geolocation, scale, or radiometric calibration.
+Wavelengths are nominal visible-light centres, not measured sensor responses.
+Images span 0.2--30 m/px; the ``aerial`` tag's 1 m GSD is only an approximation.
+"""
 
-import torch
-from torch.utils.data import Dataset
-from torchgeo.datasets import RESISC45 as TGRESISC45
-from torchvision.transforms import Compose
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec, BenchDataset
-from .input import ResolvedInput, Split
+from .spec import DatasetSpec, GeographySpec, SplitSizes, TorchGeoSource
 
-
-class RESISC45(BenchDataset):
-    """Aerial scene classification, 45 classes, via torchgeo.
-
-    31,500 RGB images at 256x256, with 700 images per class.
-
-    Northwestern Polytechnical University sourced them from Google Earth.
-
-    Uses torchgeo's 60/20/20 split: 18,900 train, 6,300 validation, and 6,300 test.
-
-    8-bit imagery has no per-image geolocation, scale, or radiometric calibration.
-
-    Wavelengths are nominal visible-light centres, not measured sensor responses.
-
-    Images span 0.2--30 m/px; the ``aerial`` tag's 1 m GSD is only an approximation.
-
-    This lets resolution-aware models accept them as RGB aerial imagery.
-    """
-
-    name = "resisc45"
-    task = "classification"
-    num_classes = 45
-    multilabel = False
-    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 18900, "val": 6300, "test": 6300}
-    supports_partitions = False
+# fmt: off
+SPEC = DatasetSpec(
+    name="resisc45",
+    task="classification",
+    num_classes=45,
+    multilabel=False,
+    rgb_bands=("red", "green", "blue"),
+    split_sizes=SplitSizes(train=18900, val=6300, test=6300),
+    source=TorchGeoSource("RESISC45", root="data/resisc45", download_checksum=True),
+    geography=GeographySpec(
+        reason=(
+            "scene-classification JPEGs with no georeferencing: no sampled image "
+            "carries any EXIF block, and the upstream release ships no coordinate table"
+        )
+    ),
 
     # Train-split statistics in raw 0-255 units; see scripts/compute_band_statistics.py.
     # ``source_name`` identifies the RGB channel, not a band key in the JPEG.
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("aerial", "red", "R", mean=93.8939, std=51.8492, min=0, max=255, wavelength_um=0.65),
         BandSpec("aerial", "green", "G", mean=97.1123, std=47.2366, min=0, max=255, wavelength_um=0.55),
         BandSpec("aerial", "blue", "B", mean=87.5678, std=47.0631, min=0, max=255, wavelength_um=0.45),
-    ]
-    # fmt: on
-
-    @classmethod
-    def data_root(cls) -> Path:
-        """Return ``Path("data/resisc45")``; torchgeo manages the layout below."""
-        return Path("data/resisc45")
-
-    def _load_split(
-        self,
-        split: Split,
-        *,
-        inputs: ResolvedInput,
-        partition: str = "default",
-        transform: Callable | None = None,
-    ) -> Dataset:
-        """Return the wrapped torchgeo dataset for the split.
-
-        Select bands before transforms so unused RGB channels are not resized.
-        """
-        del partition
-        indices = [self.bands.index(spec) for spec in inputs.bands]
-        select = _make_band_select(indices, len(self.bands))
-        if select is not None:
-            transform = select if transform is None else Compose([select, transform])
-        return TGRESISC45(
-            root=str(self.data_root()),
-            split=split,
-            transforms=transform,
-            download=False,
-        )
-
-
-def _make_band_select(indices: list[int], n_bands: int) -> Callable[[dict], dict] | None:
-    """Return a transform selecting ``indices`` from the channel axis.
-
-    ``None`` when the selection is the identity (every band, in order), so the
-    common ``bands="all"`` and ``bands="rgb"`` paths add no per-sample work.
-    """
-    if indices == list(range(n_bands)):
-        return None
-    index = torch.tensor(indices)
-
-    def _select(sample: dict) -> dict:
-        sample["image"] = sample["image"].index_select(-3, index)
-        return sample
-
-    return _select
+    ),
+)

@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 
 from torchgeo_bench.config.presets import merge_settings, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.datasets import LoadedSplit, ResolvedInput, get_bench_dataset_class
+from torchgeo_bench.datasets import LoadedSplit, ResolvedInput, get_dataset_spec
 from torchgeo_bench.datasets.input import Split
 from torchgeo_bench.main import dataset_metadata
 from torchgeo_bench.resume import resume_config_hash
@@ -55,16 +55,13 @@ def make_loaded_split(  # noqa: PLR0913 - mirror split metadata for offline test
     partition: str = "default",
 ) -> LoadedSplit:
     """Attach real catalog metadata to an offline source dataset."""
-    bench = get_bench_dataset_class(dataset_name)()
+    bench = get_dataset_spec(dataset_name)
     return LoadedSplit(
         dataset=dataset,
-        dataset_name=dataset_name,
+        spec=bench,
         split=split,
         partition=partition,
         input=ResolvedInput(tuple(bench.resolve_band_specs(bands)), bands, time_steps),
-        task=bench.task,
-        num_classes=bench.num_classes,
-        multilabel=bench.multilabel,
     )
 
 
@@ -106,7 +103,7 @@ def _resume_row(cfg: RunConfig, *, method: str, metric_name: str) -> dict[str, o
         **dataset_metadata(
             resolved,
             ds_name,
-            get_bench_dataset_class(ds_name),
+            get_dataset_spec(ds_name),
             preset,
             resume_config_hash(resolved, preset),
         ),

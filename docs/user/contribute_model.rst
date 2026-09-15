@@ -112,7 +112,7 @@ Create :file:`tests/test_<model>.py`.  Every added code path must be covered.
    import pytest
    import torch
 
-   from torchgeo_bench.datasets.base import BandSpec
+   from torchgeo_bench.bands import BandSpec
    from torchgeo_bench.models.new_model import NewModel
 
 

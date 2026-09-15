@@ -1,28 +1,20 @@
 """BENV2 (GeoBench V2) benchmark dataset."""
 
-from typing import ClassVar
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec
-from .geobench_v2 import _V2Dataset
+from .spec import DatasetSpec, SplitSizes, V2Source
 
+# fmt: off
+SPEC = DatasetSpec(
+    name="benv2",
+    task="classification",
+    num_classes=19,
+    multilabel=True,
+    rgb_bands=("b04", "b03", "b02"),
+    split_sizes=SplitSizes(train=20000, val=4000, test=4000),
+    source=V2Source("GeoBenchBENV2", band_order_strategy="by_sensor"),
 
-class BENV2(_V2Dataset):
-    """Sentinel-2 + SAR multi-label classification (19 classes).
-
-    BigEarthNet V2 with 12 Sentinel-2 optical bands and 2 SAR bands.
-    """
-
-    band_order_strategy = "by_sensor"
-
-    name = "benv2"
-    task = "classification"
-    num_classes = 19
-    multilabel = True
-    rgb_bands: ClassVar[list[str]] = ["b04", "b03", "b02"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 20000, "val": 4000, "test": 4000}
-
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("s2", "b01", "B01", mean=356.468, std=551.961, min=1, max=11450, wavelength_um=0.443),
         BandSpec("s2", "b02", "B02", mean=434.675, std=594.998, min=1, max=20592, wavelength_um=0.49),
         BandSpec("s2", "b03", "B03", mean=612.172, std=595.693, min=1, max=18640, wavelength_um=0.56),
@@ -37,5 +29,5 @@ class BENV2(_V2Dataset):
         BandSpec("s2", "b12", "B12", mean=1004.48, std=809.08, min=1, max=15213, wavelength_um=2.19),
         BandSpec("s1", "vv", "VV", mean=-19.361, std=5.6033, min=-66.5271, max=24.3281),
         BandSpec("s1", "vh", "VH", mean=-12.6317, std=5.094, min=-65.3005, max=33.5545),
-    ]
-    # fmt: on
+    ),
+)

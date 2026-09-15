@@ -1,26 +1,22 @@
 """MSo2Sat (GeoBench V1) benchmark dataset."""
 
-from typing import ClassVar
+from torchgeo_bench.bands import BandSpec
 
-from .base import BandSpec
-from .geobench_v1 import _V1Dataset
+from .spec import DatasetCapabilities, DatasetSpec, GeographySpec, SplitSizes, V1Source
 
+# fmt: off
+SPEC = DatasetSpec(
+    name="m-so2sat",
+    task="classification",
+    num_classes=17,
+    multilabel=False,
+    rgb_bands=("red", "green", "blue"),
+    split_sizes=SplitSizes(train=19992, val=986, test=986),
+    source=V1Source(),
+    capabilities=DatasetCapabilities(supports_partitions=True),
+    geography=GeographySpec(reason="every sample has transform=None and crs=None"),
 
-class MSo2Sat(_V1Dataset):
-    """Sentinel-2 + SAR local climate zone classification (17 classes).
-
-    Based on the So2Sat dataset with 10 Sentinel-2 and 8 SAR bands.
-    """
-
-    name = "m-so2sat"
-    task = "classification"
-    num_classes = 17
-    multilabel = False
-    rgb_bands: ClassVar[list[str]] = ["red", "green", "blue"]
-    split_sizes: ClassVar[dict[str, int]] = {"train": 19992, "val": 986, "test": 986}
-
-    # fmt: off
-    bands: ClassVar[list[BandSpec]] = [
+    bands=(
         BandSpec("sar", "vh_real", "01 - VH.Real", mean=0, std=0.2156, min=-107.636, max=45.3088),
         BandSpec("s2", "blue", "02 - Blue", mean=0.1295, std=0.0414, min=0.0001, max=2.8, wavelength_um=0.49),
         BandSpec("sar", "vh_imag", "02 - VH.Imaginary", mean=0.0001, std=0.2142, min=-107.636, max=107.633),
@@ -39,5 +35,5 @@ class MSo2Sat(_V1Dataset):
         BandSpec("s2", "red_edge_4", "08A - Vegetation Red Edge", mean=0.2073, std=0.094, min=0.0001, max=2.8001, wavelength_um=0.865),
         BandSpec("s2", "swir_1", "11 - SWIR", mean=0.1768, std=0.1024, min=0.0001, max=2.8, wavelength_um=1.61),
         BandSpec("s2", "swir_2", "12 - SWIR", mean=0.1285, std=0.0923, min=0.0001, max=2.8, wavelength_um=2.19),
-    ]
-    # fmt: on
+    ),
+)

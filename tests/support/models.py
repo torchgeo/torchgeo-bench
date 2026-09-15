@@ -1,6 +1,6 @@
 """Small model inputs shared by model contract tests."""
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 
 
 def bands(n: int = 2) -> list[BandSpec]:

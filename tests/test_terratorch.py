@@ -7,7 +7,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.bands import BandSpec
 from torchgeo_bench.models.terratorch_models import (
     TerraTorchClayBench,
     TerraTorchPrithviBench,
