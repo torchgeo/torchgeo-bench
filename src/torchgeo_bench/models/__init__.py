@@ -2,6 +2,7 @@
 
 from ._input_units import InputUnit
 from ._normalization import NormalizationStrategy
+from .handcrafted import HandcraftedBench
 from .image_stats import ImageStatsBench
 from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
@@ -31,6 +32,7 @@ __all__: list[str] = [
     "ConvBlockHead",
     "DPTHead",
     "FPNHead",
+    "HandcraftedBench",
     "ImageStatsBench",
     "InputUnit",
     "LinearHead",
