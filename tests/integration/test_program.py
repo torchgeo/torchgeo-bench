@@ -11,8 +11,8 @@ import yaml
 
 from tests.support.cli import cli_output, run_cli
 from tests.support.data import write_classification_files
-from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.flops_config import FlopsConfig
+from torchgeo_bench.run_config import RunConfig
 
 pytestmark = pytest.mark.integration
 

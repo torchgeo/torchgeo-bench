@@ -12,8 +12,8 @@ from tests.support.runner import (
     _synthetic_embeddings,
     _synthetic_loaders,
 )
-from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.main import evaluate_intrinsic_dim, main
+from torchgeo_bench.run_config import RunConfig
 
 
 def test_intrinsic_dim_rows_emitted(tmp_path: Path):

@@ -6,9 +6,10 @@ import sys
 import pytest
 
 from torchgeo_bench.config import list_model_configs, model_config_path
-from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_yaml
+from torchgeo_bench.config_schema import ModelConfig, load_yaml
 from torchgeo_bench.models.torchgeo_models import TorchGeoScaleMAEBench
 from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset, resolve_run_config
+from torchgeo_bench.run_config import RunConfig
 
 
 @pytest.mark.parametrize("name", list_model_configs())

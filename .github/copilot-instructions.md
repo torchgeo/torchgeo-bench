@@ -15,10 +15,8 @@ The Python package lives at **`src/torchgeo_bench/`**. Important pieces:
 - `cli.py` / `__main__.py` / `commands/` — shared dispatch for the installed
   command and both Python module entry points. Commands are `run`, `models`,
   `datasets`, `download`, `profile`, `flops`, and `coord`.
-- `config_schema.py` / `presets.py` — strict Pydantic image configuration,
-  safe YAML loading, `ModelPreset`, per-dataset `resolve_run_config`, and
-  explicit `build_model` construction. No legacy override parser or
-  recursive target instantiation.
+- `run_config.py` / `config_schema.py` / `presets.py` — strict image `RunConfig`, shared configuration sections and safe YAML loading, `ModelPreset`, per-dataset `resolve_run_config`, and explicit `build_model` construction. No legacy override parser or recursive target instantiation.
+- `commands/run_arguments.py` / `commands/_run.py` / `commands/_run_runtime.py` — run flags, configuration loading, and execution. Like the other benchmark commands, `run` dispatches directly through `commands.run` from `cli.py`.
 - `profile_config.py` / `flops_config.py` / `coordbench/config.py` — separate
   strict schemas for real-batch profiling, synthetic compute measurements,
   and coordinate evaluation.

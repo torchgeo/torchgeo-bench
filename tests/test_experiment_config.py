@@ -14,9 +14,10 @@ from experiments.scripts import (
     introspect_seg_layers,
     tune_dataloader,
 )
-from torchgeo_bench.config_schema import ModelConfig, RunConfig
+from torchgeo_bench.config_schema import ModelConfig
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError
 from torchgeo_bench.presets import ModelPreset, load_model_preset, resolve_run_config
+from torchgeo_bench.run_config import RunConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 

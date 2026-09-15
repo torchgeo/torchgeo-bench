@@ -143,7 +143,7 @@ class BlockKNN(importlib.abc.MetaPathFinder):
             raise AssertionError(f'unselected backend imported: {fullname}')
 sys.meta_path.insert(0, BlockKNN())
 
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.run_config import RunConfig
 from torchgeo_bench.main import dataset_metadata, run_dataset
 from torchgeo_bench.resume import ResumeState
 from tests.support.runner import _synthetic_loaders, _synthetic_embeddings, _chainable_model_mock

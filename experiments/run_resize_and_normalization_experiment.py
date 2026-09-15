@@ -19,10 +19,10 @@ from torchgeo_bench.config_schema import (
     InputConfig,
     LinearConfig,
     ModelConfig,
-    RunConfig,
     RuntimeConfig,
 )
 from torchgeo_bench.presets import resolve_run_config
+from torchgeo_bench.run_config import RunConfig
 
 OUTPUT = default_output(__file__)
 

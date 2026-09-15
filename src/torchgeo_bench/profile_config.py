@@ -8,12 +8,12 @@ from .config_schema import (
     Device,
     InputConfig,
     ModelConfig,
-    RunConfig,
     RuntimeConfig,
     StrictModel,
 )
 from .datasets import list_datasets
 from .presets import ModelPreset, resolve_run_config
+from .run_config import RunConfig
 
 
 class ProfileRuntimeConfig(RuntimeConfig):

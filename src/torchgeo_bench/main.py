@@ -16,7 +16,6 @@ from torchgeo_bench.calibration import (
     compute_calibration_metrics,
     fit_temperature,
 )
-from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.datasets import (
     BenchDataset,
     get_bench_dataset_class,
@@ -52,6 +51,7 @@ from torchgeo_bench.resume import (
     plan_dataset_run,
     resume_config_hash,
 )
+from torchgeo_bench.run_config import RunConfig
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
 
 if TYPE_CHECKING:

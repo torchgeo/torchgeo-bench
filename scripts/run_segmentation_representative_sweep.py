@@ -25,7 +25,7 @@ from _seg_sweep_common import (
     write_run_config,
 )
 
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 

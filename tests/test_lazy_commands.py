@@ -36,6 +36,7 @@ import pytest
             ["coord", "--model", "sincos", "--dataset", "california_housing", "--dry-run"],
         ),
         ("torchgeo_bench.config_schema", []),
+        ("torchgeo_bench.run_config", []),
     ],
 )
 def test_cli_queries_do_not_import_heavy_modules(module: str, arguments: list[str]) -> None:

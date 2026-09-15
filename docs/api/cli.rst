@@ -49,7 +49,7 @@ Load and validate a YAML file without importing model implementations:
 
 .. code-block:: python
 
-   from torchgeo_bench.config_schema import load_run_config
+   from torchgeo_bench.run_config import load_run_config
    from torchgeo_bench.presets import resolve_run_config
 
    config = load_run_config("examples/image-run.yaml")
@@ -60,11 +60,16 @@ supplied values. ``RunConfig.model_dump_yaml()`` preserves omission by
 excluding unset fields; dumping all schema defaults and reloading them would
 turn those defaults into explicit overrides.
 
-.. currentmodule:: torchgeo_bench.config_schema
+.. currentmodule:: torchgeo_bench.run_config
 
 .. autoclass:: RunConfig
    :members: model_dump_yaml
    :no-show-inheritance:
+
+.. autofunction:: load_run_config
+.. autofunction:: validate_run_config
+
+.. currentmodule:: torchgeo_bench.config_schema
 
 .. autoclass:: ModelConfig
    :members:
@@ -74,8 +79,6 @@ turn those defaults into explicit overrides.
    :members:
    :no-show-inheritance:
 
-.. autofunction:: load_run_config
-.. autofunction:: validate_run_config
 .. autofunction:: load_yaml
 
 Preset resolution and construction
@@ -105,7 +108,7 @@ The image loop consumes a ``RunConfig`` directly:
 
 .. code-block:: python
 
-   from torchgeo_bench.config_schema import load_run_config
+   from torchgeo_bench.run_config import load_run_config
    from torchgeo_bench.main import main
 
    config = load_run_config("examples/image-run.yaml")

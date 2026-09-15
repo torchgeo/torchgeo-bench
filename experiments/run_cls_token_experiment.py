@@ -15,8 +15,9 @@ import sys
 
 from _runner import Job, add_devices_argument, default_output, run_jobs
 
-from torchgeo_bench.config_schema import InputConfig, ModelConfig, RunConfig
+from torchgeo_bench.config_schema import InputConfig, ModelConfig
 from torchgeo_bench.presets import resolve_run_config
+from torchgeo_bench.run_config import RunConfig
 
 OUTPUT = default_output(__file__)
 

@@ -17,7 +17,7 @@ from tempfile import NamedTemporaryFile
 
 import yaml
 
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 

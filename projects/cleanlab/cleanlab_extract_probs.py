@@ -35,7 +35,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_run_config
+from torchgeo_bench.config_schema import ModelConfig
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.datasets.base import BandSpec, BenchDataset
 from torchgeo_bench.linear import LogisticRegression
@@ -47,6 +47,7 @@ from torchgeo_bench.presets import (
     resolve_run_config,
 )
 from torchgeo_bench.results import DEFAULT_RESULTS_DIR, load_results
+from torchgeo_bench.run_config import RunConfig, load_run_config
 from torchgeo_bench.utils import FeatureSplit
 
 logger = logging.getLogger(__name__)

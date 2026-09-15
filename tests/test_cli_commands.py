@@ -14,10 +14,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from torchgeo_bench.cli import _image_size, main
+from torchgeo_bench.cli import main
 from torchgeo_bench.commands._config import set_path
-from torchgeo_bench.config_schema import validate_run_config
+from torchgeo_bench.commands.run_arguments import _image_size
 from torchgeo_bench.presets import resolve_run_config
+from torchgeo_bench.run_config import validate_run_config
 
 
 def test_dry_run_applies_explicit_flags_and_preserves_false_values(
@@ -114,7 +115,7 @@ def test_missing_model_or_dataset_fails_before_execution(selection: list[str]) -
 
 def test_non_dry_run_calls_typed_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     received = []
-    monkeypatch.setattr("torchgeo_bench.commands._image_runtime.run", received.append)
+    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.run", received.append)
     main(["run", "--model", "rcf", "--dataset", "m-eurosat"])
     assert received[0].model.name == "rcf"
 
@@ -128,7 +129,7 @@ def test_runtime_preserves_typed_schema(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr("torchgeo_bench.commands._image_runtime.main", capture)
+    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.main", capture)
     config = validate_run_config(
         {
             "model": {"name": "rcf"},
@@ -143,7 +144,7 @@ def test_runtime_preserves_typed_schema(
             "classification": {"methods": ["knn"]},
         }
     )
-    from torchgeo_bench.commands._image_runtime import run
+    from torchgeo_bench.commands._run_runtime import run
 
     run(config)
     assert received[0].runtime.device == "cpu"
@@ -163,7 +164,7 @@ def test_runtime_rejects_unavailable_cuda(monkeypatch: pytest.MonkeyPatch) -> No
         }
     )
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    from torchgeo_bench.commands._image_runtime import run
+    from torchgeo_bench.commands._run_runtime import run
 
     with pytest.raises(RuntimeError, match="CUDA device"):
         run(config)
@@ -178,7 +179,7 @@ def test_runtime_preserves_model_and_segmentation_overrides(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr("torchgeo_bench.commands._image_runtime.main", capture)
+    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.main", capture)
     config = validate_run_config(
         {
             "model": {"name": "torchgeo/scalemae_large_fmow", "kwargs": {"res": 1.0}},
@@ -188,7 +189,7 @@ def test_runtime_preserves_model_and_segmentation_overrides(
             "segmentation": {"layers": ["layer1"]},
         }
     )
-    from torchgeo_bench.commands._image_runtime import run
+    from torchgeo_bench.commands._run_runtime import run
 
     run(config)
     effective, preset = resolve_run_config(received[0], "m-eurosat")
@@ -207,7 +208,7 @@ def test_runtime_preserves_preset_layers_when_schema_omits_them(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr("torchgeo_bench.commands._image_runtime.main", capture)
+    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.main", capture)
     config = validate_run_config(
         {
             "model": {"name": "torchgeo/resnet50_s2rgb_satlas_si"},
@@ -215,7 +216,7 @@ def test_runtime_preserves_preset_layers_when_schema_omits_them(
             "runtime": {"device": "cpu"},
         }
     )
-    from torchgeo_bench.commands._image_runtime import run
+    from torchgeo_bench.commands._run_runtime import run
 
     run(config)
     effective, _ = resolve_run_config(received[0], "burn_scars")
@@ -236,7 +237,7 @@ def test_runtime_explicit_empty_layers_clear_preset(
         assert strict is True
         received.append(config)
 
-    monkeypatch.setattr("torchgeo_bench.commands._image_runtime.main", capture)
+    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.main", capture)
     config = validate_run_config(
         {
             "model": {"name": "torchgeo/resnet50_s2rgb_satlas_si"},
@@ -245,7 +246,7 @@ def test_runtime_explicit_empty_layers_clear_preset(
             "segmentation": {"layers": []},
         }
     )
-    from torchgeo_bench.commands._image_runtime import run
+    from torchgeo_bench.commands._run_runtime import run
 
     run(config)
     effective, _ = resolve_run_config(received[0], "burn_scars")
@@ -254,7 +255,7 @@ def test_runtime_explicit_empty_layers_clear_preset(
 
 def test_linear_only_reaches_typed_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     received = []
-    monkeypatch.setattr("torchgeo_bench.commands._image_runtime.run", received.append)
+    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.run", received.append)
     main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--methods", "linear"])
     assert received[0].classification.methods == ["linear"]
 
@@ -277,7 +278,7 @@ def test_runtime_failure_propagates_from_cli(
     def fail(_: object) -> None:
         raise error_type("benchmark failed")
 
-    monkeypatch.setattr("torchgeo_bench.commands._image_runtime.run", fail)
+    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.run", fail)
     with pytest.raises(error_type, match="benchmark failed"):
         main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--device", "cpu"])
 
@@ -555,11 +556,11 @@ def test_auto_device_resolves_before_typed_execution(
 ) -> None:
     import torch
 
-    from torchgeo_bench.commands import _image_runtime
+    from torchgeo_bench.commands import _run_runtime
 
     received = []
     monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
-    monkeypatch.setattr(_image_runtime, "main", lambda cfg, **kwargs: received.append(cfg))
+    monkeypatch.setattr(_run_runtime, "main", lambda cfg, **kwargs: received.append(cfg))
     config = validate_run_config(
         {
             "model": {"name": "rcf"},
@@ -567,7 +568,7 @@ def test_auto_device_resolves_before_typed_execution(
             "runtime": {"device": "auto"},
         }
     )
-    _image_runtime.run(config)
+    _run_runtime.run(config)
     assert received[0].runtime.device == expected
 
 
@@ -577,11 +578,11 @@ def test_auto_device_resolves_before_typed_execution(
 def test_dry_run_reload_preserves_preset_settings(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], model: str
 ) -> None:
-    from torchgeo_bench.commands import _image_runtime
+    from torchgeo_bench.commands import _run_runtime
 
     received = []
     monkeypatch.setattr(
-        _image_runtime,
+        _run_runtime,
         "main",
         lambda cfg, **kwargs: received.append(cfg.model_dump_yaml()),
     )
@@ -589,17 +590,17 @@ def test_dry_run_reload_preserves_preset_settings(
     main(arguments)
     main([*arguments, "--dry-run"])
     restored = validate_run_config(yaml.safe_load(capsys.readouterr().out))
-    _image_runtime.run(restored)
+    _run_runtime.run(restored)
     assert received[0] == received[1]
     assert not restored.input.model_fields_set
     assert not restored.segmentation.model_fields_set
 
 
 def test_image_size_override_reaches_model_construction(monkeypatch: pytest.MonkeyPatch) -> None:
-    from torchgeo_bench.commands import _image_runtime
+    from torchgeo_bench.commands import _run_runtime
 
     received = []
-    monkeypatch.setattr(_image_runtime, "main", lambda cfg, **kwargs: received.append(cfg))
+    monkeypatch.setattr(_run_runtime, "main", lambda cfg, **kwargs: received.append(cfg))
     main(
         [
             "run",

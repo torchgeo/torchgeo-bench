@@ -14,11 +14,11 @@ from .config_schema import (
     ClassificationConfig,
     InputConfig,
     ModelConfig,
-    RunConfig,
     SegmentationConfig,
     StrictModel,
     load_yaml,
 )
+from .run_config import RunConfig
 
 NORMALIZATIONS = {
     "dataset": "bandspec_zscore",

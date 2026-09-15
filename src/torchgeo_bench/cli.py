@@ -12,6 +12,7 @@ from . import commands
 from .commands.coord_arguments import add_coord_arguments
 from .commands.flops_arguments import add_flops_arguments
 from .commands.profile_arguments import add_profile_arguments
+from .commands.run_arguments import add_run_arguments
 from .datasets import get_dataset_task, list_datasets
 
 
@@ -39,40 +40,8 @@ def _parser() -> argparse.ArgumentParser:
     """Build the CLI parser without importing numerical dependencies."""
     parser = argparse.ArgumentParser(prog="torchgeo-bench")
     subcommands = parser.add_subparsers(dest="command", required=True)
-    run = subcommands.add_parser(
-        "run", help="Run image benchmarks", argument_default=argparse.SUPPRESS
-    )
-    run.add_argument("--config", type=pathlib.Path, help="YAML configuration file")
-    run.add_argument("-m", "--model", help="Model preset name")
-    run.add_argument(
-        "-d", "--dataset", action="append", dest="datasets", help="Dataset (repeatable)"
-    )
-    run.add_argument("--device")
-    run.add_argument("--batch-size", type=int)
-    run.add_argument("--workers", type=int)
-    run.add_argument("--seed", type=int)
-    run.add_argument("--bands", help="rgb, all, or comma-separated band names")
-    run.add_argument("--interpolation", choices=("area", "bilinear", "bicubic", "nearest"))
-    run.add_argument("--image-size", type=_image_size, metavar="PX|none")
-    run.add_argument(
-        "--normalization", choices=("dataset", "model", "minmax", "minmax_zscore", "none")
-    )
-    run.add_argument("--partition")
-    run.add_argument("--time-steps", type=int)
-    run.add_argument("--methods", nargs="+", choices=("knn", "linear"))
-    run.add_argument("--knn-k", type=int)
-    run.add_argument("--knn-device")
-    run.add_argument("--bootstrap-samples", type=int)
-    run.add_argument("--refit-train-val", action=argparse.BooleanOptionalAction)
-    run.add_argument("--temp-scale", action=argparse.BooleanOptionalAction)
-    run.add_argument("--resume", action=argparse.BooleanOptionalAction)
-    run.add_argument("-o", "--output", help="CSV for all image result kinds")
-    run.add_argument("--results-dir", help="Directory for per-model metric CSVs")
-    run.add_argument("--verbose", action=argparse.BooleanOptionalAction)
-    run.add_argument(
-        "--dry-run", action="store_true", help="Validate and print reusable YAML without running"
-    )
-    run.add_argument("--config-help", action="store_true", help="Print the JSON schema and exit")
+    run = subcommands.add_parser("run", help="Run image benchmarks")
+    add_run_arguments(run)
     for name, help_text in (
         ("models", "List model presets or show one preset"),
         ("datasets", "List datasets or show one dataset"),
@@ -90,21 +59,6 @@ def _parser() -> argparse.ArgumentParser:
     coord = subcommands.add_parser("coord", help="Run coordinate encoder benchmarks")
     add_coord_arguments(coord)
     return parser
-
-
-def _image_size(value: str) -> int | None:
-    """Parse a positive image size or the explicit ``none`` value."""
-    if value == "none":
-        return None
-    size = int(value)
-    if size <= 0:
-        raise argparse.ArgumentTypeError("image size must be positive or none")
-    return size
-
-
-def _run(args: argparse.Namespace) -> None:
-    """Validate and execute one image benchmark."""
-    commands._image.run(args, tuple(list_datasets()))
 
 
 def _show_catalog(
@@ -137,7 +91,7 @@ def main(argv: list[str] | None = None) -> None:
     """Run image, coordinate, download, and compute commands."""
     args = _parse_args(argv)
     if args.command == "run":
-        _run(args)
+        commands.run(args)
     elif args.command == "models":
         _show_catalog(args.name, _model_names(), _model_detail, "model")
     elif args.command == "datasets":

@@ -6,7 +6,6 @@ import pandas as pd
 import pytest
 
 from tests.support.runner import _resume_row
-from torchgeo_bench.config_schema import RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.presets import merge_settings, resolve_run_config
 from torchgeo_bench.resume import (
@@ -15,6 +14,7 @@ from torchgeo_bench.resume import (
     plan_dataset_run,
     resume_config_hash,
 )
+from torchgeo_bench.run_config import RunConfig
 
 
 def _cfg(**sections) -> RunConfig:
