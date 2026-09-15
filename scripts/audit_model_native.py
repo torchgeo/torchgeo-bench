@@ -3,7 +3,7 @@
 Check that each model supplies training-time preprocessing, not just unit conversion.
 
 Usage:
-    python experiments/scripts/audit_model_native.py --out model_native_audit.json
+    python scripts/audit_model_native.py --out model_native_audit.json
 """
 
 import argparse
@@ -33,6 +33,7 @@ def band_specs(dataset: str, bands: str) -> list[BandSpec]:
 
 
 def main() -> None:
+    """Audit model-native normalization against dataset statistics."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)

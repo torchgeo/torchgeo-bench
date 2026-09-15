@@ -35,13 +35,22 @@ data/                      # Datasets always live here (relative to CWD, untrack
   ├── geobenchv2/          # GeoBench V2
   └── eurosat/             # torchgeo EuroSAT
 docs/                      # Documentation sources, including runnable examples/
-experiments/               # Experiment runners plus an analysis scripts/ subdirectory
+experiments/               # Runnable benchmark studies, their analysis, and the shared GPU runners
 projects/                  # Standalone sub-projects (currently cleanlab)
 results/                   # Benchmark result CSVs
-scripts/                   # Maintenance, analysis, and study scripts
+scripts/                   # Maintenance, dataset preparation, diagnostics, and results generation
+  └── migrations/          # One-time result-format migrations
 tests/                     # Test suite (pytest)
 pyproject.toml             # Project config, dependencies, tool settings
 ```
+
+### Where scripts belong
+
+`experiments/` holds runnable benchmark studies and the analysis specific to them, along with the GPU job runners they share (`_runner.py` for the classification studies, `_seg_sweep_common.py` for the segmentation sweeps). A study imports its runner as a plain sibling module (`from _runner import ...`) and is invoked as a file, for example `python experiments/run_main_experiments.py --devices 0 1`.
+
+`scripts/` holds everything that maintains the repository rather than producing benchmark numbers: dataset preparation, diagnostics, and results generation. These are standalone entry points run as `python scripts/<name>.py`. One-time result-format migrations live in `scripts/migrations/` so they are not mistaken for tools that are still run regularly.
+
+Both directories compute the repository root from `__file__`, so check the `parents[...]` index when adding or moving a file.
 
 ## Contributing: Commits, PRs, and Splitting Changes
 
@@ -333,7 +342,7 @@ Implement `_forward_patch_features`, not the public `forward_patch_features`: th
 - **Enabled rules:** `A, ARG, B, BLE001, C4, C901, D, E, ERA, F, FBT001, FBT002, G, I, LOG, NPY, PERF, PGH004, PIE, PLR0911, PLR0912, PLR0913, PLR0915, PLR5501, PT, RET505, RET506, RET507, RET508, RUF, SIM, T201, TID251, TRY, UP, W, W505`
 - **Ignored:** `B008, D104, D105, D107, E501, SIM108, SIM116, TRY003`
 - **Docstrings:** `D` (pydocstyle) is enabled with `convention = "google"`, so the docstring style below is enforced, not merely encouraged.
-- **Per-file ignores:** `tests/**` drops `ARG` and `D`; `experiments/scripts/**` and `projects/cleanlab/**` drop `D`; `cli.py` and `commands/**` drop `T201` because CLI payloads go to stdout.
+- **Per-file ignores:** `tests/**` drops `ARG` and `D`; `projects/cleanlab/**` drops `D`; `cli.py` and `commands/**` drop `T201` because CLI payloads go to stdout.
 - **Banned imports (`TID251`):** `from __future__ import annotations` and `contextlib.suppress`.
 - **Complexity caps:** max-complexity 10, max-args 5, max-branches 12, max-returns 6, max-statements 50.
 

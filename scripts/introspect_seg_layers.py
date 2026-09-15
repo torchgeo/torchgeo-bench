@@ -5,7 +5,7 @@ Layer names alone can select several outputs of the same size.
 Prefer four distinct output grid sizes; otherwise choose layers at different depths.
 
 Usage:
-    python experiments/scripts/introspect_seg_layers.py --out /tmp/seg_layers.json
+    python scripts/introspect_seg_layers.py --out /tmp/seg_layers.json
 """
 
 import argparse
@@ -116,6 +116,7 @@ def choose(seen: dict[str, tuple[int, int]]) -> tuple[list[str], str]:
 
 
 def main() -> None:
+    """Report the feature shapes each backbone layer exposes to a segmentation probe."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)

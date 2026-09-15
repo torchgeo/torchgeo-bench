@@ -89,7 +89,7 @@ Per-band ``transform`` and ``crs`` entries are optional. Geographic extraction a
 
    Existing pickle-based V1 caches are not converted or unpickled. Replace them with ``torchgeo-bench download geobench_v1`` (or ``--datasets m-eurosat`` for a subset). If an archive checksum fails, remove the named corrupt archive and retry the download. Custom datasets must supply JSON metadata.
 
-Geography extraction reads the JSON metadata directly from the default shards or custom HDF5 files. ``experiments/scripts/repack_geobench_v1.py`` repacks custom JSON-metadata HDF5 files into JSON-based shards; it does not read or convert pickle metadata.
+Geography extraction reads the JSON metadata directly from the default shards or custom HDF5 files. ``scripts/repack_geobench_v1.py`` repacks custom JSON-metadata HDF5 files into JSON-based shards; it does not read or convert pickle metadata.
 
 Supported V1 datasets
 ^^^^^^^^^^^^^^^^^^^^^
