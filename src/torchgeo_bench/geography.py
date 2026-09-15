@@ -55,6 +55,10 @@ NO_GEO: dict[str, str] = {
         "scene-classification JPEGs with no georeferencing: no sampled image "
         "carries any EXIF block, and the upstream release ships no coordinate table"
     ),
+    "aid": (
+        "scene-classification JPEGs with no georeferencing: no sampled image "
+        "carries any EXIF block, and the upstream release ships no coordinate table"
+    ),
 }
 
 # Re-splits reuse coordinates from the dataset with the same imagery.

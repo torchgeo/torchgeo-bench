@@ -6,13 +6,16 @@ Targets:
 - ``geobench_v2``: datasets from ``aialliance/<name>`` under ``<output>/geobenchv2/``.
 - ``eurosat`` — torchgeo's EuroSAT downloader, into ``<output>/eurosat``.
 - ``resisc45`` — torchgeo's NWPU-RESISC45 downloader, into ``<output>/resisc45``.
+- ``aid`` — pinned ``isaaccorley/aid`` rehost, into ``<output>/aid``.
 
 V1 uses the pinned ``calebrob6/geobenchv1-webdataset`` mirror.
 
 Use ``--datasets`` to select a GeoBench subset.
 """
 
+import hashlib
 import logging
+import zipfile
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
@@ -25,6 +28,15 @@ logger = logging.getLogger(__name__)
 
 GEOBENCH_V2_REPO_PREFIX = "aialliance"
 
+AID_REPO = "isaaccorley/aid"
+AID_REVISION = "e6767964e40f567a18eac6e6ca5fce397e4ce411"
+AID_ZIP_SHA256 = "79345ef1766e85f7b92cf556c809c4f32ff24228ae71aadf96780f74f48c26a4"
+AID_SPLIT_SHA256: dict[str, str] = {
+    "train": "807a725d2c07c77c0fd3014b341825f76aacfb47bd90485f8c222502945d4149",
+    "val": "b1bdacc9f5a406715b2b1e40648e5d4bc8929cadde4646c2fc5b2e3b6a3ead21",
+    "test": "84b08edcfd4d34bc62340ff0aebc0e07426865323bfd6c38868dc2bc8c70111b",
+}
+
 DEFAULT_V2_DATASETS: tuple[str, ...] = tuple(list_v2_datasets())
 
 V1_DATASETS: tuple[str, ...] = (
@@ -36,7 +48,10 @@ V1_DATASETS: tuple[str, ...] = (
     "m-bigearthnet",
 )
 TORCHGEO_DATASETS: tuple[str, ...] = ("eurosat", "resisc45")
-DOWNLOADABLE_DATASETS: tuple[str, ...] = V1_DATASETS + DEFAULT_V2_DATASETS + TORCHGEO_DATASETS
+DIRECT_DATASETS: tuple[str, ...] = ("aid",)
+DOWNLOADABLE_DATASETS: tuple[str, ...] = (
+    V1_DATASETS + DEFAULT_V2_DATASETS + TORCHGEO_DATASETS + DIRECT_DATASETS
+)
 
 
 def _validate_names(names: list[str]) -> list[str]:
@@ -133,6 +148,33 @@ def download_resisc45(output_dir: Path) -> None:
     logger.info("RESISC45 download complete.")
 
 
+def _verify_sha256(path: Path, expected: str) -> None:
+    """Raise ``ValueError`` if ``path`` does not hash to ``expected``."""
+    with path.open("rb") as stream:
+        actual = hashlib.file_digest(stream, "sha256").hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"AID checksum mismatch: {path} (expected {expected}, got {actual}). "
+            "Remove this file and retry the download."
+        )
+
+
+def download_aid(output_dir: Path) -> None:
+    """Download the pinned ``isaaccorley/aid`` rehost into ``output_dir/aid``."""
+    target = Path(output_dir) / "aid"
+    target.mkdir(parents=True, exist_ok=True)
+    logger.info("Downloading %s@%s -> %s", AID_REPO, AID_REVISION, target)
+    snapshot_download(
+        repo_id=AID_REPO, repo_type="dataset", revision=AID_REVISION, local_dir=target
+    )
+    _verify_sha256(target / "AID.zip", AID_ZIP_SHA256)
+    for split, expected in AID_SPLIT_SHA256.items():
+        _verify_sha256(target / f"aid-{split}.txt", expected)
+    with zipfile.ZipFile(target / "AID.zip") as archive:
+        archive.extractall(target)
+    logger.info("AID download complete.")
+
+
 def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None:
     """Download individually named benchmark datasets.
 
@@ -154,3 +196,5 @@ def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None
         download_eurosat(output_dir)
     if "resisc45" in selected:
         download_resisc45(output_dir)
+    if "aid" in selected:
+        download_aid(output_dir)

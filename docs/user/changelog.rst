@@ -13,6 +13,12 @@ Added
   the GFM literature, so having it under a fixed protocol is the point.
 * ``scripts/compute_band_statistics.py`` computes the per-band ``BandSpec``
   statistics a new dataset needs, from its train split only.
+* AID (``aid``), rehosted at Hugging Face ``isaaccorley/aid`` (pinned commit,
+  checksum-verified): 10,000 RGB scenes, 30 classes.  No official split
+  exists upstream, so ``scripts/generate_aid_splits.py`` derives a
+  deterministic, stratified 60/20/20 split per class (6,000 / 2,000 / 2,000).
+  Downloadable with ``torchgeo-bench download aid``.  One of the three
+  most-used benchmarks in the GFM literature.
 
 0.5.0 (2026-08-10)
 ------------------
