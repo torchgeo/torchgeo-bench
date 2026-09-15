@@ -73,6 +73,18 @@ wavelength = int(round(wavelength_um))
 # BEST: no comment on lines that are self explanatory
 ```
 
+## Simplification Principles
+
+Prioritize readability, clear ownership, and long-term maintainability. Evaluate simplification by how easily a contributor can understand and change the behavior.
+
+- Implement shared behavior once. Search for equivalent helpers and inline logic across the repository, including implementations with different names. Reuse or extract the common mechanism, update every caller, and remove superseded copies.
+- Keep each fact in one authoritative place and each module focused on a clear responsibility. Derive catalogs from definitions; separate metadata discovery from runtime loading and execution.
+- Prefer typed, explicit interfaces with predictable results. Declare requirements and capabilities instead of guessing from names or tensor shapes. Reject unsupported input rather than silently ignoring it.
+- Preserve meaningful differences between tasks and backends. Similar function names or signatures do not justify merging distinct behavior or hiding it behind a collection of flags.
+- Resolve related input choices once. Keep transformed data, ordered metadata, and effective processing settings in agreement instead of reconstructing them independently in consumers.
+- Verify behavior at the affected boundaries, including dataset and label semantics, preprocessing order, seeds, and result/resume identity. Document and test deliberate changes to those behaviors.
+- Respect the compatibility scope agreed for the task. Do not assume a simplification permits breaking public APIs or stored results. When compatibility is explicitly out of scope, avoid shims that exist only to retain obsolete interfaces.
+
 ## Writing and Line Wrapping
 
 Do not manually wrap any writing to a maximum line length unless Ruff requires it. This applies to prose, comments, docstrings, and issue or PR descriptions. Keep each paragraph or list item on one source line, and let the editor or renderer wrap it for display. Preserve structural line breaks in Markdown and code.
