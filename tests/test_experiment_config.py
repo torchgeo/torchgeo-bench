@@ -4,6 +4,7 @@ import importlib
 import json
 from pathlib import Path
 from types import ModuleType
+from unittest import mock
 
 import pytest
 import torch
@@ -14,6 +15,7 @@ from experiments.scripts import (
     introspect_seg_layers,
     tune_dataloader,
 )
+from tests.support.runner import _synthetic_splits
 from torchgeo_bench.config.presets import ModelPreset, load_model_preset, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig
@@ -91,7 +93,9 @@ def test_dataloader_tuning_does_not_report_failed_sweeps_as_success(
             "0",
         ],
     )
-    monkeypatch.setattr(tune_dataloader, "_build_dataset", lambda *args: [])
+    monkeypatch.setattr(
+        tune_dataloader, "load_split", lambda *args, **kwargs: _synthetic_splits()[0]
+    )
     monkeypatch.setattr(tune_dataloader, "_build_model", lambda *args: torch.nn.Identity())
 
     def fail(*args: object) -> None:
@@ -181,6 +185,94 @@ def test_inprocess_experiments_use_typed_constructors(
         "m-eurosat",
     )
     assert model(torch.zeros(1, 3, 16, 16)).shape == (1, 8)
+
+
+@pytest.mark.parametrize("filename", ["run_c_sweep_experiment", "run_effect_of_lbfgs_vs_adam"])
+def test_experiments_build_models_from_loaded_metadata(
+    monkeypatch: pytest.MonkeyPatch, filename: str
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "experiments"))
+    script = importlib.import_module(f"experiments.{filename}")
+    splits = _synthetic_splits()
+    monkeypatch.setattr(script, "MODEL_CONFIGS", {"rcf": ModelConfig(name="rcf")})
+
+    def build(config: ModelConfig, bands: list, dataset_name: str) -> torch.nn.Module:
+        assert dataset_name == "m-eurosat"
+        assert all(a is b for a, b in zip(bands, splits[0].bands, strict=True))
+        return torch.nn.Identity()
+
+    monkeypatch.setattr(script, "instantiate_model", build)
+    if filename == "run_c_sweep_experiment":
+        execute = script.run_dataset_sweep
+        arguments = ("m-eurosat", torch.device("cpu"), [])
+    else:
+        execute = script.run_dataset
+        arguments = (
+            "m-eurosat",
+            [{"solver": "lbfgs", "C": 1.0, "lr": 1.0}],
+            torch.device("cpu"),
+            [],
+        )
+    with (
+        mock.patch.object(script, "load_split", side_effect=splits) as load,
+        mock.patch.object(script, "DataLoader", wraps=script.DataLoader) as loaders,
+        mock.patch.object(
+            script, "extract_features", side_effect=RuntimeError("reached extraction")
+        ),
+        pytest.raises(RuntimeError, match="reached extraction"),
+    ):
+        execute(*arguments)
+    assert [call.args[1] for call in load.call_args_list] == ["train", "val", "test"]
+    assert loaders.call_count == 3
+    for index, call in enumerate(loaders.call_args_list):
+        assert call.args[0] is splits[index].dataset
+        assert call.kwargs == {
+            "batch_size": 64,
+            "num_workers": 8,
+            "shuffle": index == 0,
+            "pin_memory": torch.cuda.is_available(),
+        }
+
+
+def test_tuner_uses_train_only_metadata_and_keeps_batching_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    train = _synthetic_splits()[0]
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tune_dataloader.py",
+            "--model",
+            "rcf",
+            "--dataset",
+            "m-eurosat",
+            "--bands",
+            "rgb",
+            "--batch-sizes",
+            "2",
+            "--num-workers",
+            "0",
+            "--device",
+            "cpu",
+        ],
+    )
+    with (
+        mock.patch.object(tune_dataloader, "load_split", return_value=train) as load,
+        mock.patch.object(
+            tune_dataloader, "_build_model", return_value=torch.nn.Identity()
+        ) as build,
+        mock.patch.object(tune_dataloader, "_bench", return_value=(1.0, 0.0, 1.0)) as measure,
+    ):
+        tune_dataloader.main()
+    load.assert_called_once_with("m-eurosat", "train", bands="rgb")
+    assert build.call_args.args[3] is train.dataset
+    assert all(a is b for a, b in zip(build.call_args.args[1], train.bands, strict=True))
+    loader = measure.call_args.args[1]
+    assert loader.dataset is train.dataset
+    assert loader.batch_size == 2
+    assert loader.num_workers == 0
+    assert not loader.pin_memory
+    assert not loader.persistent_workers
 
 
 def test_model_variants_preserve_constructor_options_and_preset_defaults(

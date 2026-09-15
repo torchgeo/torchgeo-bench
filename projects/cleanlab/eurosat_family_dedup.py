@@ -26,7 +26,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from torchgeo_bench.datasets import get_datasets
+from torchgeo_bench.datasets import load_split
 
 logger = logging.getLogger(__name__)
 
@@ -34,22 +34,9 @@ DATASETS = ["m-eurosat", "eurosat-spatial", "eurosat"]
 
 
 def _load_splits(dataset: str) -> dict[str, Dataset]:
-    result = get_datasets(
-        dataset_name=dataset,
-        partition_name="default",
-        batch_size=1,
-        num_workers=0,
-        return_val=True,
-        image_size=None,
-        bands="rgb",
-        interpolation="bicubic",
-    )
-    assert result is not None
-    train_ds, _train_loader, val_loader, test_loader = result
     return {
-        "train": train_ds,
-        "val": val_loader.dataset,
-        "test": test_loader.dataset,
+        split: load_split(dataset, split, bands="rgb", interpolation="bicubic").dataset
+        for split in ("train", "val", "test")
     }
 
 

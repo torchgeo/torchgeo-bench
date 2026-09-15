@@ -1,20 +1,18 @@
-"""Dataset registry, band selection, resizing, and split dataloaders.
+"""Dataset registry, input resolution, resizing, and single-split loading.
 
 Wrapper modules and torch load only when needed; listing datasets does not import them.
 """
 
 import logging
-import warnings
+from collections.abc import Iterable
 from importlib import import_module
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from .base import BenchDataset
+from .input import LoadedSplit, ResolvedInput, Split
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     import torch
-    from torch.utils.data import DataLoader, Dataset
 
 logger = logging.getLogger(__name__)
 
@@ -156,45 +154,81 @@ class _ResizeTransform:
         return sample
 
 
-def _make_loader(
-    ds: "Dataset", *, batch_size: int, shuffle: bool, num_workers: int
-) -> "DataLoader":
-    import torch
-    from torch.utils.data import DataLoader
+def _validate_split_options(
+    bench: BenchDataset, split: str, partition: str, time_steps: int | None
+) -> Split:
+    if not isinstance(split, str) or split not in ("train", "val", "test"):
+        raise ValueError(f"Unknown split {split!r}. Expected train, val, or test.")
+    if not isinstance(partition, str):
+        raise TypeError("partition must be a string")
+    if not partition:
+        raise ValueError("partition must not be empty")
+    if partition != "default" and not bench.supports_partitions:
+        raise ValueError(f"Dataset {bench.name!r} does not support custom partitions.")
+    if time_steps is not None:
+        if type(time_steps) is not int:
+            raise TypeError("time_steps must be an integer or None")
+        if time_steps < 1:
+            raise ValueError("time_steps must be positive")
+        if not bench.multi_temporal:
+            raise ValueError(f"{bench.name} is not multi-temporal; drop time_steps.")
+    return cast(Split, split)
 
-    return DataLoader(
-        ds,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
-    )
+
+def _resolve_input(
+    bench: BenchDataset, bands: str | Iterable[str] | None, time_steps: int | None
+) -> ResolvedInput:
+    selection: str | tuple[str, ...]
+    if bands is None:
+        selection = "all"
+    elif isinstance(bands, str):
+        selection = bands
+    else:
+        if not isinstance(bands, Iterable) or isinstance(bands, dict | set | frozenset):
+            raise TypeError("bands must be rgb, all, None, or an ordered iterable of band names")
+        selection = tuple(bands)
+        if any(not isinstance(name, str) for name in selection):
+            raise TypeError("band names must be strings")
+    specs = tuple(bench.resolve_band_specs(selection))
+    if not specs:
+        raise ValueError("bands must select at least one channel")
+    return ResolvedInput(specs, selection, time_steps)
 
 
-def get_datasets(  # noqa: PLR0913 - public dataset loading options.
-    dataset_name: str = "m-forestnet",
-    partition_name: str = "default",
-    batch_size: int = 32,
+def _resize_transform(image_size: int | None, interpolation: str) -> _ResizeTransform | None:
+    if image_size is not None:
+        if type(image_size) is not int:
+            raise TypeError("image_size must be an integer or None")
+        if image_size < 1:
+            raise ValueError("image_size must be positive")
+    if interpolation not in _ResizeTransform.valid_modes:
+        raise ValueError(
+            f"interpolation must be one of {_ResizeTransform.valid_modes}, got {interpolation!r}."
+        )
+    return _ResizeTransform(image_size, interpolation) if image_size is not None else None
+
+
+def load_split(  # noqa: PLR0913 - explicit public input options, without batching policy.
+    dataset_name: str,
+    split: str,
     *,
-    return_val: bool = False,
-    num_workers: int = 8,
+    partition: str = "default",
     image_size: int | None = None,
     interpolation: str = "bilinear",
-    bands: "str | Iterable[str] | None" = "rgb",
+    bands: str | Iterable[str] | None = "rgb",
     time_steps: int | None = None,
-) -> tuple:
-    """Load benchmark dataset splits and dataloaders.
+) -> LoadedSplit:
+    """Load exactly one split and its resolved metadata, without batching.
 
     Datasets always emit raw float32 values; per-channel normalization is
     the model's responsibility (see :class:`~torchgeo_bench.models.interface.BenchModel`).
+    No samples are read to infer metadata, and no unrelated split is constructed.
 
     Args:
         dataset_name: Identifier registered in ``_REGISTRY_SPEC``.
-        partition_name: Partition name (only honoured by datasets where
+        split: ``"train"``, ``"val"``, or ``"test"``.
+        partition: Partition for this split (only supported by datasets where
             :attr:`~.base.BenchDataset.supports_partitions` is ``True``).
-        batch_size: Batch size for the returned dataloaders.
-        return_val: If ``True``, also return a validation dataloader.
-        num_workers: Number of dataloader worker processes.
         image_size: If set, resize images (and masks, with nearest) to this
             square size at sample time.
         interpolation: Resize interpolation for images (``"area"``, ``"bicubic"``,
@@ -202,16 +236,15 @@ def get_datasets(  # noqa: PLR0913 - public dataset loading options.
         bands: ``"rgb"`` (use the dataset's ``rgb_bands``), ``"all"`` /
             ``None`` (load all bands), or an explicit iterable of band names.
         time_steps: Number of acquisition dates per sample.  Only accepted by
-            multi-temporal wrappers (PASTIS); ``None`` keeps each dataset's
-            own default.
+            multi-temporal wrappers (PASTIS); ``None`` keeps the source default.
 
     Returns:
-        Either ``(train_dataset, train_loader, test_loader)`` or, when
-        ``return_val=True``, ``(train_dataset, train_loader, val_loader,
-        test_loader)``.
+        The requested Dataset and immutable metadata describing its output.
 
     Raises:
         KeyError: If ``dataset_name`` is not registered.
+        TypeError: If an input option has the wrong type.
+        ValueError: If an option is invalid or unsupported by this dataset.
         FileNotFoundError: If a required dataset file is missing.
     """
     from torchgeo.datasets import DatasetNotFoundError
@@ -219,61 +252,37 @@ def get_datasets(  # noqa: PLR0913 - public dataset loading options.
     cls = get_bench_dataset_class(dataset_name)
     bench = cls()
 
-    if partition_name != "default" and not bench.supports_partitions:
-        warnings.warn(
-            f"Dataset '{dataset_name}' does not support custom partitions. "
-            f"Ignoring partition '{partition_name}'.",
-            UserWarning,
-            stacklevel=2,
-        )
-
-    if bands == "rgb":
-        bands_tuple: tuple[str, ...] | None = tuple(bench.rgb_bands)
-    elif bands == "all" or bands is None:
-        bands_tuple = None
-    elif isinstance(bands, str):
-        raise ValueError(
-            f"Invalid bands parameter: {bands!r}. Use 'rgb', 'all', None, "
-            "or an iterable of band names."
-        )
-    else:
-        bands_tuple = tuple(bands)
-
-    transform = _ResizeTransform(image_size, interpolation) if image_size is not None else None
-    train_partition = partition_name if bench.supports_partitions else "default"
-
-    common: dict = {"bands": bands_tuple, "transform": transform}
-    if time_steps is not None:
-        # Only multi-temporal wrappers accept a time axis.
-        common["time_steps"] = time_steps
+    validated_split = _validate_split_options(bench, split, partition, time_steps)
+    inputs = _resolve_input(bench, bands, time_steps)
+    transform = _resize_transform(image_size, interpolation)
     try:
-        train_ds = bench.get_dataset("train", partition=train_partition, **common)
-        val_ds = bench.get_dataset("val", partition="default", **common)
-        test_ds = bench.get_dataset("test", partition="default", **common)
+        dataset = bench._load_split(
+            validated_split, inputs=inputs, partition=partition, transform=transform
+        )
     except (
         FileNotFoundError,
         DatasetNotFoundError,
     ) as error:  # allow-except: add download command.
         raise FileNotFoundError(
-            f"Required files for {dataset_name!r} are missing. Run `{download_command(dataset_name)}`."
+            f"Required files for {dataset_name!r} split {split!r} are missing. "
+            f"Run `{download_command(dataset_name)}`."
         ) from error
 
-    train_loader = _make_loader(
-        train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers
+    return LoadedSplit(
+        dataset=dataset,
+        dataset_name=dataset_name,
+        split=validated_split,
+        partition=partition,
+        input=inputs,
+        task=bench.task,
+        num_classes=bench.num_classes,
+        multilabel=bench.multilabel,
     )
-    val_loader = _make_loader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    test_loader = _make_loader(
-        test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers
-    )
-
-    if return_val:
-        return train_ds, train_loader, val_loader, test_loader
-    return train_ds, train_loader, test_loader
 
 
 __all__ = [
     "get_bench_dataset_class",
     "get_dataset_task",
-    "get_datasets",
     "list_datasets",
+    "load_split",
 ]

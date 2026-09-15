@@ -1,4 +1,4 @@
-"""Tests for the high-level get_datasets API for GeoBench V2 datasets."""
+"""Tests for the single-split loading API for GeoBench V2 datasets."""
 
 from collections.abc import Callable, Iterator
 from io import BytesIO
@@ -13,10 +13,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from tests.support.data import require_dataset_data
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.datasets import get_bench_dataset_class, load_split
 from torchgeo_bench.datasets.burn_scars import BurnScars
 from torchgeo_bench.datasets.geobench_v2 import _V2_REGISTRY
-from torchgeo_bench.datasets.pastis import PASTIS
 
 
 class MockV2Dataset:
@@ -89,19 +88,16 @@ class TestV2Loading:
             patch("geobench_v2.datasets.base.download_url") as download_url,
             pytest.raises(FileNotFoundError) as error,
         ):
-            get_datasets(dataset_name=dataset_name, num_workers=0)
+            load_split(dataset_name, "train")
 
         assert f"torchgeo-bench download {download}" in str(error.value)
         snapshot.assert_not_called()
         download_url.assert_not_called()
 
     def test_benv2_classification(self, mock_v2_env: dict[str, MagicMock]) -> None:
-        ds, train_dl, _, _ = get_datasets(
-            dataset_name="benv2",
-            return_val=True,
-            batch_size=4,
-            num_workers=0,
-        )
+        train = load_split("benv2", "train")
+        ds = train.dataset
+        train_dl = DataLoader(ds, batch_size=4, num_workers=0)
 
         assert isinstance(train_dl, DataLoader)
         assert len(ds) == 10
@@ -116,12 +112,8 @@ class TestV2Loading:
         )
 
     def test_burn_scars_segmentation(self, mock_v2_env: dict[str, MagicMock]) -> None:
-        _, train_dl, _ = get_datasets(
-            dataset_name="burn_scars",
-            batch_size=2,
-            return_val=False,
-            num_workers=0,
-        )
+        train = load_split("burn_scars", "train")
+        train_dl = DataLoader(train.dataset, batch_size=2, num_workers=0)
 
         assert get_bench_dataset_class("burn_scars").task == "segmentation"
         batch = next(iter(train_dl))
@@ -129,25 +121,17 @@ class TestV2Loading:
         assert batch["mask"].shape == (2, 32, 32)
         assert batch["mask"].dtype == torch.long
 
-    def test_partition_warning(self, mock_v2_env: dict[str, MagicMock]) -> None:
-        with pytest.warns(UserWarning, match="does not support custom partitions"):
-            get_datasets(
-                dataset_name="benv2",
-                partition_name="0.10x_train",
-                num_workers=0,
-            )
+    def test_partition_rejected(self, mock_v2_env: dict[str, MagicMock]) -> None:
+        with pytest.raises(ValueError, match="does not support custom partitions"):
+            load_split("benv2", "train", partition="0.10x_train")
+        mock_v2_env["benv2"].assert_not_called()
 
     @pytest.mark.parametrize("dataset_name", ["benv2", "burn_scars"])
     def test_resize_preserves_raw_images_and_categorical_masks(
         self, mock_v2_env: dict[str, MagicMock], dataset_name: str
     ) -> None:
         target = 64
-        ds, _, _ = get_datasets(
-            dataset_name=dataset_name,
-            image_size=target,
-            batch_size=4,
-            num_workers=0,
-        )
+        ds = load_split(dataset_name, "train", image_size=target).dataset
 
         sample = ds[0]
         assert sample["image"].shape == (3, target, target)
@@ -160,7 +144,7 @@ class TestV2Loading:
 
     def test_bad_dataset_name(self) -> None:
         with pytest.raises(KeyError, match="Unknown dataset 'phantom_dataset'"):
-            get_datasets(dataset_name="phantom_dataset")
+            load_split("phantom_dataset", "train")
 
     @pytest.mark.parametrize(
         ("dataset_name", "expected_bands"),
@@ -175,7 +159,8 @@ class TestV2Loading:
         dataset_name: str,
         expected_bands: dict[str, list[str]] | list[str],
     ) -> None:
-        get_datasets(dataset_name=dataset_name, bands="rgb", batch_size=2, num_workers=0)
+        for split in ("train", "val", "test"):
+            load_split(dataset_name, split, bands="rgb")
         calls = mock_v2_env[dataset_name].call_args_list
         assert [call.kwargs["split"] for call in calls] == ["train", "validation", "test"]
         for call in calls:
@@ -265,7 +250,8 @@ class TestKuroSiwoCanonicalization:
         expected_values: list[float],
     ) -> None:
         bench = get_bench_dataset_class("kuro_siwo")()
-        ds = bench.get_dataset("train", bands=bands)
+        loaded = load_split("kuro_siwo", "train", bands=bands)
+        ds = loaded.dataset
         sample = ds[0]
         img = sample["image"]
         torch.testing.assert_close(
@@ -274,6 +260,7 @@ class TestKuroSiwoCanonicalization:
         assert img.dtype == torch.float32
         expected_specs = bench.select_band_specs(bands)
         assert len(ds.band_specs) == len(expected_specs)
+        assert loaded.bands is ds.band_specs
         assert all(
             actual is expected
             for actual, expected in zip(ds.band_specs, expected_specs, strict=True)
@@ -290,13 +277,13 @@ class TestKuroSiwoCanonicalization:
 
     def test_resize_runs_after_canonicalization(self, mocked_kuro_siwo: MagicMock) -> None:
         """Resize needs a single image tensor, not separate modality keys."""
-        _, train_dl, _ = get_datasets(
-            dataset_name="kuro_siwo",
+        train = load_split(
+            "kuro_siwo",
+            "train",
             bands=("dem", "vv", "vh"),
             image_size=32,
-            batch_size=2,
-            num_workers=0,
         )
+        train_dl = DataLoader(train.dataset, batch_size=2, num_workers=0)
         batch = next(iter(train_dl))
         assert batch["image"].shape[-2:] == (32, 32)
         torch.testing.assert_close(
@@ -305,8 +292,6 @@ class TestKuroSiwoCanonicalization:
         assert batch["mask"].shape[-2:] == (32, 32)
         assert [call.kwargs["split"] for call in mocked_kuro_siwo.call_args_list] == [
             "train",
-            "val",
-            "test",
         ]
 
 
@@ -324,8 +309,7 @@ class TestKuroSiwoLive:
     )
     def test_real_sample_is_3d(self, bands: tuple[str, ...] | None, expected_channels: int) -> None:
         require_dataset_data("kuro_siwo")
-        bench = get_bench_dataset_class("kuro_siwo")()
-        ds = bench.get_dataset("train", bands=bands)
+        ds = load_split("kuro_siwo", "train", bands=bands).dataset
         sample = ds[0]
         img = sample["image"]
         assert img.dim() == 3, f"expected 3-D, got shape {tuple(img.shape)}"
@@ -391,8 +375,7 @@ class TestPASTISSampleConstruction:
         ("bands", "expected_channels"), [(("b04", "b03", "b02"), 3), (None, 16)]
     )
     def test_image_is_stacked_and_3d(self, mocked_pastis, bands, expected_channels):
-        bench = get_bench_dataset_class("pastis")()
-        sample = bench.get_dataset("train", bands=bands)[0]
+        sample = load_split("pastis", "train", bands=bands).dataset[0]
         assert "image" in sample
         assert sample["image"].shape == (expected_channels, 16, 16)
         assert not [k for k in sample if k.startswith("image_")]
@@ -401,26 +384,25 @@ class TestPASTISSampleConstruction:
     def test_resize_transform_reaches_the_image(self, mocked_pastis):
         """A framework transform must see a canonical ``image``, not ``image_s2``."""
         del mocked_pastis
-        _, train_dl, _, _ = get_datasets(
-            dataset_name="pastis",
-            return_val=True,
-            batch_size=2,
-            num_workers=0,
+        train = load_split(
+            "pastis",
+            "train",
             image_size=8,
             bands="rgb",
         )
+        train_dl = DataLoader(train.dataset, batch_size=2, num_workers=0)
         batch = next(iter(train_dl))
         assert batch["image"].shape == (2, 3, 8, 8)
 
     def test_time_steps_requests_a_time_series(self, mocked_pastis):
-        PASTIS().get_dataset("train", bands=("b04", "b03", "b02"), time_steps=4)
+        load_split("pastis", "train", bands=("b04", "b03", "b02"), time_steps=4)
         kwargs = mocked_pastis.call_args.kwargs
         assert kwargs["num_time_steps"] == 4
         assert kwargs["temporal_output_format"] == "TCHW"
 
     def test_time_steps_rejected_when_not_multi_temporal(self):
         with pytest.raises(ValueError, match="not multi-temporal"):
-            BurnScars().get_dataset("train", time_steps=2)
+            load_split("burn_scars", "train", time_steps=2)
 
 
 def _synthetic_sensor_sources(
@@ -526,14 +508,18 @@ def test_installed_backend_preserves_requested_channels(
 ) -> None:
     sources = _synthetic_sensor_sources(monkeypatch, dataset_name)
     bench = get_bench_dataset_class(dataset_name)()
-    ds, loader, _ = get_datasets(
-        dataset_name=dataset_name,
+    loaded = load_split(
+        dataset_name,
+        "train",
         bands=bands,
         time_steps=time_steps,
         image_size=8,
-        batch_size=2,
-        num_workers=0,
     )
+    ds = loaded.dataset
+    loader = DataLoader(ds, batch_size=2, num_workers=0)
+    assert loaded.bands is ds.band_specs
+    assert loaded.input.layout == ("TCHW" if time_steps and time_steps > 1 else "CHW")
+    assert loaded.input.num_time_steps == (time_steps or 1)
     specs = bench.select_band_specs(bands)
     assert len(ds.band_specs) == len(specs)
     assert all(actual is expected for actual, expected in zip(ds.band_specs, specs, strict=True))
@@ -582,7 +568,7 @@ def test_correct_requests_preserve_upstream_numerics(
     monkeypatch: pytest.MonkeyPatch, dataset_name: str
 ) -> None:
     _synthetic_sensor_sources(monkeypatch, dataset_name)
-    ds, _, _ = get_datasets(dataset_name=dataset_name, bands="all", image_size=8, num_workers=0)
+    ds = load_split(dataset_name, "train", bands="all", image_size=8).dataset
     upstream = ds._inner[0]
     sample = ds[0]
     assert sample.keys() == upstream.keys()
@@ -603,12 +589,12 @@ def test_backend_resolved_sensor_order_is_used(monkeypatch: pytest.MonkeyPatch) 
         return dict(reversed(resolved.items())) if isinstance(resolved, dict) else resolved
 
     monkeypatch.setattr(GeoBenchTreeSatAI, "resolve_band_order", reverse_sensors)
-    ds, _, _ = get_datasets(
-        dataset_name="treesatai",
+    ds = load_split(
+        "treesatai",
+        "train",
         bands=("b04", "red", "green"),
         image_size=8,
-        num_workers=0,
-    )
+    ).dataset
     assert list(ds._inner.band_order) == ["aerial", "s2"]
     upstream = ds._inner[0]["image"]
     torch.testing.assert_close(ds[0]["image"], upstream[[2, 0, 1]], rtol=0, atol=0)
@@ -630,7 +616,7 @@ def test_fotw_load_path_keeps_later_acquisition(monkeypatch: pytest.MonkeyPatch)
             return self.transforms(sample)
 
     monkeypatch.setattr("geobench_v2.datasets.GeoBenchFieldsOfTheWorld", PairedImages)
-    ds, _, _ = get_datasets(dataset_name="fotw", bands=("nir", "red"), image_size=12, num_workers=0)
+    ds = load_split("fotw", "train", bands=("nir", "red"), image_size=12).dataset
     sample = ds[0]
     assert set(sample) == {"image", "mask"}
     torch.testing.assert_close(
@@ -645,10 +631,11 @@ def test_fotw_load_path_keeps_later_acquisition(monkeypatch: pytest.MonkeyPatch)
 
 def test_band_selection_is_resolved_once(mock_v2_env: dict[str, MagicMock]) -> None:
     bench = BurnScars()
-    with patch.object(bench, "select_band_specs", wraps=bench.select_band_specs) as select:
-        ds = bench.get_dataset("train", bands=("b04", "b03"))
+    with patch.object(BurnScars, "select_band_specs", wraps=bench.select_band_specs) as select:
+        loaded = load_split("burn_scars", "train", bands=("b04", "b03"))
     select.assert_called_once_with(("b04", "b03"))
-    assert ds.band_specs[0] is next(spec for spec in bench.bands if spec.name == "b04")
+    assert loaded.bands is loaded.dataset.band_specs
+    assert loaded.bands[0] is next(spec for spec in bench.bands if spec.name == "b04")
 
 
 @pytest.mark.parametrize("shape", [(2, 8, 8), (8, 8), (1, 3, 2, 8, 8)])
@@ -658,6 +645,6 @@ def test_malformed_backend_image_is_rejected(
     monkeypatch.setattr(
         MockV2Dataset, "__getitem__", lambda self, index: {"image": torch.ones(shape)}
     )
-    ds = BurnScars().get_dataset("train", bands=("b04", "b03", "b02"))
+    ds = load_split("burn_scars", "train", bands=("b04", "b03", "b02")).dataset
     with pytest.raises(ValueError, match="expected CHW or TCHW image with 3 channels"):
         ds[0]

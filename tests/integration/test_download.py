@@ -26,7 +26,7 @@ from tests.support.data import (
 from torchgeo_bench import download
 from torchgeo_bench.cli import main
 from torchgeo_bench.datasets import _v1_webdataset as v1
-from torchgeo_bench.datasets import get_datasets
+from torchgeo_bench.datasets import load_split
 
 pytestmark = pytest.mark.integration
 
@@ -143,13 +143,14 @@ def test_download_every_family_then_load_real_splits(
         ("eurosat-spatial", [2, 2, 2], 3),
         ("resisc45", [2, 2, 2], 3),
     ):
-        _, *loaders = get_datasets(
-            name, batch_size=2, num_workers=0, return_val=True, image_size=16, bands="rgb"
-        )
-        assert [len(loader.dataset) for loader in loaders] == counts
+        splits = [
+            load_split(name, split, image_size=16, bands="rgb")
+            for split in ("train", "val", "test")
+        ]
+        assert [len(loaded.dataset) for loaded in splits] == counts
         split_images = []
-        for loader in loaders:
-            sample = loader.dataset[0]
+        for loaded in splits:
+            sample = loaded.dataset[0]
             assert sample["image"].shape == (channels, 16, 16)
             assert torch.isfinite(sample["image"]).all()
             split_images.append(sample["image"].numpy().tobytes())

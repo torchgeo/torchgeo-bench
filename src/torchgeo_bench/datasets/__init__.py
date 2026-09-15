@@ -4,7 +4,9 @@ Dataset classes load only when requested, keeping imports and CLI startup fast.
 
 Public API
 ----------
-.. autofunction:: get_datasets
+.. autofunction:: load_split
+.. autoclass:: LoadedSplit
+.. autoclass:: ResolvedInput
 .. autofunction:: get_bench_dataset_class
 .. autofunction:: get_dataset_task
 .. autofunction:: list_datasets
@@ -15,11 +17,12 @@ Public API
 from importlib import import_module
 
 from .base import BandSpec, BenchDataset
+from .input import LoadedSplit, ResolvedInput
 from .loading import (
     get_bench_dataset_class,
     get_dataset_task,
-    get_datasets,
     list_datasets,
+    load_split,
 )
 
 __all__ = [
@@ -38,20 +41,22 @@ __all__ = [
     "FieldsOfTheWorld",
     "Forestnet",
     "KuroSiwo",
+    "LoadedSplit",
     "MBigEarthNet",
     "MBrickKiln",
     "MEurosat",
     "MForestnet",
     "MPv4ger",
     "MSo2Sat",
+    "ResolvedInput",
     "So2Sat",
     "SpaceNet2",
     "SpaceNet7",
     "TreeSatAI",
     "get_bench_dataset_class",
     "get_dataset_task",
-    "get_datasets",
     "list_datasets",
+    "load_split",
 ]
 
 _LAZY_CLASSES: dict[str, str] = {

@@ -166,7 +166,7 @@ def test_runtime_rejects_invalid_cuda_before_loading(
     monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     with (
-        mock.patch("torchgeo_bench.main.get_datasets") as data,
+        mock.patch("torchgeo_bench.main.load_split") as data,
         mock.patch("torchgeo_bench.main.build_model") as build,
         pytest.raises(ValueError, match=message),
     ):

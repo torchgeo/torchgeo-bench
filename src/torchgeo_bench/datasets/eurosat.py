@@ -9,6 +9,7 @@ from torchgeo.datasets import EuroSAT as TGEuroSAT
 from torchgeo.datasets import EuroSATSpatial as TGEuroSATSpatial
 
 from .base import BandSpec, BenchDataset
+from .input import ResolvedInput, Split
 
 
 class EuroSAT(BenchDataset):
@@ -57,24 +58,23 @@ class EuroSAT(BenchDataset):
         """
         return Path("data/eurosat")
 
-    def get_dataset(
+    def _load_split(
         self,
-        split: str,
+        split: Split,
         *,
+        inputs: ResolvedInput,
         partition: str = "default",
-        bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
     ) -> Dataset:
         """Return the wrapped torchgeo dataset (``_tg_class``) for the split."""
         del partition
-        if split not in ("train", "val", "test"):
-            raise ValueError(f"Unknown split {split!r}. Expected train, val, or test.")
-        band_codes = tuple(spec.source_name for spec in self.select_band_specs(bands))
+        band_codes = tuple(spec.source_name for spec in inputs.bands)
         return self._tg_class(
             root=str(self.data_root()),
             split=split,
             bands=band_codes,
             transforms=transform,
+            download=False,
         )
 
 

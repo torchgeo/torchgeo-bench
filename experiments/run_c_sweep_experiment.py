@@ -20,12 +20,13 @@ import pandas as pd
 import torch
 from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from torchgeo_bench.config.presets import build_model, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig, RuntimeConfig
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.datasets import get_bench_dataset_class, load_split
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
@@ -133,15 +134,21 @@ def run_dataset_sweep(dataset_name: str, device: torch.device, all_rows: list[di
         )
 
     logger.info("Loading %s dataset...", dataset_name)
-    _train_dataset, train_loader, val_loader, test_loader = get_datasets(
-        dataset_name=dataset_name,
-        partition_name="default",
-        batch_size=64,
-        return_val=True,
-        image_size=IMAGE_SIZE,
-        interpolation="bilinear",
-    )
-    bands = bench_cls().select_band_specs(tuple(bench_cls.rgb_bands))
+    train, val, test = [
+        load_split(dataset_name, split, image_size=IMAGE_SIZE, interpolation="bilinear")
+        for split in ("train", "val", "test")
+    ]
+    train_loader, val_loader, test_loader = [
+        DataLoader(
+            loaded.dataset,
+            batch_size=64,
+            shuffle=loaded.split == "train",
+            num_workers=8,
+            pin_memory=torch.cuda.is_available(),
+        )
+        for loaded in (train, val, test)
+    ]
+    bands = list(train.bands)
 
     for model_name, model_cfg in MODEL_CONFIGS.items():
         if model_name in completed_models:

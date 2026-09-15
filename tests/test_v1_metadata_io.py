@@ -14,11 +14,10 @@ import pytest
 import torch
 
 from experiments.scripts.repack_geobench_v1 import repack, validate
-from torchgeo_bench.datasets import geobench_v1
+from torchgeo_bench.datasets import geobench_v1, load_split
 from torchgeo_bench.datasets._metadata import decode_metadata
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
 from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
-from torchgeo_bench.datasets.m_eurosat import MEurosat
 from torchgeo_bench.geography import _v1_origin, _v1_shard_origins, extract_geography
 
 RED = "04 - Red_2020-01-01"
@@ -149,7 +148,7 @@ def test_v1_wrapper_rejects_unknown_band_without_data(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="unknown band"):
-        MEurosat().get_dataset("train", bands=("nonexistent_band",))
+        load_split("m-eurosat", "train", bands=("nonexistent_band",))
 
 
 @pytest.mark.parametrize("label", [2, [1, 0, 1]])
@@ -208,7 +207,7 @@ def test_v1_wrapper_loads_data_only_metadata(
         repack(source, shard_root / source.name)
     monkeypatch.setattr(geobench_v1, "V1_ROOT", hdf_root)
     monkeypatch.setattr(geobench_v1, "V1_SHARDED_ROOT", shard_root)
-    dataset = MEurosat().get_dataset("train", bands=("red", "green"))
+    dataset = load_split("m-eurosat", "train", bands=("red", "green")).dataset
     assert dataset[0]["image"].shape == (2, 2, 3)
     assert dataset[0]["label"].item() == 1
 

@@ -113,9 +113,12 @@ class GeoBenchv1Sharded(Dataset):
         with open(partition_file) as f:
             partition_data = json.load(f)
         if split not in partition_data:
-            raise ValueError(
+            message = (
                 f"Split '{split}' not found in partition. Available: {list(partition_data.keys())}"
             )
+            if split in ("train", "valid", "test"):
+                raise FileNotFoundError(message)
+            raise ValueError(message)
         self.sample_ids: list[str] = partition_data[split]
         self.transform = transform
 

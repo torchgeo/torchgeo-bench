@@ -10,7 +10,7 @@ from tests.support.runner import (
     _compose_cfg,
     _resume_row,
     _synthetic_embeddings,
-    _synthetic_loaders,
+    _synthetic_splits,
 )
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import evaluate_intrinsic_dim, main
@@ -37,7 +37,7 @@ def test_intrinsic_dim_rows_emitted(tmp_path: Path):
         return {est: values[est]}
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -77,7 +77,7 @@ def test_spectrum_rows_do_not_require_torchid_estimators(tmp_path: Path):
     )
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -174,7 +174,7 @@ def test_intrinsic_dim_resume_per_estimator(tmp_path: Path):
         return {est: values[est]}
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -217,7 +217,7 @@ def test_resume_backfills_spectrum_without_rerunning_completed_estimators(tmp_pa
     pd.DataFrame(seed_rows).to_csv(out, index=False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",

@@ -252,21 +252,25 @@ def test_probability_writer_emits_no_object_arrays(
             for labels in (train_labels, val_labels, test_labels)
         ]
 
-    train = _probability_samples(train_labels)
-    train_loader = DataLoader(
-        train, batch_size=2, shuffle=True, generator=torch.Generator().manual_seed(17)
-    )
-    val_loader = DataLoader(_probability_samples(val_labels), batch_size=2)
-    test_loader = DataLoader(_probability_samples(test_labels), batch_size=2)
+    train = _probability_samples(train_labels, temporal=custom_model)
+    splits = {
+        "train": train,
+        "val": _probability_samples(val_labels, temporal=custom_model),
+        "test": _probability_samples(test_labels, temporal=custom_model),
+    }
 
-    def datasets(**kwargs: object) -> tuple:
-        assert kwargs["dataset_name"] == dataset
+    def datasets(dataset_name: str, split: str, **kwargs: object):
+        from tests.support.runner import make_loaded_split
+
+        assert dataset_name == dataset
         assert kwargs["image_size"] == 16
         assert kwargs["interpolation"] == "bilinear"
         assert kwargs["bands"] == "rgb"
-        assert kwargs["partition_name"] == "default"
+        assert kwargs["partition"] == "default"
         assert kwargs["time_steps"] == (2 if custom_model else None)
-        return train, train_loader, val_loader, test_loader
+        return make_loaded_split(
+            splits[split], dataset, split, time_steps=2 if custom_model else None
+        )
 
     def build(preset: ModelPreset, **kwargs: object) -> torch.nn.Module:
         assert preset.name == model_name
@@ -279,7 +283,7 @@ def test_probability_writer_emits_no_object_arrays(
             assert "dataset" not in kwargs
         return torch.nn.Identity()
 
-    monkeypatch.setattr(cleanlab_extract_probs, "get_datasets", datasets)
+    monkeypatch.setattr(cleanlab_extract_probs, "load_split", datasets)
     monkeypatch.setattr("torchgeo_bench.main.build_model", build)
 
     def embed(
@@ -309,10 +313,12 @@ def test_probability_writer_emits_no_object_arrays(
     _assert_probability_artifacts(output, dataset, model_name, train_labels, test_labels)
 
 
-def _probability_samples(labels: np.ndarray) -> list[dict[str, torch.Tensor]]:
+def _probability_samples(
+    labels: np.ndarray, *, temporal: bool = False
+) -> list[dict[str, torch.Tensor]]:
     return [
         {
-            "image": torch.full((3, 2, 2), float(index)),
+            "image": torch.full((2, 3, 2, 2) if temporal else (3, 2, 2), float(index)),
             "label": torch.from_numpy(np.asarray(label)),
         }
         for index, label in enumerate(labels)

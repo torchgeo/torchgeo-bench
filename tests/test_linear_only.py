@@ -14,7 +14,7 @@ from tests.support.runner import (
     _compose_cfg,
     _hash_for,
     _resume_row,
-    _synthetic_loaders,
+    _synthetic_splits,
 )
 from torchgeo_bench.main import main
 
@@ -49,7 +49,9 @@ def test_only_linear_runs_and_resumes_without_knn(tmp_path: Path, kind: str) -> 
         },
     )
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch(
+            "torchgeo_bench.main.load_split", side_effect=_synthetic_splits(config.datasets[0])
+        ),
         mock.patch("torchgeo_bench.main.build_model", return_value=_chainable_model_mock()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_embeddings(kind)),
         mock.patch("torchgeo_bench.main.evaluate_knn", side_effect=AssertionError("KNN evaluated")),
@@ -71,7 +73,7 @@ def test_only_linear_runs_and_resumes_without_knn(tmp_path: Path, kind: str) -> 
 
     config.output.resume = True
     with mock.patch(
-        "torchgeo_bench.main.get_datasets", side_effect=AssertionError("resume loaded data")
+        "torchgeo_bench.main.load_split", side_effect=AssertionError("resume loaded data")
     ):
         main(config, strict=True)
     assert len(pd.read_csv(output)) == 1
@@ -86,7 +88,7 @@ def test_linear_resume_reuses_existing_linear_row_without_knn(tmp_path: Path) ->
     )
     config.output.resume = True
     with mock.patch(
-        "torchgeo_bench.main.get_datasets", side_effect=AssertionError("resume loaded data")
+        "torchgeo_bench.main.load_split", side_effect=AssertionError("resume loaded data")
     ):
         main(config)
     assert pd.read_csv(config.output.file)["method"].tolist() == ["linear"]
@@ -104,7 +106,7 @@ def test_completed_knn_alone_does_not_satisfy_linear_only_resume(tmp_path: Path)
         config.output.file, index=False
     )
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.build_model", return_value=_chainable_model_mock()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_embeddings("binary")),
         mock.patch("torchgeo_bench.main.evaluate_knn", side_effect=AssertionError("KNN evaluated")),
@@ -117,7 +119,7 @@ def test_linear_only_failure_never_writes_fabricated_knn_row(tmp_path: Path) -> 
     output = tmp_path / "linear.csv"
     config = _compose_cfg(output, {"classification": {"methods": ["linear"]}})
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.build_model", return_value=_chainable_model_mock()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_embeddings("binary")),
         mock.patch(
@@ -146,7 +148,7 @@ sys.meta_path.insert(0, BlockKNN())
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import dataset_metadata, run_dataset
 from torchgeo_bench.resume import ResumeState
-from tests.support.runner import _synthetic_loaders, _synthetic_embeddings, _chainable_model_mock
+from tests.support.runner import _synthetic_splits, _synthetic_embeddings, _chainable_model_mock
 config = RunConfig.model_validate({
     'model': {'name': 'rcf'}, 'datasets': ['m-eurosat'],
     'runtime': {'device': 'cpu'},
@@ -155,7 +157,7 @@ config = RunConfig.model_validate({
 })
 module = importlib.import_module('torchgeo_bench.main')
 with (
-    patch.object(module, 'get_datasets', return_value=_synthetic_loaders()),
+    patch.object(module, 'load_split', side_effect=_synthetic_splits()),
     patch.object(module, 'build_model', return_value=_chainable_model_mock()),
     patch.object(module, 'embed_split', side_effect=_synthetic_embeddings()),
 ):

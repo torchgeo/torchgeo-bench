@@ -85,7 +85,7 @@ def test_public_classification_and_resume(tmp_path: Path, *, temperature_scaling
 
 def test_classification_fixture_has_no_split_leakage(tmp_path: Path) -> None:
     """Keep toy perfection meaningful: held-out examples are not training duplicates."""
-    from torchgeo_bench.datasets import get_datasets
+    from torchgeo_bench.datasets import load_split
 
     directory = write_classification_files(tmp_path, "m-eurosat", (2, 7))
     partition = json.loads((directory / "default_partition.json").read_text())
@@ -93,11 +93,12 @@ def test_classification_fixture_has_no_split_leakage(tmp_path: Path) -> None:
     assert sum(map(len, groups)) == len(set.union(*groups))
     with pytest.MonkeyPatch.context() as patch:
         patch.chdir(tmp_path)
-        _, *loaders = get_datasets(
-            "m-eurosat", batch_size=8, num_workers=0, bands="rgb", image_size=16, return_val=True
-        )
+        splits = [
+            load_split("m-eurosat", split, bands="rgb", image_size=16)
+            for split in ("train", "val", "test")
+        ]
         split_images = [
-            {sample["image"].numpy().tobytes() for sample in loader.dataset} for loader in loaders
+            {sample["image"].numpy().tobytes() for sample in loaded.dataset} for loaded in splits
         ]
     assert [len(group) for group in split_images] == [24, 8, 8]
     assert sum(map(len, split_images)) == len(set.union(*split_images))

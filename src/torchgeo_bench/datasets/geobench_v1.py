@@ -17,6 +17,7 @@ from torch.utils.data import Dataset
 
 from ._metadata import read_hdf5_metadata
 from .base import BenchDataset
+from .input import ResolvedInput, Split
 
 V1_ROOT = Path("data/classification_v1.0")
 V1_SHARDED_ROOT = Path("data/classification_v1.0_wds")
@@ -66,9 +67,12 @@ class GeoBenchv1(Dataset):
             partition_data = json.load(f)
 
         if split not in partition_data:
-            raise ValueError(
+            message = (
                 f"Split '{split}' not found in partition. Available: {list(partition_data.keys())}"
             )
+            if split in ("train", "valid", "test"):
+                raise FileNotFoundError(message)
+            raise ValueError(message)
         self.sample_ids = partition_data[split]
 
         if bands is None:
@@ -135,12 +139,12 @@ class _V1Dataset(BenchDataset):
     def data_root(cls) -> Path:
         return V1_ROOT
 
-    def get_dataset(
+    def _load_split(
         self,
-        split: str,
+        split: Split,
         *,
+        inputs: ResolvedInput,
         partition: str = "default",
-        bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
     ) -> Dataset:
         """Return a torch :class:`Dataset` for the split (raw values).
@@ -152,8 +156,8 @@ class _V1Dataset(BenchDataset):
 
         Missing data must be downloaded with ``torchgeo-bench download`` first.
         """
-        v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split  # type: ignore[assignment]
-        source_bands = tuple(spec.source_name for spec in self.select_band_specs(bands))
+        v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split
+        source_bands = tuple(spec.source_name for spec in inputs.bands)
 
         sharded_dir = V1_SHARDED_ROOT / self.name
         hdf5_dir = self.data_root() / self.name

@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 
 from .base import BandSpec, BenchDataset
+from .input import ResolvedInput, Split
 
 logger = logging.getLogger(__name__)
 
@@ -213,14 +214,13 @@ class _V2Dataset(BenchDataset):
         """
         return sample
 
-    def get_dataset(
+    def _load_split(
         self,
-        split: str,
+        split: Split,
         *,
+        inputs: ResolvedInput,
         partition: str = "default",
-        bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
-        time_steps: int | None = None,
     ) -> Dataset:
         """Return raw sensor values for a split.
 
@@ -228,7 +228,8 @@ class _V2Dataset(BenchDataset):
         ``time_steps`` requests a time series and needs :attr:`multi_temporal`.
         """
         del partition
-        specs = tuple(self.select_band_specs(bands))
+        specs = inputs.bands
+        time_steps = inputs.time_steps
         band_order = self.build_band_order(specs)
 
         kwargs: dict[str, object] = {
@@ -239,9 +240,7 @@ class _V2Dataset(BenchDataset):
             kwargs["return_stacked_image"] = True
         kwargs.update(self.upstream_kwargs)
         if time_steps is not None:
-            if not self.multi_temporal:
-                raise ValueError(f"{self.name} is not multi-temporal; drop time_steps.")
-            kwargs["num_time_steps"] = int(time_steps)
+            kwargs["num_time_steps"] = time_steps
             kwargs["temporal_output_format"] = "TCHW"
             if time_steps > 1:
                 kwargs["return_stacked_image"] = False

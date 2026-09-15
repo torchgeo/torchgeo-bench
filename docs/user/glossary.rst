@@ -7,9 +7,9 @@ Glossary
    BenchDataset
        Abstract base class implemented by every dataset wrapper in
        :mod:`torchgeo_bench.datasets`.  Declares static metadata (bands,
-       number of classes, task type, default split sizes) and exposes a
-       :meth:`~torchgeo_bench.datasets.BenchDataset.get_dataset` factory
-       returning a PyTorch ``Dataset`` for a given split.
+       number of classes, task type, default split sizes). The public
+       :func:`~torchgeo_bench.datasets.load_split` API returns one PyTorch
+       ``Dataset`` with immutable resolved input and target metadata.
 
    BenchModel
        Abstract base class implemented by every backbone in

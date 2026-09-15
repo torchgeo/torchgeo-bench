@@ -9,7 +9,7 @@ from tests.support.runner import (
     _compose_cfg,
     _resume_row,
     _synthetic_embeddings,
-    _synthetic_loaders,
+    _synthetic_splits,
 )
 from torchgeo_bench.main import main
 
@@ -37,7 +37,7 @@ def test_profile_resume_partial_does_not_skip(tmp_path: Path):
     pd.DataFrame(seed_rows).to_csv(out, index=False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -72,7 +72,7 @@ def test_profile_resume_complete_skips(tmp_path: Path):
     pd.DataFrame(seed_rows).to_csv(out, index=False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.measure_profile") as profile_mock,
     ):
         main(cfg)

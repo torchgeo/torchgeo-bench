@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from torchgeo_bench.calibration import (
@@ -25,9 +25,10 @@ from torchgeo_bench.config.presets import (
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.datasets import (
     BenchDataset,
+    LoadedSplit,
     get_bench_dataset_class,
-    get_datasets,
     list_datasets,
+    load_split,
 )
 from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.intrinsic_dim import (
@@ -814,15 +815,23 @@ def run_classification(  # noqa: PLR0913 - keep the CLI failure policy explicit
 def instantiate_dataset_model(
     cfg: RunConfig,
     model_cfg: ModelPreset,
-    bench: BenchDataset,
-    train_dataset: Dataset,
+    train: LoadedSplit,
     device: torch.device,
 ) -> BenchModel:
     """Construct the model with bands matching the loaded tensor channels."""
-    num_channels = train_dataset[0]["image"].shape[-3]
+    image = train.dataset[0]["image"]
+    expected_rank = 4 if train.input.layout == "TCHW" else 3
+    if image.ndim != expected_rank or (
+        expected_rank == 4 and image.shape[0] != train.input.num_time_steps
+    ):
+        raise ValueError(
+            f"{train.dataset_name}: expected {train.input.layout} image with "
+            f"{train.input.num_time_steps} time step(s), got {tuple(image.shape)}"
+        )
+    num_channels = image.shape[-3]
     normalization = NORMALIZATIONS[cfg.input.normalization]
-    ds_name = bench.name
-    bands_list = bench.resolve_band_specs(cfg.input.bands)
+    ds_name = train.dataset_name
+    bands_list = list(train.bands)
     if len(bands_list) != num_channels:
         raise ValueError(
             f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
@@ -835,7 +844,7 @@ def instantiate_dataset_model(
     }
     if model_cfg.kwargs.get("mode") == "empirical":
         # Empirical RCF whitens against real patches, so it needs the dataset.
-        instantiate_kwargs["dataset"] = train_dataset
+        instantiate_kwargs["dataset"] = train.dataset
     model: BenchModel = build_model(model_cfg, **instantiate_kwargs)
     model.to(device).eval()
 
@@ -875,6 +884,18 @@ def dataset_metadata(
     }
 
 
+def _check_split_metadata(train: LoadedSplit, other: LoadedSplit) -> None:
+    if other.input != train.input or (
+        other.dataset_name,
+        other.task,
+        other.num_classes,
+        other.multilabel,
+    ) != (train.dataset_name, train.task, train.num_classes, train.multilabel):
+        raise ValueError(
+            f"{train.dataset_name}: split input or target metadata disagrees with train"
+        )
+
+
 def run_dataset(
     cfg: RunConfig,
     ds_name: str,
@@ -907,24 +928,34 @@ def run_dataset(
             plan,
             knn_device=resolve_knn_device(cfg.classification.knn_device, cfg.runtime.device),
         )
-    train_dataset, train_loader, val_loader, test_loader = get_datasets(
-        dataset_name=ds_name,
-        partition_name=cfg.input.partition,
-        batch_size=cfg.runtime.batch_size,
-        num_workers=cfg.runtime.workers,
-        return_val=True,
-        image_size=cfg.input.image_size,
-        interpolation=cfg.input.interpolation,
-        bands=cfg.input.bands,
-        time_steps=cfg.input.time_steps,
-    )
-
-    bench = ds_cls()
-    model = instantiate_dataset_model(
-        cfg, model_cfg, bench, train_dataset, torch.device(cfg.runtime.device)
-    )
+    train, val, test = [
+        load_split(
+            ds_name,
+            split,
+            partition=cfg.input.partition if split == "train" else "default",
+            image_size=cfg.input.image_size,
+            interpolation=cfg.input.interpolation,
+            bands=cfg.input.bands,
+            time_steps=cfg.input.time_steps,
+        )
+        for split in ("train", "val", "test")
+    ]
+    for other in (val, test):
+        _check_split_metadata(train, other)
+    train_loader, val_loader, test_loader = [
+        DataLoader(
+            loaded.dataset,
+            batch_size=cfg.runtime.batch_size,
+            shuffle=loaded.split == "train",
+            num_workers=cfg.runtime.workers,
+            pin_memory=torch.cuda.is_available(),
+        )
+        for loaded in (train, val, test)
+    ]
+    common_meta["num_classes"] = train.num_classes
+    model = instantiate_dataset_model(cfg, model_cfg, train, torch.device(cfg.runtime.device))
     loaders = LoaderSplits(train_loader, val_loader, test_loader)
-    if ds_cls.task == "segmentation":
+    if train.task == "segmentation":
         for rows in run_segmentation(cfg, model, loaders, common_meta):
             yield rows, [], []
         return

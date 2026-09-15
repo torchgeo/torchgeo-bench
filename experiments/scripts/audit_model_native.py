@@ -17,7 +17,7 @@ from torchgeo_bench.config import list_model_configs
 from torchgeo_bench.config.presets import build_model, load_model_preset, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import InputConfig, ModelConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets import get_bench_dataset_class, load_split
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError
 
@@ -56,13 +56,13 @@ def main() -> None:
             ),
             args.dataset,
         )
-        bands = band_specs(args.dataset, args.bands)
         runtime_options = {}
         if preset.kwargs.get("mode") == "empirical":
-            bench = get_bench_dataset_class(args.dataset)()
-            runtime_options["dataset"] = bench.get_dataset(
-                "train", bands=tuple(band.name for band in bands)
-            )
+            train = load_split(args.dataset, "train", bands=args.bands)
+            bands = list(train.bands)
+            runtime_options["dataset"] = train.dataset
+        else:
+            bands = band_specs(args.dataset, args.bands)
         entry: dict = {"config": config_name}
         try:
             model = build_model(

@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 import torch
 import yaml
+from torch.utils.data import DataLoader
 
 from tests.support.cli import cli_output, run_cli
 from tests.support.data import write_caffe_files
@@ -15,7 +16,7 @@ from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench.cli import main
 from torchgeo_bench.config.presets import NORMALIZATIONS, build_model, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.datasets import load_split
 from torchgeo_bench.segmentation_task import build_seg_probe_and_solver
 
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("isolated_torch_rng")]
@@ -102,9 +103,19 @@ def test_real_solver_learns_target_with_consistent_cached_and_uncached_updates(
     """Check learned predictions and parameter updates, not merely executable epochs."""
     write_caffe_files(tmp_path, target_class=2)
     monkeypatch.chdir(tmp_path)
-    _, train, val, test = get_datasets(
-        "caffe", batch_size=6, num_workers=0, image_size=16, bands="rgb", return_val=True
-    )
+    splits = [
+        load_split("caffe", split, image_size=16, bands="rgb") for split in ("train", "val", "test")
+    ]
+    train, val, test = [
+        DataLoader(
+            loaded.dataset,
+            batch_size=6,
+            num_workers=0,
+            shuffle=loaded.split == "train",
+            pin_memory=torch.cuda.is_available(),
+        )
+        for loaded in splits
+    ]
     final_heads = []
     for cached in (True, False):
         torch.manual_seed(7)
@@ -113,7 +124,7 @@ def test_real_solver_learns_target_with_consistent_cached_and_uncached_updates(
         )
         model = build_model(
             preset,
-            bands=get_bench_dataset_class("caffe").bands,
+            bands=list(splits[0].bands),
             normalization=NORMALIZATIONS[cfg.input.normalization],
         )
         probe, solver = build_seg_probe_and_solver(model, 4, cfg.segmentation, torch.device("cpu"))

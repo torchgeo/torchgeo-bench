@@ -25,12 +25,13 @@ import pandas as pd
 import torch
 from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from torchgeo_bench.config.presets import build_model, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig, RuntimeConfig
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.datasets import get_bench_dataset_class, load_split
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.utils import extract_features
@@ -136,16 +137,22 @@ def run_dataset(
             "=== %s === skipping (multi-label not supported by this comparison)", dataset_name
         )
         return all_rows
-    bands_list = bench.select_band_specs(tuple(bench.rgb_bands))
-    train_dataset, train_loader, val_loader, test_loader = get_datasets(
-        dataset_name=dataset_name,
-        partition_name="default",
-        batch_size=64,
-        return_val=True,
-        image_size=IMAGE_SIZE,
-        interpolation="bilinear",
-    )
-    num_channels = train_dataset[0]["image"].shape[0]
+    train, val, test = [
+        load_split(dataset_name, split, image_size=IMAGE_SIZE, interpolation="bilinear")
+        for split in ("train", "val", "test")
+    ]
+    train_loader, val_loader, test_loader = [
+        DataLoader(
+            loaded.dataset,
+            batch_size=64,
+            shuffle=loaded.split == "train",
+            num_workers=8,
+            pin_memory=torch.cuda.is_available(),
+        )
+        for loaded in (train, val, test)
+    ]
+    bands_list = list(train.bands)
+    num_channels = train.dataset[0]["image"].shape[0]
     assert len(bands_list) == num_channels, (
         f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} for {dataset_name}"
     )

@@ -15,38 +15,50 @@ from typing import Any
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 
 from ..config.presets import NORMALIZATIONS, ModelPreset, build_model
 from ..config.profile import ProfileConfig, resolve_profile_config
-from ..datasets import BandSpec, get_bench_dataset_class, get_datasets
+from ..datasets import BandSpec, LoadedSplit, load_split
 from ..devices import resolve_device
 from ..model_profile import ProfileResult, profile_inference
 
 
-def _load_batch(config: ProfileConfig) -> tuple[Dataset, torch.Tensor, list[BandSpec]]:
+def _load_batch(config: ProfileConfig) -> tuple[LoadedSplit, torch.Tensor]:
     """Load one full batch and its ordered band metadata."""
     inputs = config.input
-    dataset = get_bench_dataset_class(config.dataset)()
-    band_names = inputs.bands
-    selected = dataset.resolve_band_specs(band_names)
-    train_dataset, train_loader, _, _ = get_datasets(
-        dataset_name=config.dataset,
-        batch_size=config.runtime.batch_size,
-        num_workers=config.runtime.workers,
-        return_val=True,
+    train = load_split(
+        config.dataset,
+        "train",
         image_size=inputs.image_size,
         interpolation=inputs.interpolation,
-        bands=band_names,
-        partition_name=inputs.partition,
+        bands=inputs.bands,
+        partition=inputs.partition,
         time_steps=inputs.time_steps,
+    )
+    train_loader = DataLoader(
+        train.dataset,
+        batch_size=config.runtime.batch_size,
+        shuffle=True,
+        num_workers=config.runtime.workers,
+        pin_memory=torch.cuda.is_available(),
     )
     batch = next(iter(train_loader))["image"]
     if batch.shape[0] != config.runtime.batch_size:
         raise RuntimeError(
             f"dataset returned batch size {batch.shape[0]}, requested {config.runtime.batch_size}"
         )
-    return train_dataset, batch, selected
+    expected_rank = 5 if train.input.layout == "TCHW" else 4
+    if (
+        batch.ndim != expected_rank
+        or batch.shape[-3] != len(train.bands)
+        or (expected_rank == 5 and batch.shape[1] != train.input.num_time_steps)
+    ):
+        raise ValueError(
+            f"{train.dataset_name}: batch {tuple(batch.shape)} disagrees with "
+            f"resolved {train.input.layout} input ({len(train.bands)} channels)"
+        )
+    return train, batch
 
 
 def _construction_preset(
@@ -141,9 +153,10 @@ def run(config: ProfileConfig) -> None:
     np.random.seed(config.runtime.seed)  # noqa: NPY002 - Dataset transforms use NumPy's global RNG.
     # Upstream dataset/model constructors may print diagnostics; stdout is one JSON record.
     with redirect_stdout(sys.stderr):
-        train_dataset, batch, selected_bands = _load_batch(config)
+        train, batch = _load_batch(config)
+        selected_bands = list(train.bands)
         preset = _construction_preset(preset, config, batch)
-        model = _build_model(preset, config, train_dataset, selected_bands).to(device).eval()
+        model = _build_model(preset, config, train.dataset, selected_bands).to(device).eval()
         sample = batch.to(device)
         result = profile_inference(
             model,

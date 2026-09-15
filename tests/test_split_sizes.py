@@ -3,7 +3,7 @@
 import pytest
 
 from tests.support.data import require_dataset_data
-from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets import get_bench_dataset_class, load_split
 
 # V1 counts come from data/classification_v1.0/<name>/default_partition.json.
 # V2 counts come from len(...) on each upstream geobench_v2.datasets.GeoBench<X> split.
@@ -45,8 +45,7 @@ def test_split_sizes(dataset_name: str) -> None:
     expected = EXPECTED_SIZES[dataset_name]
 
     actual = {
-        split: len(bench.get_dataset(split, bands=tuple(bench.rgb_bands)))
-        for split in ("train", "val", "test")
+        split: len(load_split(dataset_name, split).dataset) for split in ("train", "val", "test")
     }
 
     assert bench.split_sizes == expected

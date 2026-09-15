@@ -7,31 +7,15 @@ import pytest
 import torch
 
 from projects.cleanlab import cleanlab_extract_probs
+from tests.support.runner import _synthetic_splits
 from torchgeo_bench.config.presets import build_model, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig, RuntimeConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
-
-
-@pytest.mark.parametrize(
-    ("requested", "expected"),
-    [
-        ("rgb", ["red", "green", "blue"]),
-        (["blue", "red", "green"], ["blue", "red", "green"]),
-    ],
-)
-def test_extraction_preserves_requested_band_order(
-    requested: str | list[str], expected: list[str]
-) -> None:
-    bench = get_bench_dataset_class("m-eurosat")()
-    bands = cleanlab_extract_probs.band_specs(bench, requested)
-    assert [band.name for band in bands] == expected
 
 
 def test_extraction_discovers_and_builds_packaged_model_configs() -> None:
     model_name = cleanlab_extract_probs.build_name_to_config_map()["rcf"]
-    bench = get_bench_dataset_class("m-eurosat")()
-    bands = cleanlab_extract_probs.band_specs(bench, "rgb")
+    bands = list(_synthetic_splits()[0].bands)
     cfg, model_cfg = resolve_run_config(
         RunConfig(
             model=ModelConfig(name=model_name),
@@ -115,7 +99,7 @@ def test_extraction_loads_strict_custom_model_config(tmp_path: Path) -> None:
     assert effective.input.image_size is None
     assert effective.input.time_steps == 2
     assert preset.kwargs == {"features": 8, "seed": 17}
-    bands = cleanlab_extract_probs.band_specs(get_bench_dataset_class("m-eurosat")(), "rgb")
+    bands = list(_synthetic_splits()[0].bands)
     model = build_model(preset, bands=bands, normalization="identity")
     assert model(torch.zeros(1, 3, 16, 16)).shape == (1, 8)
     path.write_text(path.read_text() + "unknown: true\n")

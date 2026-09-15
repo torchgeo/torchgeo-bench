@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+from torchgeo_bench.datasets import ResolvedInput, load_split
 from torchgeo_bench.datasets.eurosat import EuroSAT, EuroSATSpatial
 from torchgeo_bench.datasets.fotw import FieldsOfTheWorld as FOTW
 from torchgeo_bench.datasets.spacenet2 import SpaceNet2
@@ -54,7 +55,7 @@ class TestSpaceNetCanonicalize:
 @pytest.mark.parametrize("dataset_cls", [EuroSAT, EuroSATSpatial])
 def test_eurosat_rejects_unknown_split(dataset_cls: type[EuroSAT]) -> None:
     with pytest.raises(ValueError, match="Unknown split"):
-        dataset_cls().get_dataset("invalid")
+        load_split(dataset_cls.name, "invalid")
 
 
 @pytest.mark.parametrize("dataset_cls", [EuroSAT, EuroSATSpatial])
@@ -93,8 +94,17 @@ def test_eurosat_forwards_bands_split_and_transform(
     upstream = MagicMock()
     transform = torch.nn.Identity()
     monkeypatch.setattr(dataset_cls, "_tg_class", upstream)
-    result = dataset_cls().get_dataset(split, bands=bands, partition="unused", transform=transform)
+    bench = dataset_cls()
+    result = bench._load_split(
+        split,
+        inputs=ResolvedInput(tuple(bench.select_band_specs(bands)), bands or "all"),
+        transform=transform,
+    )
     upstream.assert_called_once_with(
-        root=str(Path("data/eurosat")), split=split, bands=expected_codes, transforms=transform
+        root=str(Path("data/eurosat")),
+        split=split,
+        bands=expected_codes,
+        transforms=transform,
+        download=False,
     )
     assert result is upstream.return_value

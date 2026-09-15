@@ -6,21 +6,21 @@ from unittest import mock
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader
 
-from tests.support.runner import _compose_cfg, _DictTensorDataset, _resume_row
+from tests.support.runner import _compose_cfg, _DictTensorDataset, _resume_row, make_loaded_split
 from torchgeo_bench.config.presets import merge_settings
 from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.datasets import LoadedSplit
 from torchgeo_bench.main import LinearProbeDivergedError, main
 
 
-def _synthetic_multilabel_loaders(
+def _synthetic_multilabel_splits(
     n_train: int = 12,
     n_val: int = 6,
     n_test: int = 6,
     channels: int = 3,
     n_classes: int = 8,
-) -> tuple[_DictTensorDataset, DataLoader, DataLoader, DataLoader]:
+) -> list[LoadedSplit]:
     rng = torch.Generator().manual_seed(2)
     train_images = torch.rand(n_train, channels, 8, 8, generator=rng) * 3000.0
     val_images = torch.rand(n_val, channels, 8, 8, generator=rng) * 3000.0
@@ -36,12 +36,12 @@ def _synthetic_multilabel_loaders(
     val_dataset = _DictTensorDataset(val_images, val_labels)
     test_dataset = _DictTensorDataset(test_images, test_labels)
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=3, shuffle=True, generator=rng, num_workers=0
-    )
-    val_loader = DataLoader(val_dataset, batch_size=3, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=3, shuffle=False, num_workers=0)
-    return train_dataset, train_loader, val_loader, test_loader
+    return [
+        make_loaded_split(dataset, "m-bigearthnet", split)
+        for dataset, split in zip(
+            (train_dataset, val_dataset, test_dataset), ("train", "val", "test"), strict=True
+        )
+    ]
 
 
 def _synthetic_multilabel_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
@@ -68,9 +68,7 @@ def test_multilabel_knn_emits_micro_map(tmp_path: Path):
     cfg = _cfg_for_multilabel(out, overrides={"classification": {"methods": ["knn"]}})
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()
-        ),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_multilabel_splits()),
         mock.patch(
             "torchgeo_bench.main.embed_split", side_effect=_synthetic_multilabel_embeddings()
         ),
@@ -91,9 +89,7 @@ def test_multilabel_linear_emits_micro_map(tmp_path: Path):
     cfg = _cfg_for_multilabel(out)
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()
-        ),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_multilabel_splits()),
         mock.patch(
             "torchgeo_bench.main.embed_split", side_effect=_synthetic_multilabel_embeddings()
         ),
@@ -126,9 +122,7 @@ def test_diverged_linear_probe_skips_row_not_whole_run(tmp_path: Path):
     cfg = _cfg_for_multilabel(out)
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()
-        ),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_multilabel_splits()),
         mock.patch(
             "torchgeo_bench.main.embed_split", side_effect=_synthetic_multilabel_embeddings()
         ),
@@ -158,9 +152,7 @@ def test_multilabel_resume_key_stable(tmp_path: Path):
     )
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_multilabel_loaders()
-        ),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_multilabel_splits()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
     ):
         main(cfg)

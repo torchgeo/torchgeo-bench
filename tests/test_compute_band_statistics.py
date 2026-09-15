@@ -32,8 +32,9 @@ def two_band_dataset(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     )
     bench = MagicMock()
     bench.bands = [SimpleNamespace(name="varying"), SimpleNamespace(name="constant")]
-    bench.get_dataset.return_value = [{"image": image} for image in pixels]
-    monkeypatch.setattr(statistics, "get_bench_dataset_class", lambda _: lambda: bench)
+    bench.dataset = [{"image": image} for image in pixels]
+    bench.load = MagicMock(return_value=bench)
+    monkeypatch.setattr(statistics, "load_split", bench.load)
     return bench
 
 
@@ -51,7 +52,7 @@ def test_statistics_weight_pixels_not_batches_and_use_only_training_data(
         },
         {"name": "constant", "mean": 10.0, "std": 0.0, "min": 10.0, "max": 10.0},
     ]
-    two_band_dataset.get_dataset.assert_called_once_with("train", bands=None)
+    two_band_dataset.load.assert_called_once_with("toy", "train", bands="all")
 
 
 def test_statistics_reject_inconsistent_channel_metadata(two_band_dataset: MagicMock) -> None:

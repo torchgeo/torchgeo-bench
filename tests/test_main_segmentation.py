@@ -6,11 +6,17 @@ from unittest import mock
 import pandas as pd
 import pytest
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
-from tests.support.runner import _chainable_model_mock, _compose_cfg, _resume_row
+from tests.support.runner import (
+    _chainable_model_mock,
+    _compose_cfg,
+    _resume_row,
+    make_loaded_split,
+)
 from torchgeo_bench.config.presets import merge_settings
 from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.datasets import LoadedSplit
 from torchgeo_bench.main import main, run_dataset
 from torchgeo_bench.resume import ResumeState
 
@@ -27,13 +33,13 @@ class _SegmentationDataset(Dataset):
         return {"image": self._images[index], "mask": self._masks[index]}
 
 
-def _synthetic_segmentation_loaders(
+def _synthetic_segmentation_splits(
     n_train: int = 8,
     n_val: int = 4,
     n_test: int = 4,
     channels: int = 3,
     n_classes: int = 3,
-) -> tuple[_SegmentationDataset, DataLoader, DataLoader, DataLoader]:
+) -> list[LoadedSplit]:
     rng = torch.Generator().manual_seed(1)
     train_images = torch.rand(n_train, channels, 8, 8, generator=rng)
     val_images = torch.rand(n_val, channels, 8, 8, generator=rng)
@@ -47,12 +53,12 @@ def _synthetic_segmentation_loaders(
     val_dataset = _SegmentationDataset(val_images, val_masks)
     test_dataset = _SegmentationDataset(test_images, test_masks)
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=2, shuffle=True, generator=rng, num_workers=0
-    )
-    val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False, num_workers=0)
-    return train_dataset, train_loader, val_loader, test_loader
+    return [
+        make_loaded_split(dataset, "burn_scars", split)
+        for dataset, split in zip(
+            (train_dataset, val_dataset, test_dataset), ("train", "val", "test"), strict=True
+        )
+    ]
 
 
 def _cfg_for_segmentation(out: Path, overrides: dict | None = None) -> RunConfig:
@@ -105,8 +111,8 @@ def test_dataset_eval_resolution_preserves_explicit_values_and_original_config(
         captured.append(config)
         return []
 
-    loaders = _synthetic_segmentation_loaders()
-    monkeypatch.setattr("torchgeo_bench.main.get_datasets", lambda **_kwargs: loaders)
+    splits = iter(_synthetic_segmentation_splits())
+    monkeypatch.setattr("torchgeo_bench.main.load_split", lambda *_args, **_kwargs: next(splits))
     monkeypatch.setattr(
         "torchgeo_bench.main.instantiate_dataset_model", lambda *_args: torch.nn.Identity()
     )
@@ -125,9 +131,7 @@ def test_segmentation_row_emitted(tmp_path: Path):
     cfg = _cfg_for_segmentation(out)
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
-        ),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_segmentation_splits()),
         mock.patch(
             "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
             return_value=_mock_probe_and_solver(),
@@ -139,7 +143,7 @@ def test_segmentation_row_emitted(tmp_path: Path):
     assert df["method"].str.startswith("seg-").any()
     assert "miou" in set(df["metric_name"].str.lower())
     assert df.loc[0, "best_lr"] == 1e-3
-    assert df.loc[0, "best_batch_size"] == 2
+    assert df.loc[0, "best_batch_size"] == cfg.runtime.batch_size
     assert not df.loc[0, "merge_val"]
     assert df.loc[0, "ci_lower"] < df.loc[0, "ci_upper"]
 
@@ -167,9 +171,7 @@ def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):
     )
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
-        ),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_segmentation_splits()),
         mock.patch(
             "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
             return_value=(probe, solver),
@@ -195,7 +197,7 @@ def test_segmentation_resume_skips_complete_run(tmp_path: Path):
     model = _chainable_model_mock()
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
+        mock.patch("torchgeo_bench.main.load_split") as data_mock,
         mock.patch("torchgeo_bench.main.build_model", return_value=model) as instantiate_mock,
         mock.patch("torchgeo_bench.segmentation_task.build_seg_probe_and_solver") as build_mock,
     ):

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from torchgeo_bench.datasets import ResolvedInput, load_split
 from torchgeo_bench.datasets.resisc45 import RESISC45
 
 
@@ -66,7 +67,7 @@ class TestBandSelection:
         self, patched: RESISC45, bands: tuple[str, ...] | None
     ) -> None:
         """Selecting all bands should avoid a per-sample channel copy."""
-        ds = patched.get_dataset("train", bands=bands)
+        ds = load_split("resisc45", "train", bands=bands).dataset
         assert ds.kwargs["transforms"] is None
         torch.testing.assert_close(ds[0]["image"][:, 0, 0], torch.tensor([0.0, 1.0, 2.0]))
 
@@ -77,22 +78,27 @@ class TestBandSelection:
     def test_selection_preserves_requested_order(
         self, patched: RESISC45, bands: tuple[str, ...], expected: list[float]
     ) -> None:
-        ds = patched.get_dataset("train", bands=bands)
+        loaded = load_split("resisc45", "train", bands=bands)
+        ds = loaded.dataset
+        assert [spec.name for spec in loaded.bands] == list(bands)
         image = ds[0]["image"]
         assert image.shape == (len(expected), 8, 8)
         torch.testing.assert_close(image[:, 0, 0], torch.tensor(expected))
 
     def test_unknown_band_is_rejected(self, patched: RESISC45) -> None:
         with pytest.raises(ValueError, match="unknown band 'nir'"):
-            patched.get_dataset("train", bands=("nir",))
+            load_split("resisc45", "train", bands=("nir",))
 
     def test_unknown_split_is_rejected(self, patched: RESISC45) -> None:
         with pytest.raises(ValueError, match="Unknown split"):
-            patched.get_dataset("invalid")
+            load_split("resisc45", "invalid")
 
-    def test_split_is_forwarded_and_partition_ignored(self, patched: RESISC45) -> None:
-        ds = patched.get_dataset("test", partition="0.01x_train", bands=None)
+    def test_split_is_forwarded_and_partition_rejected(self, patched: RESISC45) -> None:
+        with pytest.raises(ValueError, match="does not support custom partitions"):
+            load_split("resisc45", "test", partition="0.01x_train")
+        ds = load_split("resisc45", "test", bands="all").dataset
         assert ds.kwargs["split"] == "test"
+        assert ds.kwargs["download"] is False
         assert "partition" not in ds.kwargs
 
 
@@ -104,7 +110,11 @@ class TestTransformComposition:
             seen.append(tuple(sample["image"].shape))
             return sample
 
-        ds = patched.get_dataset("train", bands=("red",), transform=_resize)
+        ds = patched._load_split(
+            "train",
+            inputs=ResolvedInput((patched.bands[0],), ("red",)),
+            transform=_resize,
+        )
         ds[0]
         assert seen == [(1, 8, 8)]
 
@@ -115,7 +125,9 @@ class TestTransformComposition:
             calls.append(1)
             return sample
 
-        ds = patched.get_dataset("train", bands=None, transform=_mark)
+        ds = patched._load_split(
+            "train", inputs=ResolvedInput(tuple(patched.bands), "all"), transform=_mark
+        )
         assert ds.kwargs["transforms"] is _mark
         ds[0]
         assert calls == [1]

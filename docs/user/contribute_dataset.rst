@@ -44,6 +44,7 @@ Create a new module under :file:`src/torchgeo_bench/datasets/` and subclass
    from torch.utils.data import Dataset
 
    from torchgeo_bench.datasets.base import BandSpec, BenchDataset
+   from torchgeo_bench.datasets.input import ResolvedInput, Split
 
    class MyDataset(BenchDataset):
        name = "my_dataset"
@@ -59,12 +60,12 @@ Create a new module under :file:`src/torchgeo_bench/datasets/` and subclass
        def data_root(cls) -> Path:
            return Path("data/my_dataset")
 
-       def get_dataset(
+       def _load_split(
            self,
-           split: str,
+           split: Split,
            *,
            partition: str = "default",
-           bands: tuple[str, ...] | None = None,
+           inputs: ResolvedInput,
            transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
        ) -> Dataset[dict[str, Tensor]]:
            raise NotImplementedError("Implement loading and apply the requested bands/transform")
@@ -83,19 +84,23 @@ Required class-level attributes:
   Selects micro-mAP over accuracy as the reported metric, so getting it wrong
   silently reports the wrong number.
 * ``supports_partitions`` — ``True`` only for V1 GeoBench datasets, which ship
-  partition JSON files.  When ``False``, ``get_datasets`` warns and ignores a
-  non-default ``input.partition``.
+  partition JSON files. When ``False``, ``load_split`` rejects a non-default
+  partition before source construction.
+* ``multi_temporal`` — supports explicit ``time_steps`` (currently PASTIS).
+  Unsupported temporal requests fail before data access.
 
-The ``get_dataset`` method takes ``split`` (``"train"``, ``"val"``, or
-``"test"``) plus the keyword-only arguments ``partition``, ``bands`` (the
-subset of bands requested by the model), and ``transform``.  It returns a
+The private ``_load_split`` method takes a validated ``split`` (``"train"``,
+``"val"``, or ``"test"``) plus keyword-only ``partition``, ``inputs`` (the
+immutable ``ResolvedInput``), and ``transform``. Derive source band requests
+from ``inputs.bands`` without resolving names a second time. Load only that
+split; do not construct or validate unrelated splits. It returns a
 :class:`torch.utils.data.Dataset` whose ``__getitem__`` yields **dict**
 samples — ``{"image": tensor, "label": tensor}`` for classification, with
 ``"mask"`` in place of ``"label"`` for segmentation.  Datasets always emit
 raw float32 values; normalization is the model's job.
 
 If you inherit from ``_V1Dataset`` or ``_V2Dataset``, both ``data_root`` and
-``get_dataset`` are already implemented — your subclass is pure metadata.  See
+``_load_split`` are already implemented — your subclass is pure metadata. See
 :file:`src/torchgeo_bench/datasets/m_eurosat.py` for a minimal example.
 
 .. note::
@@ -107,9 +112,10 @@ If you inherit from ``_V1Dataset`` or ``_V2Dataset``, both ``data_root`` and
 Band selection when the loader has no ``bands`` argument
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The runner passes ``get_dataset`` the band subset a model asked for, and then
-checks that the loaded tensor's channel count matches the ``BandSpec`` list it
-built.  How you honour that subset depends on the upstream loader:
+``load_split`` resolves the band subset once and passes it to ``_load_split``.
+The runner uses the returned ``LoadedSplit.bands`` for model construction,
+checking the tensor's channels and layout without selecting bands again.
+How you honour that subset depends on the upstream loader:
 
 * **The loader accepts bands.** Forward them and you are done —
   :class:`~torchgeo_bench.datasets.EuroSAT` passes ``source_name`` codes
@@ -123,10 +129,15 @@ built.  How you honour that subset depends on the upstream loader:
 
 Two details matter in the second case.  Compose your selection **before** the
 ``transform`` the caller handed you — that argument is the resize built by
-:func:`~torchgeo_bench.datasets.get_datasets`, and it should only see channels
+:func:`~torchgeo_bench.datasets.load_split`, and it should only see channels
 that survive selection.  And return ``None`` rather than an identity transform
 when the selection is a no-op, so the common ``--bands rgb`` / ``--bands all``
 paths add no per-sample work.
+
+The public result contains a Dataset and immutable metadata, never a DataLoader.
+Batching, shuffling, workers, pinning, collation, and seeding belong to callers.
+Do not sample data to infer metadata: describe the actual source layout,
+including CHW for squeezed single-step temporal requests.
 
 Compute the band statistics
 ---------------------------

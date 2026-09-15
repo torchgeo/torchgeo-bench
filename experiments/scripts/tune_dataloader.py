@@ -8,17 +8,15 @@ Usage::
         --model terratorch/prithvi_eo_v2_300 \\
         --dataset m-bigearthnet \\
         --bands all \\
-        --root data/classification_v1.0_wds \\
         --batch-sizes 64,128,256,512 \\
         --num-workers 4,8,16,32
 
-Uses GeoBench V1 tar shards, whose reader lets each worker open its own files.
+Loads only the training split from the dataset family's fixed local data root.
 """
 
 import argparse
 import logging
 import time
-from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -26,33 +24,12 @@ from torch.utils.data import DataLoader, Dataset
 from torchgeo_bench.config.presets import NORMALIZATIONS, build_model, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
+from torchgeo_bench.datasets import load_split
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.models.interface import BenchModel
 
 logger = logging.getLogger(__name__)
-
-
-def _build_dataset(name: str, bands: str, root: Path) -> GeoBenchv1Sharded:
-    cls = get_bench_dataset_class(name)
-    bench = cls()
-    sel = (
-        tuple(bench.rgb_bands)
-        if bands == "rgb"
-        else None
-        if bands == "all"
-        else tuple(bands.split(","))
-    )
-    band_names = [b.source_name for b in bench.select_band_specs(sel)]
-    return GeoBenchv1Sharded(
-        root=str(root),
-        dataset_name=name,
-        split="train",
-        partition="default",
-        bands=tuple(band_names),
-    )
 
 
 def _build_model(
@@ -101,7 +78,6 @@ def main() -> None:
     p.add_argument("--model", required=True, help="e.g. terratorch/prithvi_eo_v2_300")
     p.add_argument("--dataset", default="m-bigearthnet")
     p.add_argument("--bands", default="all")
-    p.add_argument("--root", default="data/classification_v1.0_wds")
     p.add_argument("--batch-sizes", default="64,128,256,512")
     p.add_argument("--num-workers", default="4,8,16,32")
     p.add_argument("--max-batches", type=int, default=20, help="cap per cell to stay quick")
@@ -113,17 +89,11 @@ def main() -> None:
     bs_list = [int(x) for x in args.batch_sizes.split(",")]
     nw_list = [int(x) for x in args.num_workers.split(",")]
 
-    dataset = _build_dataset(args.dataset, args.bands, Path(args.root))
-    bench_cls = get_bench_dataset_class(args.dataset)()
-    sel = (
-        tuple(bench_cls.rgb_bands)
-        if args.bands == "rgb"
-        else None
-        if args.bands == "all"
-        else tuple(args.bands.split(","))
+    selection = args.bands if args.bands in ("rgb", "all") else tuple(args.bands.split(","))
+    train = load_split(args.dataset, "train", bands=selection)
+    model = (
+        _build_model(args.model, list(train.bands), args.dataset, train.dataset).to(device).eval()
     )
-    bands_list = bench_cls.select_band_specs(sel)
-    model = _build_model(args.model, bands_list, args.dataset, dataset).to(device).eval()
 
     logger.info("Tuning %s on %s/%s (%s)", args.model, args.dataset, args.bands, device)
     logger.info("%6s %6s %12s %10s %10s", "bs", "nw", "samples/sec", "peak GB", "wall (s)")
@@ -132,7 +102,7 @@ def main() -> None:
     for bs in bs_list:
         for nw in nw_list:
             loader = DataLoader(
-                dataset,
+                train.dataset,
                 batch_size=bs,
                 num_workers=nw,
                 shuffle=False,

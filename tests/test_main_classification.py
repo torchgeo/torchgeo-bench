@@ -14,7 +14,7 @@ from tests.support.runner import (
     _hash_for,
     _resume_row,
     _synthetic_embeddings,
-    _synthetic_loaders,
+    _synthetic_splits,
 )
 from torchgeo_bench.config.presets import ModelPreset, resolve_run_config
 from torchgeo_bench.config.run import validate_run_config
@@ -74,9 +74,7 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
     model = _chainable_model_mock()
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
-        ) as data_mock,
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()) as data_mock,
         mock.patch("torchgeo_bench.main.build_model", return_value=model) as instantiate_mock,
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
@@ -102,7 +100,7 @@ def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -
     changed_cfg.output.resume = True
     changed_cfg.model.kwargs["pool"] = "mean"
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.build_model", return_value=model),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
@@ -122,7 +120,7 @@ def test_knn_row_preserves_metrics_and_metadata(tmp_path: Path) -> None:
     cfg = _compose_cfg(out, overrides={"classification": {"methods": ["knn"]}})
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -164,7 +162,7 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.build_model", return_value=model),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
@@ -215,7 +213,7 @@ def test_device_labels_use_stable_current_hashes_and_resume(
     monkeypatch.setattr("torchgeo_bench.knn.gpu_faiss_available", lambda: False)
     expected_device = "cuda:1" if requested in ("auto", "cuda") else requested or "cuda:0"
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()) as data,
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()) as data,
         mock.patch(
             "torchgeo_bench.main.build_model", return_value=_chainable_model_mock()
         ) as build,
@@ -261,7 +259,7 @@ def test_direct_main_rejects_invalid_cuda_before_loading(
     monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     with (
-        mock.patch("torchgeo_bench.main.get_datasets") as data,
+        mock.patch("torchgeo_bench.main.load_split") as data,
         mock.patch("torchgeo_bench.main.build_model") as build,
         pytest.raises(ValueError, match=message),
     ):
@@ -282,7 +280,7 @@ def test_auto_cpu_resumes_existing_cpu_results(tmp_path: Path) -> None:
     cfg.output.resume = True
     with (
         mock.patch.object(torch.cuda, "is_available", return_value=False),
-        mock.patch("torchgeo_bench.main.get_datasets") as data,
+        mock.patch("torchgeo_bench.main.load_split") as data,
         mock.patch("torchgeo_bench.main.build_model") as build,
     ):
         main(cfg)
@@ -303,7 +301,7 @@ def test_explicit_gpu_knn_without_gpu_faiss_fails_before_data_loading(tmp_path: 
     monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets") as data_mock,
+        mock.patch("torchgeo_bench.main.load_split") as data_mock,
         pytest.raises(RuntimeError, match="explicit KNN device 'cuda'"),
     ):
         main(cfg)
@@ -316,7 +314,7 @@ def test_linear_row_emitted(tmp_path: Path):
     cfg = _compose_cfg(out)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -357,7 +355,7 @@ def test_completed_knn_survives_later_linear_failure(
     cfg = _compose_cfg(out)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.build_model", return_value=_chainable_model_mock()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
@@ -385,7 +383,7 @@ def test_resume_skips_completed_knn_row(tmp_path: Path):
     pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
     ):
         main(cfg)
@@ -406,12 +404,12 @@ def test_resume_complete_preflight_skips_data_loading_and_model_init(tmp_path: P
     ).to_csv(out, index=False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets") as get_datasets_mock,
+        mock.patch("torchgeo_bench.main.load_split") as load_split_mock,
         mock.patch("torchgeo_bench.main.build_model") as instantiate_mock,
     ):
         main(cfg)
 
-    get_datasets_mock.assert_not_called()
+    load_split_mock.assert_not_called()
     instantiate_mock.assert_not_called()
     assert len(pd.read_csv(out)) == 2
 
@@ -423,9 +421,7 @@ def test_resume_partial_completion_still_runs_missing_work(tmp_path: Path):
     model = _chainable_model_mock()
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
-        ) as data_mock,
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()) as data_mock,
         mock.patch("torchgeo_bench.main.build_model", return_value=model) as instantiate_mock,
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
@@ -443,7 +439,7 @@ def test_resume_partial_completion_still_runs_missing_work(tmp_path: Path):
     ):
         main(cfg)
 
-    data_mock.assert_called_once()
+    assert data_mock.call_count == 3
     instantiate_mock.assert_called_once()
     knn_mock.assert_not_called()
     linear_mock.assert_called_once()
@@ -459,9 +455,7 @@ def test_non_resume_still_runs_even_with_matching_existing_rows(tmp_path: Path):
     model = _chainable_model_mock()
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
-        ) as data_mock,
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()) as data_mock,
         mock.patch("torchgeo_bench.main.build_model", return_value=model) as instantiate_mock,
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
@@ -471,7 +465,7 @@ def test_non_resume_still_runs_even_with_matching_existing_rows(tmp_path: Path):
     ):
         main(cfg)
 
-    data_mock.assert_called_once()
+    assert data_mock.call_count == 3
     instantiate_mock.assert_called_once()
     knn_mock.assert_called_once()
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 2
@@ -500,9 +494,7 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(
     model = _chainable_model_mock()
 
     with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()
-        ) as data_mock,
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()) as data_mock,
         mock.patch("torchgeo_bench.main.build_model", return_value=model) as instantiate_mock,
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
@@ -520,7 +512,7 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(
     ):
         main(cfg, strict=strict)
 
-    data_mock.assert_called_once()
+    assert data_mock.call_count == 3
     instantiate_mock.assert_called_once()
     knn_mock.assert_not_called()
     linear_mock.assert_called_once()
@@ -555,7 +547,7 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
     df.to_csv(out, index=False)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
     ):
         main(cfg)
@@ -576,7 +568,7 @@ def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
     model = _chainable_model_mock()
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.build_model", return_value=model),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
@@ -610,7 +602,7 @@ def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
     )
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -631,10 +623,10 @@ def test_missing_dataset_raises(
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out)
 
-    def missing_dataset(**_kwargs: object) -> None:
+    def missing_dataset(*_args: object, **_kwargs: object) -> None:
         raise error
 
-    monkeypatch.setattr("torchgeo_bench.main.get_datasets", missing_dataset)
+    monkeypatch.setattr("torchgeo_bench.main.load_split", missing_dataset)
     with pytest.raises(type(error)) as exc_info:
         main(cfg)
     assert exc_info.value is error

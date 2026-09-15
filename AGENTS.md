@@ -222,7 +222,7 @@ from dataclasses import dataclass
 import numpy as np                      # 2. Third-party
 import torch
 
-from torchgeo_bench.datasets import get_datasets   # 3. Local imports
+from torchgeo_bench.datasets import load_split     # 3. Local imports
 
 logger = logging.getLogger(__name__)
 ```
@@ -231,7 +231,7 @@ logger = logging.getLogger(__name__)
 
 | Type | Convention | Example |
 |------|------------|---------|
-| Variables/functions | `snake_case` | `get_datasets`, `embed_split` |
+| Variables/functions | `snake_case` | `load_split`, `embed_split` |
 | Classes | `PascalCase` | `GeoBenchDataset`, `BenchModel` |
 | Constants | `SCREAMING_SNAKE_CASE` | `NUM_CLASSES_PER_DATASET` |
 | Private methods | `_leading_underscore` | `_load_sample_metadata` |
@@ -241,14 +241,22 @@ logger = logging.getLogger(__name__)
 Always annotate function signatures:
 
 ```python
-def get_datasets(
-    dataset_name: str = "m-forestnet",
-    partition_name: str = "default",
-    batch_size: int = 32,
-    geobench_root: str | None = None,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
+def load_split(
+    dataset_name: str,
+    split: str,
+    *,
+    partition: str = "default",
+    bands: str | Iterable[str] | None = "rgb",
+) -> LoadedSplit:
     ...
 ```
+
+`load_split` loads only the requested split. Callers construct DataLoaders and
+use `LoadedSplit.bands` for model construction, never independently reselecting
+bands. Family implementations receive the same immutable `ResolvedInput` through
+their private `_load_split` hook. Unsupported splits, partitions, bands, and
+temporal requests fail before source construction. The image runner applies
+non-default partitions only to train; val/test use the default partition.
 
 ### Documentation Style (Google-style)
 
@@ -330,14 +338,12 @@ Implement `_forward_patch_features`, not the public `forward_patch_features`: th
 ```python
 class TestGeoBenchDatasetBasics:
     def test_dataset_initialization(self, geobench_root):
-        bench = get_bench_dataset_class("m-eurosat")()
-        dataset = bench.get_dataset("train", bands=tuple(bench.rgb_bands))
+        dataset = load_split("m-eurosat", "train", bands="rgb").dataset
         assert len(dataset) > 0
 
     @pytest.mark.parametrize("dataset_name", ["m-eurosat", "m-forestnet"])
     def test_dataset_loads(self, geobench_root, dataset_name):
-        bench = get_bench_dataset_class(dataset_name)()
-        dataset = bench.get_dataset("train", bands=tuple(bench.rgb_bands))
+        dataset = load_split(dataset_name, "train", bands="rgb").dataset
         assert len(dataset) > 0, f"{dataset_name} has no samples"
 ```
 

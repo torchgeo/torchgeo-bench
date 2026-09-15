@@ -14,6 +14,7 @@ from torchgeo_bench.cli import main
 from torchgeo_bench.datasets import (
     BandSpec,
     BenchDataset,
+    ResolvedInput,
     get_bench_dataset_class,
     get_dataset_task,
     list_datasets,
@@ -42,12 +43,12 @@ def registered_dataset(
         def data_root(cls) -> Path:
             return Path("data/catalog-test")
 
-        def get_dataset(
+        def _load_split(
             self,
             split: str,
             *,
             partition: str = "default",
-            bands: tuple[str, ...] | None = None,
+            inputs: ResolvedInput,
             transform: "Callable | None" = None,
         ) -> "Dataset":
             raise AssertionError("Catalogs and dry runs must not load samples")

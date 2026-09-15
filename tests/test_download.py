@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from torchgeo_bench.datasets import _v1_webdataset as v1
-from torchgeo_bench.datasets import geobench_v1, get_bench_dataset_class, list_datasets
+from torchgeo_bench.datasets import geobench_v1, get_bench_dataset_class, list_datasets, load_split
 from torchgeo_bench.datasets.geobench_v1 import _V1Dataset
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
 from torchgeo_bench.download import (
@@ -116,14 +116,13 @@ def test_v1_requires_explicit_download_before_loading(
     root = tmp_path / "classification_v1.0_wds"
     monkeypatch.setattr(geobench_v1, "V1_ROOT", tmp_path / "hdf5")
     monkeypatch.setattr(geobench_v1, "V1_SHARDED_ROOT", root)
-    bench = get_bench_dataset_class("m-eurosat")()
-    with pytest.raises(FileNotFoundError, match="download m-eurosat"):
-        bench.get_dataset("train", bands=tuple(bench.rgb_bands))
+    with pytest.raises(FileNotFoundError, match="download geobench_v1 --datasets m-eurosat"):
+        load_split("m-eurosat", "train")
     v1_download.assert_not_called()
 
     download_geobench_v1(tmp_path, datasets=["m-eurosat"])
     for split in ("train", "val", "test"):
-        dataset = bench.get_dataset(split, bands=tuple(bench.rgb_bands))
+        dataset = load_split("m-eurosat", split).dataset
         assert dataset[0]["image"].shape == (3, 2, 2)
     v1_download.assert_called_once()
     assert v1_download.call_args.kwargs["local_dir"] == root

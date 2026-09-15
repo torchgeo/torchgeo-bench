@@ -43,8 +43,7 @@ from torchgeo_bench.config.presets import (
 )
 from torchgeo_bench.config.run import RunConfig, load_run_config
 from torchgeo_bench.config.schema import ModelConfig
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
-from torchgeo_bench.datasets.base import BandSpec, BenchDataset
+from torchgeo_bench.datasets import load_split
 from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.main import embed_split, instantiate_dataset_model
@@ -88,7 +87,7 @@ def lookup_top1(results_path: Path, dataset: str) -> pd.Series:
 
 
 def parse_bands(value: object) -> str | list[str]:
-    """Convert a CSV bands cell back to the form ``get_datasets`` accepts."""
+    """Convert a CSV bands cell back to the form ``load_split`` accepts."""
     s = str(value)
     if s in ("rgb", "all"):
         return s
@@ -164,17 +163,6 @@ def fit_probe(
     )
     clf.fit(x_fit, y_fit)
     return clf
-
-
-def band_specs(bench: BenchDataset, bands: str | list[str] | None) -> list[BandSpec]:
-    """Resolve dataset band statistics in the requested order."""
-    if bands == "rgb":
-        names = tuple(bench.rgb_bands)
-    elif bands in ("all", None):
-        names = None
-    else:
-        names = tuple(bands)
-    return bench.select_band_specs(names)
 
 
 def source_config(path: Path | None, model_name: str, dataset: str) -> RunConfig:
@@ -272,32 +260,32 @@ def main() -> None:
     device = resolve_device(cfg.runtime.device)
     torch.manual_seed(args.seed)
 
-    ds_cls = get_bench_dataset_class(args.dataset)
-    is_multilabel = ds_cls.multilabel
-
-    result = get_datasets(
-        dataset_name=args.dataset,
-        partition_name=cfg.input.partition,
-        batch_size=cfg.runtime.batch_size,
-        num_workers=cfg.runtime.workers,
-        return_val=True,
-        image_size=cfg.input.image_size,
-        interpolation=cfg.input.interpolation,
-        bands=cfg.input.bands,
-        time_steps=cfg.input.time_steps,
-    )
-    assert result is not None
-    train_dataset, train_loader_shuffled, val_loader, test_loader = result
+    train, val, test = [
+        load_split(
+            args.dataset,
+            split,
+            partition=cfg.input.partition if split == "train" else "default",
+            image_size=cfg.input.image_size,
+            interpolation=cfg.input.interpolation,
+            bands=cfg.input.bands,
+            time_steps=cfg.input.time_steps,
+        )
+        for split in ("train", "val", "test")
+    ]
+    is_multilabel = train.multilabel
     # Saved indices must match dataset order, not training shuffle order.
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=train_loader_shuffled.batch_size,
-        shuffle=False,
-        num_workers=train_loader_shuffled.num_workers,
-        pin_memory=train_loader_shuffled.pin_memory,
-    )
+    train_loader, val_loader, test_loader = [
+        DataLoader(
+            loaded.dataset,
+            batch_size=cfg.runtime.batch_size,
+            shuffle=False,
+            num_workers=cfg.runtime.workers,
+            pin_memory=torch.cuda.is_available(),
+        )
+        for loaded in (train, val, test)
+    ]
 
-    model = instantiate_dataset_model(cfg, model_cfg, ds_cls(), train_dataset, device)
+    model = instantiate_dataset_model(cfg, model_cfg, train, device)
 
     x_train, y_train = embed_split(model, train_loader, device, verbose=args.verbose)
     x_val, y_val = embed_split(model, val_loader, device, verbose=args.verbose)

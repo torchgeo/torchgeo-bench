@@ -20,7 +20,7 @@ import sys
 import torch
 from torch.utils.data import DataLoader
 
-from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets import get_bench_dataset_class, load_split
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +41,12 @@ def compute_statistics(
 
     Use float64 totals to limit rounding error when summing large datasets.
     """
-    bench = get_bench_dataset_class(dataset_name)()
-    dataset = bench.get_dataset("train", bands=None)
-    loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False)
+    train = load_split(dataset_name, "train", bands="all")
+    loader = DataLoader(
+        train.dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False
+    )
 
-    n_bands = len(bench.bands)
+    n_bands = len(train.bands)
     count = 0
     total = torch.zeros(n_bands, dtype=torch.float64)
     total_sq = torch.zeros(n_bands, dtype=torch.float64)
@@ -79,7 +80,7 @@ def compute_statistics(
             "min": float(minimum[i]),
             "max": float(maximum[i]),
         }
-        for i, spec in enumerate(bench.bands)
+        for i, spec in enumerate(train.bands)
     ]
 
 

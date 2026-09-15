@@ -20,33 +20,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
 
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.datasets import LoadedSplit, get_bench_dataset_class, load_split
 
 logger = logging.getLogger(__name__)
 
 
-def _load_split_dataset(dataset: str, split: str, partition: str = "default") -> Dataset:
-    result = get_datasets(
-        dataset_name=dataset,
-        partition_name=partition,
-        batch_size=1,
-        num_workers=0,
-        return_val=True,
+def _load_gallery_split(dataset: str, split: str, partition: str = "default") -> LoadedSplit:
+    return load_split(
+        dataset,
+        split,
+        partition=partition,
         image_size=None,
         bands="all",
         interpolation="bicubic",
     )
-    assert result is not None
-    train_dataset, _train_loader, val_loader, test_loader = result
-    if split == "train":
-        return train_dataset
-    if split == "val":
-        return val_loader.dataset
-    if split == "test":
-        return test_loader.dataset
-    raise ValueError(split)
 
 
 def _to_rgb(image: torch.Tensor, rgb_idx: list[int]) -> np.ndarray:
@@ -73,10 +61,10 @@ def render_gallery(
         logger.warning("[%s/%s] no flagged samples", dataset, split)
         return
 
-    ds_cls = get_bench_dataset_class(dataset)
-    ds = _load_split_dataset(dataset, split)
-    bench = ds_cls()
-    rgb_idx = bench.rgb_indices or [0, 1, 2]
+    loaded = _load_gallery_split(dataset, split)
+    names = [band.name for band in loaded.bands]
+    rgb_names = get_bench_dataset_class(dataset).rgb_bands
+    rgb_idx = [names.index(name) for name in rgb_names if name in names] or [0, 1, 2]
 
     rows = (len(flagged) + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 1.6, rows * 1.8))
@@ -88,7 +76,7 @@ def render_gallery(
 
     for k, (_, row) in enumerate(flagged.iterrows()):
         idx = int(row["index"])
-        sample = ds[idx]
+        sample = loaded.dataset[idx]
         img = sample["image"]
         rgb = _to_rgb(img, rgb_idx)
         ax = axes[k // cols, k % cols]

@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 from torchgeo_bench.bands import BandSpec
 
+from .input import ResolvedInput, Split
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
@@ -28,7 +30,7 @@ class BenchDataset(ABC):
     """Abstract base class for benchmark datasets.
 
     Subclasses must define the class-level metadata attributes listed below
-    and implement :meth:`get_dataset` and :meth:`data_root`.
+    and implement :meth:`_load_split` and :meth:`data_root`.
 
     Attributes:
         name: Dataset identifier used on the command line (e.g. ``"m-eurosat"``).
@@ -51,6 +53,7 @@ class BenchDataset(ABC):
     split_sizes: ClassVar[dict[str, int]]
     multilabel: bool = False
     supports_partitions: bool = False
+    multi_temporal: ClassVar[bool] = False
 
     @property
     def num_channels(self) -> int:
@@ -107,12 +110,12 @@ class BenchDataset(ABC):
         )
 
     @abstractmethod
-    def get_dataset(
+    def _load_split(
         self,
-        split: str,
+        split: Split,
         *,
+        inputs: ResolvedInput,
         partition: str = "default",
-        bands: tuple[str, ...] | None = None,
         transform: "Callable | None" = None,
     ) -> "Dataset":
         """Return a PyTorch :class:`~torch.utils.data.Dataset` for a split.
@@ -122,9 +125,7 @@ class BenchDataset(ABC):
 
         Args:
             split: ``"train"``, ``"val"``, or ``"test"``.
+            inputs: Validated, resolved input metadata shared with the caller.
             partition: Partition name (V1 only, e.g. ``"0.01x_train"``).
-                Ignored by datasets where :attr:`supports_partitions` is
-                ``False``.
-            bands: Tuple of canonical band names to load. ``None`` loads all.
             transform: Optional sample transform callable.
         """

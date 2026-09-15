@@ -18,6 +18,7 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
+from tests.support.runner import make_loaded_split
 from torchgeo_bench import commands
 from torchgeo_bench.commands import _profile_runtime
 from torchgeo_bench.commands._profile import profile
@@ -25,6 +26,7 @@ from torchgeo_bench.commands.profile_arguments import add_profile_arguments, loa
 from torchgeo_bench.config.presets import NORMALIZATIONS, ModelPreset
 from torchgeo_bench.config.profile import ProfileConfig
 from torchgeo_bench.config.schema import ModelConfig
+from torchgeo_bench.datasets import LoadedSplit
 
 
 class _Loader:
@@ -44,6 +46,15 @@ class _ImageDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         return {"image": self.images[index]}
+
+
+def _loaded_images(images: torch.Tensor | None = None, **options: Any) -> LoadedSplit:
+    return make_loaded_split(
+        _ImageDataset(torch.ones(4, 3, 8, 8) if images is None else images),
+        bands=options.get("bands", "rgb"),
+        time_steps=options.get("time_steps"),
+        partition=options.get("partition", "default"),
+    )
 
 
 @pytest.fixture
@@ -108,7 +119,7 @@ def test_profile_emits_fixed_real_batch_metadata(
             return super().forward(images)
 
     monkeypatch.setattr(
-        _profile_runtime, "get_datasets", lambda **_: (None, _Loader(batch), None, None)
+        _profile_runtime, "load_split", lambda *_args, **kwargs: _loaded_images(batch, **kwargs)
     )
     monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: CountingModel(3, 3, 1))
 
@@ -124,7 +135,8 @@ def test_profile_emits_fixed_real_batch_metadata(
     assert record["profile"]["measurements"] == 3
     assert record["profile"]["throughput_samples_per_sec"] > 0
     assert record["profile"]["flops"]["status"] == ("measured" if count_flops else "disabled")
-    assert record["sample_sha256"] == hashlib.sha256(batch.numpy().tobytes()).hexdigest()
+    sampled = calls[0]
+    assert record["sample_sha256"] == hashlib.sha256(sampled.numpy().tobytes()).hexdigest()
     assert (
         record["model_config_hash"]
         == hashlib.sha256(json.dumps(record["model_config"], sort_keys=True).encode()).hexdigest()
@@ -137,7 +149,7 @@ def test_profile_emits_fixed_real_batch_metadata(
     assert record["timestamp_utc"].endswith("+00:00")
     assert record["scope"].startswith("encoder inference")
     assert len(calls) == 5 + count_flops
-    assert all(images is batch for images in calls[:5])
+    assert all(images is sampled for images in calls[:5])
     if count_flops:
         assert calls[-1].shape == (1, 3, 8, 8)
 
@@ -175,18 +187,19 @@ def test_profile_applies_image_size_to_model_and_loader(
     inputs: dict[str, Any] = {}
     construction: dict[str, Any] = {}
 
-    def load(**kwargs: Any) -> tuple:
+    def load(dataset_name: str, split: str, **kwargs: Any) -> LoadedSplit:
+        assert dataset_name == "m-eurosat"
+        assert split == "train"
         inputs.update(kwargs)
         size = kwargs["image_size"] or 64
-        batch = torch.ones(kwargs["batch_size"], 3, size, size)
-        return _ImageDataset(batch), _Loader(batch), None, None
+        return _loaded_images(torch.ones(4, 3, size, size), **kwargs)
 
     def build(preset: ModelPreset, **kwargs: Any) -> nn.Module:
         construction["preset"] = preset
         construction["options"] = kwargs
         return nn.Conv2d(3, 2, 1)
 
-    monkeypatch.setattr(_profile_runtime, "get_datasets", load)
+    monkeypatch.setattr(_profile_runtime, "load_split", load)
     monkeypatch.setattr(_profile_runtime, "build_model", build)
 
     _profile_runtime.run(load_profile_config(args))
@@ -200,7 +213,7 @@ def test_profile_applies_image_size_to_model_and_loader(
     assert record["model_config"]["input"]["image_size"] == loader_size
     assert record["input_shape"] == [4, 3, expected_size, expected_size]
     assert inputs["interpolation"] == record["interpolation"] == "area"
-    assert inputs["partition_name"] == "default"
+    assert inputs["partition"] == "default"
     assert model_kwargs["res"] == 3.5
     assert model_kwargs["pool"] == "cls"
     assert model_kwargs["auto_resize"] is False
@@ -228,11 +241,11 @@ def test_profile_resolves_requested_seed_before_building_rcf(
         models.append(model)
         return model
 
-    def load(**_: Any) -> tuple:
+    def load(*_args: Any, **kwargs: Any) -> LoadedSplit:
         offset = np.random.random()  # noqa: NPY002 - Verify the seeded dataset-transform RNG.
-        return None, _Loader(torch.randn(4, 3, 8, 8) + offset), None, None
+        return _loaded_images(torch.randn(4, 3, 8, 8) + offset, **kwargs)
 
-    monkeypatch.setattr(_profile_runtime, "get_datasets", load)
+    monkeypatch.setattr(_profile_runtime, "load_split", load)
     monkeypatch.setattr(_profile_runtime, "build_model", build)
 
     _profile_runtime.run(profile_config)
@@ -266,8 +279,8 @@ def test_profile_supplies_selected_training_dataset_to_empirical_rcf(
 
     monkeypatch.setattr(
         _profile_runtime,
-        "get_datasets",
-        lambda **_: (train_dataset, _Loader(batch), None, None),
+        "load_split",
+        lambda *_args, **_: make_loaded_split(train_dataset),
     )
     monkeypatch.setattr(_profile_runtime, "build_model", build)
 
@@ -303,7 +316,9 @@ def test_profile_preserves_custom_constructor_and_normalization_metadata(
         assert preset.kwargs == profile_config.model.kwargs
         return nn.Identity()
 
-    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
+    monkeypatch.setattr(
+        _profile_runtime, "load_split", lambda *_args, **kwargs: _loaded_images(**kwargs)
+    )
     monkeypatch.setattr(_profile_runtime, "build_model", build)
 
     _profile_runtime.run(profile_config)
@@ -328,21 +343,27 @@ def test_profile_passes_input_options_and_band_order(
     profile_config.runtime.workers = 1
     options: dict[str, Any] = {}
 
-    def load(**kwargs: Any) -> tuple:
+    def load(dataset_name: str, split: str, **kwargs: Any) -> LoadedSplit:
+        assert dataset_name == "m-eurosat"
+        assert split == "train"
         options.update(kwargs)
         channels = 13 if bands == "all" else len(bands)
-        return None, _Loader(torch.ones(4, channels, 8, 8)), None, None
+        selection = bands if isinstance(bands, str) else tuple(bands)
+        return _loaded_images(torch.ones(4, 2, channels, 8, 8), **{**kwargs, "bands": selection})
 
-    monkeypatch.setattr(_profile_runtime, "get_datasets", load)
+    monkeypatch.setattr(_profile_runtime, "load_split", load)
     monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: nn.Identity())
 
-    _profile_runtime.run(profile_config)
+    with mock.patch.object(
+        _profile_runtime, "DataLoader", wraps=_profile_runtime.DataLoader
+    ) as loader:
+        _profile_runtime.run(profile_config)
 
     record = json.loads(capsys.readouterr().out)
     assert options["bands"] == bands
-    assert options["partition_name"] == record["dataset_partition"] == "0.01x_train"
+    assert options["partition"] == record["dataset_partition"] == "0.01x_train"
     assert options["time_steps"] == 2
-    assert options["num_workers"] == 1
+    assert loader.call_args.kwargs["num_workers"] == 1
     if isinstance(bands, list):
         assert record["bands"] == bands
     else:
@@ -355,8 +376,8 @@ def test_profile_rejects_short_batches_before_construction(
 ) -> None:
     monkeypatch.setattr(
         _profile_runtime,
-        "get_datasets",
-        lambda **_: (None, _Loader(torch.ones(2, 3, 8, 8)), None, None),
+        "load_split",
+        lambda *_args, **kwargs: _loaded_images(torch.ones(2, 3, 8, 8), **kwargs),
     )
     with pytest.raises(RuntimeError, match="dataset returned batch size 2, requested 4"):
         _profile_runtime.run(profile_config)
@@ -372,15 +393,15 @@ def test_profile_keeps_upstream_diagnostics_off_json_stdout(
             sys.stdout.write("upstream forward\n")
             return images
 
-    def load(**_: Any) -> tuple:
+    def load(*_args: Any, **kwargs: Any) -> LoadedSplit:
         sys.stdout.write("upstream dataset\n")
-        return None, _Loader(), None, None
+        return _loaded_images(**kwargs)
 
     def build(*_: Any, **__: Any) -> nn.Module:
         sys.stdout.write("upstream model\n")
         return NoisyModel()
 
-    monkeypatch.setattr(_profile_runtime, "get_datasets", load)
+    monkeypatch.setattr(_profile_runtime, "load_split", load)
     monkeypatch.setattr(_profile_runtime, "build_model", build)
 
     _profile_runtime.run(profile_config)
@@ -425,7 +446,9 @@ def test_profile_auto_uses_cpu_without_cuda(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
+    monkeypatch.setattr(
+        _profile_runtime, "load_split", lambda *_args, **kwargs: _loaded_images(**kwargs)
+    )
     monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: nn.Identity())
     profile_config.runtime.device = "auto"
     _profile_runtime.run(profile_config)
@@ -458,8 +481,9 @@ def test_profile_records_resolved_cuda_index(
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: 1024**3)
     monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: 2 * 1024**3)
     monkeypatch.setattr(
-        _profile_runtime, "get_datasets", lambda **_: (None, _Loader(batch), None, None)
+        _profile_runtime, "load_split", lambda *_args, **kwargs: _loaded_images(**kwargs)
     )
+    monkeypatch.setattr(_profile_runtime, "DataLoader", lambda *_args, **_: _Loader(batch))
     monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: nn.Identity())
     profile_config.runtime.device = requested
     with mock.patch.object(torch.cuda, "synchronize") as synchronize:
@@ -479,7 +503,9 @@ def test_profile_propagates_model_failures(
     def build(*_: Any, **__: Any) -> nn.Module:
         raise RuntimeError("unexpected model failure")
 
-    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
+    monkeypatch.setattr(
+        _profile_runtime, "load_split", lambda *_args, **kwargs: _loaded_images(**kwargs)
+    )
     monkeypatch.setattr(_profile_runtime, "build_model", build)
     with pytest.raises(RuntimeError, match="unexpected model failure"):
         _profile_runtime.run(profile_config)
@@ -537,11 +563,11 @@ def test_invalid_profile_request_fails_before_loading(
     profile_args.dataset = "m-eurosat"
     setattr(profile_args, field, value)
 
-    def unexpected_load(**_kwargs: object) -> None:
+    def unexpected_load(*_args: object, **_kwargs: object) -> None:
         pytest.fail("Invalid profile request reached dataset loading")
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    monkeypatch.setattr(_profile_runtime, "get_datasets", unexpected_load)
+    monkeypatch.setattr(_profile_runtime, "load_split", unexpected_load)
     with pytest.raises(SystemExit) as error:
         profile(profile_args)
     assert error.value.code == 2

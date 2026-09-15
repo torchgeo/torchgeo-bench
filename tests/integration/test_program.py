@@ -156,7 +156,7 @@ def test_program_fails_when_any_requested_data_is_unavailable(
         cwd=tmp_path,
     )
     assert completed.returncode != 0, cli_output(completed)
-    assert "Required files for 'm-forestnet' are missing" in completed.stderr
+    assert "Required files for 'm-forestnet' split 'train' are missing" in completed.stderr
     assert "torchgeo-bench download geobench_v1 --datasets m-forestnet" in completed.stderr
     if dataset_names[0] == "m-eurosat":
         rows = pd.read_csv(output)

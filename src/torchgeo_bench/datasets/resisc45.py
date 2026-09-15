@@ -10,6 +10,7 @@ from torchgeo.datasets import RESISC45 as TGRESISC45
 from torchvision.transforms import Compose
 
 from .base import BandSpec, BenchDataset
+from .input import ResolvedInput, Split
 
 
 class RESISC45(BenchDataset):
@@ -53,12 +54,12 @@ class RESISC45(BenchDataset):
         """Return ``Path("data/resisc45")``; torchgeo manages the layout below."""
         return Path("data/resisc45")
 
-    def get_dataset(
+    def _load_split(
         self,
-        split: str,
+        split: Split,
         *,
+        inputs: ResolvedInput,
         partition: str = "default",
-        bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
     ) -> Dataset:
         """Return the wrapped torchgeo dataset for the split.
@@ -66,10 +67,7 @@ class RESISC45(BenchDataset):
         Select bands before transforms so unused RGB channels are not resized.
         """
         del partition
-        if split not in ("train", "val", "test"):
-            raise ValueError(f"Unknown split {split!r}. Expected train, val, or test.")
-        specs = self.select_band_specs(bands)
-        indices = [self.bands.index(spec) for spec in specs]
+        indices = [self.bands.index(spec) for spec in inputs.bands]
         select = _make_band_select(indices, len(self.bands))
         if select is not None:
             transform = select if transform is None else Compose([select, transform])
@@ -77,6 +75,7 @@ class RESISC45(BenchDataset):
             root=str(self.data_root()),
             split=split,
             transforms=transform,
+            download=False,
         )
 
 

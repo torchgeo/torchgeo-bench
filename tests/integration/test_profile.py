@@ -13,7 +13,13 @@ pytestmark = pytest.mark.integration
 
 
 def test_profiles_are_numerical_and_reproduce_seeded_inputs(tmp_path: Path) -> None:
-    write_classification_files(tmp_path, "m-eurosat", (2, 7))
+    directory = write_classification_files(tmp_path, "m-eurosat", (2, 7))
+    partition_path = directory / "default_partition.json"
+    partition = json.loads(partition_path.read_text())
+    for split in ("valid", "test"):
+        for sample_id in partition.pop(split):
+            (directory / f"{sample_id}.hdf5").unlink()
+    partition_path.write_text(json.dumps(partition))
     arguments = [
         "profile",
         "--model",

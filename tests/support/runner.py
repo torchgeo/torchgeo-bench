@@ -5,11 +5,12 @@ from unittest import mock
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 from torchgeo_bench.config.presets import merge_settings, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets import LoadedSplit, ResolvedInput, get_bench_dataset_class
+from torchgeo_bench.datasets.input import Split
 from torchgeo_bench.main import dataset_metadata
 from torchgeo_bench.resume import resume_config_hash
 
@@ -44,7 +45,30 @@ def _compose_cfg(output_path: Path, overrides: dict | None = None) -> RunConfig:
     )
 
 
-def _synthetic_loaders() -> tuple[_DictTensorDataset, DataLoader, DataLoader, DataLoader]:
+def make_loaded_split(  # noqa: PLR0913 - mirror split metadata for offline tests.
+    dataset: Dataset,
+    dataset_name: str = "m-eurosat",
+    split: Split = "train",
+    *,
+    bands: str | tuple[str, ...] = "rgb",
+    time_steps: int | None = None,
+    partition: str = "default",
+) -> LoadedSplit:
+    """Attach real catalog metadata to an offline source dataset."""
+    bench = get_bench_dataset_class(dataset_name)()
+    return LoadedSplit(
+        dataset=dataset,
+        dataset_name=dataset_name,
+        split=split,
+        partition=partition,
+        input=ResolvedInput(tuple(bench.resolve_band_specs(bands)), bands, time_steps),
+        task=bench.task,
+        num_classes=bench.num_classes,
+        multilabel=bench.multilabel,
+    )
+
+
+def _synthetic_splits(dataset_name: str = "m-eurosat") -> list[LoadedSplit]:
     generator = torch.Generator().manual_seed(0)
     datasets = [
         _DictTensorDataset(
@@ -53,8 +77,10 @@ def _synthetic_loaders() -> tuple[_DictTensorDataset, DataLoader, DataLoader, Da
         )
         for size in (16, 8, 8)
     ]
-    loaders = [DataLoader(dataset, batch_size=4, num_workers=0) for dataset in datasets]
-    return datasets[0], *loaders
+    return [
+        make_loaded_split(dataset, dataset_name, split)
+        for dataset, split in zip(datasets, ("train", "val", "test"), strict=True)
+    ]
 
 
 def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:

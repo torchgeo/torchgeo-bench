@@ -13,7 +13,7 @@ from tests.support.runner import (
     _chainable_model_mock,
     _compose_cfg,
     _synthetic_embeddings,
-    _synthetic_loaders,
+    _synthetic_splits,
 )
 from torchgeo_bench.config.presets import merge_settings
 from torchgeo_bench.config.run import RunConfig
@@ -68,7 +68,7 @@ def test_routing_splits_by_kind_unless_output_is_explicit(
         return {str(kwargs["estimators"][0]): 5.0}
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -122,7 +122,7 @@ def test_completed_intrinsic_dim_survives_profile_failure(
         metrics_path = id_path = Path(cfg.output.file)
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.build_model", return_value=_chainable_model_mock()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
@@ -172,7 +172,7 @@ def test_default_routing_resume_reads_all_three_files(tmp_path: Path):
     }
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
         mock.patch(
             "torchgeo_bench.main.evaluate_knn",
@@ -191,7 +191,7 @@ def test_default_routing_resume_reads_all_three_files(tmp_path: Path):
     id_rows_after_first = len(pd.read_csv(id_path))
 
     with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
+        mock.patch("torchgeo_bench.main.load_split", side_effect=_synthetic_splits()),
         mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
         mock.patch("torchgeo_bench.main.compute_intrinsic_dim") as id_mock,
         mock.patch("torchgeo_bench.main.measure_profile") as profile_mock,
