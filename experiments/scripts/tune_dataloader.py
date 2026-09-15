@@ -29,8 +29,8 @@ from torchgeo_bench.config.schema import ModelConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
 from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.utils import resolve_device
 
 logger = logging.getLogger(__name__)
 

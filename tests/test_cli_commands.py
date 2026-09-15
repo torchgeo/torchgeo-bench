@@ -10,6 +10,7 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 import yaml
@@ -154,21 +155,25 @@ def test_runtime_preserves_typed_schema(
     assert received[0] == config
 
 
-def test_runtime_rejects_unavailable_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("device", "available", "message"),
+    [("cuda", False, "CUDA is unavailable"), ("cuda:2", True, "CUDA index 2")],
+)
+def test_runtime_rejects_invalid_cuda_before_loading(
+    monkeypatch: pytest.MonkeyPatch, device: str, *, available: bool, message: str
+) -> None:
     import torch
 
-    config = validate_run_config(
-        {
-            "model": {"name": "rcf"},
-            "datasets": ["m-eurosat"],
-            "runtime": {"device": "cuda:0"},
-        }
-    )
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    from torchgeo_bench.commands._run_runtime import run
-
-    with pytest.raises(RuntimeError, match="CUDA device"):
-        run(config)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets") as data,
+        mock.patch("torchgeo_bench.main.build_model") as build,
+        pytest.raises(ValueError, match=message),
+    ):
+        main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--device", device])
+    data.assert_not_called()
+    build.assert_not_called()
 
 
 def test_runtime_preserves_model_and_segmentation_overrides(
@@ -556,26 +561,37 @@ def test_public_download_and_profile_dispatch(monkeypatch: pytest.MonkeyPatch) -
     assert received[1].batch_size == 4
 
 
-@pytest.mark.parametrize(("available", "expected"), [(False, "cpu"), (True, "cuda:0")])
-def test_auto_device_resolves_before_typed_execution(
-    monkeypatch: pytest.MonkeyPatch, *, available: bool, expected: str
+@pytest.mark.parametrize(("available", "expected"), [(False, "cpu"), (True, "cuda:1")])
+def test_auto_device_resolves_once_before_dataset_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, available: bool, expected: str
 ) -> None:
     import torch
 
-    from torchgeo_bench.commands import _run_runtime
-
     received = []
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
-    monkeypatch.setattr(_run_runtime, "main", lambda cfg, **kwargs: received.append(cfg))
-    config = validate_run_config(
-        {
-            "model": {"name": "rcf"},
-            "datasets": ["m-eurosat"],
-            "runtime": {"device": "auto"},
-        }
-    )
-    _run_runtime.run(config)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+
+    def dataset_run(cfg: object, *args: object, **kwargs: object) -> tuple:
+        received.append(cfg)
+        return ()
+
+    monkeypatch.setattr("torchgeo_bench.main.run_dataset", dataset_run)
+    with mock.patch.object(torch.cuda, "is_available", return_value=available) as query:
+        main(
+            [
+                "run",
+                "--model",
+                "rcf",
+                "--dataset",
+                "m-eurosat",
+                "--device",
+                "auto",
+                "--output",
+                str(tmp_path / "out.csv"),
+            ]
+        )
     assert received[0].runtime.device == expected
+    query.assert_called_once_with()
 
 
 @pytest.mark.parametrize(

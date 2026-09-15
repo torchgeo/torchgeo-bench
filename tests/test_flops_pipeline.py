@@ -688,18 +688,55 @@ def test_terramind_pipeline_measures_only_its_modality(
     assert {row["name"] for row in rows} == {"tt_terramind_v1_base"}
 
 
-def test_auto_device_uses_cpu_when_cuda_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auto_device_uses_cpu_when_cuda_is_unavailable(
+    flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    assert flops_pipeline._resolve_device("auto") == CPU
+    cfg, rows, events = flops_run
+    cfg.runtime.device = "auto"
+    main(cfg)
+    assert len(rows) == 6
+    assert "backbone:3" in events
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"), [("auto", "cuda:1"), ("cuda", "cuda:1"), ("cuda:0", "cuda:0")]
+)
+def test_flops_places_models_on_resolved_cuda(
+    flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch, requested: str, expected: str
+) -> None:
+    cfg, rows, _ = flops_run
+    cfg.runtime.device = requested
+    cfg.segmentation.heads = []
+    devices = []
+
+    def place(model: nn.Module, device: torch.device) -> nn.Module:
+        devices.append(str(device))
+        return model
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(nn.Module, "to", place)
+    main(cfg)
+    assert devices == [expected, expected]
+    assert len(rows) == 2
+    assert all(row["gflops_total"] == 2.5 for row in rows)
 
 
 def test_invalid_cuda_index_fails_before_model_construction(
+    flops_run: FlopsRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    cfg, rows, events = flops_run
+    cfg.runtime.device = "cuda:2"
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
     with pytest.raises(ValueError, match="index 2"):
-        flops_pipeline._resolve_device("cuda:2")
+        main(cfg)
+    assert not rows
+    assert not events
 
 
 @pytest.mark.parametrize("fail", [False, True])

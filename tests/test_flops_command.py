@@ -413,15 +413,21 @@ def test_real_rcf_synthetic_cpu_csv_and_resume(tmp_path: Path) -> None:
     assert output.read_bytes() == before
 
 
-def test_unavailable_cuda_errors_without_cpu_fallback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("device", "available", "message"),
+    [("cuda", False, "CUDA is unavailable"), ("cuda:2", True, "CUDA index 2")],
+)
+def test_invalid_cuda_errors_without_cpu_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, device: str, *, available: bool, message: str
 ) -> None:
     import torch
 
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    with pytest.raises(ValueError, match="CUDA"):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    with pytest.raises(ValueError, match=message):
         _flops.run(
             parser().parse_args(
-                ["--model", "rcf", "--device", "cuda", "--output", str(tmp_path / "cuda.csv")]
+                ["--model", "rcf", "--device", device, "--output", str(tmp_path / "cuda.csv")]
             )
         )
+    assert not (tmp_path / "cuda.csv").exists()

@@ -18,7 +18,6 @@ from torchgeo_bench.intrinsic_dim import (
     DegenerateSpectrumError,
     _drop_zero_distance_rows,
     _load_estimator,
-    _resolve_device,
     _subsample,
     compute_feature_spectrum,
     compute_intrinsic_dim,
@@ -32,19 +31,55 @@ requires_torchid = pytest.mark.skipif(
 )
 
 
-class TestResolveDevice:
-    def test_none_uses_cuda_when_available(self) -> None:
-        with mock.patch.object(torch.cuda, "is_available", return_value=True):
-            assert _resolve_device(None).type == "cuda"
-
-    def test_cuda_unavailable_falls_back_to_cpu(self, caplog: pytest.LogCaptureFixture) -> None:
+class TestDeviceSelection:
+    @pytest.mark.parametrize("device", ["cuda", "cuda:0", torch.device("cuda")])
+    def test_explicit_cuda_requires_availability(self, device: str | torch.device) -> None:
         with (
             mock.patch.object(torch.cuda, "is_available", return_value=False),
-            caplog.at_level(logging.WARNING),
+            mock.patch.object(intrinsic_dim, "_load_estimator") as load,
+            mock.patch.object(torch, "from_numpy") as allocate,
+            pytest.raises(ValueError, match="CUDA is unavailable"),
         ):
-            dev = _resolve_device("cuda")
-        assert dev.type == "cpu"
-        assert any("CUDA requested" in r.message for r in caplog.records)
+            compute_intrinsic_dim(np.ones((10, 3)), ["TwoNN"], device=device)
+        allocate.assert_not_called()
+        load.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("device", "available"),
+        [
+            (None, False),
+            (None, True),
+            ("auto", False),
+            ("auto", True),
+            ("cuda", True),
+            (torch.device("cuda"), True),
+        ],
+    )
+    def test_default_and_auto_select_current_cuda_or_cpu(
+        self, monkeypatch: pytest.MonkeyPatch, device: str | torch.device | None, *, available: bool
+    ) -> None:
+        devices = []
+        tensor_to = torch.Tensor.to
+
+        def to_cpu(tensor: torch.Tensor, device: torch.device, **kwargs: object) -> torch.Tensor:
+            devices.append(device)
+            return tensor_to(tensor, "cpu", **kwargs)
+
+        class Estimator:
+            dimension_: float
+
+            def fit(self, features: torch.Tensor) -> "Estimator":
+                self.dimension_ = float(features.shape[1])
+                return self
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+        monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+        monkeypatch.setattr(torch.Tensor, "to", to_cpu)
+        monkeypatch.setattr(intrinsic_dim, "_load_estimator", lambda name: Estimator)
+        result = compute_intrinsic_dim(np.arange(30).reshape(10, 3), ["TwoNN"], device=device)
+        assert result == {"TwoNN": 3.0}
+        assert devices == [torch.device("cuda:1" if available else "cpu")]
 
 
 class TestSubsample:

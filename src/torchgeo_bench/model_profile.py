@@ -15,6 +15,8 @@ import torch
 from torch import nn
 from torch.utils.flop_counter import FlopCounterMode
 
+from torchgeo_bench.devices import resolve_device
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,10 +147,7 @@ def _validate_profile_inputs(
         raise ValueError("sample_batch must have a non-empty batch dimension")
     if device.type not in {"cpu", "cuda"}:
         raise ValueError("device must be 'cpu' or 'cuda'")
-    if device.type == "cuda" and not torch.cuda.is_available():
-        raise ValueError("CUDA is not available")
-    if device.type == "cuda" and device.index is None:
-        device = torch.device("cuda", torch.cuda.current_device())
+    device = resolve_device(device)
     if sample_batch.device != device:
         raise ValueError(f"sample_batch is on {sample_batch.device}, expected {device}")
     if precision not in {"float32", "float16", "bfloat16"}:

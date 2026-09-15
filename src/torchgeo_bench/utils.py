@@ -1,6 +1,5 @@
 """Feature extraction utilities for model benchmarking."""
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -8,8 +7,6 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,15 +24,6 @@ class FeatureSplits[T]:
     train: FeatureSplit[T]
     val: FeatureSplit[T]
     test: FeatureSplit[T]
-
-
-def resolve_device(requested_device: str | torch.device) -> torch.device:
-    """Resolve a requested device, falling back to CPU if CUDA is unavailable."""
-    device = torch.device(requested_device)
-    if device.type == "cuda" and not torch.cuda.is_available():
-        logger.warning("CUDA requested but not available; falling back to CPU.")
-        return torch.device("cpu")
-    return device
 
 
 def extract_features(

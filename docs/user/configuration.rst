@@ -130,9 +130,9 @@ Normalization choices map to the model interface as follows:
 automatic substitute for dataset normalization. Wrappers that own their
 normalization retain their documented behavior.
 
-Use ``--device cpu`` without CUDA, a specific device such as ``cuda:1``, or
-``auto`` to choose an available CUDA device or CPU. The image default remains
-``cuda:0``. Runtime flags are ``--device``, ``--batch-size``, ``--workers``,
+Torch execution uses one device policy across image runs, profiling, synthetic compute measurements, coordinate encoders/probes, and intrinsic-dimension estimation. ``cpu`` uses CPU without checking CUDA. ``auto`` selects the current CUDA device when available, otherwise CPU. Explicit ``cuda`` selects the current CUDA device; ``cuda:N`` selects index N. Explicit CUDA requests now raise an error when CUDA is unavailable or the index is invalid, rather than silently falling back to CPU. Use ``auto`` to allow CPU fallback. The image default remains ``cuda:0``.
+
+Runtime flags are ``--device``, ``--batch-size``, ``--workers``,
 ``--seed``, and ``--verbose`` / ``--no-verbose``. Input flags are ``--bands``,
 ``--partition``, ``--time-steps``, ``--image-size``, ``--interpolation``, and
 ``--normalization``.
@@ -346,6 +346,7 @@ operation support depends on the model and device.
 ``--count-flops`` / ``--no-count-flops`` add or omit FLOP counting.
 The JSON includes effective preprocessing, device, precision, timing, and
 memory metadata. Local dataset samples must already be available.
+Profiling supports only CPU and CUDA measurement devices.
 
 Synthetic compute measurements
 -------------------------------

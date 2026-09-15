@@ -31,6 +31,7 @@ from torchgeo_bench.coordbench.probe import (
     linear_probe_score,
     spatial_fold_ids,
 )
+from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.results import append_rows_atomic
 
 logger = logging.getLogger(__name__)
@@ -126,10 +127,9 @@ def _evaluation_split(
 def run_coordbench(cfg: CoordConfig) -> None:
     """Run the CoordBench location-encoder benchmark for the configured model."""
     preset = resolve_coord_preset(cfg)
+    device = str(resolve_device(cfg.runtime.device))
     torch.manual_seed(cfg.runtime.seed)
-    device = cfg.runtime.device
-    if device == "auto":
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    if cfg.runtime.device != device:
         cfg = cfg.model_copy(update={"runtime": cfg.runtime.model_copy(update={"device": device})})
     splits = _resolve_splits(cfg.evaluation.split)
 
