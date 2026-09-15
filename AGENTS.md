@@ -47,27 +47,11 @@ pyproject.toml             # Project config, dependencies, tool settings
 
 ## Contributing: Commits, PRs, and Splitting Changes
 
-Most contributors here are driving an AI coding agent and may not write Python
-day to day themselves — that's fine, but it means the PR is often the only
-thing a human reviewer has to go on. Optimize for a reviewer who wants to
-understand *and approve* a change in one pass, not one who has to reconstruct
-what happened from a wall of text or untangle five unrelated edits from one
-diff.
+Most contributors here are driving an AI coding agent and may not write Python day to day themselves — that's fine, but it means the PR is often the only thing a human reviewer has to go on. Optimize for a reviewer who wants to understand *and approve* a change in one pass, not one who has to reconstruct what happened from a wall of text or untangle five unrelated edits from one diff.
 
-**One PR per logical change, each with its own tests.**
-If an agent's exploration turns up more than one fix, bug, or improvement,
-that's multiple PRs, not one. Bundling unrelated changes together forces a
-reviewer to approve or block all of them as a set, and it flattens the
-changelog — a small, real bug fix deserves its own commit/PR so it shows up
-as its own trackable entry in history, not a buried line in something else's
-diff. If change B only makes sense on top of change A (e.g. B extends a
-function A just added), stack B's PR on A's branch instead of merging them
-into one.
+**One PR per logical change, each with its own tests.** If an agent's exploration turns up more than one fix, bug, or improvement, that's multiple PRs, not one. Bundling unrelated changes together forces a reviewer to approve or block all of them as a set, and it flattens the changelog — a small, real bug fix deserves its own commit/PR so it shows up as its own trackable entry in history, not a buried line in something else's diff. If change B only makes sense on top of change A (e.g. B extends a function A just added), stack B's PR on A's branch instead of merging them into one.
 
-**Commit messages: one Conventional Commits subject line, nothing else.**
-`fix(models): handle missing coastal band` — no body, no bullet list, no
-restating the diff. Nobody reads commit bodies; the PR description is where
-context goes.
+**Commit messages: one Conventional Commits subject line, nothing else.** `fix(models): handle missing coastal band` — no body, no bullet list, no restating the diff. Nobody reads commit bodies; the PR description is where context goes.
 
 **PR descriptions: say what changed and why, in a few plain sentences.**
 - No "Test plan" / "How I tested this" section unless the reviewer asks.
@@ -75,19 +59,9 @@ context goes.
 - Don't restate the diff line by line — the diff is right there.
 - Skip it if the code and a one-line summary already make the change obvious.
 
-**Every PR should be independently reviewable.**
-A reviewer should be able to read the diff top to bottom, understand the
-change, check the tests cover it, and approve — without needing chat history,
-a linked doc, or a walkthrough. If a change needs more than a few sentences
-to explain *why* it's safe, that's a sign it should be split further or the
-code needs a comment (see below), not that the PR description needs to be
-longer.
+**Every PR should be independently reviewable.** A reviewer should be able to read the diff top to bottom, understand the change, check the tests cover it, and approve — without needing chat history, a linked doc, or a walkthrough. If a change needs more than a few sentences to explain *why* it's safe, that's a sign it should be split further or the code needs a comment (see below), not that the PR description needs to be longer.
 
-**Minimal code comments.**
-Don't comment what the code already says. A comment earns its place only
-when it captures something the code can't: a non-obvious constraint, a
-citation for a magic number, a workaround for a specific upstream bug, or a
-"why not the obvious alternative" note. When in doubt, leave it out.
+**Minimal code comments.** Don't comment what the code already says. A comment earns its place only when it captures something the code can't: a non-obvious constraint, a citation for a magic number, a workaround for a specific upstream bug, or a "why not the obvious alternative" note. When in doubt, leave it out.
 
 ```python
 # BAD: restates the line below
@@ -99,23 +73,24 @@ count += 1
 wavelength = int(round(wavelength_um))
 ```
 
+## Writing and Line Wrapping
+
+Do not manually wrap any writing to a maximum line length unless Ruff requires it. This applies to prose, comments, docstrings, and issue or PR descriptions. Keep each paragraph or list item on one source line, and let the editor or renderer wrap it for display. Preserve structural line breaks in Markdown and code.
+
 ## Environment Setup
 
 Two supported workflows — pick **one** (they manage *separate* environments):
 
 ```bash
-# Option A — uv (the README's canonical path). Creates and manages its own
-# .venv and ignores any active conda env. Run tools via `uv run …`:
+# Option A — uv (the README's canonical path). Creates and manages its own .venv and ignores any active conda env. Run tools via `uv run …`:
 uv sync --extra dev
 
-# Option B — conda (matches the Makefile). Create the env with `make install`,
-# then install editable:
+# Option B — conda (matches the Makefile). Create the env with `make install`, then install editable:
 conda activate torchgeo-bench
 pip install -e ".[dev]"
 ```
 
-> Note: `uv sync` always uses its own `.venv`, so a preceding
-> `conda activate` does **not** change what `uv sync` installs into.
+> Note: `uv sync` always uses its own `.venv`, so a preceding `conda activate` does **not** change what `uv sync` installs into.
 
 ## Build/Lint/Test Commands
 
@@ -189,53 +164,25 @@ torchgeo-bench coord --model sincos --dataset california_housing --methods linea
 
 ## Configuration Architecture
 
-- The installed CLI, `python -m torchgeo_bench`, and
-  `python -m torchgeo_bench.cli` dispatch the same commands. Do not reintroduce
-  a legacy override parser or a second configuration engine.
+- The installed CLI, `python -m torchgeo_bench`, and `python -m torchgeo_bench.cli` dispatch the same commands. Do not reintroduce a legacy override parser or a second configuration engine.
 - `run_config.py` defines `RunConfig` and `load_run_config`; `config_schema.py` holds shared configuration sections and safe YAML loading. Unknown fields, duplicate YAML keys, and wrong types are errors. Profile, FLOPs, and CoordBench have their own typed schemas.
 - Benchmark commands declare flags in `commands/<name>_arguments.py` and dispatch directly through `commands.<name>` from `cli.py`. The run handler is `commands/_run.py`, with execution in `commands/_run_runtime.py`.
-- A run selects `model: {name: rcf}` or a custom
-  `model: {name: my-model, target: my_package.MyModel, kwargs: {...}}`.
-  Presets in `conf/model/` use `name`, `target`, `track`, `seed_from_run`,
-  `kwargs`, `input`, `classification`, `segmentation`, and
-  `dataset_overrides`. Metadata is never a constructor kwarg.
-- Preserve precedence: built-in defaults < model preset < preset's dataset
-  defaults < explicit YAML < explicit flags. Use unset-aware serialization;
-  explicit `false`, `null`, and `[]` must not be replaced by defaults.
-- `resolve_run_config` resolves effective settings per dataset. `build_model`
-  receives runtime `BandSpec` objects and empirical-RCF datasets explicitly;
-  never serialize them into YAML. Existing timm/RCF model dataclasses remain
-  construction boundaries, not a competing configuration system.
-- Optional model dependencies stay lazy. Catalogs, schemas, and dry runs
-  must not load weights or dataset samples.
+- A run selects `model: {name: rcf}` or a custom `model: {name: my-model, target: my_package.MyModel, kwargs: {...}}`. Presets in `conf/model/` use `name`, `target`, `track`, `seed_from_run`, `kwargs`, `input`, `classification`, `segmentation`, and `dataset_overrides`. Metadata is never a constructor kwarg.
+- Preserve precedence: built-in defaults < model preset < preset's dataset defaults < explicit YAML < explicit flags. Use unset-aware serialization; explicit `false`, `null`, and `[]` must not be replaced by defaults.
+- `resolve_run_config` resolves effective settings per dataset. `build_model` receives runtime `BandSpec` objects and empirical-RCF datasets explicitly; never serialize them into YAML. Existing timm/RCF model dataclasses remain construction boundaries, not a competing configuration system.
+- Optional model dependencies stay lazy. Catalogs, schemas, and dry runs must not load weights or dataset samples.
 
 ## Results Layout & Resume
 
-- Each model writes to its own `results/models/<model name>.csv` (not one
-  shared file), so re-running one model only touches that file. Rows are
-  appended, never rewritten in place.
-- `--resume` skips a (dataset, method, bands, normalization, ...) combo
-  only if an existing row's `config_hash` matches the current run's config.
-  Changing a hashed config field invalidates the match. Additive `profile`
-  and `intrinsic_dim` settings do not invalidate equivalent classification
-  results; their own metric completeness is checked separately.
-- One-time, hardware-dependent measurements (`torchgeo-bench flops`,
-  intrinsic-dimension probes) live in their own side files —
-  `results/compute_cost.csv`, `results/profiles/<model name>.csv`, and
-  `results/intrinsic_dim/<model name>.csv` —
-  so a routine metrics rerun doesn't touch them.
-- `--output` / `output.file` combines selected image-run measurements in one
-  CSV; otherwise `output.directory`, `output.profile_directory`, and
-  `output.intrinsic_dim_directory` keep their respective defaults. Standalone
-  `profile` writes JSON stdout, and `coord` has its own CSV schema/resume key.
-- Don't hand-edit `config_hash`/`KEY_COLS` logic without checking
-  `resume.py`'s docstring first; it's easy to silently invalidate every
-  existing row across `results/models/`.
+- Each model writes to its own `results/models/<model name>.csv` (not one shared file), so re-running one model only touches that file. Rows are appended, never rewritten in place.
+- `--resume` skips a (dataset, method, bands, normalization, ...) combo only if an existing row's `config_hash` matches the current run's config. Changing a hashed config field invalidates the match. Additive `profile` and `intrinsic_dim` settings do not invalidate equivalent classification results; their own metric completeness is checked separately.
+- One-time, hardware-dependent measurements (`torchgeo-bench flops`, intrinsic-dimension probes) live in their own side files — `results/compute_cost.csv`, `results/profiles/<model name>.csv`, and `results/intrinsic_dim/<model name>.csv` — so a routine metrics rerun doesn't touch them.
+- `--output` / `output.file` combines selected image-run measurements in one CSV; otherwise `output.directory`, `output.profile_directory`, and `output.intrinsic_dim_directory` keep their respective defaults. Standalone `profile` writes JSON stdout, and `coord` has its own CSV schema/resume key.
+- Don't hand-edit `config_hash`/`KEY_COLS` logic without checking `resume.py`'s docstring first; it's easy to silently invalidate every existing row across `results/models/`.
 
 ## Datasets
 
-All datasets are loaded from `./data/<canonical-subdir>` relative to the
-current working directory (no env vars, no overrides — keep it simple).
+All datasets are loaded from `./data/<canonical-subdir>` relative to the current working directory (no env vars, no overrides — keep it simple).
 
 ### GeoBench V1 (Classification) - use `m-` prefix
 `m-eurosat`, `m-forestnet`, `m-so2sat`, `m-pv4ger`, `m-brick-kiln`, `m-bigearthnet`
@@ -328,10 +275,7 @@ if not self.dataset_dir.exists():
 
 ### No defensive imports or bare-`Exception` catches
 
-**Do NOT write fallback `try`/`except ImportError` blocks for hard dependencies.**
-Every package listed under `[project.dependencies]` in `pyproject.toml` is
-guaranteed to be installed; pretending otherwise just papers over real
-breakage and forces every reader to mentally evaluate the fallback path.
+**Do NOT write fallback `try`/`except ImportError` blocks for hard dependencies.** Every package listed under `[project.dependencies]` in `pyproject.toml` is guaranteed to be installed; pretending otherwise just papers over real breakage and forces every reader to mentally evaluate the fallback path.
 
 ```python
 # ❌ BAD: hides the real failure mode behind a fake fallback
@@ -344,11 +288,7 @@ except ImportError:  # pragma: no cover - older torchgeo versions
 from torchgeo.datasets import DatasetNotFoundError
 ```
 
-The same rule applies to bare `except Exception:` blocks that swallow errors
-to "keep going". If you want to skip a single iteration in a sweep, catch
-the *specific* exception you expect (e.g. `FileNotFoundError`,
-`DatasetNotFoundError`, `pandas.errors.ParserError`). Letting unexpected
-failures propagate is a feature, not a bug.
+The same rule applies to bare `except Exception:` blocks that swallow errors to "keep going". If you want to skip a single iteration in a sweep, catch the *specific* exception you expect (e.g. `FileNotFoundError`, `DatasetNotFoundError`, `pandas.errors.ParserError`). Letting unexpected failures propagate is a feature, not a bug.
 
 ### Class Patterns
 
@@ -364,8 +304,7 @@ class BenchModel(nn.Module, ABC):
         raise NotImplementedError
 ```
 
-Implement `_forward_patch_features`, not the public `forward_patch_features`:
-the public method applies the configured normalization before calling the hook.
+Implement `_forward_patch_features`, not the public `forward_patch_features`: the public method applies the configured normalization before calling the hook.
 
 ## Ruff Configuration
 
@@ -393,14 +332,9 @@ class TestGeoBenchDatasetBasics:
 
 ## Key Dependencies
 
-Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision>=0.15`,
-`numpy>=1.24`, `scikit-learn>=1.3`, `timm>=0.9`, `torchgeo>=0.9`, `torchmetrics>=1.4`,
-`pydantic>=2`, `pyyaml>=6`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform),
-`huggingface-hub>=0.20`, `geobenchv2>=0.9`, `pandas>=2`, `pyarrow>=14`, `safetensors>=0.4`,
-`filelock>=3.12`, `rich>=13`.
+Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision>=0.15`, `numpy>=1.24`, `scikit-learn>=1.3`, `timm>=0.9`, `torchgeo>=0.9`, `torchmetrics>=1.4`, `pydantic>=2`, `pyyaml>=6`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform), `huggingface-hub>=0.20`, `geobenchv2>=0.9`, `pandas>=2`, `pyarrow>=14`, `safetensors>=0.4`, `filelock>=3.12`, `rich>=13`.
 
-Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everything):
-`coordbench`, `dev`, `docs`, `id` (intrinsic-dimension estimators), `olmoearth`, `sam3`, `terratorch`. Model wrappers behind an extra (OlmoEarth, SAM3, terratorch-backed models) import that dependency lazily — don't add a top-level import for one at module scope.
+Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everything): `coordbench`, `dev`, `docs`, `id` (intrinsic-dimension estimators), `olmoearth`, `sam3`, `terratorch`. Model wrappers behind an extra (OlmoEarth, SAM3, terratorch-backed models) import that dependency lazily — don't add a top-level import for one at module scope.
 
 ## Common Gotchas
 
@@ -412,6 +346,4 @@ Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everythin
 
 ## Copilot/Cursor Instructions
 
-`.github/copilot-instructions.md` covers the same ground in more depth
-(source layout, build/test/lint, architecture notes, conventions) — read it
-directly for anything not covered here rather than relying on a summary.
+`.github/copilot-instructions.md` covers the same ground in more depth (source layout, build/test/lint, architecture notes, conventions) — read it directly for anything not covered here rather than relying on a summary.
