@@ -163,6 +163,7 @@ def test_resolved_metadata_is_immutable(train_only: str) -> None:
         ({"bands": ("red", 1)}, TypeError, "must be strings"),
         ({"partition": None}, TypeError, "partition"),
         ({"partition": ""}, ValueError, "partition"),
+        ({"partition": " \t"}, ValueError, "partition"),
         ({"time_steps": 1}, ValueError, "not multi-temporal"),
         ({"time_steps": 0}, ValueError, "positive"),
         ({"time_steps": True}, TypeError, "integer"),

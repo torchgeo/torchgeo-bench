@@ -161,8 +161,8 @@ def _validate_split_options(
         raise ValueError(f"Unknown split {split!r}. Expected train, val, or test.")
     if not isinstance(partition, str):
         raise TypeError("partition must be a string")
-    if not partition:
-        raise ValueError("partition must not be empty")
+    if not partition.strip():
+        raise ValueError("partition must not be blank")
     if partition != "default" and not bench.supports_partitions:
         raise ValueError(f"Dataset {bench.name!r} does not support custom partitions.")
     if time_steps is not None:
