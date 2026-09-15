@@ -24,8 +24,9 @@ pytestmark = pytest.mark.slow
         ("m-eurosat", "rgb", "0.01x_train"),
         ("so2sat", "rgb", "default"),
         ("eurosat", "all", "default"),
+        ("ucmerced", "rgb", "default"),
     ],
-    ids=["v1-m-eurosat", "v2-so2sat", "eurosat"],
+    ids=["v1-m-eurosat", "v2-so2sat", "eurosat", "ucmerced"],
 )
 def test_real_classification_program(
     tmp_path: Path, dataset: str, bands: str, partition: str

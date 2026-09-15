@@ -23,6 +23,7 @@ from torchgeo_bench.download import (
     download_geobench_v2,
     download_geobench_v2_dataset,
     download_resisc45,
+    download_ucmerced,
 )
 
 
@@ -220,12 +221,25 @@ def test_download_resisc45_verifies_checksums_for_every_split(tmp_path: Path) ->
     ]
 
 
+def test_download_ucmerced_verifies_checksums_for_every_split(tmp_path: Path) -> None:
+    out = tmp_path / "data"
+    with mock.patch("torchgeo_bench.download.UCMerced") as ucmerced_mock:
+        download_ucmerced(out)
+
+    assert (out / "ucmerced").is_dir()
+    assert ucmerced_mock.call_args_list == [
+        mock.call(root=str(out / "ucmerced"), split=split, download=True, checksum=True)
+        for split in ("train", "val", "test")
+    ]
+
+
 def test_download_datasets_dispatches_only_selected_names(tmp_path: Path) -> None:
     with (
         mock.patch("torchgeo_bench.download.download_geobench_v1") as v1,
         mock.patch("torchgeo_bench.download.download_geobench_v2") as v2,
         mock.patch("torchgeo_bench.download.download_eurosat") as eurosat,
         mock.patch("torchgeo_bench.download.download_resisc45") as resisc45,
+        mock.patch("torchgeo_bench.download.download_ucmerced") as ucmerced,
     ):
         download_datasets(["m-eurosat", "burn_scars", "eurosat"], tmp_path)
 
@@ -233,9 +247,12 @@ def test_download_datasets_dispatches_only_selected_names(tmp_path: Path) -> Non
     v2.assert_called_once_with(tmp_path, datasets=["burn_scars"])
     eurosat.assert_called_once_with(tmp_path)
     resisc45.assert_not_called()
+    ucmerced.assert_not_called()
 
 
-@pytest.mark.parametrize("names", [[], ["m-eurosat", "not-a-dataset"], ["eurosat", "unknown"]])
+@pytest.mark.parametrize(
+    "names", [[], ["m-eurosat", "not-a-dataset"], ["eurosat", "unknown"], ["ucmerced", "unknown"]]
+)
 def test_download_datasets_validates_every_name_before_dispatch(
     tmp_path: Path, names: list[str]
 ) -> None:
@@ -244,17 +261,19 @@ def test_download_datasets_validates_every_name_before_dispatch(
         mock.patch("torchgeo_bench.download.download_geobench_v2") as v2,
         mock.patch("torchgeo_bench.download.download_eurosat") as eurosat,
         mock.patch("torchgeo_bench.download.download_resisc45") as resisc45,
+        mock.patch("torchgeo_bench.download.download_ucmerced") as ucmerced,
         pytest.raises(ValueError, match=r"Unknown dataset|at least one"),
     ):
         download_datasets(names, tmp_path)
 
-    for download in (v1, v2, eurosat, resisc45):
+    for download in (v1, v2, eurosat, resisc45, ucmerced):
         download.assert_not_called()
     assert not list(tmp_path.iterdir())
 
 
-def test_download_datasets_deduplicates_names(tmp_path: Path) -> None:
-    with mock.patch("torchgeo_bench.download.download_eurosat") as eurosat:
-        download_datasets(["eurosat", "eurosat"], tmp_path)
+@pytest.mark.parametrize("name", ["eurosat", "resisc45", "ucmerced"])
+def test_download_datasets_deduplicates_names(tmp_path: Path, name: str) -> None:
+    with mock.patch(f"torchgeo_bench.download.download_{name}") as download:
+        download_datasets([name, name], tmp_path)
 
-    eurosat.assert_called_once_with(tmp_path)
+    download.assert_called_once_with(tmp_path)

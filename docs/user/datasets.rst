@@ -2,7 +2,7 @@ Datasets
 ========
 
 ``torchgeo-bench`` supports two generations of GeoBench datasets — V1 and
-V2 — plus wrappers around torchgeo's standalone EuroSAT and NWPU-RESISC45
+V2 — plus wrappers around torchgeo's standalone EuroSAT, NWPU-RESISC45, and UC Merced
 datasets.  All datasets share the
 :class:`~torchgeo_bench.datasets.BenchDataset` interface and are
 registered by name so they can be selected without importing every loader.
@@ -34,6 +34,9 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
    * - ``resisc45``
      - ``data/resisc45/``
      - torchgeo's ``RESISC45`` downloader
+   * - ``ucmerced``
+     - ``data/ucmerced/``
+     - torchgeo's ``UCMerced`` downloader
 
 Downloading
 -----------
@@ -49,6 +52,7 @@ The :doc:`/api/cli` accepts one or more dataset names. Collection aliases remain
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # V2 subset
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT
    $ torchgeo-bench download resisc45                                 # torchgeo RESISC45
+   $ torchgeo-bench download ucmerced                                 # torchgeo UC Merced
    $ torchgeo-bench download geobench_v2 --output-dir /scratch/data   # custom root
 
 Do not mix collection aliases and individual names in one invocation. ``--datasets`` applies only to a collection alias. ``--output-dir`` changes the download destination, not the runner's fixed ``data/`` location; link the downloaded root to ``data/`` before loading it from another working directory.
@@ -208,6 +212,7 @@ CLI name             Class
 ``eurosat``          :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper, random split)
 ``eurosat-spatial``  :class:`~torchgeo_bench.datasets.EuroSATSpatial`  (longitude-based split)
 ``resisc45``         :class:`~torchgeo_bench.datasets.RESISC45`  (45-class aerial scenes, RGB)
+``ucmerced``         :class:`~torchgeo_bench.datasets.UCMerced`  (21-class aerial land use, RGB)
 ==================== ============================================================================
 
 ``resisc45`` is 31,500 RGB scenes at 256x256 across 45 classes, on torchgeo's
@@ -217,6 +222,18 @@ linear-probe accuracy by different papers under the same nominal protocol —
 which is why it is worth running under a fixed harness.  The imagery carries
 no geolocation, so it appears on the coverage map as an explicit gap rather
 than being silently omitted.
+
+``ucmerced`` contains 2,100 RGB aerial 256x256 images across 21 land use classes.
+The wrapper uses torchgeo's published split files: 1,260 training, 420 validation,
+and 420 test images (60/20/20 overall).
+Normalization statistics are measured on the training split only.
+The original imagery has 1 ft (0.3048 m) resolution; the shared ``aerial`` sensor
+tag uses an approximate 1 m GSD for resolution-aware models. Individual images
+have no georeferencing, which is recorded in the coverage map.
+
+.. code-block:: console
+
+   $ torchgeo-bench run --model imagestats --dataset ucmerced --device cpu
 
 Selecting datasets
 ------------------

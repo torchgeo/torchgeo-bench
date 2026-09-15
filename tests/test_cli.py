@@ -187,6 +187,7 @@ def test_run_list_datasets(capsys) -> None:
     cli_main(["datasets"])
     out = capsys.readouterr().out
     assert "m-eurosat" in out
+    assert "ucmerced" in out
 
 
 def test_run_model_help(capsys) -> None:
@@ -283,6 +284,8 @@ def test_download_geobench_v2_with_datasets(monkeypatch) -> None:
         ["m-eurosat", "burn_scars"],
         ["m-eurosat", "eurosat"],
         ["eurosat", "resisc45"],
+        ["ucmerced"],
+        ["eurosat", "ucmerced"],
         ["m-eurosat", "burn_scars", "eurosat", "resisc45"],
     ],
 )
@@ -335,6 +338,18 @@ def test_download_resisc45(monkeypatch) -> None:
     )
     cli_main(["download", "resisc45"])
     assert calls == ["data"]
+
+
+def test_download_ucmerced(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[Path] = []
+    monkeypatch.setattr("torchgeo_bench.download.download_ucmerced", calls.append)
+    cli_main(["download", "ucmerced", "--output-dir", str(tmp_path)])
+    assert calls == [tmp_path]
+
+
+def test_download_rejects_datasets_for_ucmerced() -> None:
+    with pytest.raises(SystemExit, match="only supported for GeoBench"):
+        cli_main(["download", "ucmerced", "--datasets", "ucmerced"])
 
 
 def test_download_rejects_datasets_for_resisc45() -> None:

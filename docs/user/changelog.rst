@@ -7,6 +7,9 @@ Unreleased
 Added
 ^^^^^
 
+* UC Merced Land Use (``ucmerced``) via torchgeo: 2,100 RGB images, 21 classes,
+  with published 1,260 / 420 / 420 splits and training-split normalization statistics.
+  Download with ``torchgeo-bench download ucmerced``.
 * NWPU-RESISC45 (``resisc45``) via torchgeo: 31,500 RGB scenes, 45 classes, on
   torchgeo's published 18,900 / 6,300 / 6,300 split.  Downloadable with
   ``torchgeo-bench download resisc45``.  It is the most-divergent benchmark in
