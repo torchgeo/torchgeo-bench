@@ -64,6 +64,7 @@ turn those defaults into explicit overrides.
 
 .. autoclass:: RunConfig
    :members: model_dump_yaml
+   :inherited-members: BaseModel
    :no-show-inheritance:
 
 .. autofunction:: load_run_config
@@ -131,6 +132,7 @@ and a ``timing`` block. Neither takes an image ``RunConfig``.
 
 .. autoclass:: ProfileConfig
    :members: model_dump_yaml
+   :inherited-members: BaseModel
    :no-show-inheritance:
 
 .. autofunction:: resolve_profile_config
@@ -139,6 +141,7 @@ and a ``timing`` block. Neither takes an image ``RunConfig``.
 
 .. autoclass:: FlopsConfig
    :members: model_dump_yaml, resolve
+   :inherited-members: BaseModel
    :no-show-inheritance:
 
 .. currentmodule:: torchgeo_bench.flops_pipeline

@@ -1,6 +1,6 @@
 """Strict settings for synthetic backbone and probe compute measurements."""
 
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
 
@@ -130,10 +130,6 @@ class FlopsConfig(StrictModel):
     segmentation: FlopsSegmentationConfig = Field(default_factory=FlopsSegmentationConfig)
     timing: FlopsTimingConfig = Field(default_factory=FlopsTimingConfig)
     output: FlopsOutputConfig = Field(default_factory=FlopsOutputConfig)
-
-    def model_dump_yaml(self) -> dict[str, Any]:
-        """Serialize supplied values without overriding omitted preset defaults."""
-        return self.model_dump(mode="json", exclude_unset=True)
 
     def resolve(self) -> tuple[Self, ModelPreset]:
         """Apply model/dataset defaults beneath explicit YAML or CLI settings."""

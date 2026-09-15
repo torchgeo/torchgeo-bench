@@ -105,10 +105,6 @@ class RunConfig(StrictModel):
             raise ValueError("'all' cannot be combined with other datasets")
         return value
 
-    def model_dump_yaml(self) -> dict[str, Any]:
-        """Return supplied settings without turning omitted defaults into overrides."""
-        return self.model_dump(mode="json", exclude_unset=True)
-
 
 def load_run_config(path: str | Path) -> RunConfig:
     """Load and strictly validate a core image benchmark configuration."""

@@ -75,6 +75,10 @@ class StrictModel(BaseModel):
         extra="forbid", strict=True, validate_default=True, allow_inf_nan=False
     )
 
+    def model_dump_yaml(self) -> dict[str, Any]:
+        """Return supplied settings without turning omitted defaults into overrides."""
+        return self.model_dump(mode="json", exclude_unset=True)
+
 
 def _check_device(value: str) -> str:
     """Reject malformed device strings without importing Torch."""

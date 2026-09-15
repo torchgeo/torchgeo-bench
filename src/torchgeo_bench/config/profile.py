@@ -1,6 +1,6 @@
 """Strict settings for profiling one fixed, real dataset batch."""
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
 
@@ -54,10 +54,6 @@ class ProfileConfig(StrictModel):
         if isinstance(value.bands, str) and value.bands not in {"rgb", "all"}:
             raise ValueError("input.bands must be rgb, all, or a YAML list of band names")
         return value
-
-    def model_dump_yaml(self) -> dict[str, Any]:
-        """Serialize supplied settings without promoting defaults to overrides."""
-        return self.model_dump(mode="json", exclude_unset=True)
 
 
 def resolve_profile_config(config: ProfileConfig) -> tuple[ProfileConfig, ModelPreset]:
