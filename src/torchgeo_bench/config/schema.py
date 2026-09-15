@@ -11,6 +11,7 @@ import yaml
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
@@ -96,10 +97,18 @@ def _check_methods(value: list["Method"]) -> list["Method"]:
     return value
 
 
+def _check_schema_version(value: object) -> object:
+    """Reject non-integer versions before literal validation."""
+    if type(value) is not int:
+        raise ValueError("schema_version must be the integer 1")  # noqa: TRY004 - Pydantic field validation
+    return value
+
+
 type Method = Literal["knn", "linear"]
 type Device = Annotated[StrictStr, AfterValidator(_check_device)]
 type KnnDevice = Annotated[StrictStr, AfterValidator(_check_knn_device)]
 type Methods = Annotated[list[Method], AfterValidator(_check_methods)]
+type SchemaVersion = Annotated[Literal[1], BeforeValidator(_check_schema_version)]
 
 
 def default_methods() -> list[Method]:

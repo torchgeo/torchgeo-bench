@@ -50,6 +50,8 @@ Scientific notation such as ``1e-3`` is supported. Constructor options inside
 ``model.kwargs`` are passed to the selected constructor; they are not
 additional benchmark configuration fields.
 
+All four command configurations use integer ``schema_version: 1`` by default. If supplied, the version must be the integer ``1``; ``1.0``, booleans, strings, and other versions are rejected.
+
 Image runs
 ----------
 

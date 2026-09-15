@@ -10,6 +10,7 @@ from .schema import (
     InputConfig,
     ModelConfig,
     RuntimeConfig,
+    SchemaVersion,
     SegmentationConfig,
     StrictModel,
     load_yaml,
@@ -81,7 +82,7 @@ class IntrinsicDimensionConfig(StrictModel):
 class RunConfig(StrictModel):
     """Complete core image benchmark configuration."""
 
-    schema_version: Literal[1] = 1
+    schema_version: SchemaVersion = 1
     model: ModelConfig
     datasets: list[StrictStr] = Field(min_length=1)
     input: InputConfig = Field(default_factory=InputConfig)
@@ -91,14 +92,6 @@ class RunConfig(StrictModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     profile: FeatureProfileConfig = Field(default_factory=FeatureProfileConfig)
     intrinsic_dim: IntrinsicDimensionConfig = Field(default_factory=IntrinsicDimensionConfig)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def reject_bool_schema_version(cls, value: object) -> object:
-        """Reject ``true`` because booleans are integer subclasses in Python."""
-        if isinstance(value, bool):
-            raise ValueError("schema_version must be the integer 1")  # noqa: TRY004 - Pydantic requires ValueError for field errors
-        return value
 
     @field_validator("datasets")
     @classmethod

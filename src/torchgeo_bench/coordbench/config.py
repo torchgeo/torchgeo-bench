@@ -11,6 +11,7 @@ from torchgeo_bench.config.schema import (
     KnnDevice,
     Methods,
     ModelConfig,
+    SchemaVersion,
     StrictModel,
     default_methods,
     load_yaml,
@@ -54,20 +55,12 @@ class CoordEvaluationConfig(StrictModel):
 class CoordConfig(StrictModel):
     """Complete coordinate benchmark configuration, independent of image settings."""
 
-    schema_version: Literal[1] = 1
+    schema_version: SchemaVersion = 1
     model: ModelConfig
     datasets: list[StrictStr] = Field(default_factory=lambda: ["all"], min_length=1)
     evaluation: CoordEvaluationConfig = Field(default_factory=CoordEvaluationConfig)
     runtime: CoordRuntimeConfig = Field(default_factory=CoordRuntimeConfig)
     output: CoordOutputConfig = Field(default_factory=CoordOutputConfig)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def validate_version(cls, value: object) -> object:
-        """Require integer schema versions without numeric coercion."""
-        if type(value) is not int:
-            raise ValueError("schema_version must be the integer 1")
-        return value
 
     @field_validator("datasets")
     @classmethod

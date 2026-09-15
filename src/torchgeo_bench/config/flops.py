@@ -9,6 +9,7 @@ from .presets import ModelPreset, load_model_preset, merge_settings
 from .schema import (
     Device,
     ModelConfig,
+    SchemaVersion,
     SegmentationConfig,
     StrictModel,
 )
@@ -121,7 +122,7 @@ class FlopsOutputConfig(StrictModel):
 class FlopsConfig(StrictModel):
     """Complete synthetic compute measurement, independent of image evaluation."""
 
-    schema_version: Literal[1] = 1
+    schema_version: SchemaVersion = 1
     model: ModelConfig
     runtime: FlopsRuntimeConfig = Field(default_factory=FlopsRuntimeConfig)
     input: FlopsInputConfig = Field(default_factory=FlopsInputConfig)
@@ -129,14 +130,6 @@ class FlopsConfig(StrictModel):
     segmentation: FlopsSegmentationConfig = Field(default_factory=FlopsSegmentationConfig)
     timing: FlopsTimingConfig = Field(default_factory=FlopsTimingConfig)
     output: FlopsOutputConfig = Field(default_factory=FlopsOutputConfig)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def validate_version(cls, value: object) -> object:
-        """Keep booleans distinct from schema version one."""
-        if isinstance(value, bool):
-            raise ValueError("schema_version must be the integer 1")  # noqa: TRY004 - Pydantic validation contract
-        return value
 
     def model_dump_yaml(self) -> dict[str, Any]:
         """Serialize supplied values without overriding omitted preset defaults."""
