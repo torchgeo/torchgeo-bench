@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import torch
 
-from experiments.scripts.repack_geobench_v1 import repack, validate
+from scripts.repack_geobench_v1 import repack, validate
 from torchgeo_bench.datasets import geobench_v1
 from torchgeo_bench.datasets._metadata import decode_metadata
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded

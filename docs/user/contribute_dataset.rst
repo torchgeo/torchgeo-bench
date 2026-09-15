@@ -244,7 +244,7 @@ coverage map.  Generate yours:
 
 .. code-block:: console
 
-   $ uv run python experiments/scripts/extract_dataset_geography.py --dataset my_dataset
+   $ uv run python scripts/extract_dataset_geography.py --dataset my_dataset
 
 Commit the resulting :file:`docs/_static/_dataset_geography/my_dataset.json`
 together with the regenerated :file:`index.json`.

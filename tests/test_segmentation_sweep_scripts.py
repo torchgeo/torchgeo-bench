@@ -20,7 +20,7 @@ ROOT = Path(__file__).parents[1]
 @pytest.fixture
 def load_script(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], ModuleType]:
     def load(filename: str) -> ModuleType:
-        path = ROOT / "scripts" / filename
+        path = ROOT / "experiments" / filename
         name = path.stem if path.stem == "_seg_sweep_common" else f"test_{path.stem}"
         spec = importlib.util.spec_from_file_location(name, path)
         assert spec is not None
