@@ -11,6 +11,7 @@ from torchgeo_bench.config.schema import (
     KnnDevice,
     Methods,
     ModelConfig,
+    OutputPath,
     SchemaVersion,
     StrictModel,
     default_methods,
@@ -29,16 +30,8 @@ class CoordRuntimeConfig(StrictModel):
 class CoordOutputConfig(StrictModel):
     """Coordinate result CSV and resume settings."""
 
-    file: StrictStr = "results/coordbench_results.csv"
+    file: OutputPath = "results/coordbench_results.csv"
     resume: StrictBool = False
-
-    @field_validator("file")
-    @classmethod
-    def validate_file(cls, value: str) -> str:
-        """Require a non-blank result path."""
-        if not value.strip():
-            raise ValueError("output.file must not be blank")
-        return value
 
 
 class CoordEvaluationConfig(StrictModel):

@@ -9,6 +9,7 @@ from .schema import (
     ClassificationConfig,
     InputConfig,
     ModelConfig,
+    OutputPath,
     RuntimeConfig,
     SchemaVersion,
     SegmentationConfig,
@@ -20,19 +21,11 @@ from .schema import (
 class OutputConfig(StrictModel):
     """Result storage settings."""
 
-    directory: StrictStr = "results/models"
-    file: StrictStr | None = None
+    directory: OutputPath = "results/models"
+    file: OutputPath | None = None
     resume: StrictBool = False
-    profile_directory: StrictStr = "results/profiles"
-    intrinsic_dim_directory: StrictStr = "results/intrinsic_dim"
-
-    @field_validator("directory", "file", "profile_directory", "intrinsic_dim_directory")
-    @classmethod
-    def validate_paths(cls, value: str | None) -> str | None:
-        """Reject blank paths while allowing a null optional file."""
-        if value is not None and not value.strip():
-            raise ValueError("paths must not be blank")
-        return value
+    profile_directory: OutputPath = "results/profiles"
+    intrinsic_dim_directory: OutputPath = "results/intrinsic_dim"
 
 
 class CPUThroughputConfig(StrictModel):

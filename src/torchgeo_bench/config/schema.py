@@ -108,11 +108,19 @@ def _check_schema_version(value: object) -> object:
     return value
 
 
+def _check_output_path(value: str) -> str:
+    """Reject blank output paths without rewriting valid strings."""
+    if not value.strip():
+        raise ValueError("output path must not be blank")
+    return value
+
+
 type Method = Literal["knn", "linear"]
 type Device = Annotated[StrictStr, AfterValidator(_check_device)]
 type KnnDevice = Annotated[StrictStr, AfterValidator(_check_knn_device)]
 type Methods = Annotated[list[Method], AfterValidator(_check_methods)]
 type SchemaVersion = Annotated[Literal[1], BeforeValidator(_check_schema_version)]
+type OutputPath = Annotated[StrictStr, AfterValidator(_check_output_path)]
 
 
 def default_methods() -> list[Method]:

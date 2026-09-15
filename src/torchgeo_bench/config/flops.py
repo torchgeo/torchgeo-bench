@@ -9,6 +9,7 @@ from .presets import ModelPreset, load_model_preset, merge_settings
 from .schema import (
     Device,
     ModelConfig,
+    OutputPath,
     SchemaVersion,
     SegmentationConfig,
     StrictModel,
@@ -107,16 +108,8 @@ class FlopsTimingConfig(StrictModel):
 class FlopsOutputConfig(StrictModel):
     """Append-only CSV with the established per-cell resume keys."""
 
-    file: StrictStr = "results/compute_cost.csv"
+    file: OutputPath = "results/compute_cost.csv"
     resume: StrictBool = True
-
-    @field_validator("file")
-    @classmethod
-    def validate_file(cls, value: str) -> str:
-        """Reject blank output paths."""
-        if not value.strip():
-            raise ValueError("output.file must not be blank")
-        return value
 
 
 class FlopsConfig(StrictModel):
