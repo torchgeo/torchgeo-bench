@@ -17,7 +17,7 @@ from tests.support.runner import (
     _synthetic_loaders,
 )
 from torchgeo_bench.config.presets import ModelPreset, resolve_run_config
-from torchgeo_bench.config.schema import validate_run_config
+from torchgeo_bench.config.run import validate_run_config
 from torchgeo_bench.main import LinearProbeDivergedError, main
 
 
@@ -196,7 +196,7 @@ def test_device_labels_preserve_existing_hashes_and_resume(
     expected_hash: str,
     entrypoint: str,
 ) -> None:
-    from torchgeo_bench.commands._image_runtime import run
+    from torchgeo_bench.commands._run_runtime import run
 
     cfg = validate_run_config(
         {
