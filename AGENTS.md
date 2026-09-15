@@ -341,7 +341,3 @@ Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everythin
 3. **Tests need data**: Tests skip if `data/classification_v1.0_wds` / `data/geobenchv2` / `data/eurosat` aren't on disk.
 4. **Model reinitialization**: Models are reinitialized per-dataset to handle varying input channels.
 5. **V1 vs V2 datasets**: V1 uses `m-` prefix, V2 uses no prefix.
-
-## Copilot/Cursor Instructions
-
-`.github/copilot-instructions.md` covers the same ground in more depth (source layout, build/test/lint, architecture notes, conventions) — read it directly for anything not covered here rather than relying on a summary.
