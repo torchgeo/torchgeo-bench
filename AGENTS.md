@@ -17,7 +17,7 @@ Guidelines for AI coding agents working in the torchgeo-bench repository.
 src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
   ├── cli.py               # Unified CLI: run/models/datasets/download/profile/flops/coord
   ├── main.py              # Benchmark runner (classification + segmentation)
-  ├── config/             # Python schemas, preset resolution, and catalog discovery
+  ├── config/              # Python schemas, preset resolution, and catalog discovery
   ├── coordbench/          # Location encoders, typed config, probes, and runner
   ├── resume.py            # config_hash-based resume/skip logic
   ├── results.py            # EvaluationResult schema + atomic per-model CSV writes
@@ -29,14 +29,16 @@ src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
   ├── segmentation_probe.py# Hook-based segmentation probe
   ├── conf/                # Config YAMLs (packaged inside the source tree)
   └── models/              # Model implementations (interface.py, timm.py, torchgeo_models.py, etc.)
-data/                      # Datasets always live here (relative to CWD)
+data/                      # Datasets always live here (relative to CWD, untracked)
   ├── classification_v1.0_wds/ # GeoBench V1 JSON-metadata shards
   ├── classification_v1.0/ # Custom V1 HDF5 with JSON metadata
   ├── geobenchv2/          # GeoBench V2
   └── eurosat/             # torchgeo EuroSAT
-experiments/               # Experiment runners, analysis scripts, SLURM jobs
-  ├── scripts/             # Analysis + benchmark scripts (with a slurm/ subdir)
-  └── slurm/               # Standalone SLURM batch files
+docs/                      # Documentation sources, including runnable examples/
+experiments/               # Experiment runners plus an analysis scripts/ subdirectory
+projects/                  # Standalone sub-projects (currently cleanlab)
+results/                   # Benchmark result CSVs
+scripts/                   # Maintenance, analysis, and study scripts
 tests/                     # Test suite (pytest)
 pyproject.toml             # Project config, dependencies, tool settings
 ```
@@ -117,7 +119,13 @@ Only optional real-data tests skip for missing datasets. V1 slow tests use the J
 ruff check .           # Check for lint errors
 ruff check . --fix     # Auto-fix lint errors
 ruff format .          # Format code
+uv run pyrefly check   # Type check
+pre-commit run -a      # Everything CI runs (what `make lint` invokes)
 ```
+
+Pre-commit also runs a local `uv-lock` hook, so editing `pyproject.toml` without re-locking fails CI. Run `uv lock` (or `pre-commit run -a`) after any dependency change.
+
+A second local hook, `explicit-except`, rejects any `except` clause that does not carry a `# allow-except: <reason>` comment. This is the mechanism behind the "no bare-`Exception` catches" rule below — when a recovery path is genuinely correct, annotate it, for example `except PackageNotFoundError:  # allow-except: source-only imports before package installation`.
 
 ### Downloading Datasets
 
@@ -192,9 +200,9 @@ All datasets are loaded from `./data/<canonical-subdir>` relative to the current
 `burn_scars`, `caffe`, `cloudsen12`, `dynamic_earthnet`, `flair2`, `fotw`, `kuro_siwo`, `pastis`, `spacenet2`, `spacenet7`
 
 ### torchgeo template
-`eurosat` (loads via `torchgeo.datasets.EuroSAT`)
+`eurosat` and `eurosat-spatial` (load via `torchgeo.datasets.EuroSAT`), and `resisc45`
 
-**Note:** V1 datasets use the `m-` prefix (e.g., `m-eurosat`), V2 datasets use no prefix.
+**Note:** V1 datasets use the `m-` prefix (e.g., `m-eurosat`), V2 datasets use no prefix. `torchgeo-bench datasets` prints the registry, which is the authoritative list.
 
 ## Code Style Guidelines
 
@@ -306,11 +314,16 @@ Implement `_forward_patch_features`, not the public `forward_patch_features`: th
 
 ## Ruff Configuration
 
-From `pyproject.toml`:
-- **Line length:** 100 characters
+`pyproject.toml` is authoritative; check it before assuming a rule is off.
+
+- **Line length:** 100 characters. `E501` is ignored because `ruff format` handles wrapping, and `W505` caps docstring and comment length at 100.
 - **Target:** Python 3.12
-- **Enabled rules:** E, W, F, I (isort), B (bugbear), C4, UP, ARG, SIM
-- **Ignored:** E501 (line too long), B008 (function calls in defaults), B905 (zip strict)
+- **Enabled rules:** `A, ARG, B, BLE001, C4, C901, D, E, ERA, F, FBT001, FBT002, G, I, LOG, NPY, PERF, PGH004, PIE, PLR0911, PLR0912, PLR0913, PLR0915, PLR5501, PT, RET505, RET506, RET507, RET508, RUF, SIM, T201, TID251, TRY, UP, W, W505`
+- **Ignored:** `B008, D104, D105, D107, E501, SIM108, SIM116, TRY003`
+- **Docstrings:** `D` (pydocstyle) is enabled with `convention = "google"`, so the docstring style below is enforced, not merely encouraged.
+- **Per-file ignores:** `tests/**` drops `ARG` and `D`; `experiments/scripts/**` and `projects/cleanlab/**` drop `D`; `cli.py` and `commands/**` drop `T201` because CLI payloads go to stdout.
+- **Banned imports (`TID251`):** `from __future__ import annotations` and `contextlib.suppress`.
+- **Complexity caps:** max-complexity 10, max-args 5, max-branches 12, max-returns 6, max-statements 50.
 
 ## Testing Patterns
 
@@ -330,7 +343,7 @@ class TestGeoBenchDatasetBasics:
 
 ## Key Dependencies
 
-Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision>=0.15`, `numpy>=1.24`, `scikit-learn>=1.3`, `timm>=0.9`, `torchgeo>=0.9`, `torchmetrics>=1.4`, `pydantic>=2`, `pyyaml>=6`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform), `huggingface-hub>=0.20`, `geobenchv2>=0.9`, `pandas>=2`, `pyarrow>=14`, `safetensors>=0.4`, `filelock>=3.12`, `rich>=13`.
+Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision>=0.15`, `numpy>=1.24`, `scikit-learn>=1.3`, `timm>=0.9`, `torchgeo>=0.10`, `torchmetrics>=1.4`, `pydantic>=2`, `pyyaml>=6`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform), `huggingface-hub>=0.20`, `geobenchv2>=0.9`, `pandas>=2`, `pyarrow>=14`, `safetensors>=0.4`, `filelock>=3.12`, `lazy-loader>=0.4`, `tqdm>=4.66`.
 
 Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everything): `coordbench`, `dev`, `docs`, `id` (intrinsic-dimension estimators), `olmoearth`, `sam3`, `terratorch`. Model wrappers behind an extra (OlmoEarth, SAM3, terratorch-backed models) import that dependency lazily — don't add a top-level import for one at module scope.
 
