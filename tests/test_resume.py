@@ -1,10 +1,20 @@
-"""Regression tests for resume hashing."""
+"""Regression tests for resume hashing and metric completeness."""
 
+from pathlib import Path
+
+import pandas as pd
 import pytest
 
-from torchgeo_bench.config_schema import RunConfig
-from torchgeo_bench.presets import merge_settings, resolve_run_config
-from torchgeo_bench.resume import resume_config_hash
+from tests.support.runner import _resume_row
+from torchgeo_bench.config.presets import merge_settings, resolve_run_config
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.resume import (
+    ResumeState,
+    load_completed,
+    plan_dataset_run,
+    resume_config_hash,
+)
 
 
 def _cfg(**sections) -> RunConfig:
@@ -18,18 +28,18 @@ def _hash(config: RunConfig, dataset: str = "m-eurosat") -> str:
     return resume_config_hash(resolved, preset)
 
 
-def test_config_hash_ignores_profile_toggle() -> None:
-    assert _hash(_cfg()) == _hash(
-        _cfg(profile={"enabled": True, "cpu_throughput": {"enabled": True}})
-    )
-
-
-def test_config_hash_ignores_intrinsic_dim_toggle() -> None:
-    assert _hash(_cfg()) == _hash(_cfg(intrinsic_dim={"enabled": True}))
-
-
-def test_dataset_selection_does_not_change_hash() -> None:
-    assert _hash(_cfg()) == _hash(_cfg(datasets=["m-forestnet"]))
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"profile": {"enabled": True, "cpu_throughput": {"enabled": True}}},
+        {"intrinsic_dim": {"enabled": True}},
+        {"datasets": ["m-forestnet"]},
+        {"output": {"resume": True}},
+    ],
+    ids=["profile-pass", "intrinsic-dim-pass", "dataset-selection", "resume-toggle"],
+)
+def test_config_hash_ignores_run_selection_and_additive_passes(overrides: dict) -> None:
+    assert _hash(_cfg()) == _hash(_cfg(**overrides))
 
 
 def test_config_hash_ignores_output_paths_and_method_selection() -> None:
@@ -53,6 +63,7 @@ def test_config_hash_ignores_output_paths_and_method_selection() -> None:
         {"classification": {"knn_k": 7}},
         {"classification": {"knn_device": "cpu"}},
         {"classification": {"linear": {"c_log10_start": -5.0}}},
+        {"classification": {"linear": {"refit_train_val": False}}},
         {"classification": {"calibration": {"n_bins_linear": 10}}},
         {"classification": {"bootstrap_samples": 100}},
         {"segmentation": {"head": "linear"}},
@@ -76,3 +87,63 @@ def test_config_hash_includes_resolved_model_target_and_kwargs() -> None:
 def test_config_hash_reflects_dataset_resolved_preset_overrides() -> None:
     config = _cfg(model={"name": "torchgeo/scalemae_large_fmow"})
     assert _hash(config, "m-eurosat") != _hash(config, "forestnet")
+
+
+def test_resume_keys_require_the_requested_metric(tmp_path: Path) -> None:
+    path = tmp_path / "results.csv"
+    pd.DataFrame(
+        [{"dataset": "m-eurosat", "method": "intrinsic_dim", "metric_name": "id_twonn_train"}]
+    ).to_csv(path, index=False)
+    columns = ("dataset", "method")
+    key = ("m-eurosat", "intrinsic_dim")
+    completed, metrics = load_completed(str(path), columns)
+    assert completed == {key}
+    assert metrics["id_twonn_train"] == {key}
+    assert metrics.get("id_mle_train", set()) == set()
+
+
+@pytest.mark.parametrize("cpu_enabled", [False, True])
+def test_profile_resume_requires_every_enabled_metric(tmp_path: Path, *, cpu_enabled: bool) -> None:
+    config, _ = resolve_run_config(
+        _cfg(
+            output={"resume": True},
+            profile={"enabled": True, "cpu_throughput": {"enabled": cpu_enabled}},
+        ),
+        "m-eurosat",
+    )
+    expected = {"throughput_samples_per_sec", "latency_ms_per_batch_p50", "params_m"}
+    if cpu_enabled:
+        expected |= {"throughput_samples_per_sec_cpu", "latency_ms_per_batch_p50_cpu"}
+    path = tmp_path / "profile.csv"
+    metadata = _resume_row(config, method="profile", metric_name="params_m")
+    rows = [_resume_row(config, method="profile", metric_name=name) for name in sorted(expected)]
+    pd.DataFrame(rows).to_csv(path, index=False)
+    completed = ResumeState(*load_completed(str(path)))
+    dataset = get_bench_dataset_class("m-eurosat")
+    assert plan_dataset_run(config, dataset, metadata, completed).skip_profile
+    for name in expected:
+        partial = ResumeState(
+            completed.completed_runs,
+            {
+                metric: keys
+                for metric, keys in completed.completed_metrics.items()
+                if metric != name
+            },
+        )
+        assert not plan_dataset_run(config, dataset, metadata, partial).skip_profile
+
+
+def test_load_completed_canonicalizes_csv_numbers_and_legacy_columns(tmp_path: Path) -> None:
+    path = tmp_path / "results.csv"
+    path.write_text(
+        "dataset,image_size,metric_name\n"
+        "m-eurosat,224.0,accuracy\n"
+        "m-eurosat,224,accuracy\n"
+        "m-forestnet,,micro_mAP\n"
+    )
+    completed, metrics = load_completed(str(path), ("dataset", "image_size", "config_hash"))
+    assert completed == {("m-eurosat", "224", ""), ("m-forestnet", "", "")}
+    assert metrics == {
+        "accuracy": {("m-eurosat", "224", "")},
+        "micro_mAP": {("m-forestnet", "", "")},
+    }

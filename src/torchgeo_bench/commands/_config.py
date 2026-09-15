@@ -8,10 +8,23 @@ from typing import Any, NoReturn
 
 import yaml
 
-from ..config_schema import _UniqueKeyLoader, load_yaml
-from ..presets import merge_settings
+from ..config.presets import merge_settings
+from ..config.schema import _UniqueKeyLoader, load_yaml
 
 EXPECTED_CONFIG_ERRORS = (OSError, ValueError, yaml.YAMLError)
+
+
+def parse_image_size(value: str) -> int | None:
+    """Parse a positive image size or case-insensitive ``none`` to disable resizing."""
+    if value.lower() == "none":
+        return None
+    try:
+        size = int(value)
+    except ValueError as error:  # allow-except: report invalid sizes as argparse input errors
+        raise argparse.ArgumentTypeError("image-size must be a positive integer or none") from error
+    if size <= 0:
+        raise argparse.ArgumentTypeError("image-size must be a positive integer or none")
+    return size
 
 
 @dataclass(frozen=True)

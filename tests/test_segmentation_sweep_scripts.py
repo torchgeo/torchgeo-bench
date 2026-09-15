@@ -4,35 +4,40 @@ import importlib.util
 import logging
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_run_config
-from torchgeo_bench.presets import resolve_run_config
+from torchgeo_bench.config.presets import resolve_run_config
+from torchgeo_bench.config.run import RunConfig, load_run_config
+from torchgeo_bench.config.schema import ModelConfig
 
 ROOT = Path(__file__).parents[1]
 
 
-def _load_script(filename: str) -> ModuleType:
-    """Add ``scripts/`` so runners can import the sibling ``_seg_sweep_common`` module."""
-    scripts_dir = str(ROOT / "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    path = ROOT / "scripts" / filename
-    module_name = f"test_{path.stem}"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+@pytest.fixture
+def load_script(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], ModuleType]:
+    def load(filename: str) -> ModuleType:
+        path = ROOT / "scripts" / filename
+        name = path.stem if path.stem == "_seg_sweep_common" else f"test_{path.stem}"
+        spec = importlib.util.spec_from_file_location(name, path)
+        assert spec is not None
+        assert spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, name, module)
+        spec.loader.exec_module(module)
+        return module
+
+    load("_seg_sweep_common.py")
+    return load
 
 
-def test_representative_sweep_passes_seed_and_rejects_unknown_metadata(tmp_path: Path) -> None:
-    sweep = _load_script("run_segmentation_representative_sweep.py")
+def test_representative_sweep_passes_seed_and_rejects_unknown_metadata(
+    tmp_path: Path, load_script: Callable[[str], ModuleType]
+) -> None:
+    sweep = load_script("run_segmentation_representative_sweep.py")
     config = sweep.SweepConfig(
         root=ROOT,
         cli=tmp_path / "torchgeo-bench",
@@ -74,8 +79,10 @@ def test_representative_sweep_passes_seed_and_rejects_unknown_metadata(tmp_path:
         runner._validate_metadata()
 
 
-def test_protocol_study_passes_configured_seed(tmp_path: Path) -> None:
-    study = _load_script("run_segmentation_protocol_study.py")
+def test_protocol_study_passes_configured_seed(
+    tmp_path: Path, load_script: Callable[[str], ModuleType]
+) -> None:
+    study = load_script("run_segmentation_protocol_study.py")
     config = study.StudyConfig(
         root=ROOT,
         cli=tmp_path / "torchgeo-bench",
@@ -110,9 +117,11 @@ def test_protocol_study_passes_configured_seed(tmp_path: Path) -> None:
 
 
 def test_queue_dry_run_logs_without_launching_jobs(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    load_script: Callable[[str], ModuleType],
 ) -> None:
-    runner = _load_script("../experiments/_runner.py")
+    runner = load_script("../experiments/_runner.py")
 
     def fail_if_called(*_args: object, **_kwargs: object) -> None:
         pytest.fail("A dry run must not launch a subprocess")
@@ -138,9 +147,12 @@ def test_queue_dry_run_logs_without_launching_jobs(
 
 @pytest.mark.parametrize("returncode", [0, 1])
 def test_queue_reports_job_result_at_the_expected_log_level(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, returncode: int
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    load_script: Callable[[str], ModuleType],
+    returncode: int,
 ) -> None:
-    runner = _load_script("../experiments/_runner.py")
+    runner = load_script("../experiments/_runner.py")
     config_paths: list[Path] = []
     settings = RunConfig(
         model=ModelConfig(
@@ -186,7 +198,8 @@ def test_queue_logging_uses_stderr_by_default() -> None:
             sys.executable,
             "-c",
             "from experiments._runner import Job, run_jobs; "
-            "from torchgeo_bench.config_schema import ModelConfig, RunConfig; "
+            "from torchgeo_bench.config.schema import ModelConfig; "
+            "from torchgeo_bench.config.run import RunConfig; "
             "config = RunConfig(model=ModelConfig(name='rcf'), datasets=['m-eurosat']); "
             "run_jobs([Job('rcf', config)], [0], output='results.csv', dry_run=True)",
         ],
@@ -194,6 +207,7 @@ def test_queue_logging_uses_stderr_by_default() -> None:
         capture_output=True,
         text=True,
         check=True,
+        timeout=30,
     )
     assert result.stdout == ""
     assert "Dry run complete" in result.stderr

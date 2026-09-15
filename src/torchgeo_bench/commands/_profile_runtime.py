@@ -17,25 +17,11 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
+from ..config.presets import NORMALIZATIONS, ModelPreset, build_model
+from ..config.profile import ProfileConfig, resolve_profile_config
 from ..datasets import BandSpec, get_bench_dataset_class, get_datasets
+from ..devices import resolve_device
 from ..model_profile import ProfileResult, profile_inference
-from ..presets import NORMALIZATIONS, ModelPreset, build_model
-from ..profile_config import ProfileConfig, resolve_profile_config
-
-
-def _resolve_device(requested: str) -> torch.device:
-    """Reject unavailable explicit devices instead of changing the measurement."""
-    if requested == "auto":
-        requested = "cuda" if torch.cuda.is_available() else "cpu"
-    device = torch.device(requested)
-    if device.type == "cuda":
-        if not torch.cuda.is_available():
-            raise ValueError(f"requested {requested!r}, but CUDA is unavailable")
-        index = torch.cuda.current_device() if device.index is None else device.index
-        if index >= torch.cuda.device_count():
-            raise ValueError(f"requested CUDA index {index}, but it is unavailable")
-        device = torch.device("cuda", index)
-    return device
 
 
 def _load_batch(config: ProfileConfig) -> tuple[Dataset, torch.Tensor, list[BandSpec]]:
@@ -43,12 +29,7 @@ def _load_batch(config: ProfileConfig) -> tuple[Dataset, torch.Tensor, list[Band
     inputs = config.input
     dataset = get_bench_dataset_class(config.dataset)()
     band_names = inputs.bands
-    if band_names == "rgb":
-        selected = dataset.select_band_specs(dataset.rgb_bands)
-    elif band_names == "all":
-        selected = dataset.select_band_specs(None)
-    else:
-        selected = dataset.select_band_specs(band_names)
+    selected = dataset.resolve_band_specs(band_names)
     train_dataset, train_loader, _, _ = get_datasets(
         dataset_name=config.dataset,
         batch_size=config.runtime.batch_size,
@@ -153,7 +134,7 @@ def run(config: ProfileConfig) -> None:
     """Load one real dataset batch, measure it, and write one JSON record."""
     config, preset = resolve_profile_config(config)
     try:
-        device = _resolve_device(config.runtime.device)
+        device = resolve_device(config.runtime.device)
     except ValueError as error:  # allow-except: report unavailable or invalid requested devices
         raise SystemExit(f"error: {error}") from error
     torch.manual_seed(config.runtime.seed)

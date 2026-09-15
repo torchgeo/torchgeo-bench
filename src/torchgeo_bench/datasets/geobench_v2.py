@@ -145,6 +145,9 @@ class _V2Dataset(BenchDataset):
     #: Override upstream loader defaults here, including ``return_stacked_image``.
     upstream_kwargs: ClassVar[dict[str, object]] = {}
 
+    #: Whether the upstream loader accepts a time axis (``num_time_steps``).
+    multi_temporal: ClassVar[bool] = False
+
     @classmethod
     def data_root(cls) -> Path:
         return V2_ROOT
@@ -173,10 +176,12 @@ class _V2Dataset(BenchDataset):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
+        time_steps: int | None = None,
     ) -> Dataset:
         """Return raw sensor values for a split.
 
         Use ``nn.Identity`` upstream; ``BenchModel`` owns per-channel normalization.
+        ``time_steps`` requests a time series and needs :attr:`multi_temporal`.
         """
         del partition
         band_order = self.build_band_order(bands)
@@ -188,6 +193,11 @@ class _V2Dataset(BenchDataset):
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True
         kwargs.update(self.upstream_kwargs)
+        if time_steps is not None:
+            if not self.multi_temporal:
+                raise ValueError(f"{self.name} is not multi-temporal; drop time_steps.")
+            kwargs["num_time_steps"] = int(time_steps)
+            kwargs["temporal_output_format"] = "TCHW"
 
         return GeoBenchv2(
             root=self.data_root(),

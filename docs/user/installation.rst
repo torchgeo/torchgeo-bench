@@ -28,11 +28,12 @@ development dependencies:
 The install pulls in ``faissknn[cuda]`` (GPU FAISS) on Linux x86_64 and
 ``faissknn[cpu]`` everywhere else — no extra needed.
 
-The ``torchgeo-bench`` console script is then available via ``uv run``:
+The ``torchgeo-bench`` console script is then available via ``uv run``. Use ``--help`` to list commands or ``--version`` to print the installed version:
 
 .. code-block:: console
 
    $ uv run torchgeo-bench --help
+   $ uv run torchgeo-bench --version
 
 pip
 ---

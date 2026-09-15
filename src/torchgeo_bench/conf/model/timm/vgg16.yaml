@@ -4,7 +4,6 @@ kwargs:
   model_name: vgg16
   pretrained: true
   global_pool: avg
-  seed: null
 segmentation:
   layers:
     - features.30

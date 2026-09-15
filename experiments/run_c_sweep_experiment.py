@@ -22,11 +22,12 @@ from _runner import add_devices_argument, default_output
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
-from torchgeo_bench.config_schema import ModelConfig, RunConfig, RuntimeConfig
+from torchgeo_bench.config.presets import build_model, resolve_run_config
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import ModelConfig, RuntimeConfig
 from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.linear import LogisticRegression
-from torchgeo_bench.presets import build_model, resolve_run_config
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

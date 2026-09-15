@@ -10,6 +10,7 @@ import sys
 from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -21,9 +22,9 @@ from torchgeo_bench import commands
 from torchgeo_bench.commands import _profile_runtime
 from torchgeo_bench.commands._profile import profile
 from torchgeo_bench.commands.profile_arguments import add_profile_arguments, load_profile_config
-from torchgeo_bench.config_schema import ModelConfig
-from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset
-from torchgeo_bench.profile_config import ProfileConfig
+from torchgeo_bench.config.presets import NORMALIZATIONS, ModelPreset
+from torchgeo_bench.config.profile import ProfileConfig
+from torchgeo_bench.config.schema import ModelConfig
 
 
 class _Loader:
@@ -394,19 +395,82 @@ def test_profile_rejects_unavailable_cuda_before_loading_data(
 ) -> None:
     profile_config.runtime.device = "cuda:0"
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    with pytest.raises(SystemExit, match="CUDA is unavailable"):
+    with (
+        mock.patch.object(_profile_runtime, "_load_batch") as load,
+        mock.patch.object(_profile_runtime, "_build_model") as build,
+        pytest.raises(SystemExit, match=r"error: .*CUDA is unavailable"),
+    ):
         _profile_runtime.run(profile_config)
-    assert _profile_runtime._resolve_device("auto") == torch.device("cpu")
+    load.assert_not_called()
+    build.assert_not_called()
 
 
-def test_profile_validates_cuda_indices(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_profile_validates_cuda_indices(
+    profile_config: ProfileConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    profile_config.runtime.device = "cuda:2"
+    with (
+        mock.patch.object(_profile_runtime, "_load_batch") as load,
+        pytest.raises(SystemExit, match=r"error: .*CUDA index 2"),
+    ):
+        _profile_runtime.run(profile_config)
+    load.assert_not_called()
+
+
+def test_profile_auto_uses_cpu_without_cuda(
+    profile_config: ProfileConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
+    monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: nn.Identity())
+    profile_config.runtime.device = "auto"
+    _profile_runtime.run(profile_config)
+    record = json.loads(capsys.readouterr().out)
+    assert record["device"] == record["profile"]["device"] == "cpu"
+    assert record["profile"]["throughput_samples_per_sec"] > 0
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"), [("auto", "cuda:1"), ("cuda", "cuda:1"), ("cuda:0", "cuda:0")]
+)
+def test_profile_records_resolved_cuda_index(
+    profile_config: ProfileConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    requested: str,
+    expected: str,
+) -> None:
+    device = torch.device(expected)
+    batch = mock.Mock(
+        spec=torch.Tensor, device=device, dtype=torch.float32, shape=(4, 3, 8, 8), ndim=4
+    )
+    batch.to.return_value = batch
+    batch.detach.return_value = torch.ones(4, 3, 8, 8)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
-    assert _profile_runtime._resolve_device("auto") == torch.device("cuda:1")
-    assert _profile_runtime._resolve_device("cuda:0") == torch.device("cuda:0")
-    with pytest.raises(ValueError, match="CUDA index 2"):
-        _profile_runtime._resolve_device("cuda:2")
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "Mock GPU")
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device: None)
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: 1024**3)
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: 2 * 1024**3)
+    monkeypatch.setattr(
+        _profile_runtime, "get_datasets", lambda **_: (None, _Loader(batch), None, None)
+    )
+    monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: nn.Identity())
+    profile_config.runtime.device = requested
+    with mock.patch.object(torch.cuda, "synchronize") as synchronize:
+        _profile_runtime.run(profile_config)
+    record = json.loads(capsys.readouterr().out)
+    assert record["device"] == record["profile"]["device"] == expected
+    assert record["device_index"] == device.index
+    assert record["profile"]["throughput_samples_per_sec"] > 0
+    assert record["profile"]["peak_gpu_mem_gb"] == 1
+    batch.to.assert_called_once_with(device)
+    assert synchronize.call_args_list == [mock.call(device), mock.call(device)]
 
 
 def test_profile_propagates_model_failures(
@@ -447,3 +511,38 @@ def test_profile_reports_validation_errors_without_loading_runtime(
         profile(profile_args)
     assert error.value.code == 2
     assert "batch_size" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "invalid_request",
+    [
+        ("batch_size", 0, "batch_size"),
+        ("warmup", -1, "warmup"),
+        ("measurements", 0, "measurements"),
+        ("seed", -1, "seed"),
+        ("image_size", 0, "image_size"),
+        ("model", "missing-model", "Unknown model config"),
+        ("dataset", "missing-dataset", "unknown dataset"),
+        ("bands", "red,,blue", "bands must contain non-empty names"),
+    ],
+)
+def test_invalid_profile_request_fails_before_loading(
+    profile_args: argparse.Namespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    invalid_request: tuple[str, object, str],
+) -> None:
+    field, value, message = invalid_request
+    profile_args.model = "rcf"
+    profile_args.dataset = "m-eurosat"
+    setattr(profile_args, field, value)
+
+    def unexpected_load(**_kwargs: object) -> None:
+        pytest.fail("Invalid profile request reached dataset loading")
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(_profile_runtime, "get_datasets", unexpected_load)
+    with pytest.raises(SystemExit) as error:
+        profile(profile_args)
+    assert error.value.code == 2
+    assert message in capsys.readouterr().err

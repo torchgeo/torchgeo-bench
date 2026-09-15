@@ -33,6 +33,7 @@ docs-clean:
 
 clean:
 	rm -rf htmlcov .pytest_cache .coverage
+	rm -f coverage.xml
 
 help:
 	@echo "Available targets:"
@@ -43,5 +44,5 @@ help:
 	@echo "  format  - Format code and auto-fix imports with ruff"
 	@echo "  docs       - Build HTML documentation into docs/_build/html"
 	@echo "  docs-clean - Remove the docs build directory"
-	@echo "  clean      - Remove generated files (htmlcov, .coverage, .pytest_cache)"
+	@echo "  clean      - Remove generated files (htmlcov, .coverage, coverage.xml, .pytest_cache)"
 	@echo "  help       - Show this help message"

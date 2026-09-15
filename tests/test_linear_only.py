@@ -9,15 +9,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from torchgeo_bench.main import main
-
-from .test_main_fast import (
+from tests.support.runner import (
     _chainable_model_mock,
     _compose_cfg,
     _hash_for,
     _resume_row,
     _synthetic_loaders,
 )
+from torchgeo_bench.main import main
 
 
 def _embeddings(kind: str) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -144,10 +143,10 @@ class BlockKNN(importlib.abc.MetaPathFinder):
             raise AssertionError(f'unselected backend imported: {fullname}')
 sys.meta_path.insert(0, BlockKNN())
 
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import dataset_metadata, run_dataset
 from torchgeo_bench.resume import ResumeState
-from tests.test_main_fast import _synthetic_loaders, _synthetic_embeddings, _chainable_model_mock
+from tests.support.runner import _synthetic_loaders, _synthetic_embeddings, _chainable_model_mock
 config = RunConfig.model_validate({
     'model': {'name': 'rcf'}, 'datasets': ['m-eurosat'],
     'runtime': {'device': 'cpu'},

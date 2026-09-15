@@ -18,7 +18,7 @@ import torch
 import yaml
 from filelock import FileLock, Timeout
 
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.config.run import RunConfig
 
 logger = logging.getLogger(__name__)
 

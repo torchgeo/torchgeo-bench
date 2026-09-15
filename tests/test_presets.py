@@ -6,8 +6,22 @@ import sys
 import pytest
 
 from torchgeo_bench.config import list_model_configs, model_config_path
-from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_yaml
-from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset, resolve_run_config
+from torchgeo_bench.config.presets import (
+    ModelPreset,
+    build_model,
+    load_model_preset,
+    resolve_run_config,
+)
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import ModelConfig, load_yaml
+from torchgeo_bench.models.torchgeo_models import TorchGeoScaleMAEBench
+
+
+@pytest.mark.parametrize("name", ["timm/resnet5", "RCF", "not-a-model", "../model/rcf"])
+def test_unknown_model_config_is_rejected_without_suggestions(name: str) -> None:
+    with pytest.raises(ValueError, match="Unknown model config") as error:
+        model_config_path(name)
+    assert str(error.value) == f"Unknown model config {name!r}."
 
 
 @pytest.mark.parametrize("name", list_model_configs())
@@ -70,8 +84,8 @@ def test_configuration_import_and_resolution_do_not_import_omegaconf() -> None:
     code = """
 import sys
 from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.config_schema import ModelConfig
-from torchgeo_bench.presets import load_model_preset
+from torchgeo_bench.config.schema import ModelConfig
+from torchgeo_bench.config.presets import load_model_preset
 for name in list_model_configs():
     load_model_preset(ModelConfig(name=name))
 assert not set(('omegaconf', 'torch', 'torchgeo', 'numpy', 'pandas')) & sys.modules.keys()
@@ -93,9 +107,12 @@ def test_scalemae_constructor_uses_resolved_dataset_grid(
     effective, preset = resolve_run_config(config, "m-eurosat")
     received = {}
 
-    def constructor(**kwargs: object) -> object:
-        received.update(kwargs)
-        return object()
+    class constructor:
+        wants_resolved_image_size = TorchGeoScaleMAEBench.wants_resolved_image_size
+
+        def __new__(cls, **kwargs: object) -> object:
+            received.update(kwargs)
+            return object()
 
     monkeypatch.setattr("torchgeo_bench.models.TorchGeoScaleMAEBench", constructor)
     build_model(preset, bands=[], normalization="identity")
@@ -106,7 +123,7 @@ def test_scalemae_constructor_uses_resolved_dataset_grid(
 def test_flops_scalemae_constructor_grid_follows_explicit_synthetic_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from torchgeo_bench.flops_config import FlopsConfig
+    from torchgeo_bench.config.flops import FlopsConfig
 
     config = FlopsConfig.model_validate(
         {
@@ -117,9 +134,12 @@ def test_flops_scalemae_constructor_grid_follows_explicit_synthetic_size(
     effective, preset = config.resolve()
     received = {}
 
-    def constructor(**kwargs: object) -> object:
-        received.update(kwargs)
-        return object()
+    class constructor:
+        wants_resolved_image_size = TorchGeoScaleMAEBench.wants_resolved_image_size
+
+        def __new__(cls, **kwargs: object) -> object:
+            received.update(kwargs)
+            return object()
 
     monkeypatch.setattr("torchgeo_bench.models.TorchGeoScaleMAEBench", constructor)
     build_model(preset, bands=[], normalization="identity")
@@ -168,7 +188,9 @@ def test_typed_preset_learning_rate_and_head_defaults_have_lower_precedence(monk
             "segmentation": {"learning_rate": 0.02, "head": "linear", "layers": ["backbone"]},
         }
     )
-    monkeypatch.setattr("torchgeo_bench.presets.load_model_preset", lambda *args, **kwargs: preset)
+    monkeypatch.setattr(
+        "torchgeo_bench.config.presets.load_model_preset", lambda *args, **kwargs: preset
+    )
     config = RunConfig.model_validate({"model": {"name": "custom"}, "datasets": ["caffe"]})
     effective, _ = resolve_run_config(config, "caffe")
     assert effective.segmentation.learning_rate == 0.02

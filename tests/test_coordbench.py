@@ -2,12 +2,15 @@
 
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import numpy as np
 import pandas as pd
 import pytest
 import torch
 
+from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
+from torchgeo_bench.config.presets import ModelPreset
 from torchgeo_bench.coordbench import (
     CoordBenchmark,
     SinCosLocationEncoder,
@@ -20,7 +23,8 @@ from torchgeo_bench.coordbench import (
 from torchgeo_bench.coordbench import datasets as cb_datasets
 from torchgeo_bench.coordbench.config import CoordConfig
 from torchgeo_bench.coordbench.run import _instantiate_encoder
-from torchgeo_bench.presets import ModelPreset
+
+pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 
 
 @pytest.fixture
@@ -35,16 +39,106 @@ def points(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
     return lon, lat
 
 
-def test_sincos_encode_shape(points: tuple[np.ndarray, np.ndarray]) -> None:
+@pytest.mark.parametrize("batch_size", [1, 137, 8192])
+def test_sincos_encode_preserves_coordinate_order_across_batches(
+    points: tuple[np.ndarray, np.ndarray], batch_size: int
+) -> None:
     lon, lat = points
-    feats = SinCosLocationEncoder(device="cpu").encode(lon, lat)
-    assert feats.shape == (len(lon), 4)
+    feats = SinCosLocationEncoder(device="cpu", batch_size=batch_size).encode(lon, lat)
     assert feats.dtype == np.float32
-    assert np.isfinite(feats).all()
+    lat_r, lon_r = np.deg2rad(lat), np.deg2rad(lon)
+    expected = np.column_stack([np.sin(lat_r), np.cos(lat_r), np.sin(lon_r), np.cos(lon_r)])
+    np.testing.assert_allclose(feats, expected, rtol=1e-6, atol=1e-7)
+
+
+@pytest.mark.parametrize(
+    ("device", "expected"),
+    [("auto", "cuda:1"), ("cuda", "cuda:1"), ("cuda:0", "cuda:0"), ("meta", "meta")],
+)
+def test_encoder_resolves_devices_without_changing_features(
+    points: tuple[np.ndarray, np.ndarray],
+    monkeypatch: pytest.MonkeyPatch,
+    device: str,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    encoder = SinCosLocationEncoder(device=device)
+    assert encoder.device == expected
+    np.testing.assert_array_equal(encoder.encode(*points), SinCosLocationEncoder().encode(*points))
+
+
+@pytest.mark.parametrize(
+    ("device", "available", "message"),
+    [
+        ("cuda", False, "CUDA is unavailable"),
+        ("cuda:0", False, "CUDA is unavailable"),
+        ("cuda:2", True, "CUDA index 2"),
+        ("cuda:-1", True, "Invalid device request"),
+    ],
+)
+def test_encoder_and_linear_probe_reject_invalid_devices(
+    monkeypatch: pytest.MonkeyPatch, device: str, *, available: bool, message: str
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    with pytest.raises(ValueError, match=message):
+        SinCosLocationEncoder(device=device)
+    with (
+        mock.patch.object(torch, "as_tensor") as allocate,
+        pytest.raises(ValueError, match=message),
+    ):
+        linear_probe_score(np.ones((10, 2)), np.arange(10), "regression", device=device)
+    allocate.assert_not_called()
+
+
+def test_coordinate_cpu_paths_do_not_query_cuda(
+    points: tuple[np.ndarray, np.ndarray], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unexpected_query() -> bool:
+        pytest.fail("CPU encoders and probes must not query CUDA")
+
+    monkeypatch.setattr(torch.cuda, "is_available", unexpected_query)
+    features = SinCosLocationEncoder().encode(*points)
+    score, _ = linear_probe_score(features, features[:, 0], "regression", alphas=(0.1,))
+    assert score > 0.99
+
+
+@pytest.mark.parametrize(("available", "expected"), [(False, "cpu"), (True, "cuda:1")])
+def test_coordinate_auto_probe_selects_device_and_preserves_solution(
+    points: tuple[np.ndarray, np.ndarray],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    available: bool,
+    expected: str,
+) -> None:
+    features = SinCosLocationEncoder().encode(*points)
+    expected_score = linear_probe_score(features, features[:, 0], "regression", alphas=(0.1,))
+    devices = []
+    as_tensor, arange = torch.as_tensor, torch.arange
+
+    def cpu_tensor(data: object, **kwargs: Any) -> torch.Tensor:
+        devices.append(str(kwargs.pop("device")))
+        return as_tensor(data, **kwargs)
+
+    def cpu_arange(*args: Any, **kwargs: Any) -> torch.Tensor:
+        devices.append(str(kwargs.pop("device")))
+        return arange(*args, **kwargs)
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(torch, "as_tensor", cpu_tensor)
+    monkeypatch.setattr(torch, "arange", cpu_arange)
+    score = linear_probe_score(features, features[:, 0], "regression", device="auto", alphas=(0.1,))
+    assert devices
+    assert set(devices) == {expected}
+    assert score == expected_score
 
 
 def test_documented_fourier_encoder_example(points: tuple[np.ndarray, np.ndarray]) -> None:
-    from examples.coordbench_location_encoder import FourierLocationEncoder
+    from docs.examples.coordbench_location_encoder import FourierLocationEncoder
 
     lon, lat = points
     feats = FourierLocationEncoder(num_frequencies=4).encode(lon, lat)
@@ -117,7 +211,7 @@ def _synthetic_benchmarks() -> list[CoordBenchmark]:
     return [reg, clf]
 
 
-def _coord_cfg(tmp_path, **coord_overrides) -> CoordConfig:
+def _coord_cfg(tmp_path: Path, **coord_overrides: object) -> CoordConfig:
     coord = {
         "methods": ["knn", "linear"],
         "split": "random",
@@ -136,7 +230,7 @@ def _coord_cfg(tmp_path, **coord_overrides) -> CoordConfig:
     )
 
 
-def test_run_coordbench_end_to_end(tmp_path, monkeypatch) -> None:
+def test_run_coordbench_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
     )
@@ -156,20 +250,27 @@ def test_run_coordbench_end_to_end(tmp_path, monkeypatch) -> None:
     assert (df.metric_value.abs() <= 1.5).all()
 
 
-def test_run_coordbench_resume_skips(tmp_path, monkeypatch) -> None:
+def test_run_coordbench_resume_skips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
     )
     cfg = _coord_cfg(tmp_path)
     run_coordbench(cfg)
-    n_first = len(pd.read_csv(cfg.output.file))
+    before = Path(cfg.output.file).read_bytes()
+
+    def unexpected_probe(*args: object, **kwargs: object) -> None:
+        pytest.fail("Completed coordinate probes must not be recomputed")
 
     cfg.output.resume = True
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", unexpected_probe)
+    monkeypatch.setattr("torchgeo_bench.coordbench.run.knn_probe_score", unexpected_probe)
     run_coordbench(cfg)
-    assert len(pd.read_csv(cfg.output.file)) == n_first
+    assert Path(cfg.output.file).read_bytes() == before
 
 
-def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> None:
+def test_run_coordbench_reports_official_test_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     bench = _synthetic_benchmarks()[0]
     test_mask = np.zeros(len(bench.lat), dtype=bool)
     test_mask[::3] = True
@@ -184,7 +285,7 @@ def test_run_coordbench_reports_official_test_count(tmp_path, monkeypatch) -> No
     assert set(df.n_test) == {int(test_mask.sum())}
 
 
-def test_load_benchmarks_selection(monkeypatch) -> None:
+def test_load_benchmarks_selection(monkeypatch: pytest.MonkeyPatch) -> None:
     # Use local tables instead of downloading Parquet files.
     tables = {
         "country": pd.DataFrame(
@@ -205,16 +306,15 @@ def test_load_benchmarks_selection(monkeypatch) -> None:
     single = load_benchmarks("worldclim-bio1")
     assert [b.name for b in single] == ["worldclim-bio1"]
 
-    assert "pdfm" in cb_datasets.list_families()
+    np.testing.assert_array_equal(single[0].tasks["bio1"], [10.0, 20.0])
 
 
-def test_mind_load_roundtrip(tmp_path) -> None:
+def test_mind_load_roundtrip(tmp_path: Path) -> None:
     from safetensors.torch import save_file
 
     from torchgeo_bench.coordbench.mind import ReSIRENLocationEncoder, load_mind
 
-    torch.manual_seed(0)
-    model = ReSIRENLocationEncoder(embed_dim=16, out_dim=8, depth=2)
+    model = ReSIRENLocationEncoder(embed_dim=16, out_dim=8, depth=2).eval()
     path = tmp_path / "m.safetensors"
     save_file(model.state_dict(), str(path))
 
@@ -224,15 +324,17 @@ def test_mind_load_roundtrip(tmp_path) -> None:
     assert not loaded.use_year  # A two-input checkpoint has coordinates but no year.
 
     latlon = torch.tensor([[37.77, -122.42], [51.51, -0.13]], dtype=torch.float32)
-    assert loaded(latlon, return_features=True).shape == (2, 16)
-    assert loaded(latlon).shape == (2, 8)
+    with torch.no_grad():
+        torch.testing.assert_close(
+            loaded(latlon, return_features=True), model(latlon, return_features=True)
+        )
+        torch.testing.assert_close(loaded(latlon), model(latlon))
 
 
-def test_mind_encoder_dim_slice(monkeypatch) -> None:
+def test_mind_encoder_dim_slice(monkeypatch: pytest.MonkeyPatch) -> None:
     from torchgeo_bench.coordbench import mind as mind_mod
     from torchgeo_bench.coordbench.models import MINDLocationEncoder
 
-    torch.manual_seed(0)
     model = mind_mod.ReSIRENLocationEncoder(embed_dim=32, out_dim=32, depth=2).eval()
     monkeypatch.setattr(mind_mod, "load_mind", lambda path, device="cpu": model)
     monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda *a, **k: "dummy")
@@ -241,6 +343,9 @@ def test_mind_encoder_dim_slice(monkeypatch) -> None:
     out = enc.encode(np.array([1.0, 2.0]), np.array([37.0, 51.0]))
     assert out.shape == (2, 8)  # MIND's training permits using a prefix of the 32 features.
     assert out.dtype == np.float32
+    with torch.no_grad():
+        expected = model(torch.tensor([[37.0, 1.0], [51.0, 2.0]]), return_features=True)
+    np.testing.assert_allclose(out, expected[:, :8].numpy())
 
 
 def test_family_index_matches_loaders() -> None:
@@ -248,6 +353,9 @@ def test_family_index_matches_loaders() -> None:
     assert set(cb_datasets.FAMILY_BENCHMARKS) == set(cb_datasets.FAMILY_LOADERS)
     all_names = cb_datasets.list_benchmarks()
     assert len(all_names) == len(set(all_names))
+    assert set(all_names) == {
+        name for family_names in cb_datasets.FAMILY_BENCHMARKS.values() for name in family_names
+    }
     assert "pdfm-conus27" in all_names
     assert sum(n.startswith("dm-") for n in all_names) == 15
 
@@ -382,8 +490,13 @@ def test_rejects_non_location_custom_target() -> None:
         _instantiate_encoder(preset, "cpu")
 
 
-def test_auto_device_resolves_on_cpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+@pytest.mark.parametrize(("available", "expected"), [(False, "cpu"), (True, "cuda:1")])
+def test_auto_device_resolves_for_encoder_and_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, available: bool, expected: str
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     monkeypatch.setattr(
         "torchgeo_bench.coordbench.run.load_benchmarks",
         lambda names: [_synthetic_benchmarks()[0]],
@@ -392,14 +505,64 @@ def test_auto_device_resolves_on_cpu(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     def linear(*args: Any, **kwargs: Any) -> tuple[float, list[float]]:
         devices.append(kwargs["device"])
-        return 0.5, [0.5]
+        return linear_probe_score(*args, **{**kwargs, "device": "cpu"})
 
     monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", linear)
     config = _coord_cfg(tmp_path)
     config.runtime.device = "auto"
-    run_coordbench(config)
-    assert devices == ["cpu"]
+    with mock.patch(
+        "torchgeo_bench.coordbench.run._instantiate_encoder", wraps=_instantiate_encoder
+    ) as build:
+        run_coordbench(config)
+    assert build.call_args.args[1] == expected
+    assert devices == [expected]
     assert config.runtime.device == "auto"
+    assert pd.read_csv(config.output.file)["metric_value"].iloc[0] > 0.9
+
+
+@pytest.mark.parametrize(
+    "device_case",
+    [("cuda", False, "CUDA is unavailable"), ("cuda:2", True, "CUDA index 2")],
+)
+@pytest.mark.parametrize("entrypoint", ["direct", "cli"])
+def test_coordinate_run_rejects_invalid_cuda_before_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint: str,
+    device_case: tuple[str, bool, str],
+) -> None:
+    from torchgeo_bench.cli import main
+
+    device, available, message = device_case
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    config = _coord_cfg(tmp_path)
+    config.runtime.device = device
+    with (
+        mock.patch("torchgeo_bench.coordbench.run.load_benchmarks") as data,
+        mock.patch("torchgeo_bench.coordbench.run.build_model") as build,
+    ):
+        if entrypoint == "direct":
+            with pytest.raises(ValueError, match=message):
+                run_coordbench(config)
+        else:
+            with pytest.raises(ValueError, match=message):
+                main(
+                    [
+                        "coord",
+                        "--model",
+                        "sincos",
+                        "--dataset",
+                        "california_housing",
+                        "--device",
+                        device,
+                        "--output",
+                        config.output.file,
+                    ]
+                )
+    data.assert_not_called()
+    build.assert_not_called()
+    assert not Path(config.output.file).exists()
 
 
 def test_runtime_seeds_encoder_construction(

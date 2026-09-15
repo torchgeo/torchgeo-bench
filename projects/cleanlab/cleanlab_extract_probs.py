@@ -35,17 +35,19 @@ import torch
 from torch.utils.data import DataLoader
 
 from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.config_schema import ModelConfig, RunConfig, load_run_config
-from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
-from torchgeo_bench.datasets.base import BandSpec, BenchDataset
-from torchgeo_bench.linear import LogisticRegression
-from torchgeo_bench.main import embed_split, instantiate_dataset_model, resolve_image_device
-from torchgeo_bench.presets import (
+from torchgeo_bench.config.presets import (
     NORMALIZATIONS,
     load_model_preset,
     merge_settings,
     resolve_run_config,
 )
+from torchgeo_bench.config.run import RunConfig, load_run_config
+from torchgeo_bench.config.schema import ModelConfig
+from torchgeo_bench.datasets import get_bench_dataset_class, get_datasets
+from torchgeo_bench.datasets.base import BandSpec, BenchDataset
+from torchgeo_bench.devices import resolve_device
+from torchgeo_bench.linear import LogisticRegression
+from torchgeo_bench.main import embed_split, instantiate_dataset_model
 from torchgeo_bench.results import DEFAULT_RESULTS_DIR, load_results
 from torchgeo_bench.utils import FeatureSplit
 
@@ -267,7 +269,7 @@ def main() -> None:
             f"Configured model {model_cfg.name!r} does not match result model {model_name!r}"
         )
 
-    device = resolve_image_device(cfg.runtime.device)
+    device = resolve_device(cfg.runtime.device)
     torch.manual_seed(args.seed)
 
     ds_cls = get_bench_dataset_class(args.dataset)

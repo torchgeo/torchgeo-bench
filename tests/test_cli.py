@@ -1,5 +1,6 @@
 """Unit tests for CLI entrypoints."""
 
+import argparse
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,14 +9,23 @@ import yaml
 
 from torchgeo_bench import commands
 from torchgeo_bench.cli import main as cli_main
-from torchgeo_bench.config_schema import RunConfig
-from torchgeo_bench.flops_config import FlopsConfig
-from torchgeo_bench.presets import ModelPreset
+from torchgeo_bench.config.flops import FlopsConfig
+from torchgeo_bench.config.presets import ModelPreset
+from torchgeo_bench.config.run import RunConfig
+
+
+@pytest.mark.parametrize("command", ["run", "profile", "flops", "coord"])
+def test_cli_dispatches_commands_directly(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[argparse.Namespace] = []
+    monkeypatch.setattr(commands, command, received.append)
+    cli_main([command])
+    assert len(received) == 1
+    assert received[0].command == command
 
 
 def test_run_dispatches_typed_config(monkeypatch: pytest.MonkeyPatch) -> None:
     received: list[RunConfig] = []
-    monkeypatch.setattr(commands, "_image_runtime", SimpleNamespace(run=received.append))
+    monkeypatch.setattr(commands, "_run_runtime", SimpleNamespace(run=received.append))
     cli_main(
         ["run", "--model", "rcf", "--dataset", "m-eurosat", "--batch-size", "8", "--device", "cpu"]
     )
@@ -143,7 +153,7 @@ def test_unrecognized_arguments_are_rejected(argv, capsys) -> None:
 
 def test_run_repeated_dataset_flags_preserve_order(monkeypatch: pytest.MonkeyPatch) -> None:
     received: list[RunConfig] = []
-    monkeypatch.setattr(commands, "_image_runtime", SimpleNamespace(run=received.append))
+    monkeypatch.setattr(commands, "_run_runtime", SimpleNamespace(run=received.append))
     cli_main(["run", "-m", "rcf", "-d", "m-eurosat", "--dataset", "m-so2sat"])
     assert received[0].datasets == ["m-eurosat", "m-so2sat"]
 
@@ -365,11 +375,11 @@ def test_flops_dispatches_typed_config(monkeypatch: pytest.MonkeyPatch) -> None:
     assert received[0].runtime.device == "cpu"
 
 
-def test_unknown_model_suggests_close_names(capsys: pytest.CaptureFixture[str]) -> None:
+def test_unknown_model_is_reported_without_suggestions(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as error:
         cli_main(["run", "-m", "resnet50", "-d", "m-eurosat"])
     assert error.value.code == 2
-    assert "timm/resnet50" in capsys.readouterr().err
+    assert capsys.readouterr().err == "error: Unknown model config 'resnet50'.\n"
 
 
 def test_constructor_options_are_explicit_yaml_kwargs(

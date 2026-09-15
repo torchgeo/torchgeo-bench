@@ -9,6 +9,7 @@ The MOSAIKS-style extractor is adapted from ``torchgeo.models.RCF``.
 """
 
 from collections.abc import Sized
+from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
@@ -276,3 +277,37 @@ class RCFBench(BenchModel):
     ) -> torch.Tensor:
         """Return RCF embeddings for already-normalized images."""
         return self.rcf(images)
+
+
+@dataclass(frozen=True)
+class RCFModelSettings:
+    """Validated constructor settings for :class:`RCFBench`."""
+
+    features: int = 512
+    kernel_size: int = 3
+    mode: str = "gaussian"
+    stats_mode: str = "mean"
+    seed: int | None = None
+    dataset: Dataset | None = None
+
+    def __post_init__(self) -> None:
+        """Validate settings before constructing the filter bank."""
+        if not isinstance(self.features, int) or not isinstance(self.kernel_size, int):
+            raise TypeError("features and kernel_size must be integers")
+        if self.features <= 0 or self.features % 2:
+            raise ValueError("features must be a positive even number")
+        if self.kernel_size <= 0:
+            raise ValueError("kernel_size must be positive")
+        if self.mode not in ("gaussian", "empirical"):
+            raise ValueError("mode must be 'gaussian' or 'empirical'")
+        if self.stats_mode not in ("mean", "stdev", "all"):
+            raise ValueError("stats_mode must be 'mean', 'stdev', or 'all'")
+        if self.mode == "empirical" and self.dataset is None:
+            raise ValueError("dataset must be provided for empirical mode")
+
+    def build(self, bands: list[BandSpec], *, normalization: str = "bandspec_zscore") -> RCFBench:
+        """Construct the wrapper these settings describe."""
+        return RCFBench(bands=bands, normalization=normalization, **vars(self))
+
+
+RCFBench.validated_settings = RCFModelSettings

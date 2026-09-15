@@ -91,6 +91,21 @@ class BenchDataset(ABC):
             result.append(by_name[name])
         return result
 
+    def resolve_band_specs(self, selection: "str | Iterable[str]") -> list[BandSpec]:
+        """Resolve ``rgb``, ``all``, or explicit names using this dataset's metadata.
+
+        Band order and objects are preserved without loading dataset samples.
+        """
+        if not isinstance(selection, str):
+            return self.select_band_specs(selection)
+        if selection == "rgb":
+            return self.select_band_specs(self.rgb_bands)
+        if selection == "all":
+            return self.select_band_specs(None)
+        raise ValueError(
+            f"Unknown band selection {selection!r}; use rgb, all, or explicit band names"
+        )
+
     @abstractmethod
     def get_dataset(
         self,

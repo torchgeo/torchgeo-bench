@@ -2,9 +2,9 @@
 
 import argparse
 
-from ..presets import NORMALIZATIONS
-from ..profile_config import ProfileConfig
-from ._config import FlagOverride, comma_separated_bands, load_from_flags
+from ..config.presets import NORMALIZATIONS
+from ..config.profile import ProfileConfig
+from ._config import FlagOverride, comma_separated_bands, load_from_flags, parse_image_size
 
 _FLAG_OVERRIDES = (
     FlagOverride("model", ("model", "name"), replace_roots=("model",)),
@@ -24,19 +24,6 @@ _FLAG_OVERRIDES = (
 )
 
 
-def _image_size(value: str) -> int | None:
-    """Parse an explicit resize request, including disabled resizing."""
-    if value.lower() == "none":
-        return None
-    try:
-        size = int(value)
-    except ValueError as error:  # allow-except: convert invalid sizes into argparse input errors
-        raise argparse.ArgumentTypeError("image-size must be a positive integer or none") from error
-    if size <= 0:
-        raise argparse.ArgumentTypeError("image-size must be a positive integer or none")
-    return size
-
-
 def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
     """Register profile flags without overriding YAML with parser defaults."""
     parser.add_argument("--config", default=argparse.SUPPRESS, help="Standalone profile YAML")
@@ -54,7 +41,7 @@ def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--partition", default=argparse.SUPPRESS)
     parser.add_argument(
-        "--image-size", type=_image_size, metavar="PX|none", default=argparse.SUPPRESS
+        "--image-size", type=parse_image_size, metavar="PX|none", default=argparse.SUPPRESS
     )
     parser.add_argument(
         "--interpolation",

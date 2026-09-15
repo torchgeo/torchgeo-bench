@@ -4,7 +4,6 @@ kwargs:
   model_name: efficientnet_b3
   pretrained: true
   global_pool: avg
-  seed: null
   auto_resize: true
 segmentation:
   layers:

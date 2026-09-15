@@ -4,4 +4,3 @@ kwargs:
   model_name: wide_resnet50_2
   pretrained: true
   global_pool: avg
-  seed: null

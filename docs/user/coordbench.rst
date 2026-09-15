@@ -130,7 +130,7 @@ remote tables:
 
 .. code-block:: console
 
-   $ torchgeo-bench coord --config examples/coord-run.yaml --dry-run
+   $ torchgeo-bench coord --config docs/examples/coord-run.yaml --dry-run
 
 The coordinate schema deliberately has no image ``input``, ``segmentation``,
 or ``classification`` sections. See :doc:`/api/coordbench` for
@@ -144,14 +144,14 @@ and implements ``_encode(lon, lat, year)``. The method receives one batch of
 NumPy arrays and returns a finite ``(N, D)`` feature matrix.
 
 The repository includes a complete Fourier-feature example in
-:file:`examples/coordbench_location_encoder.py`. Run it from the repository
-root using :file:`examples/coord-run.yaml`:
+:file:`docs/examples/coordbench_location_encoder.py`. Run it from the repository
+root using :file:`docs/examples/coord-run.yaml`:
 
 .. code-block:: yaml
 
    model:
      name: fourier
-     target: examples.coordbench_location_encoder.FourierLocationEncoder
+     target: docs.examples.coordbench_location_encoder.FourierLocationEncoder
      kwargs:
        num_frequencies: 8
    datasets: [california_housing]
@@ -165,7 +165,7 @@ root using :file:`examples/coord-run.yaml`:
 
 .. code-block:: console
 
-   $ PYTHONPATH=. uv run torchgeo-bench coord --config examples/coord-run.yaml
+   $ PYTHONPATH=. uv run torchgeo-bench coord --config docs/examples/coord-run.yaml
 
 For a reusable integration, place the class in an installed package and add a
 model preset under :file:`src/torchgeo_bench/conf/model/`:

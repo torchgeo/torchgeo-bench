@@ -14,6 +14,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from torchgeo_bench.devices import resolve_device
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,18 +56,6 @@ def _load_estimator(name: str) -> type:
             f"Unknown torchid estimator '{name}'. Supported: {', '.join(SUPPORTED_ESTIMATORS)}."
         )
     return getattr(_est, name)
-
-
-def _resolve_device(device: str | torch.device | None) -> torch.device:
-    """Resolve the requested device, falling back to CPU when CUDA unavailable."""
-    if device is None:
-        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    else:
-        dev = torch.device(device)
-    if dev.type == "cuda" and not torch.cuda.is_available():
-        logger.warning("CUDA requested for intrinsic-dim but unavailable; using CPU.")
-        dev = torch.device("cpu")
-    return dev
 
 
 def _subsample(X: np.ndarray, max_samples: int | None, seed: int) -> np.ndarray:
@@ -216,8 +206,7 @@ def compute_intrinsic_dim(
         X: Feature matrix of shape ``(n_samples, n_features)``.
         estimators: Names of torchid global estimators (see
             ``SUPPORTED_ESTIMATORS``).
-        device: ``"cuda"``, ``"cpu"``, a ``torch.device``, or ``None`` to
-            auto-select (CUDA when available, otherwise CPU).
+        device: Torch device; ``"auto"`` or ``None`` selects current CUDA if available, else CPU.
         max_samples: Cap row count via random subsampling for speed/memory.
             ``None`` disables subsampling.
         seed: RNG seed for subsampling determinism.
@@ -225,6 +214,9 @@ def compute_intrinsic_dim(
     Returns:
         Mapping ``{estimator_name: dimension}``.  Estimator-internal
         exceptions propagate rather than becoming NaN.
+
+    Raises:
+        ValueError: If the input or device is invalid, or explicit CUDA is unavailable.
     """
     if X.ndim != 2:
         raise ValueError(f"X must be 2D, got shape {X.shape}")
@@ -232,7 +224,7 @@ def compute_intrinsic_dim(
     if not estimators:
         return {}
 
-    dev = _resolve_device(device)
+    dev = resolve_device("auto" if device is None else device)
     Xs = _subsample(X, max_samples, seed)
     X_tensor = torch.from_numpy(np.ascontiguousarray(Xs)).to(dev, dtype=torch.float32)
     X_tensor = _drop_zero_distance_rows(X_tensor)

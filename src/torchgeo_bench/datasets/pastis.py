@@ -1,13 +1,9 @@
 """PASTIS (GeoBench V2) benchmark dataset."""
 
-from collections.abc import Callable
 from typing import ClassVar
 
-import torch.nn as nn
-from torch.utils.data import Dataset
-
 from .base import BandSpec
-from .geobench_v2 import GeoBenchv2, _V2Dataset
+from .geobench_v2 import _V2Dataset
 
 
 class PASTIS(_V2Dataset):
@@ -17,6 +13,7 @@ class PASTIS(_V2Dataset):
     """
 
     band_order_strategy = "by_sensor"
+    multi_temporal = True
 
     name = "pastis"
     task = "segmentation"
@@ -45,34 +42,3 @@ class PASTIS(_V2Dataset):
         BandSpec("s1_desc", "vv_vh_desc", "VV/VH_desc", mean=6.189, std=3.2708, min=-21.0469, max=44.75),
     ]
     # fmt: on
-
-    def get_dataset(
-        self,
-        split: str,
-        *,
-        partition: str = "default",
-        bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-        time_steps: int | None = None,
-    ) -> Dataset:
-        """Return a :class:`GeoBenchv2` split, optionally as a time series.
-
-        Use more dates to capture crop seasonality.
-
-        ``time_steps=None`` keeps only the last acquisition, matching existing results.
-        """
-        del partition
-        band_order = self.build_band_order(bands)
-        extra: dict = {}
-        if time_steps is not None:
-            extra["num_time_steps"] = int(time_steps)
-            extra["temporal_output_format"] = "TCHW"
-        return GeoBenchv2(
-            root=self.data_root(),
-            dataset_name=self.name,
-            split=split,
-            band_order=band_order,
-            transforms=transform,
-            data_normalizer=nn.Identity,
-            **extra,
-        )

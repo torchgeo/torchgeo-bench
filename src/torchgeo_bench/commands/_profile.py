@@ -8,7 +8,7 @@ import argparse
 import yaml
 
 from .. import commands
-from ..profile_config import ProfileConfig, resolve_profile_config
+from ..config.profile import ProfileConfig, resolve_profile_config
 from ._config import load_config_or_exit
 from .profile_arguments import load_profile_config
 

@@ -11,12 +11,14 @@ import torch
 from pydantic import ValidationError
 from torch import nn
 
+from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench import flops_pipeline
 from torchgeo_bench.bands import BandCompatibilityError
-from torchgeo_bench.config_schema import ModelConfig, SegmentationConfig
+from torchgeo_bench.config.flops import FlopsConfig, FlopsSegmentationConfig
+from torchgeo_bench.config.presets import ModelPreset, build_model, load_model_preset
+from torchgeo_bench.config.schema import ModelConfig, SegmentationConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.base import BandSpec
-from torchgeo_bench.flops_config import FlopsConfig, FlopsSegmentationConfig
 from torchgeo_bench.flops_pipeline import (
     _MODALITY_FOR_BAND_CONFIG,
     _build_model,
@@ -28,9 +30,10 @@ from torchgeo_bench.flops_pipeline import (
     main,
 )
 from torchgeo_bench.model_profile import ProfileTiming, _count_gflops
-from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset
 
 CPU = torch.device("cpu")
+
+pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 
 
 class _TinyConvNet(nn.Module):
@@ -227,29 +230,19 @@ def test_num_classes_barely_moves_head_cost():
     assert abs(g15 - g2) / g2 < 0.02
 
 
-def test_band_configs_come_from_cloudsen12_class_attributes():
-    """Read representative RGB/S2 band metadata without loading data."""
-    bench = get_bench_dataset_class("cloudsen12")()
-    rgb = bench.select_band_specs(bench.rgb_bands)
-    s2 = bench.select_band_specs(None)
-
-    assert len(rgb) == 3
-    assert len(s2) == 12
-    # CloudSen12 supplies 12 optical S2 bands; So2Sat mixes S2 and SAR.
-    assert {b.sensor for b in s2} == {"s2"}
-    assert [b.name for b in rgb] == ["b04", "b03", "b02"]
-
-
-def test_terramind_modality_map_matches_shipped_configs():
-    """An RGB modality paired with 12 channels can produce plausible but wrong FLOP counts."""
-    for config_name, band_config in [
+@pytest.mark.parametrize(
+    ("config_name", "band_config"),
+    [
         ("terratorch/terramind_v1_base", "s2"),
         ("terratorch/terramind_v1_base_rgb", "rgb"),
         ("terratorch/terramind_v1_large", "s2"),
         ("terratorch/terramind_v1_large_rgb", "rgb"),
-    ]:
-        preset = load_model_preset(ModelConfig(name=config_name))
-        assert preset.kwargs["modality"] == _MODALITY_FOR_BAND_CONFIG[band_config]
+    ],
+)
+def test_terramind_modality_map_matches_shipped_configs(config_name: str, band_config: str) -> None:
+    """An RGB modality paired with 12 channels can produce plausible but wrong FLOP counts."""
+    preset = load_model_preset(ModelConfig(name=config_name))
+    assert preset.kwargs["modality"] == _MODALITY_FOR_BAND_CONFIG[band_config]
 
 
 def test_load_completed_missing_file(tmp_path):
@@ -309,36 +302,6 @@ def test_build_model_propagates_real_failures(error, monkeypatch):
     with pytest.raises(type(error)) as exc:
         _build_model(cfg, [], "identity", "rgb")
     assert exc.value is error
-
-
-def test_missing_bands_raise_typed_incompatibility():
-    from torchgeo_bench.datasets.base import BandSpec
-    from torchgeo_bench.models._band_mapping import map_to_model_bands, select_src_bands
-
-    rgb = [
-        BandSpec(sensor="s2", name=n, source_name=n.upper(), mean=0.0, std=1.0, min=0.0, max=1.0)
-        for n in ("red", "green", "blue")
-    ]
-
-    with pytest.raises(BandCompatibilityError, match="Missing required model band 'nir'"):
-        map_to_model_bands(torch.zeros(1, 3, 4, 4), rgb, ["blue", "green", "red", "nir"])
-
-    with pytest.raises(BandCompatibilityError, match="none of the target bands"):
-        select_src_bands(rgb, ["swir1", "swir2"])
-
-
-def test_channel_count_disagreement_is_a_bug_not_a_band_skip():
-    """Tensor/BandSpec channel disagreement is a pipeline bug, not unsupported input."""
-    from torchgeo_bench.datasets.base import BandSpec
-    from torchgeo_bench.models._band_mapping import map_to_model_bands
-
-    rgb = [
-        BandSpec(sensor="s2", name=n, source_name=n.upper(), mean=0.0, std=1.0, min=0.0, max=1.0)
-        for n in ("red", "green", "blue")
-    ]
-    with pytest.raises(ValueError, match="images has 7 channels but") as mismatch:
-        map_to_model_bands(torch.zeros(1, 7, 4, 4), rgb, ["red", "green", "blue"])
-    assert not isinstance(mismatch.value, BandCompatibilityError)
 
 
 def test_terramind_modality_mismatch_is_rejected():
@@ -725,18 +688,55 @@ def test_terramind_pipeline_measures_only_its_modality(
     assert {row["name"] for row in rows} == {"tt_terramind_v1_base"}
 
 
-def test_auto_device_uses_cpu_when_cuda_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auto_device_uses_cpu_when_cuda_is_unavailable(
+    flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    assert flops_pipeline._resolve_device("auto") == CPU
+    cfg, rows, events = flops_run
+    cfg.runtime.device = "auto"
+    main(cfg)
+    assert len(rows) == 6
+    assert "backbone:3" in events
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"), [("auto", "cuda:1"), ("cuda", "cuda:1"), ("cuda:0", "cuda:0")]
+)
+def test_flops_places_models_on_resolved_cuda(
+    flops_run: FlopsRun, monkeypatch: pytest.MonkeyPatch, requested: str, expected: str
+) -> None:
+    cfg, rows, _ = flops_run
+    cfg.runtime.device = requested
+    cfg.segmentation.heads = []
+    devices = []
+
+    def place(model: nn.Module, device: torch.device) -> nn.Module:
+        devices.append(str(device))
+        return model
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(nn.Module, "to", place)
+    main(cfg)
+    assert devices == [expected, expected]
+    assert len(rows) == 2
+    assert all(row["gflops_total"] == 2.5 for row in rows)
 
 
 def test_invalid_cuda_index_fails_before_model_construction(
+    flops_run: FlopsRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    cfg, rows, events = flops_run
+    cfg.runtime.device = "cuda:2"
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
     with pytest.raises(ValueError, match="index 2"):
-        flops_pipeline._resolve_device("cuda:2")
+        main(cfg)
+    assert not rows
+    assert not events
 
 
 @pytest.mark.parametrize("fail", [False, True])

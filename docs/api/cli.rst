@@ -49,10 +49,10 @@ Load and validate a YAML file without importing model implementations:
 
 .. code-block:: python
 
-   from torchgeo_bench.config_schema import load_run_config
-   from torchgeo_bench.presets import resolve_run_config
+   from torchgeo_bench.config.run import load_run_config
+   from torchgeo_bench.config.presets import resolve_run_config
 
-   config = load_run_config("examples/image-run.yaml")
+   config = load_run_config("docs/examples/image-run.yaml")
    effective, preset = resolve_run_config(config, "m-eurosat")
 
 ``resolve_run_config`` applies model and dataset defaults beneath explicitly
@@ -60,11 +60,17 @@ supplied values. ``RunConfig.model_dump_yaml()`` preserves omission by
 excluding unset fields; dumping all schema defaults and reloading them would
 turn those defaults into explicit overrides.
 
-.. currentmodule:: torchgeo_bench.config_schema
+.. currentmodule:: torchgeo_bench.config.run
 
 .. autoclass:: RunConfig
    :members: model_dump_yaml
+   :inherited-members: BaseModel
    :no-show-inheritance:
+
+.. autofunction:: load_run_config
+.. autofunction:: validate_run_config
+
+.. currentmodule:: torchgeo_bench.config.schema
 
 .. autoclass:: ModelConfig
    :members:
@@ -74,8 +80,6 @@ turn those defaults into explicit overrides.
    :members:
    :no-show-inheritance:
 
-.. autofunction:: load_run_config
-.. autofunction:: validate_run_config
 .. autofunction:: load_yaml
 
 Preset resolution and construction
@@ -88,7 +92,7 @@ band selection, normalization-name mapping, and per-dataset construction.
 ``kwargs`` are ordinary constructor values, not recursively instantiated
 target mappings.
 
-.. currentmodule:: torchgeo_bench.presets
+.. currentmodule:: torchgeo_bench.config.presets
 
 .. autoclass:: ModelPreset
    :members: for_dataset
@@ -105,10 +109,10 @@ The image loop consumes a ``RunConfig`` directly:
 
 .. code-block:: python
 
-   from torchgeo_bench.config_schema import load_run_config
+   from torchgeo_bench.config.run import load_run_config
    from torchgeo_bench.main import main
 
-   config = load_run_config("examples/image-run.yaml")
+   config = load_run_config("docs/examples/image-run.yaml")
    main(config)
 
 Unlike loading or resolving configuration, calling ``main`` executes the
@@ -124,18 +128,20 @@ Standalone profiling uses singular ``dataset`` plus top-level timing fields;
 synthetic compute measurements use band-source metadata, head selections,
 and a ``timing`` block. Neither takes an image ``RunConfig``.
 
-.. currentmodule:: torchgeo_bench.profile_config
+.. currentmodule:: torchgeo_bench.config.profile
 
 .. autoclass:: ProfileConfig
    :members: model_dump_yaml
+   :inherited-members: BaseModel
    :no-show-inheritance:
 
 .. autofunction:: resolve_profile_config
 
-.. currentmodule:: torchgeo_bench.flops_config
+.. currentmodule:: torchgeo_bench.config.flops
 
 .. autoclass:: FlopsConfig
    :members: model_dump_yaml, resolve
+   :inherited-members: BaseModel
    :no-show-inheritance:
 
 .. currentmodule:: torchgeo_bench.flops_pipeline

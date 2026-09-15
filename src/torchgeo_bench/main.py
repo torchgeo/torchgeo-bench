@@ -16,13 +16,20 @@ from torchgeo_bench.calibration import (
     compute_calibration_metrics,
     fit_temperature,
 )
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.config.presets import (
+    NORMALIZATIONS,
+    ModelPreset,
+    build_model,
+    resolve_run_config,
+)
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.datasets import (
     BenchDataset,
     get_bench_dataset_class,
     get_datasets,
     list_datasets,
 )
+from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.intrinsic_dim import (
     FEATURE_SPECTRUM_METRICS,
     DegenerateManifoldError,
@@ -33,7 +40,6 @@ from torchgeo_bench.intrinsic_dim import (
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput, measure_profile
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset, build_model, resolve_run_config
 from torchgeo_bench.results import (
     EvaluationResult,
     append_rows_atomic,
@@ -94,16 +100,6 @@ class LoaderSplits:
     train: DataLoader
     val: DataLoader
     test: DataLoader
-
-
-def resolve_image_device(requested: str) -> torch.device:
-    """Resolve auto selection without silently accepting an unavailable explicit GPU."""
-    if requested == "auto":
-        requested = "cuda:0" if torch.cuda.is_available() else "cpu"
-    device = torch.device(requested)
-    if device.type == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError(f"CUDA device {requested!r} requested but CUDA is unavailable")
-    return device
 
 
 def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
@@ -665,7 +661,7 @@ def _resolve_output_path(cfg: RunConfig, directory: str | None = None) -> str:
     """
     if cfg.output.file:
         return cfg.output.file
-    from torchgeo_bench.presets import load_model_preset
+    from torchgeo_bench.config.presets import load_model_preset
 
     preset = load_model_preset(cfg.model, seed=cfg.runtime.seed)
     return str(model_results_path(directory or cfg.output.directory, preset.name))
@@ -826,14 +822,7 @@ def instantiate_dataset_model(
     num_channels = train_dataset[0]["image"].shape[-3]
     normalization = NORMALIZATIONS[cfg.input.normalization]
     ds_name = bench.name
-    bands_resolved = (
-        tuple(bench.rgb_bands)
-        if cfg.input.bands == "rgb"
-        else None
-        if cfg.input.bands == "all"
-        else tuple(cfg.input.bands)
-    )
-    bands_list = bench.select_band_specs(bands_resolved)
+    bands_list = bench.resolve_band_specs(cfg.input.bands)
     if len(bands_list) != num_channels:
         raise ValueError(
             f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
@@ -892,6 +881,7 @@ def run_dataset(
     completed: ResumeState,
     *,
     strict: bool = False,
+    device: torch.device | None = None,
 ) -> Iterator[tuple[list[dict], list[dict], list[dict]]]:
     """Load and evaluate one dataset unless resume marks it complete."""
     ds_cls = get_bench_dataset_class(ds_name)
@@ -905,6 +895,11 @@ def run_dataset(
             logger.info("[%s] Resume preflight: all requested work already complete", ds_name)
         return
 
+    # Runtime canonicalization must not change the requested device in the resume hash above.
+    if device is not None:
+        cfg = cfg.model_copy(
+            update={"runtime": cfg.runtime.model_copy(update={"device": str(device)})}
+        )
     if ds_cls.task != "segmentation" and not plan.skip_knn:
         from torchgeo_bench.knn import resolve_knn_device
 
@@ -969,10 +964,14 @@ def load_completed_outputs(
 
 def main(cfg: RunConfig, *, strict: bool = False) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
+    device = resolve_device(cfg.runtime.device)
+    # Explicit labels are part of existing resume hashes; only auto needs rewriting.
+    if cfg.runtime.device == "auto":
+        cfg = cfg.model_copy(
+            update={"runtime": cfg.runtime.model_copy(update={"device": str(device)})}
+        )
     torch.manual_seed(cfg.runtime.seed)
     dataset_names = _expand_dataset_list(cfg.datasets)
-    device = resolve_image_device(cfg.runtime.device)
-    cfg = cfg.model_copy(update={"runtime": cfg.runtime.model_copy(update={"device": str(device)})})
 
     output_path = _resolve_output_path(cfg)
     profile_output_path = _resolve_output_path(cfg, cfg.output.profile_directory)
@@ -987,7 +986,7 @@ def main(cfg: RunConfig, *, strict: bool = False) -> None:
     completed = ResumeState(completed_runs, completed_metrics)
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         for all_rows, id_out_rows, profile_out_rows in run_dataset(
-            cfg, ds_name, completed, strict=strict
+            cfg, ds_name, completed, strict=strict, device=device
         ):
             append_rows_atomic(output_path, all_rows)
             append_rows_atomic(intrinsic_dim_output_path, id_out_rows)

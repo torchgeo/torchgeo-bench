@@ -1,6 +1,6 @@
 """Offline tests for per-model result files.
 
-Keep profiling and intrinsic-dimension results separate unless ``output=`` is explicit.
+Keep profiling and intrinsic-dimension results separate unless ``output.file`` is explicit.
 """
 
 from pathlib import Path
@@ -9,21 +9,20 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from torchgeo_bench.config_schema import RunConfig
-from torchgeo_bench.main import main
-from torchgeo_bench.presets import merge_settings
-from torchgeo_bench.results import model_results_path
-
-from .test_main_fast import (
+from tests.support.runner import (
     _chainable_model_mock,
     _compose_cfg,
     _synthetic_embeddings,
     _synthetic_loaders,
 )
+from torchgeo_bench.config.presets import merge_settings
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.main import main
+from torchgeo_bench.results import model_results_path
 
 
 def _compose_default_routing_cfg(tmp_path: Path, overrides: dict | None = None) -> RunConfig:
-    """Use separate result directories without setting ``output=``."""
+    """Use separate result directories without setting ``output.file``."""
     return _compose_cfg(
         tmp_path / "unused.csv",
         merge_settings(
@@ -95,8 +94,8 @@ def test_routing_splits_by_kind_unless_output_is_explicit(
     assert profile_path.exists()
     profile_df = pd.read_csv(profile_path)
     assert set(profile_df["method"]) == (all_methods if explicit_output else {"profile"})
-    for name in profile_metrics:
-        assert name in profile_df["metric_name"].values
+    actual_metrics = profile_df[profile_df["method"] == "profile"].set_index("metric_name")
+    assert actual_metrics["metric_value"].to_dict() == profile_metrics
 
     assert id_path.exists()
     id_df = pd.read_csv(id_path)

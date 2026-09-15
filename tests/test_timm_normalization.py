@@ -1,12 +1,18 @@
 """Unit tests for :class:`TimmPatchBenchModel.normalize_inputs`."""
 
+from typing import Any
+
 import pytest
 import torch
 
 from torchgeo_bench.datasets.base import BandSpec
 
 
-def _rgb_bands(*, mins=(0.0, 0.0, 0.0), maxs=(28000.0, 28000.0, 28000.0)) -> list[BandSpec]:
+def _rgb_bands(
+    *,
+    mins: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    maxs: tuple[float, float, float] = (28000.0, 28000.0, 28000.0),
+) -> list[BandSpec]:
     """S2-style RGB metadata in raw sensor units."""
     names = ("red", "green", "blue")
     return [
@@ -24,20 +30,20 @@ def _rgb_bands(*, mins=(0.0, 0.0, 0.0), maxs=(28000.0, 28000.0, 28000.0)) -> lis
 
 
 @pytest.fixture(autouse=True)
-def _block_pretrained_download(monkeypatch):
+def _block_pretrained_download(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force ``pretrained=False`` so tests don't hit Hugging Face."""
     import timm
 
     real_create = timm.create_model
 
-    def _no_pretrained(*args, **kwargs):
+    def _no_pretrained(*args: Any, **kwargs: Any) -> torch.nn.Module:
         kwargs["pretrained"] = False
         return real_create(*args, **kwargs)
 
     monkeypatch.setattr(timm, "create_model", _no_pretrained)
 
 
-def test_imagenet_normalization_rescales_raw_values_to_unit_interval():
+def test_imagenet_normalization_rescales_raw_values_to_unit_interval() -> None:
     """Scale sensor values to [0, 1] before applying ImageNet mean and standard deviation."""
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 
@@ -58,14 +64,9 @@ def test_imagenet_normalization_rescales_raw_values_to_unit_interval():
         - torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
     ) / torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
     assert torch.allclose(out, expected.expand_as(out), atol=1e-5)
-    # ImageNet-scale values should be small, not thousands of sensor counts.
-    assert out.abs().max() < 5.0, (
-        f"normalized output should be O(1) but got max |x| = {out.abs().max().item():.2f} — "
-        "this is the bug the fix addresses."
-    )
 
 
-def test_imagenet_normalization_band_min_subtracted_first():
+def test_imagenet_normalization_band_min_subtracted_first() -> None:
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 
     bands = _rgb_bands(mins=(100.0, 100.0, 100.0), maxs=(900.0, 900.0, 900.0))
@@ -86,7 +87,7 @@ def test_imagenet_normalization_band_min_subtracted_first():
     assert torch.allclose(out, expected.expand_as(out), atol=1e-5)
 
 
-def test_imagenet_normalization_rejects_non_rgb():
+def test_imagenet_normalization_rejects_non_rgb() -> None:
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 
     bands = [*_rgb_bands(), _rgb_bands()[0]]
@@ -99,7 +100,7 @@ def test_imagenet_normalization_rejects_non_rgb():
         )
 
 
-def test_timm_default_normalization_uses_default_cfg_stats():
+def test_timm_default_normalization_uses_default_cfg_stats() -> None:
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 
     bands = _rgb_bands()
@@ -122,7 +123,7 @@ def test_timm_default_normalization_uses_default_cfg_stats():
     assert torch.allclose(out, expected.expand_as(out), atol=1e-5)
 
 
-def test_bands_zscore_unaffected_by_imagenet_path():
+def test_bands_zscore_unaffected_by_imagenet_path() -> None:
     """Dataset z-scores must use band statistics, not ImageNet statistics."""
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 
@@ -138,7 +139,7 @@ def test_bands_zscore_unaffected_by_imagenet_path():
     assert torch.allclose(out, torch.zeros_like(out), atol=1e-4)
 
 
-def test_none_normalization_is_identity():
+def test_none_normalization_is_identity() -> None:
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 
     model = TimmPatchBenchModel(
@@ -152,7 +153,7 @@ def test_none_normalization_is_identity():
     assert torch.equal(out, raw)
 
 
-def test_model_native_uses_timm_pretrained_stats():
+def test_model_native_uses_timm_pretrained_stats() -> None:
     import timm
 
     from torchgeo_bench.models.timm import TimmPatchBenchModel
@@ -171,28 +172,7 @@ def test_model_native_uses_timm_pretrained_stats():
     assert torch.allclose(out, expected.expand_as(out), atol=1e-5)
 
 
-def test_minmax_zscore_uses_actual_bandspec_stats():
-    """Use each band's statistics rather than assuming mean=0.5 and std=0.25 after scaling."""
-    from torchgeo_bench.datasets.base import BandSpec
-    from torchgeo_bench.models._normalization import NormalizationStrategy, build_normalizer
-
-    # Min-max scaling gives mean=0.3 and std=0.2.
-    band = BandSpec(sensor="test", name="b", source_name="B", mean=3.0, std=2.0, min=0.0, max=10.0)
-    norm = build_normalizer(NormalizationStrategy.MINMAX_ZSCORE, [band])
-
-    x = torch.tensor([[[[3.0]]]])
-    out = norm(x)
-    assert abs(out.item()) < 1e-5, f"expected ~0 at band mean, got {out.item()}"
-
-    x_max = torch.tensor([[[[10.0]]]])
-    out_max = norm(x_max)
-    # At the maximum: (1 - 0.3) / 0.2 = 3.5.
-    assert abs(out_max.item() - 3.5) < 1e-4, f"expected 3.5 at band max, got {out_max.item()}"
-
-
-def _band(name: str, wavelength_um: float | None) -> "BandSpec":
-    from torchgeo_bench.datasets.base import BandSpec
-
+def _band(name: str, wavelength_um: float | None) -> BandSpec:
     return BandSpec(
         sensor="s2",
         name=name,
@@ -205,7 +185,7 @@ def _band(name: str, wavelength_um: float | None) -> "BandSpec":
     )
 
 
-def test_rgb_first_permutation_reorders_bgr_native_bands():
+def test_rgb_first_permutation_reorders_bgr_native_bands() -> None:
     """Match wavelengths to pretrained R/G/B weights, regardless of band names or order."""
     from torchgeo_bench.models.timm import _rgb_first_permutation
 
@@ -215,7 +195,7 @@ def test_rgb_first_permutation_reorders_bgr_native_bands():
     assert perm == [2, 1, 0, 3]
 
 
-def test_rgb_first_permutation_none_without_full_triplet():
+def test_rgb_first_permutation_none_without_full_triplet() -> None:
     """Do not reorder SAR bands or incomplete RGB triplets."""
     from torchgeo_bench.models.timm import _rgb_first_permutation
 
@@ -226,7 +206,7 @@ def test_rgb_first_permutation_none_without_full_triplet():
     assert _rgb_first_permutation(bands) is None
 
 
-def test_multichannel_pretrained_permutes_channels_before_backbone():
+def test_multichannel_pretrained_permutes_channels_before_backbone() -> None:
     """A widened pretrained RGB kernel still expects its first three channels in R/G/B order."""
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 
@@ -234,10 +214,10 @@ def test_multichannel_pretrained_permutes_channels_before_backbone():
     model = TimmPatchBenchModel(bands=bands, model_name="resnet18", pretrained=True)
     assert model._channel_perm == [2, 1, 0, 3]
 
-    seen = {}
+    seen: dict[str, torch.Tensor] = {}
 
     class _Capture(torch.nn.Module):
-        def forward(self, images):
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
             seen["images"] = images
             return torch.zeros(images.shape[0], 8)
 
@@ -247,7 +227,7 @@ def test_multichannel_pretrained_permutes_channels_before_backbone():
     assert torch.equal(seen["images"][0, :, 0, 0], torch.tensor([2.0, 1.0, 0.0, 3.0]))
 
 
-def test_unknown_timm_model_name_raises_clearly():
+def test_unknown_timm_model_name_raises_clearly() -> None:
     """Missing pretraining metadata must remain a construction error."""
     from torchgeo_bench.models.timm import TimmPatchBenchModel
 

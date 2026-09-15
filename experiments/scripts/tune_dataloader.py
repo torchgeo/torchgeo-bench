@@ -23,13 +23,14 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from torchgeo_bench.config_schema import ModelConfig, RunConfig
+from torchgeo_bench.config.presets import NORMALIZATIONS, build_model, resolve_run_config
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import ModelConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
 from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.presets import NORMALIZATIONS, build_model, resolve_run_config
-from torchgeo_bench.utils import resolve_device
 
 logger = logging.getLogger(__name__)
 

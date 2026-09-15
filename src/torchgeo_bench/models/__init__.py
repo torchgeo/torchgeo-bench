@@ -5,7 +5,7 @@ from ._normalization import NormalizationStrategy
 from .image_stats import ImageStatsBench
 from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
-from .rcf import RCFBench
+from .rcf import RCFBench, RCFModelSettings
 from .sam3 import SAM3Encoder
 from .segmentation_heads import ConvBlockHead, DPTHead, FPNHead, LinearHead, PatchLinearHead
 from .terratorch_models import (
@@ -13,7 +13,7 @@ from .terratorch_models import (
     TerraTorchPrithviBench,
     TerraTorchTerraMindBench,
 )
-from .timm import TimmPatchBenchModel
+from .timm import TimmModelSettings, TimmPatchBenchModel
 from .torchgeo_models import (
     TorchGeoCromaBench,
     TorchGeoDEOBench,
@@ -38,10 +38,12 @@ __all__: list[str] = [
     "OlmoEarthBenchModel",
     "PatchLinearHead",
     "RCFBench",
+    "RCFModelSettings",
     "SAM3Encoder",
     "TerraTorchClayBench",
     "TerraTorchPrithviBench",
     "TerraTorchTerraMindBench",
+    "TimmModelSettings",
     "TimmPatchBenchModel",
     "TorchGeoCromaBench",
     "TorchGeoDEOBench",
