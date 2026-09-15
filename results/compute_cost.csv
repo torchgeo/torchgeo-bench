@@ -477,3 +477,6 @@ torchgeo_bench.models.TerraTorchTerraMindBench,tt_terramind_v1_base,s2,12,224,4,
 torchgeo_bench.models.TerraTorchTerraMindBench,tt_terramind_v1_large,s2,12,224,10,classification,,123.370340352,,2.048e-05,123.370360832,305.137664,,0.01025,1024,mean,196,439.6340749182095,145.55617421865463,3.992046356201172,4.53125,64,True,2026-09-03T14:07:36+00:00
 torchgeo_bench.models.TerraTorchTerraMindBench,tt_terramind_v1_large,s2,12,224,4,segmentation,fpn,,1.337491456,,,305.137664,3.422212,,4096,mean,196,,,,,,True,2026-09-03T14:07:36+00:00
 torchgeo_bench.models.TerraTorchTerraMindBench,tt_terramind_v1_large,s2,12,224,4,segmentation,dpt,,147.409862656,,,305.137664,11.36154,,4096,mean,196,,,,,,True,2026-09-03T14:07:36+00:00
+torchgeo_bench.models.TerraFMBench,terrafm_base_s2,s2,12,224,10,classification,,42.524872704,,1.536e-05,42.524888064,112.951296,,0.00769,768,cls,196,381.9028824800802,167.29911230504513,1.2501225471496582,1.29296875,64,False,2026-09-14T00:13:31+00:00
+torchgeo_bench.models.TerraFMBench,terrafm_base_s2,s2,12,224,4,segmentation,fpn,,1.234731008,,,112.951296,3.15802,,3072,cls,196,,,,,,False,2026-09-14T00:13:32+00:00
+torchgeo_bench.models.TerraFMBench,terrafm_base_s2,s2,12,224,4,segmentation,dpt,,147.307102208,,,112.951296,11.097348,,3072,cls,196,,,,,,False,2026-09-14T00:28:05+00:00
