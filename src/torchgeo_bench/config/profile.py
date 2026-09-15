@@ -4,16 +4,16 @@ from typing import Any, Literal
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
 
-from .config_schema import (
+from ..datasets import list_datasets
+from .presets import ModelPreset, resolve_run_config
+from .run import RunConfig
+from .schema import (
     Device,
     InputConfig,
     ModelConfig,
     RuntimeConfig,
     StrictModel,
 )
-from .datasets import list_datasets
-from .presets import ModelPreset, resolve_run_config
-from .run_config import RunConfig
 
 
 class ProfileRuntimeConfig(RuntimeConfig):

@@ -1,7 +1,7 @@
 """Execute validated image settings without adapting the runtime configuration."""
 
+from ..config.run import RunConfig
 from ..main import main, resolve_image_device
-from ..run_config import RunConfig
 
 
 def run(config: RunConfig) -> None:

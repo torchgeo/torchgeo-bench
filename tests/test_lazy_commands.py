@@ -36,8 +36,13 @@ import pytest
             "torchgeo_bench.cli",
             ["coord", "--model", "sincos", "--dataset", "california_housing", "--dry-run"],
         ),
-        ("torchgeo_bench.config_schema", []),
-        ("torchgeo_bench.run_config", []),
+        ("torchgeo_bench.config", []),
+        ("torchgeo_bench.config.catalog", []),
+        ("torchgeo_bench.config.schema", []),
+        ("torchgeo_bench.config.presets", []),
+        ("torchgeo_bench.config.profile", []),
+        ("torchgeo_bench.config.flops", []),
+        ("torchgeo_bench.config.run", []),
     ],
 )
 def test_cli_queries_do_not_import_heavy_modules(module: str, arguments: list[str]) -> None:
@@ -66,6 +71,30 @@ assert not blocked & sys.modules.keys()
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_config_catalog_does_not_import_schemas() -> None:
+    code = """
+import sys
+from torchgeo_bench.config import list_model_configs, model_config_path
+assert "rcf" in list_model_configs()
+assert model_config_path("rcf").is_file()
+assert not {"pydantic", "yaml"} & sys.modules.keys()
+assert not {
+    "torchgeo_bench.config.schema",
+    "torchgeo_bench.config.presets",
+    "torchgeo_bench.config.profile",
+    "torchgeo_bench.config.flops",
+    "torchgeo_bench.config.run",
+} & sys.modules.keys()
+"""
+    subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
 
 
 def test_command_logging_uses_standard_logging() -> None:

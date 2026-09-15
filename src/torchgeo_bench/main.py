@@ -16,6 +16,13 @@ from torchgeo_bench.calibration import (
     compute_calibration_metrics,
     fit_temperature,
 )
+from torchgeo_bench.config.presets import (
+    NORMALIZATIONS,
+    ModelPreset,
+    build_model,
+    resolve_run_config,
+)
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.datasets import (
     BenchDataset,
     get_bench_dataset_class,
@@ -32,7 +39,6 @@ from torchgeo_bench.intrinsic_dim import (
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import ProfileTiming, measure_cpu_throughput, measure_profile
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset, build_model, resolve_run_config
 from torchgeo_bench.results import (
     EvaluationResult,
     append_rows_atomic,
@@ -51,7 +57,6 @@ from torchgeo_bench.resume import (
     plan_dataset_run,
     resume_config_hash,
 )
-from torchgeo_bench.run_config import RunConfig
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits, extract_features
 
 if TYPE_CHECKING:
@@ -665,7 +670,7 @@ def _resolve_output_path(cfg: RunConfig, directory: str | None = None) -> str:
     """
     if cfg.output.file:
         return cfg.output.file
-    from torchgeo_bench.presets import load_model_preset
+    from torchgeo_bench.config.presets import load_model_preset
 
     preset = load_model_preset(cfg.model, seed=cfg.runtime.seed)
     return str(model_results_path(directory or cfg.output.directory, preset.name))

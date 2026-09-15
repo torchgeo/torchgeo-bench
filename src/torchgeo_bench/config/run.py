@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
 
-from .config_schema import (
+from .schema import (
     ClassificationConfig,
     InputConfig,
     ModelConfig,

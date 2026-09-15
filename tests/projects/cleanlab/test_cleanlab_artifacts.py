@@ -16,7 +16,7 @@ from projects.cleanlab import (
     cleanlab_per_class_singlelabel,
     run_cleanlab_audit,
 )
-from torchgeo_bench.presets import ModelPreset
+from torchgeo_bench.config.presets import ModelPreset
 
 EXECUTED: list[bool] = []
 

@@ -2,8 +2,8 @@
 
 import argparse
 
-from ..presets import NORMALIZATIONS
-from ..profile_config import ProfileConfig
+from ..config.presets import NORMALIZATIONS
+from ..config.profile import ProfileConfig
 from ._config import FlagOverride, comma_separated_bands, load_from_flags
 
 _FLAG_OVERRIDES = (

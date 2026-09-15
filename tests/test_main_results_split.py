@@ -15,10 +15,10 @@ from tests.support.runner import (
     _synthetic_embeddings,
     _synthetic_loaders,
 )
+from torchgeo_bench.config.presets import merge_settings
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import main
-from torchgeo_bench.presets import merge_settings
 from torchgeo_bench.results import model_results_path
-from torchgeo_bench.run_config import RunConfig
 
 
 def _compose_default_routing_cfg(tmp_path: Path, overrides: dict | None = None) -> RunConfig:

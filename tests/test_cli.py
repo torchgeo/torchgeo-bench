@@ -9,9 +9,9 @@ import yaml
 
 from torchgeo_bench import commands
 from torchgeo_bench.cli import main as cli_main
-from torchgeo_bench.flops_config import FlopsConfig
-from torchgeo_bench.presets import ModelPreset
-from torchgeo_bench.run_config import RunConfig
+from torchgeo_bench.config.flops import FlopsConfig
+from torchgeo_bench.config.presets import ModelPreset
+from torchgeo_bench.config.run import RunConfig
 
 
 @pytest.mark.parametrize("command", ["run", "profile", "flops", "coord"])

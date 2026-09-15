@@ -9,10 +9,10 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from torchgeo_bench.config.flops import FlopsRuntimeConfig
+from torchgeo_bench.config.profile import ProfileRuntimeConfig
+from torchgeo_bench.config.run import RunConfig, load_run_config, validate_run_config
 from torchgeo_bench.coordbench.config import CoordRuntimeConfig
-from torchgeo_bench.flops_config import FlopsRuntimeConfig
-from torchgeo_bench.profile_config import ProfileRuntimeConfig
-from torchgeo_bench.run_config import RunConfig, load_run_config, validate_run_config
 
 _RUNTIME_SECTIONS = (CoordRuntimeConfig, FlopsRuntimeConfig, ProfileRuntimeConfig)
 

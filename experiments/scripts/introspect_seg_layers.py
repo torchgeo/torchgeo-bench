@@ -17,16 +17,16 @@ from pathlib import Path
 import torch
 
 from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.config_schema import InputConfig, ModelConfig
-from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.datasets.base import BandSpec
-from torchgeo_bench.presets import (
+from torchgeo_bench.config.presets import (
     NORMALIZATIONS,
     build_model,
     load_model_preset,
     resolve_run_config,
 )
-from torchgeo_bench.run_config import RunConfig
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import InputConfig, ModelConfig
+from torchgeo_bench.datasets import get_bench_dataset_class
+from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 
 logger = logging.getLogger(__name__)

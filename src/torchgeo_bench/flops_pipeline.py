@@ -20,17 +20,17 @@ from filelock import FileLock
 from torch import nn
 
 from torchgeo_bench.bands import BandCompatibilityError
-from torchgeo_bench.config_schema import SegmentationConfig
+from torchgeo_bench.config.flops import FlopsConfig, FlopsSegmentationConfig
+from torchgeo_bench.config.presets import NORMALIZATIONS, ModelPreset, build_model
+from torchgeo_bench.config.schema import SegmentationConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.base import BandSpec
-from torchgeo_bench.flops_config import FlopsConfig, FlopsSegmentationConfig
 from torchgeo_bench.model_profile import (
     ProfileTiming,
     _count_gflops,
     _count_params,
     measure_profile,
 )
-from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset, build_model
 from torchgeo_bench.results import append_rows_atomic
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 

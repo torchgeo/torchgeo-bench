@@ -16,8 +16,8 @@ from tests.support.runner import (
     _synthetic_embeddings,
     _synthetic_loaders,
 )
+from torchgeo_bench.config.presets import ModelPreset, resolve_run_config
 from torchgeo_bench.main import LinearProbeDivergedError, main
-from torchgeo_bench.presets import ModelPreset, resolve_run_config
 
 
 def test_model_dataset_overrides_are_isolated_and_fall_back() -> None:

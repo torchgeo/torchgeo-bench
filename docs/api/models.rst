@@ -8,8 +8,8 @@ collection of concrete backbones that can be benchmarked across the
 :mod:`torchgeo_bench.datasets` registry.
 
 Model construction is exposed through
-:func:`~torchgeo_bench.presets.load_model_preset` and
-:func:`~torchgeo_bench.presets.build_model`. Preset ``kwargs`` contain
+:func:`~torchgeo_bench.config.presets.load_model_preset` and
+:func:`~torchgeo_bench.config.presets.build_model`. Preset ``kwargs`` contain
 constructor options; the runner supplies selected ``BandSpec`` objects
 and normalization explicitly. See :doc:`cli` for typed preset resolution.
 

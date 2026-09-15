@@ -6,10 +6,15 @@ import sys
 import pytest
 
 from torchgeo_bench.config import list_model_configs, model_config_path
-from torchgeo_bench.config_schema import ModelConfig, load_yaml
+from torchgeo_bench.config.presets import (
+    ModelPreset,
+    build_model,
+    load_model_preset,
+    resolve_run_config,
+)
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import ModelConfig, load_yaml
 from torchgeo_bench.models.torchgeo_models import TorchGeoScaleMAEBench
-from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset, resolve_run_config
-from torchgeo_bench.run_config import RunConfig
 
 
 @pytest.mark.parametrize("name", ["timm/resnet5", "RCF", "not-a-model", "../model/rcf"])
@@ -79,8 +84,8 @@ def test_configuration_import_and_resolution_do_not_import_omegaconf() -> None:
     code = """
 import sys
 from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.config_schema import ModelConfig
-from torchgeo_bench.presets import load_model_preset
+from torchgeo_bench.config.schema import ModelConfig
+from torchgeo_bench.config.presets import load_model_preset
 for name in list_model_configs():
     load_model_preset(ModelConfig(name=name))
 assert not set(('omegaconf', 'torch', 'torchgeo', 'numpy', 'pandas')) & sys.modules.keys()
@@ -118,7 +123,7 @@ def test_scalemae_constructor_uses_resolved_dataset_grid(
 def test_flops_scalemae_constructor_grid_follows_explicit_synthetic_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from torchgeo_bench.flops_config import FlopsConfig
+    from torchgeo_bench.config.flops import FlopsConfig
 
     config = FlopsConfig.model_validate(
         {
@@ -183,7 +188,9 @@ def test_typed_preset_learning_rate_and_head_defaults_have_lower_precedence(monk
             "segmentation": {"learning_rate": 0.02, "head": "linear", "layers": ["backbone"]},
         }
     )
-    monkeypatch.setattr("torchgeo_bench.presets.load_model_preset", lambda *args, **kwargs: preset)
+    monkeypatch.setattr(
+        "torchgeo_bench.config.presets.load_model_preset", lambda *args, **kwargs: preset
+    )
     config = RunConfig.model_validate({"model": {"name": "custom"}, "datasets": ["caffe"]})
     effective, _ = resolve_run_config(config, "caffe")
     assert effective.segmentation.learning_rate == 0.02

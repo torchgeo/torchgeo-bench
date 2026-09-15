@@ -14,10 +14,11 @@ from torch import nn
 from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench import flops_pipeline
 from torchgeo_bench.bands import BandCompatibilityError
-from torchgeo_bench.config_schema import ModelConfig, SegmentationConfig
+from torchgeo_bench.config.flops import FlopsConfig, FlopsSegmentationConfig
+from torchgeo_bench.config.presets import ModelPreset, build_model, load_model_preset
+from torchgeo_bench.config.schema import ModelConfig, SegmentationConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.base import BandSpec
-from torchgeo_bench.flops_config import FlopsConfig, FlopsSegmentationConfig
 from torchgeo_bench.flops_pipeline import (
     _MODALITY_FOR_BAND_CONFIG,
     _build_model,
@@ -29,7 +30,6 @@ from torchgeo_bench.flops_pipeline import (
     main,
 )
 from torchgeo_bench.model_profile import ProfileTiming, _count_gflops
-from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset
 
 CPU = torch.device("cpu")
 

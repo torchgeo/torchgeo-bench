@@ -5,7 +5,8 @@ from typing import Any, Literal
 
 from pydantic import Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
 
-from torchgeo_bench.config_schema import (
+from torchgeo_bench.config.presets import ModelPreset, load_model_preset
+from torchgeo_bench.config.schema import (
     Device,
     KnnDevice,
     Methods,
@@ -15,7 +16,6 @@ from torchgeo_bench.config_schema import (
     load_yaml,
 )
 from torchgeo_bench.coordbench.catalog import FAMILY_BENCHMARKS
-from torchgeo_bench.presets import ModelPreset, load_model_preset
 
 
 class CoordRuntimeConfig(StrictModel):

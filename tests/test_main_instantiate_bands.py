@@ -5,12 +5,12 @@ from unittest import mock
 import torch
 
 from tests.support.runner import _DictTensorDataset, _synthetic_loaders
+from torchgeo_bench.config.presets import resolve_run_config
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.main import instantiate_dataset_model
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.presets import resolve_run_config
-from torchgeo_bench.run_config import RunConfig
 
 
 def test_empirical_rcf_receives_run_seed_and_actual_dataset(monkeypatch) -> None:

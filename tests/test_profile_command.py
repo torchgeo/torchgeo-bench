@@ -21,9 +21,9 @@ from torchgeo_bench import commands
 from torchgeo_bench.commands import _profile_runtime
 from torchgeo_bench.commands._profile import profile
 from torchgeo_bench.commands.profile_arguments import add_profile_arguments, load_profile_config
-from torchgeo_bench.config_schema import ModelConfig
-from torchgeo_bench.presets import NORMALIZATIONS, ModelPreset
-from torchgeo_bench.profile_config import ProfileConfig
+from torchgeo_bench.config.presets import NORMALIZATIONS, ModelPreset
+from torchgeo_bench.config.profile import ProfileConfig
+from torchgeo_bench.config.schema import ModelConfig
 
 
 class _Loader:

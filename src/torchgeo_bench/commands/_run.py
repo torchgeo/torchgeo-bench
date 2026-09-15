@@ -9,9 +9,9 @@ import json
 import yaml
 
 from .. import commands
+from ..config.presets import load_model_preset
+from ..config.run import RunConfig, validate_run_config
 from ..datasets import list_datasets
-from ..presets import load_model_preset
-from ..run_config import RunConfig, validate_run_config
 from ._config import (
     FlagOverride,
     comma_separated_bands,

@@ -7,10 +7,10 @@ import pytest
 import torch
 
 from projects.cleanlab import cleanlab_extract_probs
-from torchgeo_bench.config_schema import ModelConfig, RuntimeConfig
+from torchgeo_bench.config.presets import build_model, resolve_run_config
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import ModelConfig, RuntimeConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
-from torchgeo_bench.presets import build_model, resolve_run_config
-from torchgeo_bench.run_config import RunConfig
 
 
 @pytest.mark.parametrize(

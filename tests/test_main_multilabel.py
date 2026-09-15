@@ -9,9 +9,9 @@ import torch
 from torch.utils.data import DataLoader
 
 from tests.support.runner import _compose_cfg, _DictTensorDataset, _resume_row
+from torchgeo_bench.config.presets import merge_settings
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import LinearProbeDivergedError, main
-from torchgeo_bench.presets import merge_settings
-from torchgeo_bench.run_config import RunConfig
 
 
 def _synthetic_multilabel_loaders(

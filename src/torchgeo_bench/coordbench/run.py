@@ -18,6 +18,7 @@ import pandas as pd
 import torch
 from tqdm.auto import tqdm
 
+from torchgeo_bench.config.presets import ModelPreset, build_model
 from torchgeo_bench.coordbench.config import (
     CoordConfig,
     CoordEvaluationConfig,
@@ -30,7 +31,6 @@ from torchgeo_bench.coordbench.probe import (
     linear_probe_score,
     spatial_fold_ids,
 )
-from torchgeo_bench.presets import ModelPreset, build_model
 from torchgeo_bench.results import append_rows_atomic
 
 logger = logging.getLogger(__name__)

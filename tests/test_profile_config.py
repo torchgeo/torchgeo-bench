@@ -11,14 +11,14 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from torchgeo_bench import presets
 from torchgeo_bench.cli import main as cli_main
 from torchgeo_bench.commands._profile import profile
 from torchgeo_bench.commands.profile_arguments import add_profile_arguments, load_profile_config
-from torchgeo_bench.config_schema import ModelConfig
-from torchgeo_bench.presets import ModelPreset, resolve_run_config
-from torchgeo_bench.profile_config import ProfileConfig, resolve_profile_config
-from torchgeo_bench.run_config import RunConfig
+from torchgeo_bench.config import presets
+from torchgeo_bench.config.presets import ModelPreset, resolve_run_config
+from torchgeo_bench.config.profile import ProfileConfig, resolve_profile_config
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import ModelConfig
 
 
 @pytest.fixture

@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
+from torchgeo_bench.config.presets import ModelPreset
 from torchgeo_bench.coordbench import (
     CoordBenchmark,
     SinCosLocationEncoder,
@@ -21,7 +22,6 @@ from torchgeo_bench.coordbench import (
 from torchgeo_bench.coordbench import datasets as cb_datasets
 from torchgeo_bench.coordbench.config import CoordConfig
 from torchgeo_bench.coordbench.run import _instantiate_encoder
-from torchgeo_bench.presets import ModelPreset
 
 pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 

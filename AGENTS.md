@@ -17,11 +17,7 @@ Guidelines for AI coding agents working in the torchgeo-bench repository.
 src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
   ├── cli.py               # Unified CLI: run/models/datasets/download/profile/flops/coord
   ├── main.py              # Benchmark runner (classification + segmentation)
-  ├── run_config.py        # Strict image RunConfig and YAML loading
-  ├── config_schema.py     # Shared configuration sections and safe YAML loading
-  ├── presets.py           # ModelPreset resolution + explicit build_model construction
-  ├── profile_config.py    # Real-batch standalone profile settings
-  ├── flops_config.py      # Synthetic compute settings
+  ├── config/             # Python schemas, preset resolution, and catalog discovery
   ├── coordbench/          # Location encoders, typed config, probes, and runner
   ├── resume.py            # config_hash-based resume/skip logic
   ├── results.py            # EvaluationResult schema + atomic per-model CSV writes
@@ -167,7 +163,7 @@ torchgeo-bench coord --model sincos --dataset california_housing --methods linea
 ## Configuration Architecture
 
 - The installed CLI, `python -m torchgeo_bench`, and `python -m torchgeo_bench.cli` dispatch the same commands. Do not reintroduce a legacy override parser or a second configuration engine.
-- `run_config.py` defines `RunConfig` and `load_run_config`; `config_schema.py` holds shared configuration sections and safe YAML loading. Unknown fields, duplicate YAML keys, and wrong types are errors. Profile, FLOPs, and CoordBench have their own typed schemas.
+- `config/` groups Python configuration code; `conf/` contains packaged YAML. `config/run.py` defines `RunConfig` and `load_run_config`; `config/schema.py` holds shared configuration sections and safe YAML loading. Unknown fields, duplicate YAML keys, and wrong types are errors. Profile, FLOPs, and CoordBench have their own typed schemas.
 - Benchmark commands declare flags in `commands/<name>_arguments.py` and dispatch directly through `commands.<name>` from `cli.py`. The run handler is `commands/_run.py`, with execution in `commands/_run_runtime.py`.
 - A run selects `model: {name: rcf}` or a custom `model: {name: my-model, target: my_package.MyModel, kwargs: {...}}`. Presets in `conf/model/` use `name`, `target`, `track`, `seed_from_run`, `kwargs`, `input`, `classification`, `segmentation`, and `dataset_overrides`. Metadata is never a constructor kwarg.
 - Preserve precedence: built-in defaults < model preset < preset's dataset defaults < explicit YAML < explicit flags. Use unset-aware serialization; explicit `false`, `null`, and `[]` must not be replaced by defaults.

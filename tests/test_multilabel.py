@@ -13,8 +13,8 @@ from sklearn.metrics import average_precision_score
 
 import torchgeo_bench.knn as knn
 from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.knn import KNNClassifier, resolve_knn_device
-from torchgeo_bench.run_config import RunConfig
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits
 
 pytestmark = pytest.mark.usefixtures("isolated_torch_rng")

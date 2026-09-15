@@ -8,9 +8,9 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from torchgeo_bench.config.presets import ModelPreset
+from torchgeo_bench.config.run import FeatureProfileConfig, RunConfig
 from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
-from torchgeo_bench.presets import ModelPreset
-from torchgeo_bench.run_config import FeatureProfileConfig, RunConfig
 
 logger = logging.getLogger(__name__)
 

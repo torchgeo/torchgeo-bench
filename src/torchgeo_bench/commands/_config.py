@@ -8,8 +8,8 @@ from typing import Any, NoReturn
 
 import yaml
 
-from ..config_schema import _UniqueKeyLoader, load_yaml
-from ..presets import merge_settings
+from ..config.presets import merge_settings
+from ..config.schema import _UniqueKeyLoader, load_yaml
 
 EXPECTED_CONFIG_ERRORS = (OSError, ValueError, yaml.YAMLError)
 

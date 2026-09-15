@@ -18,8 +18,8 @@ from torchgeo_bench.cli import main
 from torchgeo_bench.commands._config import set_path
 from torchgeo_bench.commands.run_arguments import _image_size
 from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.presets import resolve_run_config
-from torchgeo_bench.run_config import validate_run_config
+from torchgeo_bench.config.presets import resolve_run_config
+from torchgeo_bench.config.run import validate_run_config
 
 
 def test_dry_run_applies_explicit_flags_and_preserves_false_values(

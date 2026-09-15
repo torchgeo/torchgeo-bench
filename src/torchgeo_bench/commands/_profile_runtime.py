@@ -17,10 +17,10 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
+from ..config.presets import NORMALIZATIONS, ModelPreset, build_model
+from ..config.profile import ProfileConfig, resolve_profile_config
 from ..datasets import BandSpec, get_bench_dataset_class, get_datasets
 from ..model_profile import ProfileResult, profile_inference
-from ..presets import NORMALIZATIONS, ModelPreset, build_model
-from ..profile_config import ProfileConfig, resolve_profile_config
 
 
 def _resolve_device(requested: str) -> torch.device:

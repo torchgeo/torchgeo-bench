@@ -4,14 +4,14 @@ from typing import Any, Literal, Self
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
 
-from .config_schema import (
+from ..datasets import list_datasets
+from .presets import ModelPreset, load_model_preset, merge_settings
+from .schema import (
     Device,
     ModelConfig,
     SegmentationConfig,
     StrictModel,
 )
-from .datasets import list_datasets
-from .presets import ModelPreset, load_model_preset, merge_settings
 
 type BandConfig = Literal["rgb", "s2"]
 type Head = Literal["linear", "conv_block", "fpn", "dpt", "patch_linear"]

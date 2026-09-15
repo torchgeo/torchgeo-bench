@@ -14,7 +14,7 @@ from torchgeo_bench import commands
 from torchgeo_bench.cli import main as cli_main
 from torchgeo_bench.commands import _flops
 from torchgeo_bench.commands.flops_arguments import add_flops_arguments
-from torchgeo_bench.flops_config import FlopsConfig
+from torchgeo_bench.config.flops import FlopsConfig
 
 
 def parser() -> argparse.ArgumentParser:
@@ -94,9 +94,9 @@ def test_model_flag_replaces_entire_yaml_selection(
 ) -> None:
     import torch
 
+    from torchgeo_bench.config.presets import build_model
     from torchgeo_bench.datasets.cloudsen12 import CloudSEN12
     from torchgeo_bench.models import RCFBench
-    from torchgeo_bench.presets import build_model
 
     path = tmp_path / "flops.yaml"
     path.write_text(
@@ -131,9 +131,9 @@ def test_model_flag_replaces_entire_yaml_selection(
 def test_explicit_constructor_flags_win_after_model_switch(tmp_path: Path) -> None:
     import torch
 
+    from torchgeo_bench.config.presets import build_model
     from torchgeo_bench.datasets.cloudsen12 import CloudSEN12
     from torchgeo_bench.models import RCFBench
-    from torchgeo_bench.presets import build_model
 
     path = tmp_path / "flops.yaml"
     path.write_text(

@@ -10,7 +10,8 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from .config_schema import (
+from .run import RunConfig
+from .schema import (
     ClassificationConfig,
     InputConfig,
     ModelConfig,
@@ -18,7 +19,6 @@ from .config_schema import (
     StrictModel,
     load_yaml,
 )
-from .run_config import RunConfig
 
 NORMALIZATIONS = {
     "dataset": "bandspec_zscore",
@@ -72,7 +72,7 @@ def load_model_preset(selection: ModelConfig, *, seed: int = 0) -> ModelPreset:
     """Load a packaged preset or a custom constructor without importing weights."""
     if selection.target is not None:
         return ModelPreset(name=selection.name, target=selection.target, kwargs=selection.kwargs)
-    from .config import model_config_path
+    from .catalog import model_config_path
 
     preset = ModelPreset.model_validate(load_yaml(model_config_path(selection.name)))
     kwargs = dict(preset.kwargs)

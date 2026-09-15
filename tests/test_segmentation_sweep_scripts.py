@@ -10,9 +10,9 @@ from types import ModuleType
 
 import pytest
 
-from torchgeo_bench.config_schema import ModelConfig
-from torchgeo_bench.presets import resolve_run_config
-from torchgeo_bench.run_config import RunConfig, load_run_config
+from torchgeo_bench.config.presets import resolve_run_config
+from torchgeo_bench.config.run import RunConfig, load_run_config
+from torchgeo_bench.config.schema import ModelConfig
 
 ROOT = Path(__file__).parents[1]
 
@@ -198,8 +198,8 @@ def test_queue_logging_uses_stderr_by_default() -> None:
             sys.executable,
             "-c",
             "from experiments._runner import Job, run_jobs; "
-            "from torchgeo_bench.config_schema import ModelConfig; "
-            "from torchgeo_bench.run_config import RunConfig; "
+            "from torchgeo_bench.config.schema import ModelConfig; "
+            "from torchgeo_bench.config.run import RunConfig; "
             "config = RunConfig(model=ModelConfig(name='rcf'), datasets=['m-eurosat']); "
             "run_jobs([Job('rcf', config)], [0], output='results.csv', dry_run=True)",
         ],

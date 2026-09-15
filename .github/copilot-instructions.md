@@ -15,11 +15,10 @@ The Python package lives at **`src/torchgeo_bench/`**. Important pieces:
 - `cli.py` / `__main__.py` / `commands/` — shared dispatch for the installed
   command and both Python module entry points. Commands are `run`, `models`,
   `datasets`, `download`, `profile`, `flops`, and `coord`.
-- `run_config.py` / `config_schema.py` / `presets.py` — strict image `RunConfig`, shared configuration sections and safe YAML loading, `ModelPreset`, per-dataset `resolve_run_config`, and explicit `build_model` construction. No legacy override parser or recursive target instantiation.
+- `config/run.py` / `config/schema.py` / `config/presets.py`: strict image `RunConfig`, shared configuration sections and safe YAML loading, `ModelPreset`, per-dataset `resolve_run_config`, and explicit `build_model` construction. No legacy override parser or recursive target instantiation.
 - `commands/run_arguments.py` / `commands/_run.py` / `commands/_run_runtime.py` — run flags, configuration loading, and execution. Like the other benchmark commands, `run` dispatches directly through `commands.run` from `cli.py`.
-- `profile_config.py` / `flops_config.py` / `coordbench/config.py` — separate
-  strict schemas for real-batch profiling, synthetic compute measurements,
-  and coordinate evaluation.
+- `config/profile.py` / `config/flops.py` / `coordbench/config.py`: separate strict schemas for real-batch profiling, synthetic compute measurements, and coordinate evaluation.
+- `config/catalog.py`: lightweight packaged preset discovery. `config/__init__.py` exposes only catalog helpers so listing models does not load schemas. YAML assets remain in `conf/`.
 - `download.py` — fetches GeoBench V1 / V2 from Hugging Face via
   `snapshot_download`, plus a torchgeo-backed `download_eurosat` helper.
 - `conf/model/` — **typed model presets are packaged inside the source tree**.

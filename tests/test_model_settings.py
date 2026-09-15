@@ -9,10 +9,10 @@ import pytest
 import torch
 
 from tests.support.models import bands as _bands
-from torchgeo_bench.config_schema import ModelConfig
+from torchgeo_bench.config.presets import build_model, load_model_preset
+from torchgeo_bench.config.schema import ModelConfig
 from torchgeo_bench.models.rcf import RCFBench, RCFModelSettings
 from torchgeo_bench.models.timm import TimmModelSettings, TimmPatchBenchModel
-from torchgeo_bench.presets import build_model, load_model_preset
 
 
 def test_timm_builder_matches_direct_constructor() -> None:
