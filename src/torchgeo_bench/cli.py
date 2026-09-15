@@ -8,20 +8,13 @@ import pathlib
 import sys
 from collections.abc import Callable, Sequence
 
-from . import commands
+from . import __version__, commands
 from .commands.coord_arguments import add_coord_arguments
 from .commands.flops_arguments import add_flops_arguments
 from .commands.profile_arguments import add_profile_arguments
 from .commands.run_arguments import add_run_arguments
+from .config import list_model_configs
 from .datasets import get_dataset_task, list_datasets
-
-
-def _model_names() -> list[str]:
-    """Return preset names from packaged YAML files without importing models."""
-    root = pathlib.Path(__file__).parent / "conf" / "model"
-    return sorted(
-        path.relative_to(root).with_suffix("").as_posix() for path in root.rglob("*.yaml")
-    )
 
 
 def _model_detail(name: str) -> str:
@@ -36,26 +29,37 @@ def _dataset_detail(name: str) -> str:
     return f"name: {name}\ntask: {task}\n"
 
 
-def _parser() -> argparse.ArgumentParser:
+def _setup_parser() -> argparse.ArgumentParser:
     """Build the CLI parser without importing numerical dependencies."""
     parser = argparse.ArgumentParser(prog="torchgeo-bench")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subcommands = parser.add_subparsers(dest="command", required=True)
+
+    # Image benchmarks
     run = subcommands.add_parser("run", help="Run image benchmarks")
     add_run_arguments(run)
+
+    # Model and dataset catalogs
     for name, help_text in (
         ("models", "List model presets or show one preset"),
         ("datasets", "List datasets or show one dataset"),
     ):
         command = subcommands.add_parser(name, help=help_text)
         command.add_argument("name", nargs="?")
+
+    # Dataset downloads
     download = subcommands.add_parser("download", help="Download benchmark datasets")
     download.add_argument("target", nargs="+")
     download.add_argument("--output-dir", default="data")
     download.add_argument("--datasets")
+
+    # Inference profiling and compute costs
     profile = subcommands.add_parser("profile", help="Measure one real inference batch")
     add_profile_arguments(profile)
     flops = subcommands.add_parser("flops", help="Measure synthetic compute cost")
     add_flops_arguments(flops)
+
+    # Coordinate benchmarks
     coord = subcommands.add_parser("coord", help="Run coordinate encoder benchmarks")
     add_coord_arguments(coord)
     return parser
@@ -75,7 +79,7 @@ def _show_catalog(
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     """Reject retired override syntax without confusing equals signs in flag values."""
-    parser = _parser()
+    parser = _setup_parser()
     args, extras = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
     if extras:
         if any("=" in value and not value.startswith("--") for value in extras):
@@ -93,7 +97,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "run":
         commands.run(args)
     elif args.command == "models":
-        _show_catalog(args.name, _model_names(), _model_detail, "model")
+        _show_catalog(args.name, list_model_configs(), _model_detail, "model")
     elif args.command == "datasets":
         _show_catalog(args.name, list_datasets(), _dataset_detail, "dataset")
     elif args.command == "download":

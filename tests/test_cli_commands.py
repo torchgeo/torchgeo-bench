@@ -17,6 +17,7 @@ import yaml
 from torchgeo_bench.cli import main
 from torchgeo_bench.commands._config import set_path
 from torchgeo_bench.commands.run_arguments import _image_size
+from torchgeo_bench.config import list_model_configs
 from torchgeo_bench.presets import resolve_run_config
 from torchgeo_bench.run_config import validate_run_config
 
@@ -453,6 +454,11 @@ def test_nested_linear_override_preserves_sibling_values(
     output = capsys.readouterr().out
     assert "knn_k: 7" in output
     assert "refit_train_val: false" in output
+
+
+def test_model_catalog_matches_packaged_presets(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["models"])
+    assert capsys.readouterr().out.splitlines() == list_model_configs()
 
 
 def test_catalog_name_selection_and_invalid_requests(

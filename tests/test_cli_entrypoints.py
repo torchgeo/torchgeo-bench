@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -10,10 +11,11 @@ import yaml
 
 
 def run_entrypoint(
-    module: str, arguments: list[str], cwd: Path
+    module: str | None, arguments: list[str], cwd: Path
 ) -> subprocess.CompletedProcess[str]:
+    command = [sys.executable, "-m", module] if module is not None else ["torchgeo-bench"]
     return subprocess.run(
-        [sys.executable, "-m", module, *arguments],
+        [*command, *arguments],
         cwd=cwd,
         env={
             **os.environ,
@@ -26,6 +28,16 @@ def run_entrypoint(
         timeout=30,
         check=False,
     )
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+def test_version_prints_installed_version_without_subcommand(
+    module: str | None, tmp_path: Path
+) -> None:
+    completed = run_entrypoint(module, ["--version"], tmp_path)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == f"torchgeo-bench {version('torchgeo-bench')}\n"
+    assert completed.stderr == ""
 
 
 @pytest.mark.parametrize(

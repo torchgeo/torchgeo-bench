@@ -10,6 +10,7 @@ import pytest
     ("module", "arguments"),
     [
         ("torchgeo_bench.cli", ["--help"]),
+        ("torchgeo_bench.cli", ["--version"]),
         ("torchgeo_bench.cli", ["run", "--help"]),
         ("torchgeo_bench.cli", ["run", "--config-help"]),
         ("torchgeo_bench.cli", ["models"]),
