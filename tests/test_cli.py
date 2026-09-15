@@ -375,11 +375,11 @@ def test_flops_dispatches_typed_config(monkeypatch: pytest.MonkeyPatch) -> None:
     assert received[0].runtime.device == "cpu"
 
 
-def test_unknown_model_suggests_close_names(capsys: pytest.CaptureFixture[str]) -> None:
+def test_unknown_model_is_reported_without_suggestions(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as error:
         cli_main(["run", "-m", "resnet50", "-d", "m-eurosat"])
     assert error.value.code == 2
-    assert "timm/resnet50" in capsys.readouterr().err
+    assert capsys.readouterr().err == "error: Unknown model config 'resnet50'.\n"
 
 
 def test_constructor_options_are_explicit_yaml_kwargs(
