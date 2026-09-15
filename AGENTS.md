@@ -71,6 +71,8 @@ count += 1
 # GOOD: explains a non-obvious constraint
 # Rounding avoids the downward bias from truncating positive wavelengths.
 wavelength = int(round(wavelength_um))
+
+# BEST: no comment on lines that are self explanatory
 ```
 
 ## Writing and Line Wrapping

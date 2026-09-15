@@ -1,3 +1,5 @@
+# lazy.attach_stub reads this file at runtime for lazy imports; it also provides type information.
+
 from . import _profile_runtime as _profile_runtime
 from . import _run_runtime as _run_runtime
 from ._coord import coord as coord
