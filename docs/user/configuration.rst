@@ -101,6 +101,8 @@ names. The equivalent flag accepts comma-separated names, for example
 ``image_size: null`` (``--image-size none``) retains native dimensions.
 Interpolation is ``area``, ``bilinear``, ``bicubic``, or ``nearest``.
 
+For ``run`` and ``profile``, ``--image-size`` accepts a positive integer or case-insensitive ``none``. FLOPs measurements require a concrete positive image size.
+
 Normalization choices map to the model interface as follows:
 
 .. list-table::

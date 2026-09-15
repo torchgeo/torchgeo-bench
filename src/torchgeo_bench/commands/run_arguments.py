@@ -3,15 +3,7 @@
 import argparse
 from pathlib import Path
 
-
-def _image_size(value: str) -> int | None:
-    """Parse a positive image size or the explicit ``none`` value."""
-    if value == "none":
-        return None
-    size = int(value)
-    if size <= 0:
-        raise argparse.ArgumentTypeError("image size must be positive or none")
-    return size
+from ._config import parse_image_size
 
 
 def add_run_arguments(parser: argparse.ArgumentParser) -> None:
@@ -41,7 +33,7 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--image-size", type=_image_size, metavar="PX|none", default=argparse.SUPPRESS
+        "--image-size", type=parse_image_size, metavar="PX|none", default=argparse.SUPPRESS
     )
     parser.add_argument(
         "--normalization",

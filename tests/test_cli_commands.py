@@ -16,8 +16,7 @@ import pytest
 import yaml
 
 from torchgeo_bench.cli import main
-from torchgeo_bench.commands._config import set_path
-from torchgeo_bench.commands.run_arguments import _image_size
+from torchgeo_bench.commands._config import parse_image_size, set_path
 from torchgeo_bench.config import list_model_configs
 from torchgeo_bench.config.presets import resolve_run_config
 from torchgeo_bench.config.run import validate_run_config
@@ -72,10 +71,10 @@ def test_nested_flag_mapping_and_image_size_validation() -> None:
         "classification": {"linear": {"refit_train_val": False}},
         "runtime": {"workers": 0},
     }
-    assert _image_size("none") is None
-    assert _image_size("224") == 224
+    assert parse_image_size("none") is None
+    assert parse_image_size("224") == 224
     with pytest.raises(argparse.ArgumentTypeError, match="positive"):
-        _image_size("0")
+        parse_image_size("0")
 
 
 @pytest.mark.parametrize("size", ["0", "-1", "not-an-integer"])
