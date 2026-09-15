@@ -63,7 +63,7 @@ def test_import_guard_allows_assertions_fixtures_and_third_party_dependencies(so
 
 
 @pytest.mark.parametrize(
-    "directory", ["src", "tests", "docs/examples", "experiments", "scripts", "projects"]
+    "directory", ["src", "tests", "docs", "experiments", "scripts", "projects"]
 )
 def test_no_application_owned_omegaconf_imports(directory: str) -> None:
     root = Path(__file__).parents[1]
@@ -71,7 +71,9 @@ def test_no_application_owned_omegaconf_imports(directory: str) -> None:
         path
         for path in (root / directory).rglob("*")
         if path.suffix in {".py", ".pyi"}
-        and not any(part in {".venv", "__pycache__", "site-packages"} for part in path.parts)
+        and not any(
+            part in {".venv", "__pycache__", "site-packages", "_build"} for part in path.parts
+        )
     )
     assert paths, f"No maintained Python sources found under {directory}"
     violations = [
