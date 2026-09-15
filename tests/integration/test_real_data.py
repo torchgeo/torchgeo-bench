@@ -81,10 +81,10 @@ def test_real_segmentation_program(tmp_path: Path, *, cached: bool) -> None:
     config.write_text(
         yaml.safe_dump(
             {
-                "model": {"name": "timm/resnet18", "kwargs": {"pretrained": False, "seed": 0}},
+                "model": {"name": "timm/resnet18", "kwargs": {"pretrained": False}},
                 "datasets": ["caffe"],
                 "input": {"image_size": 32},
-                "runtime": {"batch_size": 32, "workers": 0, "device": "cpu"},
+                "runtime": {"batch_size": 32, "workers": 0, "device": "cpu", "seed": 0},
                 "classification": {"bootstrap_samples": 5},
                 "segmentation": {
                     "head": "linear",
