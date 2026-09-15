@@ -12,6 +12,13 @@ from torchgeo_bench.presets import ModelPreset, build_model, load_model_preset, 
 from torchgeo_bench.run_config import RunConfig
 
 
+@pytest.mark.parametrize("name", ["timm/resnet5", "RCF", "not-a-model", "../model/rcf"])
+def test_unknown_model_config_is_rejected_without_suggestions(name: str) -> None:
+    with pytest.raises(ValueError, match="Unknown model config") as error:
+        model_config_path(name)
+    assert str(error.value) == f"Unknown model config {name!r}."
+
+
 @pytest.mark.parametrize("name", list_model_configs())
 def test_packaged_preset_is_typed_without_loading_weights(name: str) -> None:
     preset = load_model_preset(ModelConfig(name=name), seed=17)

@@ -1,6 +1,5 @@
 """Lightweight discovery of packaged Pydantic model presets."""
 
-import difflib
 from importlib.resources import files
 from pathlib import Path
 
@@ -18,11 +17,6 @@ def list_model_configs() -> list[str]:
 
 def model_config_path(name: str) -> Path:
     """Return a catalog-validated preset path, rejecting path traversal."""
-    names = list_model_configs()
-    if name not in names:
-        matches = difflib.get_close_matches(name, names, n=5, cutoff=0.5)
-        if not matches:
-            matches = [candidate for candidate in names if name.lower() in candidate.lower()][:5]
-        suggestion = f" Did you mean: {', '.join(matches)}?" if matches else ""
-        raise ValueError(f"Unknown model config {name!r}.{suggestion}")
+    if name not in list_model_configs():
+        raise ValueError(f"Unknown model config {name!r}.")
     return CONF_DIR / "model" / f"{name}.yaml"
