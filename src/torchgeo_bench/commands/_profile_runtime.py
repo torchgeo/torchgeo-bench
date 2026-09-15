@@ -29,12 +29,7 @@ def _load_batch(config: ProfileConfig) -> tuple[Dataset, torch.Tensor, list[Band
     inputs = config.input
     dataset = get_bench_dataset_class(config.dataset)()
     band_names = inputs.bands
-    if band_names == "rgb":
-        selected = dataset.select_band_specs(dataset.rgb_bands)
-    elif band_names == "all":
-        selected = dataset.select_band_specs(None)
-    else:
-        selected = dataset.select_band_specs(band_names)
+    selected = dataset.resolve_band_specs(band_names)
     train_dataset, train_loader, _, _ = get_datasets(
         dataset_name=config.dataset,
         batch_size=config.runtime.batch_size,

@@ -16,6 +16,8 @@ Base classes
 .. autoclass:: BenchDataset
 .. autoclass:: BandSpec
 
+``BenchDataset.resolve_band_specs()`` translates ``rgb``, ``all``, or an ordered iterable of band names into the dataset's existing ``BandSpec`` objects without loading samples. RGB selection follows each dataset's metadata, including grayscale and SAR datasets.
+
 Loading API
 -----------
 

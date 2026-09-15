@@ -2,6 +2,7 @@
 
 from unittest import mock
 
+import pytest
 import torch
 
 from tests.support.runner import _DictTensorDataset, _synthetic_loaders
@@ -86,3 +87,19 @@ def test_temporal_input_uses_channel_dimension_not_time_dimension() -> None:
         config, preset, get_bench_dataset_class("m-eurosat")(), dataset, torch.device("cpu")
     )
     assert model.num_channels == 3
+
+
+def test_band_spec_count_must_match_tensor_channels() -> None:
+    config = RunConfig.model_validate(
+        {"model": {"name": "rcf"}, "datasets": ["m-eurosat"], "runtime": {"device": "cpu"}}
+    )
+    config, preset = resolve_run_config(config, "m-eurosat")
+    dataset = _DictTensorDataset(torch.zeros(1, 4, 8, 8), torch.zeros(1))
+    with (
+        mock.patch("torchgeo_bench.main.build_model") as build,
+        pytest.raises(ValueError, match="BandSpec count 3 != tensor channel count 4"),
+    ):
+        instantiate_dataset_model(
+            config, preset, get_bench_dataset_class("m-eurosat")(), dataset, torch.device("cpu")
+        )
+    build.assert_not_called()

@@ -822,14 +822,7 @@ def instantiate_dataset_model(
     num_channels = train_dataset[0]["image"].shape[-3]
     normalization = NORMALIZATIONS[cfg.input.normalization]
     ds_name = bench.name
-    bands_resolved = (
-        tuple(bench.rgb_bands)
-        if cfg.input.bands == "rgb"
-        else None
-        if cfg.input.bands == "all"
-        else tuple(cfg.input.bands)
-    )
-    bands_list = bench.select_band_specs(bands_resolved)
+    bands_list = bench.resolve_band_specs(cfg.input.bands)
     if len(bands_list) != num_channels:
         raise ValueError(
             f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
