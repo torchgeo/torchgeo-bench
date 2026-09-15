@@ -19,6 +19,7 @@ class KuroSiwo(_V2Dataset):
     """
 
     band_order_strategy = "by_sensor"
+    canonical_sensor_order: ClassVar[tuple[str, ...]] = ("sar", "dem")
     upstream_kwargs: ClassVar[dict[str, object]] = {
         "return_stacked_image": False,
         "time_step": ["post"],
@@ -42,10 +43,13 @@ class KuroSiwo(_V2Dataset):
     def canonicalize_sample(self, sample: dict) -> dict:
         """Join post-event SAR and optional DEM into a ``(C, H, W)`` image.
 
-        Place ``image_post`` channels before ``image_dem`` and remove the original keys.
+        The shared adapter uses ``canonical_sensor_order`` to restore requested channel order.
         """
+        keys = {"sar": "image_post", "dem": "image_dem"}
         modalities: list[torch.Tensor] = [
-            sample.pop(key) for key in ("image_post", "image_dem") if key in sample
+            sample.pop(keys[sensor])
+            for sensor in self.canonical_sensor_order
+            if keys[sensor] in sample
         ]
         if modalities:
             sample["image"] = (

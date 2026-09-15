@@ -1,6 +1,9 @@
 """Regression tests for resume hashing and metric completeness."""
 
+import hashlib
+import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -10,6 +13,7 @@ from torchgeo_bench.config.presets import merge_settings, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.resume import (
+    DATASET_INPUT_PROTOCOL_VERSION,
     ResumeState,
     load_completed,
     plan_dataset_run,
@@ -87,6 +91,32 @@ def test_config_hash_includes_resolved_model_target_and_kwargs() -> None:
 def test_config_hash_reflects_dataset_resolved_preset_overrides() -> None:
     config = _cfg(model={"name": "torchgeo/scalemae_large_fmow"})
     assert _hash(config, "m-eurosat") != _hash(config, "forestnet")
+
+
+@pytest.mark.parametrize("unversioned", [True, False], ids=["pre-fix", "current"])
+def test_dataset_input_protocol_controls_resume(tmp_path: Path, *, unversioned: bool) -> None:
+    config = _cfg(classification={"methods": ["knn"]}, output={"resume": True})
+    with patch("torchgeo_bench.resume.hashlib.sha256", wraps=hashlib.sha256) as digest:
+        current_hash = _hash(config)
+    payload = json.loads(digest.call_args.args[0])
+    assert payload.pop("dataset_input_protocol_version") == DATASET_INPUT_PROTOCOL_VERSION
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    old_hash = hashlib.sha256(encoded.encode()).hexdigest()[:16]
+    assert current_hash != old_hash
+    assert _hash(config) == current_hash
+
+    metadata = _resume_row(config, method="knn5", metric_name="accuracy")
+    assert metadata["config_hash"] == current_hash
+    row = {**metadata, "config_hash": old_hash if unversioned else current_hash}
+    path = tmp_path / "results.csv"
+    pd.DataFrame([row]).to_csv(path, index=False)
+    before = path.read_bytes()
+    completed = ResumeState(*load_completed(str(path)))
+    resolved, _ = resolve_run_config(config, "m-eurosat")
+    plan = plan_dataset_run(resolved, get_bench_dataset_class("m-eurosat"), metadata, completed)
+    assert plan.skip_knn is not unversioned
+    assert plan.skip_dataset is not unversioned
+    assert path.read_bytes() == before
 
 
 def test_resume_keys_require_the_requested_metric(tmp_path: Path) -> None:

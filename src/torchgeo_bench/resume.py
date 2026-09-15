@@ -14,6 +14,9 @@ from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
 
 logger = logging.getLogger(__name__)
 
+# Version 1 restores requested V2 channel order. Unversioned results are incompatible.
+DATASET_INPUT_PROTOCOL_VERSION = 1
+
 KEY_COLS = (
     "dataset",
     "method",
@@ -37,6 +40,7 @@ def resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
     """Fingerprint result-affecting settings for one resolved image run."""
     payload = {
         "schema_version": config.schema_version,
+        "dataset_input_protocol_version": DATASET_INPUT_PROTOCOL_VERSION,
         "model": {
             "name": model_cfg.name,
             "target": model_cfg.target,

@@ -180,16 +180,16 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
 @pytest.mark.parametrize(
     ("requested", "expected_hash"),
     [
-        (None, "0391f898e8a4db0d"),
-        ("cpu", "21d7c33e4e3fb14b"),
-        ("cuda", "f3d1f875b722da7e"),
-        ("cuda:0", "0391f898e8a4db0d"),
-        ("cuda:1", "2ff6e9885cdca60c"),
-        ("auto", "2ff6e9885cdca60c"),
+        (None, "4d2b8c799a228059"),
+        ("cpu", "dd8b8443e738da5f"),
+        ("cuda", "b2ce2a88d10202d2"),
+        ("cuda:0", "4d2b8c799a228059"),
+        ("cuda:1", "8b5895d29e02776e"),
+        ("auto", "8b5895d29e02776e"),
     ],
 )
 @pytest.mark.parametrize("entrypoint", ["direct", "command"])
-def test_device_labels_preserve_existing_hashes_and_resume(
+def test_device_labels_use_stable_current_hashes_and_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     requested: str | None,

@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 
-from .base import BenchDataset
+from .base import BandSpec, BenchDataset
 
 logger = logging.getLogger(__name__)
 
@@ -75,20 +75,24 @@ class GeoBenchv2(Dataset):
             containing per-dataset subdirectories, e.g. ``data/geobenchv2``).
         dataset_name: One of :func:`list_v2_datasets`.
         split: ``"train"``, ``"val"``, or ``"test"``.
+        band_specs: Requested band metadata, in output channel order.
         band_order: Bands to load in upstream-expected shape (a flat ``list``
             for single-modality datasets, or ``dict[modality, list[str]]`` for
             multi-modality ones).
+        sensor_order: Override the upstream stack order for custom canonicalizers.
         transforms: Optional sample transform forwarded to the upstream class.
         **kwargs: Additional keyword arguments forwarded to the upstream class.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - adapter construction with resolved band metadata.
         self,
         root: str | Path,
         dataset_name: str,
         split: str,
         *,
+        band_specs: tuple[BandSpec, ...],
         band_order: object | None = None,
+        sensor_order: tuple[str, ...] | None = None,
         transforms: Callable | None = None,
         **kwargs,
     ) -> None:
@@ -100,8 +104,9 @@ class GeoBenchv2(Dataset):
             )
         # Import GeoBench V2 only when needed to keep CLI startup fast.
         import geobench_v2.datasets as _gb_v2
+        from geobench_v2.datasets.base import GeoBenchBaseDataset
 
-        cls: type[Dataset] = getattr(_gb_v2, _V2_REGISTRY[dataset_name])
+        cls = getattr(_gb_v2, _V2_REGISTRY[dataset_name])
         upstream_split = (
             "val"
             if split == "val" and dataset_name in _V2_VAL_AS_VAL
@@ -119,15 +124,53 @@ class GeoBenchv2(Dataset):
             forward["band_order"] = band_order
         forward.update(kwargs)
 
-        self._inner: Dataset = cls(**forward)
+        self._inner: GeoBenchBaseDataset = cls(**forward)
         self.dataset_name = dataset_name
         self.split = split
+        self.band_specs = band_specs
+        # Upstream preserves within-sensor band order, but stacks using its resolved
+        # band_order, not necessarily the dictionary supplied to its constructor.
+        upstream_order = self._inner.band_order
+        if sensor_order is not None:
+            self._sensor_order = sensor_order
+        elif isinstance(upstream_order, dict):
+            self._sensor_order = tuple(upstream_order)
+        else:
+            self._sensor_order = ()
+        emitted = list(range(len(band_specs)))
+        if self._sensor_order:
+            emitted = [
+                index
+                for sensor in self._sensor_order
+                for index, spec in enumerate(band_specs)
+                if spec.sensor == sensor
+            ]
+        if sorted(emitted) != list(range(len(band_specs))):
+            raise ValueError(f"{dataset_name}: backend sensor order does not match requested bands")
+        self._channel_indices = [emitted.index(index) for index in range(len(band_specs))]
 
     def __len__(self) -> int:
         return len(self._inner)  # type: ignore[arg-type]
 
     def __getitem__(self, index: int) -> dict:
-        return self._inner[index]
+        sample = self._inner[index]
+        if "image" not in sample and self._sensor_order:
+            # Upstream PASTIS stacks along dim=0 even for TCHW. Keep its acquisition
+            # selection and transforms, then concatenate along the channel axis here.
+            sample["image"] = torch.cat(
+                [sample.pop(f"image_{sensor}") for sensor in self._sensor_order], dim=-3
+            )
+        image = sample["image"]
+        if image.ndim not in (3, 4) or image.shape[-3] != len(self.band_specs):
+            raise ValueError(
+                f"{self.dataset_name}: expected CHW or TCHW image with "
+                f"{len(self.band_specs)} channels, got {tuple(image.shape)}"
+            )
+        if self._channel_indices != list(range(len(self.band_specs))):
+            sample["image"] = image.index_select(
+                -3, torch.tensor(self._channel_indices, device=image.device)
+            )
+        return sample
 
 
 class _V2Dataset(BenchDataset):
@@ -147,14 +190,15 @@ class _V2Dataset(BenchDataset):
 
     #: Whether the upstream loader accepts a time axis (``num_time_steps``).
     multi_temporal: ClassVar[bool] = False
+    #: Channel assembly order when a canonicalizer replaces upstream stacking.
+    canonical_sensor_order: ClassVar[tuple[str, ...] | None] = None
 
     @classmethod
     def data_root(cls) -> Path:
         return V2_ROOT
 
-    def build_band_order(self, bands: tuple[str, ...] | None) -> object:
-        """Translate canonical band names into the upstream loader's shape."""
-        specs = self.select_band_specs(bands)
+    def build_band_order(self, specs: tuple[BandSpec, ...]) -> object:
+        """Translate resolved band metadata into the upstream loader's shape."""
         if self.band_order_strategy == "by_sensor":
             grouped: dict[str, list[str]] = {}
             for spec in specs:
@@ -184,7 +228,8 @@ class _V2Dataset(BenchDataset):
         ``time_steps`` requests a time series and needs :attr:`multi_temporal`.
         """
         del partition
-        band_order = self.build_band_order(bands)
+        specs = tuple(self.select_band_specs(bands))
+        band_order = self.build_band_order(specs)
 
         kwargs: dict[str, object] = {
             "data_normalizer": nn.Identity,
@@ -198,12 +243,16 @@ class _V2Dataset(BenchDataset):
                 raise ValueError(f"{self.name} is not multi-temporal; drop time_steps.")
             kwargs["num_time_steps"] = int(time_steps)
             kwargs["temporal_output_format"] = "TCHW"
+            if time_steps > 1:
+                kwargs["return_stacked_image"] = False
 
         return GeoBenchv2(
             root=self.data_root(),
             dataset_name=self.name,
             split=split,
+            band_specs=specs,
             band_order=band_order,
+            sensor_order=self.canonical_sensor_order,
             transforms=_ChainedTransform(self.canonicalize_sample, transform),
             **kwargs,
         )
