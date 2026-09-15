@@ -13,7 +13,7 @@ on:
       - "results/profiles/**"
       - "results/intrinsic_dim/**"
       - "results/compute_cost.csv"
-      - "experiments/scripts/regen_results_explorer.py"
+      - "scripts/regen_results_explorer.py"
   pull_request:
     branches: [main]
     paths:
@@ -21,7 +21,7 @@ on:
       - "results/profiles/**"
       - "results/intrinsic_dim/**"
       - "results/compute_cost.csv"
-      - "experiments/scripts/regen_results_explorer.py"
+      - "scripts/regen_results_explorer.py"
   workflow_dispatch:
 
 # Serialise: two runs regenerating the same page would race on the branch.
@@ -46,7 +46,7 @@ jobs:
 
       # regen_results_explorer.py is stdlib-only, so skip the uv sync entirely.
       - name: Regenerate
-        run: python experiments/scripts/regen_results_explorer.py
+        run: python scripts/regen_results_explorer.py
 
       - name: Show what changed
         run: git --no-pager diff --stat
@@ -81,7 +81,7 @@ jobs:
           title: "chore(docs): refresh results explorer"
           body: |
             Regenerated `docs/_static/results-explorer.html` from the results
-            CSVs on `main` via `experiments/scripts/regen_results_explorer.py`.
+            CSVs on `main` via `scripts/regen_results_explorer.py`.
 
             Opened automatically because a results CSV changed. The diff is the
             re-inlined data plus the masthead, both derived from the CSVs — the

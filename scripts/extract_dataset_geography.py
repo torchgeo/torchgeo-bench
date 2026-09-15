@@ -7,13 +7,13 @@ Use the registry so newly added datasets appear in the store.
 Usage::
 
     # regenerate the whole store
-    python experiments/scripts/extract_dataset_geography.py --all
+    python scripts/extract_dataset_geography.py --all
 
     # regenerate a single dataset without rescanning everything
-    python experiments/scripts/extract_dataset_geography.py --dataset m-eurosat
+    python scripts/extract_dataset_geography.py --dataset m-eurosat
 
     # report coverage without touching the store
-    python experiments/scripts/extract_dataset_geography.py --check
+    python scripts/extract_dataset_geography.py --check
 """
 
 import argparse
@@ -53,6 +53,7 @@ def _check() -> int:
 
 
 def main() -> int:
+    """Regenerate the cached dataset geography metadata."""
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--all", action="store_true", help="regenerate every registered dataset")

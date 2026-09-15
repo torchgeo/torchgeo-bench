@@ -1,10 +1,10 @@
-"""Compare data-loader batch sizes and worker counts for one model and dataset.
+r"""Compare data-loader batch sizes and worker counts for one model and dataset.
 
 Report samples per second, peak GPU memory, and the fastest successful setting.
 
 Usage::
 
-    python experiments/scripts/tune_dataloader.py \\
+    python scripts/tune_dataloader.py \\
         --model terratorch/prithvi_eo_v2_300 \\
         --dataset m-bigearthnet \\
         --bands all \\
@@ -97,6 +97,7 @@ def _bench(
 
 
 def main() -> None:
+    """Sweep batch sizes and worker counts, reporting the fastest successful setting."""
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True, help="e.g. terratorch/prithvi_eo_v2_300")
     p.add_argument("--dataset", default="m-bigearthnet")
