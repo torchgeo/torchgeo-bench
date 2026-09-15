@@ -51,7 +51,7 @@ def test_sincos_encode_preserves_coordinate_order_across_batches(
 
 
 def test_documented_fourier_encoder_example(points: tuple[np.ndarray, np.ndarray]) -> None:
-    from examples.coordbench_location_encoder import FourierLocationEncoder
+    from docs.examples.coordbench_location_encoder import FourierLocationEncoder
 
     lon, lat = points
     feats = FourierLocationEncoder(num_frequencies=4).encode(lon, lat)

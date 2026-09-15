@@ -142,7 +142,7 @@ torchgeo-bench run --model rcf --dataset m-eurosat --methods knn --bootstrap-sam
 torchgeo-bench run --model rcf --dataset m-eurosat --methods linear
 
 # Resume a previously interrupted run (skips completed experiments)
-torchgeo-bench run --config examples/image-run.yaml --resume
+torchgeo-bench run --config docs/examples/image-run.yaml --resume
 
 # Evaluate segmentation datasets (V2)
 torchgeo-bench run --model timm/resnet50 --dataset burn_scars --dataset pastis --dataset flair2

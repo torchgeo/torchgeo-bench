@@ -18,7 +18,7 @@ For example:
 
    $ torchgeo-bench run --model timm/resnet50 --dataset m-eurosat \
        --methods knn --bootstrap-samples 100 --device cpu
-   $ torchgeo-bench run --config examples/image-run.yaml --methods linear --dry-run
+   $ torchgeo-bench run --config docs/examples/image-run.yaml --methods linear --dry-run
    $ torchgeo-bench run --config-help
 
 ``--dry-run`` validates selections and prints reusable YAML without loading
@@ -71,7 +71,7 @@ Use ``datasets: [all]`` to select the image dataset catalog. On the CLI,
    $ torchgeo-bench run --model timm/resnet50 \
        --dataset m-eurosat --dataset m-pv4ger --device cpu
 
-The complete field example is :file:`examples/image-run.yaml`. It explicitly
+The complete field example is :file:`docs/examples/image-run.yaml`. It explicitly
 sets defaults for illustration; remove fields that should inherit preset
 settings.
 
@@ -317,7 +317,7 @@ record to stdout, not to an image-results CSV:
 
    $ torchgeo-bench profile --model rcf --dataset m-eurosat --device cpu \
        --batch-size 8 --warmup 1 --measurements 5 > profile.json
-   $ torchgeo-bench profile --config examples/profile.yaml --dry-run
+   $ torchgeo-bench profile --config docs/examples/profile.yaml --dry-run
 
 Its YAML uses singular ``dataset`` and top-level measurement settings:
 
@@ -357,7 +357,7 @@ the selected model is an offline baseline or already cached.
 
 .. code-block:: console
 
-   $ torchgeo-bench flops --config examples/flops.yaml --dry-run
+   $ torchgeo-bench flops --config docs/examples/flops.yaml --dry-run
    $ torchgeo-bench flops --model rcf --device cpu --band-configs rgb \
        --seg-heads --output results/my_compute_cost.csv
 
@@ -425,7 +425,7 @@ and ``output`` sections. It does not accept image-run ``input`` or
 
    $ torchgeo-bench coord --model sincos --dataset california_housing \
        --methods linear --folds 2 --device cpu
-   $ torchgeo-bench coord --config examples/coord-run.yaml --dry-run
+   $ torchgeo-bench coord --config docs/examples/coord-run.yaml --dry-run
 
 See :doc:`coordbench` for the full YAML, encoder targets, method selection,
 random/spatial/official splits, and coordinate CSV resume semantics.

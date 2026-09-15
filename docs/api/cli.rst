@@ -52,7 +52,7 @@ Load and validate a YAML file without importing model implementations:
    from torchgeo_bench.config.run import load_run_config
    from torchgeo_bench.config.presets import resolve_run_config
 
-   config = load_run_config("examples/image-run.yaml")
+   config = load_run_config("docs/examples/image-run.yaml")
    effective, preset = resolve_run_config(config, "m-eurosat")
 
 ``resolve_run_config`` applies model and dataset defaults beneath explicitly
@@ -111,7 +111,7 @@ The image loop consumes a ``RunConfig`` directly:
    from torchgeo_bench.config.run import load_run_config
    from torchgeo_bench.main import main
 
-   config = load_run_config("examples/image-run.yaml")
+   config = load_run_config("docs/examples/image-run.yaml")
    main(config)
 
 Unlike loading or resolving configuration, calling ``main`` executes the

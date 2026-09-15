@@ -93,7 +93,7 @@ Download with `torchgeo-bench download {geobench_v1|geobench_v2|eurosat}`.
 ## Architecture (the parts you can't see from one file)
 
 1. **Strict flags and YAML.** `torchgeo-bench run --model timm/resnet50
-   --dataset m-eurosat` or `run --config examples/image-run.yaml` loads a
+   --dataset m-eurosat` or `run --config docs/examples/image-run.yaml` loads a
    `RunConfig` and calls the typed image runner directly. `key=value` and
    `+key=value` syntax is rejected by all entry points. Precedence is
    built-in defaults < preset < preset's dataset defaults < explicit YAML

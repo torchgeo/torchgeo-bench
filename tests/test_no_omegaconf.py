@@ -63,7 +63,7 @@ def test_import_guard_allows_assertions_fixtures_and_third_party_dependencies(so
 
 
 @pytest.mark.parametrize(
-    "directory", ["src", "tests", "examples", "experiments", "scripts", "projects"]
+    "directory", ["src", "tests", "docs/examples", "experiments", "scripts", "projects"]
 )
 def test_no_application_owned_omegaconf_imports(directory: str) -> None:
     root = Path(__file__).parents[1]
