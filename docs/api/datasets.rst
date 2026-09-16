@@ -15,7 +15,7 @@ Metadata API
 .. autofunction:: list_datasets
 .. autofunction:: list_v2_datasets
 .. autoclass:: DatasetSpec
-   :members: rgb_bands
+   :members: rgb_bands, default_bands
    :undoc-members:
 
 .. autodata:: torchgeo_bench.datasets.spec.Task

@@ -58,11 +58,7 @@ Source policies and capabilities
 
 Readers receive the same ``ResolvedInput`` returned to callers and derive source requests from ``inputs.bands`` without resolving names again. The source must emit channels in that order, even when its backend stacks in a different sensor order. Preserve sensor alignment, acquisition selection, and categorical mask semantics.
 
-``resolve_input`` provides metadata-only preflight and a versioned input fingerprint.
-Declare source policy changes explicitly (including ``adapter_version`` for changed
-reader/acquisition algorithms) so stale results cannot resume. The fingerprint
-includes selected raw BandSpecs, source/split identity, and temporal settings, not
-samples or arbitrary installed dependencies. Do not migrate historical result hashes.
+``resolve_input`` provides metadata-only preflight and a versioned input fingerprint. Declare source policy changes explicitly (including ``adapter_version`` for changed reader/acquisition algorithms) so stale results cannot resume. The fingerprint includes selected raw BandSpecs, source/split identity, and temporal settings, not samples or arbitrary installed dependencies. Do not migrate historical result hashes.
 
 Each reader loads only the requested split, with downloading disabled. Samples use ``image`` plus ``label`` for classification, or ``mask`` for segmentation. Images retain raw float32 values. Single-acquisition inputs are CHW; supported explicit multi-step inputs are TCHW. No sample probing is needed for metadata. The public ``LoadedSplit`` contains its authoritative ``spec`` and ``input``; callers construct DataLoaders and pass ``list(loaded.bands)`` to model construction.
 
