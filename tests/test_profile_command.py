@@ -26,7 +26,7 @@ from torchgeo_bench.commands.profile_arguments import add_profile_arguments, loa
 from torchgeo_bench.config.presets import NORMALIZATIONS, ModelPreset
 from torchgeo_bench.config.profile import ProfileConfig
 from torchgeo_bench.config.schema import ModelConfig
-from torchgeo_bench.datasets import LoadedSplit
+from torchgeo_bench.datasets import LoadedSplit, resolve_input
 
 
 class _Loader:
@@ -330,26 +330,46 @@ def test_profile_preserves_custom_constructor_and_normalization_metadata(
     assert record["model_config"]["input"]["normalization"] == normalization
 
 
-@pytest.mark.parametrize("bands", ["all", ["nir", "red"]])
-def test_profile_passes_input_options_and_band_order(
+@pytest.mark.parametrize(
+    ("dataset", "bands", "partition", "steps"),
+    [
+        ("m-eurosat", "all", "0.01x_train", None),
+        ("m-eurosat", ["nir", "red"], "0.01x_train", None),
+        ("pastis", "all", "default", 2),
+        ("pastis", ["b08", "b04"], "default", 2),
+    ],
+)
+def test_profile_passes_input_options_and_band_order(  # noqa: PLR0913 - dataset capability matrix.
     profile_config: ProfileConfig,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     bands: str | list[str],
+    dataset: str,
+    partition: str,
+    steps: int | None,
 ) -> None:
+    profile_config.dataset = dataset
     profile_config.input.bands = bands
-    profile_config.input.partition = "0.01x_train"
-    profile_config.input.time_steps = 2
+    profile_config.input.partition = partition
+    profile_config.input.time_steps = steps
     profile_config.runtime.workers = 1
     options: dict[str, Any] = {}
 
     def load(dataset_name: str, split: str, **kwargs: Any) -> LoadedSplit:
-        assert dataset_name == "m-eurosat"
+        assert dataset_name == dataset
         assert split == "train"
         options.update(kwargs)
-        channels = 13 if bands == "all" else len(bands)
+        resolved = kwargs["inputs"]
+        channels = len(resolved.bands)
         selection = bands if isinstance(bands, str) else tuple(bands)
-        return _loaded_images(torch.ones(4, 2, channels, 8, 8), **{**kwargs, "bands": selection})
+        shape = (4, 2, channels, 8, 8) if steps else (4, channels, 8, 8)
+        return make_loaded_split(
+            _ImageDataset(torch.ones(shape)),
+            dataset_name,
+            bands=selection,
+            partition=partition,
+            time_steps=steps,
+        )
 
     monkeypatch.setattr(_profile_runtime, "load_split", load)
     monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: nn.Identity())
@@ -361,14 +381,12 @@ def test_profile_passes_input_options_and_band_order(
 
     record = json.loads(capsys.readouterr().out)
     assert options["bands"] == bands
-    assert options["partition"] == record["dataset_partition"] == "0.01x_train"
-    assert options["time_steps"] == 2
+    assert options["partition"] == record["dataset_partition"] == partition
+    assert options["time_steps"] == steps
     assert loader.call_args.kwargs["num_workers"] == 1
-    if isinstance(bands, list):
-        assert record["bands"] == bands
-    else:
-        assert len(record["bands"]) == 13
-        assert record["bands"][0] == "coastal_aerosol"
+    resolved = resolve_input(dataset, bands=bands, partition=partition, time_steps=steps)
+    assert record["bands"] == list(resolved.band_names)
+    assert record["dataset_input_fingerprint"] == resolved.fingerprint
 
 
 def test_profile_rejects_short_batches_before_construction(

@@ -7,9 +7,19 @@ import pytest
 from pydantic import ValidationError
 
 from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.config.flops import FlopsConfig
+from torchgeo_bench.config.flops import FlopsConfig, FlopsInputConfig
 from torchgeo_bench.config.presets import ModelPreset, load_model_preset
 from torchgeo_bench.config.schema import ModelConfig
+
+
+@pytest.mark.parametrize("source", ["caffe", "kuro_siwo"])
+def test_synthetic_tracks_do_not_relabel_non_rgb_defaults(source: str) -> None:
+    with pytest.raises(ValidationError, match="synthetic rgb requires genuine RGB"):
+        FlopsInputConfig(band_source=source)
+    config = FlopsInputConfig(band_source=source, band_configs=["s2"])
+    assert config.band_configs == ["s2"]
+    with pytest.raises(ValidationError, match=r"rgb.*s2"):
+        FlopsInputConfig.model_validate({"band_source": source, "band_configs": ["default"]})
 
 
 @pytest.mark.parametrize(

@@ -79,6 +79,21 @@ def test_representative_sweep_passes_seed_and_rejects_unknown_metadata(
         runner._validate_metadata()
 
 
+def test_representative_sweep_keeps_numerical_inputs_but_names_non_rgb_honestly(
+    load_script: Callable[[str], ModuleType],
+) -> None:
+    sweep = load_script("run_segmentation_representative_sweep.py")
+    jobs = sweep.build_jobs()
+    for name in ("caffe", "kuro_siwo"):
+        selected = [job for job in jobs if job.dataset == name]
+        assert {job.bands for job in selected} == {"default", "all"}
+    assert {job.bands for job in jobs if job.dataset == "burn_scars"} == {"rgb", "all"}
+    assert not any(
+        job.dataset == "caffe" and job.model.config == "torchgeo/scalemae_large_fmow"
+        for job in jobs
+    )
+
+
 def test_protocol_study_passes_configured_seed(
     tmp_path: Path, load_script: Callable[[str], ModuleType]
 ) -> None:

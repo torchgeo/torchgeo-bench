@@ -3,7 +3,7 @@
 from torchgeo_bench.bands import BandSpec
 
 from .catalog import get_dataset_spec, get_dataset_task, list_datasets, list_v2_datasets
-from .input import LoadedSplit, ResolvedInput
+from .input import LoadedSplit, ResolvedInput, resolve_input
 from .loading import load_split
 from .spec import (
     DatasetCapabilities,
@@ -31,4 +31,5 @@ __all__ = [
     "list_datasets",
     "list_v2_datasets",
     "load_split",
+    "resolve_input",
 ]

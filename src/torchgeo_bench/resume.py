@@ -10,13 +10,10 @@ import pandas as pd
 
 from torchgeo_bench.config.presets import ModelPreset
 from torchgeo_bench.config.run import FeatureProfileConfig, RunConfig
-from torchgeo_bench.datasets import DatasetSpec
+from torchgeo_bench.datasets import DatasetSpec, ResolvedInput
 from torchgeo_bench.intrinsic_dim import FEATURE_SPECTRUM_METRICS
 
 logger = logging.getLogger(__name__)
-
-# Version 1 restores requested V2 channel order. Unversioned results are incompatible.
-DATASET_INPUT_PROTOCOL_VERSION = 1
 
 KEY_COLS = (
     "dataset",
@@ -37,11 +34,11 @@ KEY_COLS = (
 )
 
 
-def resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
+def resume_config_hash(config: RunConfig, model_cfg: ModelPreset, inputs: ResolvedInput) -> str:
     """Fingerprint result-affecting settings for one resolved image run."""
     payload = {
         "schema_version": config.schema_version,
-        "dataset_input_protocol_version": DATASET_INPUT_PROTOCOL_VERSION,
+        "dataset_input_fingerprint": inputs.fingerprint,
         "model": {
             "name": model_cfg.name,
             "target": model_cfg.target,
@@ -61,7 +58,7 @@ def resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
 def normalize_bands_value(bands: Iterable[object] | None) -> str:
     """Convert a band selection to a stable string for logs, CSVs, and resume keys.
 
-    Accept ``"rgb"``/``"all"``, explicit lists, or ``None``.
+    Accept ``"rgb"``/``"default"``/``"all"``, explicit lists, or ``None``.
     Lists become comma-separated names; ``None`` becomes ``"all"``.
     """
     if bands is None:

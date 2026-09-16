@@ -11,6 +11,7 @@ SPEC = DatasetSpec(
     num_classes=3,
     multilabel=False,
     rgb_bands=("b04", "b03", "b02"),
+    default_bands=("b04", "b03", "b02"),
     split_sizes=SplitSizes(train=524, val=160, test=120),
     source=V2Source("GeoBenchBurnScars"),
 

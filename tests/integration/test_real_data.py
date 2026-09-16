@@ -83,7 +83,7 @@ def test_real_segmentation_program(tmp_path: Path, *, cached: bool) -> None:
             {
                 "model": {"name": "timm/resnet18", "kwargs": {"pretrained": False}},
                 "datasets": ["caffe"],
-                "input": {"image_size": 32},
+                "input": {"image_size": 32, "bands": "default"},
                 "runtime": {"batch_size": 32, "workers": 0, "device": "cpu", "seed": 0},
                 "classification": {"bootstrap_samples": 5},
                 "segmentation": {

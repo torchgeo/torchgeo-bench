@@ -19,6 +19,7 @@ from torchgeo_bench.config.presets import ModelPreset, resolve_run_config
 from torchgeo_bench.config.profile import ProfileConfig, resolve_profile_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig
+from torchgeo_bench.datasets import resolve_input
 
 
 @pytest.fixture
@@ -45,6 +46,83 @@ def test_profile_defaults_are_cpu_fixed_batch(parser: argparse.ArgumentParser) -
         "model": {"name": "rcf"},
         "dataset": "m-eurosat",
     }
+
+
+@pytest.mark.parametrize("command", ["run", "profile"])
+@pytest.mark.parametrize(
+    ("yaml_selection", "flags", "expected"),
+    [
+        (None, [], "default"),
+        ("all", [], "all"),
+        ("rgb", [], "rgb"),
+        ("all", ["--bands", "default"], "default"),
+        ("default", ["--bands", "all"], "all"),
+        ("default", ["--bands", "gray"], ["gray"]),
+        ("default", ["--bands", "rgb"], "rgb"),
+    ],
+)
+def test_band_selectors_preserve_preset_yaml_and_flag_omission_precedence(  # noqa: PLR0913 - precedence matrix.
+    command: str,
+    yaml_selection: str | None,
+    flags: list[str],
+    expected: str | list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "toy.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "toy",
+                "target": "custom.Model",
+                "input": {"bands": "all", "image_size": 128},
+                "dataset_overrides": {"caffe": {"input": {"bands": "default"}}},
+                "segmentation": {"layers": ["layer1"]},
+            }
+        )
+    )
+    monkeypatch.setattr("torchgeo_bench.config.catalog.CONF_DIR", tmp_path)
+    values: dict[str, Any] = {
+        "model": {"name": "toy"},
+        "input": {"image_size": None},
+        "runtime": {"verbose": False},
+    }
+    if yaml_selection is not None:
+        values["input"]["bands"] = yaml_selection
+    if command == "run":
+        values.update(datasets=["caffe"], segmentation={"layers": []})
+    else:
+        values.update(dataset="caffe", count_flops=False)
+    path = tmp_path / "settings.yaml"
+    path.write_text(yaml.safe_dump(values))
+    cli_main([command, "--config", str(path), *flags, "--dry-run"])
+    output = yaml.safe_load(capsys.readouterr().out)
+    if command == "run":
+        effective, preset = resolve_run_config(RunConfig.model_validate(output), "caffe")
+        assert effective.segmentation.layers == []
+    else:
+        effective, preset = resolve_profile_config(ProfileConfig.model_validate(output))
+        assert effective.count_flops is False
+    assert effective.input.bands == preset.input.bands == expected
+    assert effective.input.image_size is None
+    assert effective.runtime.verbose is False
+    if expected == "rgb":
+        with pytest.raises(ValueError, match="no genuine RGB"):
+            resolve_input("caffe", bands=effective.input.bands)
+    else:
+        assert resolve_input("caffe", bands=effective.input.bands).band_names == ("gray",)
+
+
+def test_omitted_caffe_input_remains_rgb_not_implicit_default() -> None:
+    config, _ = resolve_profile_config(
+        ProfileConfig.model_validate({"model": {"name": "rcf"}, "dataset": "caffe"})
+    )
+    assert config.input.bands == "rgb"
+    assert "bands" not in config.input.model_fields_set
+    with pytest.raises(ValueError, match="no genuine RGB"):
+        resolve_input("caffe", bands=config.input.bands)
 
 
 @pytest.mark.parametrize("argument", ["model=rcf", "+model.features=8", "++device=cpu"])

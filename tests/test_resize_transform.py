@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from torchgeo_bench.datasets import ResolvedInput, get_dataset_spec
+from torchgeo_bench.datasets import get_dataset_spec, resolve_input
 from torchgeo_bench.datasets.transforms import CanonicalTransform, Resize
 
 
@@ -22,7 +22,7 @@ def test_temporal_images_and_singleton_masks_keep_their_axes_and_values() -> Non
     image = torch.arange(2 * 3 * 8 * 8, dtype=torch.float32).reshape(2, 3, 8, 8)
     mask = torch.arange(64).reshape(1, 8, 8) % 3
     spec = get_dataset_spec("pastis")
-    inputs = ResolvedInput(spec.resolve_band_specs("rgb"), "rgb", 2)
+    inputs = resolve_input(spec, time_steps=2)
     resized = CanonicalTransform(spec, inputs, Resize(4))({"image": image, "mask": mask})
 
     expected_image = image.reshape(2, 3, 4, 2, 4, 2).mean(dim=(3, 5))

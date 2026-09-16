@@ -10,11 +10,9 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 
 from .datasets import get_dataset_spec, list_datasets
+from .datasets.spec import V1_HF_REPO_ID, V1_HF_REVISION
 
 logger = logging.getLogger(__name__)
-
-V1_HF_REPO_ID = "calebrob6/geobenchv1-webdataset"
-V1_HF_REVISION = "18c293d3a963c73e8e055a2fef6fca9e029c6e95"
 
 
 @cache

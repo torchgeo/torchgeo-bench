@@ -37,7 +37,9 @@ def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--measurements", type=int, default=argparse.SUPPRESS)
     parser.add_argument("--seed", type=int, default=argparse.SUPPRESS)
     parser.add_argument(
-        "--bands", default=argparse.SUPPRESS, help="rgb, all, or comma-separated band names"
+        "--bands",
+        default=argparse.SUPPRESS,
+        help="rgb (default; genuine RGB only), default (dataset inputs), all, or comma-separated names",
     )
     parser.add_argument("--partition", default=argparse.SUPPRESS)
     parser.add_argument(

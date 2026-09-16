@@ -104,7 +104,7 @@ def _check_methods(value: list["Method"]) -> list["Method"]:
 def _check_schema_version(value: object) -> object:
     """Reject non-integer versions before literal validation."""
     if type(value) is not int:
-        raise ValueError("schema_version must be the integer 1")  # noqa: TRY004 - Pydantic field validation
+        raise ValueError("schema_version must be the integer 1")
     return value
 
 
@@ -175,9 +175,9 @@ class InputConfig(StrictModel):
     @field_validator("bands")
     @classmethod
     def validate_bands(cls, value: StrictStr | list[StrictStr]) -> StrictStr | list[StrictStr]:
-        """Reject empty band specifications."""
-        if isinstance(value, str) and not value.strip():
-            raise ValueError("bands must not be empty")
+        """Require named selectors or non-empty explicit band lists."""
+        if isinstance(value, str) and value not in {"rgb", "default", "all"}:
+            raise ValueError("input.bands must be rgb, default, all, or a YAML list of band names")
         if isinstance(value, list) and (
             not value or any(not band.strip() for band in value) or len(set(value)) != len(value)
         ):

@@ -11,6 +11,10 @@ def bench(request: pytest.FixtureRequest) -> DatasetSpec:
 
 
 def test_rgb_uses_dataset_specific_names(bench: DatasetSpec) -> None:
+    if bench.rgb_bands is None:
+        with pytest.raises(ValueError, match=r"no genuine RGB.*default.*all.*explicit"):
+            bench.resolve_band_specs("rgb")
+        return
     selected = bench.resolve_band_specs("rgb")
     assert tuple(band.name for band in selected) == bench.rgb_bands
     by_name = {band.name: band for band in bench.bands}
@@ -53,6 +57,6 @@ def test_existing_none_selection_keeps_all_bands(bench: DatasetSpec) -> None:
 @pytest.mark.parametrize(
     ("dataset", "channels"), [("caffe", 1), ("kuro_siwo", 2), ("m-eurosat", 3)]
 )
-def test_rgb_does_not_assume_three_channels(dataset: str, channels: int) -> None:
+def test_default_preserves_existing_reduced_channels(dataset: str, channels: int) -> None:
     bench = get_dataset_spec(dataset)
-    assert len(bench.resolve_band_specs("rgb")) == channels
+    assert len(bench.resolve_band_specs("default")) == channels

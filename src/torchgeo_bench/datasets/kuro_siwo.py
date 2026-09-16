@@ -10,7 +10,8 @@ SPEC = DatasetSpec(
     task="segmentation",
     num_classes=4,
     multilabel=False,
-    rgb_bands=("vv", "vh"),
+    default_bands=("vv", "vh"),
+    rgb_bands=None,
     split_sizes=SplitSizes(train=4000, val=1000, test=2000),
     source=V2Source(
         "GeoBenchKuroSiwo",

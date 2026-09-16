@@ -11,6 +11,7 @@ SPEC = DatasetSpec(
     num_classes=17,
     multilabel=False,
     rgb_bands=("b04", "b03", "b02"),
+    default_bands=("b04", "b03", "b02"),
     split_sizes=SplitSizes(train=19992, val=986, test=986),
     source=V2Source("GeoBenchSo2Sat", band_order_strategy="by_sensor"),
     geography=GeographySpec(reason="tortilla metadata has no lon/lat columns"),

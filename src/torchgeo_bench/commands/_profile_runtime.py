@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from ..config.presets import NORMALIZATIONS, ModelPreset, build_model
 from ..config.profile import ProfileConfig, resolve_profile_config
-from ..datasets import BandSpec, LoadedSplit, load_split
+from ..datasets import BandSpec, LoadedSplit, ResolvedInput, load_split, resolve_input
 from ..devices import resolve_device
 from ..model_profile import ProfileResult, profile_inference
 
@@ -27,6 +27,9 @@ from ..model_profile import ProfileResult, profile_inference
 def _load_batch(config: ProfileConfig) -> tuple[LoadedSplit, torch.Tensor]:
     """Load one full batch and its ordered band metadata."""
     inputs = config.input
+    resolved = resolve_input(
+        config.dataset, bands=inputs.bands, partition=inputs.partition, time_steps=inputs.time_steps
+    )
     train = load_split(
         config.dataset,
         "train",
@@ -35,6 +38,7 @@ def _load_batch(config: ProfileConfig) -> tuple[LoadedSplit, torch.Tensor]:
         bands=inputs.bands,
         partition=inputs.partition,
         time_steps=inputs.time_steps,
+        inputs=resolved,
     )
     train_loader = DataLoader(
         train.dataset,
@@ -101,7 +105,7 @@ def _build_model(
 def _record(
     config: ProfileConfig,
     preset: ModelPreset,
-    selected_bands: list[BandSpec],
+    inputs: ResolvedInput,
     sample: torch.Tensor,
     result: ProfileResult,
 ) -> dict[str, Any]:
@@ -113,6 +117,7 @@ def _record(
         "target": preset.target,
         "kwargs": preset.model_dump(mode="json")["kwargs"],
         "input": config.input.model_dump(mode="json"),
+        "dataset_input": inputs.description,
     }
     model_json = json.dumps(resolved_model_config, sort_keys=True)
     return {
@@ -120,7 +125,9 @@ def _record(
         "model": config.model.name,
         "dataset": config.dataset,
         "seed": config.runtime.seed,
-        "bands": [spec.name for spec in selected_bands],
+        "bands": list(inputs.band_names),
+        "band_selection": inputs.description["selection"],
+        "dataset_input_fingerprint": inputs.fingerprint,
         "normalization": normalization,
         "input_normalization": preset.kwargs.get("input_normalization", normalization),
         "dataset_partition": config.input.partition,
@@ -167,4 +174,4 @@ def run(config: ProfileConfig) -> None:
             n_measure=config.measurements,
             count_flops=config.count_flops,
         )
-    print(json.dumps(_record(config, preset, selected_bands, sample, result), allow_nan=False))
+    print(json.dumps(_record(config, preset, train.input, sample, result), allow_nan=False))

@@ -218,6 +218,8 @@ class EvaluationResult:
     mce_ts: float | None = None
     temperature: float | None = None
     calibration_n_bins: int | None = None
+    dataset_input_fingerprint: str | None = None
+    resolved_bands: str | None = None
 
     def to_row(self) -> dict:
         """Convert to a flat dictionary suitable for CSV/DataFrame export."""

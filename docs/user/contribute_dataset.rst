@@ -36,6 +36,7 @@ Create a module under :file:`src/torchgeo_bench/datasets/` containing a ``SPEC``
            BandSpec("aerial", "blue", "B", mean=100, std=40, min=0, max=255),
        ),
        rgb_bands=("red", "green", "blue"),
+       default_bands=("red", "green", "blue"),
        split_sizes=SplitSizes(train=5000, val=1000, test=2000),
        source=V2Source("GeoBenchMyDataset"),
    )
@@ -44,7 +45,7 @@ The canonical ``name`` identifies a benchmark, not necessarily a unique archive.
 
 Declare the exact task, class count, and multilabel semantics from verified source metadata. ``multilabel=True`` selects micro-mAP rather than accuracy (``m-bigearthnet``, ``benv2``, and ``treesatai``). Do not infer a class vocabulary from a count or change labels while moving metadata. ``split_sizes`` describes the default partition; a requested subset may have different lengths.
 
-``BandSpec`` stores source names, sensor tags, statistics, and available wavelengths in tensor order. ``rgb_bands`` currently preserves the benchmark's existing selector, including CaFFe grayscale and KuroSiwo SAR. Do not change those choices incidentally. Normalization remains model-owned.
+``BandSpec`` stores source names, sensor tags, statistics, and available wavelengths in tensor order. Declare ``default_bands`` independently of optional genuine ``rgb_bands``. Non-RGB datasets use ``rgb_bands=None``; CaFFe's default is gray and KuroSiwo's is vv/vh. Keep their numerical inputs unchanged without labeling them RGB. Configured defaults remain ``rgb``; non-RGB callers must select ``default``, ``all``, or explicit names. Normalization remains model-owned.
 
 Source policies and capabilities
 --------------------------------
@@ -56,6 +57,12 @@ Source policies and capabilities
 ``DatasetCapabilities(multi_temporal=True)`` enables explicit ``time_steps`` (currently PASTIS). Unsupported partitions, splits, temporal requests, and band selections must fail before source construction or filesystem access. Preserve the common V2 temporal path rather than adding a PASTIS-specific loader.
 
 Readers receive the same ``ResolvedInput`` returned to callers and derive source requests from ``inputs.bands`` without resolving names again. The source must emit channels in that order, even when its backend stacks in a different sensor order. Preserve sensor alignment, acquisition selection, and categorical mask semantics.
+
+``resolve_input`` provides metadata-only preflight and a versioned input fingerprint.
+Declare source policy changes explicitly (including ``adapter_version`` for changed
+reader/acquisition algorithms) so stale results cannot resume. The fingerprint
+includes selected raw BandSpecs, source/split identity, and temporal settings, not
+samples or arbitrary installed dependencies. Do not migrate historical result hashes.
 
 Each reader loads only the requested split, with downloading disabled. Samples use ``image`` plus ``label`` for classification, or ``mask`` for segmentation. Images retain raw float32 values. Single-acquisition inputs are CHW; supported explicit multi-step inputs are TCHW. No sample probing is needed for metadata. The public ``LoadedSplit`` contains its authoritative ``spec`` and ``input``; callers construct DataLoaders and pass ``list(loaded.bands)`` to model construction.
 

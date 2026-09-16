@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run every configured model on all datasets, with one job per model.
+"""Run every configured model on all datasets, explicitly selecting non-RGB inputs.
 
 Usage:
     python experiments/run_main_experiments.py
@@ -11,9 +11,10 @@ import sys
 
 from _runner import Job, add_devices_argument, default_output, run_jobs
 
+from torchgeo_bench.config.presets import resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.config.schema import ModelConfig
-from torchgeo_bench.datasets import list_datasets
+from torchgeo_bench.config.schema import InputConfig, ModelConfig
+from torchgeo_bench.datasets import get_dataset_spec, list_datasets
 
 OUTPUT = default_output(__file__)
 
@@ -93,14 +94,31 @@ MODELS = [
 
 
 def build_jobs() -> list[Job]:
-    """Create one all-dataset job for each model."""
-    return [
-        Job(
-            label=model.split("/")[-1],
-            config=RunConfig(model=ModelConfig(name=model), datasets=list_datasets()),
-        )
-        for model in MODELS
-    ]
+    """Keep preset selections, with explicit reduced inputs for non-RGB benchmarks."""
+    jobs = []
+    datasets = list_datasets()
+    for model in MODELS:
+        config = RunConfig(model=ModelConfig(name=model), datasets=datasets)
+        reduced = [
+            name
+            for name in datasets
+            if get_dataset_spec(name).rgb_bands is None
+            and resolve_run_config(config, name)[0].input.bands == "rgb"
+        ]
+        standard = [name for name in datasets if name not in reduced]
+        label = model.split("/")[-1]
+        if standard:
+            jobs.append(Job(label=label, config=config.model_copy(update={"datasets": standard})))
+        if reduced:
+            jobs.append(
+                Job(
+                    label=f"{label}-default",
+                    config=RunConfig(
+                        model=config.model, datasets=reduced, input=InputConfig(bands="default")
+                    ),
+                )
+            )
+    return jobs
 
 
 def main() -> int:

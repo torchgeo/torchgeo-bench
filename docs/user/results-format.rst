@@ -114,7 +114,7 @@ Column               Description
 ``image_size``       Input resize size (``None`` if no resizing).
 ``interpolation``    Resize interpolation mode.
 ``partition``        GeoBench V1 partition name (``default`` for V2).
-``bands``            ``rgb`` / ``all`` / a sorted comma-joined list.
+``bands``            ``rgb`` / ``default`` / ``all`` / an ordered comma-joined list.
 ``num_classes``      Dataset label count. It is also part of the resume key so
                      label-schema changes cannot reuse stale rows.
 ``c_range_start``    ``classification.linear.c_log10_start``.
@@ -130,6 +130,13 @@ Column               Description
 
 Atomic appends
 --------------
+
+New image rows also include ``resolved_bands`` (comma-joined channel names in
+tensor order) and ``dataset_input_fingerprint`` (SHA-256). The latter fingerprints
+protocol-versioned dataset identity, source/split policy, selected raw BandSpec
+metadata and requested semantics, and temporal/acquisition options. The image
+``config_hash`` includes this fingerprint. It does not hash runtime datasets or
+sample tensor values.
 
 Rows are appended via :func:`~torchgeo_bench.main.append_rows_atomic`,
 which uses ``fcntl`` advisory file locking (available on Linux and
@@ -153,9 +160,11 @@ all three files -- ``results/models/<name>.csv``,
 
 Note that ``method`` is per-method (``knn5`` / ``linear`` /
 ``intrinsic_dim`` / ``seg-<head_type>``), so re-running with
-``--methods linear`` never requires a KNN row. Resume accepts historical
-configuration hashes only when their effective preprocessing and evaluation
-settings match. Changed evaluation settings can require a new run; additive
+``--methods linear`` never requires a KNN row. Resume accepts only current
+versioned dataset-input hashes: pre-provenance and channel-order-only hashes
+are incompatible. Existing rows/hashes are not migrated or reinterpreted as
+current results; appending new fields uses the existing atomic schema upgrade
+while retaining all historical cells. Changed evaluation settings can require a new run; additive
 profile and intrinsic-dimension passes do not invalidate probe hashes.
 
 Rows written before version 0.5.0 do not have ``num_classes`` and are treated

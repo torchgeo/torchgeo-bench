@@ -11,6 +11,7 @@ SPEC = DatasetSpec(
     num_classes=13,
     multilabel=False,
     rgb_bands=("red", "green", "blue"),
+    default_bands=("red", "green", "blue"),
     split_sizes=SplitSizes(train=4049, val=1022, test=3022),
     source=V2Source("GeoBenchFLAIR2"),
 

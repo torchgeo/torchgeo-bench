@@ -40,6 +40,7 @@ For segmentation, also try
 
    model: {name: timm/resnet18}
    datasets: [caffe]
+   input: {bands: default}
    segmentation:
      cache_features: false
 

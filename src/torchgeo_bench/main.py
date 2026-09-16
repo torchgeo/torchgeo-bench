@@ -24,11 +24,12 @@ from torchgeo_bench.config.presets import (
 )
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.datasets import (
-    DatasetSpec,
     LoadedSplit,
+    ResolvedInput,
     get_dataset_spec,
     list_datasets,
     load_split,
+    resolve_input,
 )
 from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.intrinsic_dim import (
@@ -81,6 +82,8 @@ class ResultMetadata(TypedDict):
     bands: str
     num_classes: int
     config_hash: str
+    dataset_input_fingerprint: str
+    resolved_bands: str
     c_range_start: float
     c_range_stop: float
     c_range_num: int
@@ -853,17 +856,16 @@ def instantiate_dataset_model(
 
 def dataset_metadata(
     cfg: RunConfig,
-    ds_name: str,
-    spec: DatasetSpec,
     model_cfg: ModelPreset,
     config_hash: str,
+    inputs: ResolvedInput,
 ) -> ResultMetadata:
     """Collect result metadata before loading data or initializing the model."""
     linear = cfg.classification.linear
     normalization = NORMALIZATIONS[cfg.input.normalization]
-    bands_value = normalize_bands_value(cfg.input.bands)
+    bands_value = normalize_bands_value(inputs.selection)
     return {
-        "dataset": ds_name,
+        "dataset": inputs.spec.name,
         "seed": cfg.runtime.seed,
         "model": model_cfg.target,
         "name": model_cfg.name,
@@ -872,8 +874,10 @@ def dataset_metadata(
         "interpolation": cfg.input.interpolation,
         "partition": cfg.input.partition,
         "bands": bands_value,
-        "num_classes": spec.num_classes,
+        "num_classes": inputs.spec.num_classes,
         "config_hash": config_hash,
+        "dataset_input_fingerprint": inputs.fingerprint,
+        "resolved_bands": ",".join(inputs.band_names),
         "c_range_start": linear.c_log10_start,
         "c_range_stop": linear.c_log10_stop,
         "c_range_num": linear.c_count,
@@ -885,7 +889,7 @@ def dataset_metadata(
 
 
 def _check_split_metadata(train: LoadedSplit, other: LoadedSplit) -> None:
-    if other.input != train.input or (
+    if replace(other.input, partition=train.partition) != train.input or (
         other.dataset_name,
         other.task,
         other.num_classes,
@@ -908,8 +912,21 @@ def run_dataset(
     spec = get_dataset_spec(ds_name)
 
     cfg, model_cfg = resolve_run_config(cfg, ds_name)
-    config_hash = resume_config_hash(cfg, model_cfg)
-    common_meta = dataset_metadata(cfg, ds_name, spec, model_cfg, config_hash)
+    inputs = resolve_input(
+        spec,
+        bands=cfg.input.bands,
+        partition=cfg.input.partition,
+        time_steps=cfg.input.time_steps,
+    )
+    config_hash = resume_config_hash(cfg, model_cfg, inputs)
+    common_meta = dataset_metadata(cfg, model_cfg, config_hash, inputs)
+    logger.info(
+        "[%s] bands=%s -> [%s]; input=%s",
+        ds_name,
+        common_meta["bands"],
+        common_meta["resolved_bands"],
+        inputs.fingerprint,
+    )
     plan = plan_dataset_run(cfg, spec, common_meta, completed)
     if plan.skip_dataset:
         if cfg.runtime.verbose:
@@ -937,6 +954,7 @@ def run_dataset(
             interpolation=cfg.input.interpolation,
             bands=cfg.input.bands,
             time_steps=cfg.input.time_steps,
+            inputs=inputs if split == "train" else replace(inputs, partition="default"),
         )
         for split in ("train", "val", "test")
     ]

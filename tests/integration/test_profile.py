@@ -7,9 +7,52 @@ import numpy as np
 import pytest
 
 from tests.support.cli import cli_output, run_cli, run_module_cli, run_public_cli
-from tests.support.data import write_classification_files
+from tests.support.data import write_caffe_files, write_classification_files
+from torchgeo_bench.datasets import resolve_input
 
 pytestmark = pytest.mark.integration
+
+
+def test_caffe_profile_preserves_gray_and_requested_selector(tmp_path: Path) -> None:
+    write_caffe_files(tmp_path)
+    arguments = [
+        "profile",
+        "--model",
+        "rcf",
+        "--dataset",
+        "caffe",
+        "--device",
+        "cpu",
+        "--image-size",
+        "16",
+        "--batch-size",
+        "2",
+        "--warmup",
+        "0",
+        "--measurements",
+        "1",
+    ]
+    records = []
+    for selection in ("default", "all", "gray"):
+        result = run_cli(*arguments, "--bands", selection, cwd=tmp_path)
+        assert result.returncode == 0, cli_output(result)
+        record = json.loads(result.stdout)
+        records.append(record)
+        requested = [selection] if selection == "gray" else selection
+        inputs = resolve_input("caffe", bands=requested)
+        assert record["bands"] == ["gray"]
+        assert record["band_selection"] == requested
+        assert record["input_shape"] == [2, 1, 16, 16]
+        assert record["dataset_input_fingerprint"] == inputs.fingerprint
+        assert record["model_config"]["dataset_input"]["bands"][0]["sensor"] == "aerial"
+    assert len({record["sample_sha256"] for record in records}) == 1
+    assert len({record["model_config_hash"] for record in records}) == 3
+    for flags in ([], ["--bands", "rgb"]):
+        result = run_cli(*arguments, *flags, cwd=tmp_path)
+        assert result.returncode != 0
+        assert "no genuine RGB" in result.stderr
+        assert "default" in result.stderr
+        assert not result.stdout.strip()
 
 
 def test_profiles_are_numerical_and_reproduce_seeded_inputs(tmp_path: Path) -> None:

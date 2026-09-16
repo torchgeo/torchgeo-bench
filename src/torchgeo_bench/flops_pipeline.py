@@ -400,8 +400,8 @@ def main(config: FlopsConfig) -> None:
 
     bench = get_dataset_spec(cfg.input.band_source)
     band_specs_for = {
-        "rgb": bench.select_band_specs(bench.rgb_bands),
-        "s2": bench.select_band_specs(None),
+        name: bench.resolve_band_specs("rgb" if name == "rgb" else "all")
+        for name in cfg.input.band_configs
     }
 
     completed = _load_completed(output_path) if cfg.output.resume else frozenset()

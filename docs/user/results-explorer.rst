@@ -37,7 +37,7 @@ instead of requiring it to be committed.
    Cost is measured per (model, band config, task, head) at a fixed 224px
    input and carries no dataset, so the Compute & efficiency figure joins it
    to accuracy on ``(name, bands)``: a frozen backbone costs the same
-   whichever dataset is probed.  Runs configured with an explicit band list
-   rather than ``rgb`` or ``all`` have no matching measurement and are absent
+   whichever dataset is probed. Runs configured with ``default`` or an explicit
+   band list rather than ``rgb`` or ``all`` have no matching measurement and are absent
    from that figure.  ``compute_cost.csv`` records throughput and memory but
    no power draw, so the CO2 panel is hidden until energy data returns.

@@ -47,14 +47,6 @@ class ProfileConfig(StrictModel):
             raise ValueError("dataset must not be blank")
         return value
 
-    @field_validator("input")
-    @classmethod
-    def validate_input(cls, value: InputConfig) -> InputConfig:
-        """Require named band lists rather than an ambiguous string."""
-        if isinstance(value.bands, str) and value.bands not in {"rgb", "all"}:
-            raise ValueError("input.bands must be rgb, all, or a YAML list of band names")
-        return value
-
 
 def resolve_profile_config(config: ProfileConfig) -> tuple[ProfileConfig, ModelPreset]:
     """Apply shared model/dataset defaults without loading models or data."""

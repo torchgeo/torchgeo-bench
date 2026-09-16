@@ -17,6 +17,7 @@ SPEC = DatasetSpec(
     num_classes=45,
     multilabel=False,
     rgb_bands=("red", "green", "blue"),
+    default_bands=("red", "green", "blue"),
     split_sizes=SplitSizes(train=18900, val=6300, test=6300),
     source=TorchGeoSource("RESISC45", root="data/resisc45", download_checksum=True),
     geography=GeographySpec(

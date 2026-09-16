@@ -226,30 +226,36 @@ evaluate every registered dataset. YAML accepts ``datasets: [m-eurosat, caffe]``
 
    $ torchgeo-bench run --model rcf --dataset m-eurosat
    $ torchgeo-bench run --model timm/resnet18 --dataset burn_scars --dataset pastis --dataset flair2
-   $ torchgeo-bench run --model timm/resnet18 --dataset all
+   $ torchgeo-bench run --model timm/resnet18 --dataset all --bands default
 
 Bands selection
 ---------------
 
 Each dataset declares an ordered tuple of :class:`~torchgeo_bench.datasets.BandSpec`
-objects.  Three modes are supported:
+objects. Four modes are supported:
 
 * ``--bands rgb`` *(default)* — only the bands listed in
-  :attr:`~torchgeo_bench.datasets.DatasetSpec.rgb_bands`.
+  :attr:`~torchgeo_bench.datasets.DatasetSpec.rgb_bands`, requiring genuine RGB.
+* ``--bands default`` *(explicit opt-in)* — the dataset's ``default_bands``:
+  existing optical RGB sets, CaFFe gray, or KuroSiwo vv/vh.
 * ``--bands all`` — every band the dataset exposes.
 * ``--bands red,green,blue,nir`` — an explicit subset.
 
-The runner derives ``num_channels`` from the loaded tensor and constructs
-the matching ``list[BandSpec]`` so the model wrapper can size its input
-layer and per-channel normalization correctly.  The selected ``bands``
-value is recorded in the results CSV so multiple runs writing to the same
-file (and ``--resume``) keep RGB and multispectral results
-distinguishable.
+CaFFe and KuroSiwo have no genuine RGB set. Explicit or omitted ``rgb`` fails
+before data access; choose ``default``, ``all``, or explicit names. There is no
+grayscale/SAR-as-RGB fallback. Optical RGB numerical inputs are unchanged.
+
+The runner resolves ordered BandSpecs before resume, passes that same metadata
+to loading and model construction, and checks tensor channel counts. Results
+retain the requested ``bands`` selector and ordered ``resolved_bands``, plus a
+versioned ``dataset_input_fingerprint`` included in ``config_hash``.
 
 .. code-block:: console
 
    $ # All 13 Sentinel-2 bands on EuroSAT with a pretrained timm ResNet-18
    $ torchgeo-bench run --model timm/resnet18 --dataset m-eurosat --bands all
+   $ torchgeo-bench run --model timm/resnet18 --dataset caffe --bands default
+   $ torchgeo-bench profile --model rcf --dataset caffe --bands default --device cpu
 
 Multi-modality (V2)
 -------------------

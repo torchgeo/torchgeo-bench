@@ -16,6 +16,7 @@ SPEC = DatasetSpec(
     num_classes=15,
     multilabel=True,
     rgb_bands=("red", "green", "blue"),
+    default_bands=("red", "green", "blue"),
     split_sizes=SplitSizes(train=4000, val=1000, test=2000),
     source=V2Source("GeoBenchTreeSatAI", band_order_strategy="by_sensor", align_to_output=True),
 

@@ -9,6 +9,9 @@ from torchgeo_bench.bands import BandSpec
 type Split = Literal["train", "val", "test"]
 type Task = Literal["classification", "segmentation"]
 
+V1_HF_REPO_ID = "calebrob6/geobenchv1-webdataset"
+V1_HF_REVISION = "18c293d3a963c73e8e055a2fef6fca9e029c6e95"
+
 
 @dataclass(frozen=True)
 class SplitSizes(Mapping[str, int]):
@@ -64,6 +67,9 @@ class V1Source:
     root: str = "data/classification_v1.0_wds"
     storage_name: str | None = None
     validation_split: Literal["valid"] = "valid"
+    repository: str = V1_HF_REPO_ID
+    revision: str = V1_HF_REVISION
+    adapter_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -83,6 +89,7 @@ class V2Source:
     time_step: tuple[str, ...] | None = None
     canonical_sensor_order: tuple[str, ...] | None = None
     align_to_output: bool = False
+    adapter_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -95,6 +102,7 @@ class TorchGeoSource:
     storage_name: str | None = None
     validation_split: Literal["val"] = "val"
     download_checksum: bool = False
+    adapter_version: int = 1
 
     def validate(self) -> None:
         """Reject unsupported TorchGeo reader identities and options."""
@@ -120,9 +128,10 @@ class DatasetSpec:
     task: Task
     num_classes: int
     bands: tuple[BandSpec, ...]
-    rgb_bands: tuple[str, ...]
+    default_bands: tuple[str, ...]
     split_sizes: SplitSizes
     source: DatasetSource
+    rgb_bands: tuple[str, ...] | None = None
     multilabel: bool = False
     capabilities: DatasetCapabilities = DatasetCapabilities()
     geography: GeographySpec = GeographySpec()
@@ -156,9 +165,9 @@ class DatasetSpec:
 
     @property
     def rgb_indices(self) -> tuple[int, ...]:
-        """Return declared RGB selector positions, including current gray/SAR sets."""
+        """Return genuine RGB positions, rejecting datasets without RGB."""
         names = tuple(b.name for b in self.bands)
-        return tuple(names.index(name) for name in self.rgb_bands if name in names)
+        return tuple(names.index(band.name) for band in self.resolve_band_specs("rgb"))
 
     @property
     def target_key(self) -> Literal["label", "mask"]:
@@ -185,15 +194,22 @@ class DatasetSpec:
         return tuple(result)
 
     def resolve_band_specs(self, selection: str | Iterable[str]) -> tuple[BandSpec, ...]:
-        """Resolve rgb, all, or ordered explicit band names without loading data."""
+        """Resolve rgb, default, all, or ordered names without loading data."""
         if not isinstance(selection, str):
             return self.select_band_specs(selection)
         if selection == "rgb":
+            if self.rgb_bands is None:
+                raise ValueError(
+                    f"{self.name}: no genuine RGB band set; select 'default', 'all', "
+                    "or explicit band names instead"
+                )
             return self.select_band_specs(self.rgb_bands)
+        if selection == "default":
+            return self.select_band_specs(self.default_bands)
         if selection == "all":
             return self.bands
         raise ValueError(
-            f"Unknown band selection {selection!r}; use rgb, all, or explicit band names"
+            f"Unknown band selection {selection!r}; use rgb, default, all, or explicit band names"
         )
 
 

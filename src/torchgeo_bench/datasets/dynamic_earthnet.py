@@ -11,6 +11,7 @@ SPEC = DatasetSpec(
     num_classes=7,
     multilabel=False,
     rgb_bands=("r", "g", "b"),
+    default_bands=("r", "g", "b"),
     split_sizes=SplitSizes(train=700, val=100, test=200),
     source=V2Source("GeoBenchDynamicEarthNet", band_order_strategy="by_sensor", align_to_output=True),
 

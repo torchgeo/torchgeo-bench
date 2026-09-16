@@ -145,7 +145,7 @@ def test_download_every_family_then_load_real_splits(
         ("resisc45", [2, 2, 2], 3),
     ):
         splits = [
-            load_split(name, split, image_size=16, bands="rgb")
+            load_split(name, split, image_size=16, bands="default" if name == "caffe" else "rgb")
             for split in ("train", "val", "test")
         ]
         assert [len(loaded.dataset) for loaded in splits] == counts

@@ -95,7 +95,7 @@ def test_model_flag_replaces_entire_yaml_selection(
     import torch
 
     from torchgeo_bench.config.presets import build_model
-    from torchgeo_bench.datasets.cloudsen12 import CloudSEN12
+    from torchgeo_bench.datasets import get_dataset_spec
     from torchgeo_bench.models import RCFBench
 
     path = tmp_path / "flops.yaml"
@@ -110,14 +110,15 @@ def test_model_flag_replaces_entire_yaml_selection(
         )
     )
     resolved, preset = config.resolve()
-    model = build_model(preset, bands=CloudSEN12.bands).to(resolved.runtime.device).eval()
+    bands = list(get_dataset_spec(resolved.input.band_source).resolve_band_specs("all"))
+    model = build_model(preset, bands=bands).to(resolved.runtime.device).eval()
     assert isinstance(model, RCFBench)
     assert resolved.model.name == "rcf"
     assert resolved.model.target is None
     assert resolved.model.kwargs == {"features": 8}
     images = torch.zeros(
         2,
-        len(CloudSEN12.bands),
+        len(bands),
         resolved.input.image_size,
         resolved.input.image_size,
         device=resolved.runtime.device,
@@ -132,7 +133,7 @@ def test_explicit_constructor_flags_win_after_model_switch(tmp_path: Path) -> No
     import torch
 
     from torchgeo_bench.config.presets import build_model
-    from torchgeo_bench.datasets.cloudsen12 import CloudSEN12
+    from torchgeo_bench.datasets import get_dataset_spec
     from torchgeo_bench.models import RCFBench
 
     path = tmp_path / "flops.yaml"
@@ -163,14 +164,15 @@ def test_explicit_constructor_flags_win_after_model_switch(tmp_path: Path) -> No
         )
     )
     resolved, preset = config.resolve()
-    model = build_model(preset, bands=CloudSEN12.bands).to(resolved.runtime.device).eval()
+    bands = list(get_dataset_spec(resolved.input.band_source).resolve_band_specs("all"))
+    model = build_model(preset, bands=bands).to(resolved.runtime.device).eval()
     assert isinstance(model, RCFBench)
     assert resolved.model.name == "imagestats"
     assert resolved.model.target == "torchgeo_bench.models.RCFBench"
     assert resolved.model.kwargs == {"features": 8, "stats_mode": "stdev"}
     images = torch.zeros(
         2,
-        len(CloudSEN12.bands),
+        len(bands),
         resolved.input.image_size,
         resolved.input.image_size,
         device=resolved.runtime.device,

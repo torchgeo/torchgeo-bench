@@ -86,7 +86,9 @@ def test_train_only_constructs_no_unrelated_splits_loaders_or_sample_probes(
 
 
 @pytest.mark.parametrize("dataset_name", ["m-eurosat", "m-bigearthnet"])
-@pytest.mark.parametrize("selection", ["rgb", "all", None, ("nir", "red"), ("red", "red")])
+@pytest.mark.parametrize(
+    "selection", ["rgb", "default", "all", None, ("nir", "red"), ("red", "red")]
+)
 def test_ordered_metadata_and_raw_targets_are_preserved(
     train_only: None, dataset_name: str, selection: str | tuple[str, ...] | None
 ) -> None:
@@ -107,8 +109,8 @@ def test_ordered_metadata_and_raw_targets_are_preserved(
     else:
         assert sample["label"].dtype == torch.long
         assert sample["label"].item() == 2
-    if selection == "rgb":
-        assert tuple(band.name for band in loaded.bands) == bench.rgb_bands
+    if selection in ("rgb", "default"):
+        assert tuple(band.name for band in loaded.bands) == bench.default_bands
     elif selection is None or selection == "all":
         assert loaded.bands == tuple(bench.bands)
     else:
@@ -148,7 +150,6 @@ def test_definition_input_keeps_scientific_and_storage_identity_separate(train_o
     ("options", "error", "message"),
     [
         ({"split": "validation"}, ValueError, "Unknown split"),
-        ({"bands": "default"}, ValueError, "Unknown band selection"),
         ({"bands": "red"}, ValueError, "Unknown band selection"),
         ({"bands": ("not-a-band",)}, ValueError, "unknown band"),
         ({"bands": ()}, ValueError, "at least one channel"),
@@ -270,7 +271,7 @@ def test_image_runner_owns_batching_partition_policy_and_model_metadata(
         "default",
         "default",
     ]
-    assert select.call_count == 3
+    assert select.call_count == 1
     probe.assert_called_once()
     loaders = captures["loaders"]
     assert len(loaders.train.dataset) == 4

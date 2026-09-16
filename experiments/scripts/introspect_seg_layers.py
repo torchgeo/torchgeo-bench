@@ -26,7 +26,7 @@ from torchgeo_bench.config.presets import (
 )
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import InputConfig, ModelConfig
-from torchgeo_bench.datasets import get_dataset_spec
+from torchgeo_bench.datasets import resolve_input
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,7 @@ SKIP_TARGETS = {"ImageStatsBench", "RCFBench", "SAM3Encoder"}
 
 def band_specs(dataset: str, bands: str) -> list[BandSpec]:
     """Return the BandSpec list a model would receive for this dataset."""
-    bench = get_dataset_spec(dataset)
-    return list(bench.select_band_specs(bench.rgb_bands if bands == "rgb" else None))
+    return list(resolve_input(dataset, bands=bands).bands)
 
 
 class _Stub:
@@ -120,7 +119,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--dataset", default="m-eurosat")
-    ap.add_argument("--bands", default="rgb")
+    ap.add_argument("--bands", choices=("rgb", "default", "all"), default="rgb")
     ap.add_argument("--only", default=None, help="comma-separated model names")
     args = ap.parse_args()
 

@@ -11,6 +11,7 @@ SPEC = DatasetSpec(
     num_classes=43,
     multilabel=True,
     rgb_bands=("red", "green", "blue"),
+    default_bands=("red", "green", "blue"),
     split_sizes=SplitSizes(train=20000, val=1000, test=1000),
     source=V1Source(),
     capabilities=DatasetCapabilities(supports_partitions=True),

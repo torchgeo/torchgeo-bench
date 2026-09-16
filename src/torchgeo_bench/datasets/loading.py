@@ -5,7 +5,14 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
 from .catalog import download_command, get_dataset_spec
-from .input import LoadedSplit, ResolvedInput, Split
+from .input import (
+    LoadedSplit,
+    ResolvedInput,
+    Split,
+    _band_selection,
+    resolve_input,
+    validate_input_options,
+)
 from .spec import DatasetSpec, TorchGeoSource, V1Source, V2Source
 
 if TYPE_CHECKING:
@@ -16,45 +23,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _validate_split_options(
-    bench: DatasetSpec, split: str, partition: str, time_steps: int | None
-) -> Split:
+def _validate_split(split: str) -> Split:
     if not isinstance(split, str) or split not in ("train", "val", "test"):
         raise ValueError(f"Unknown split {split!r}. Expected train, val, or test.")
-    if not isinstance(partition, str):
-        raise TypeError("partition must be a string")
-    if not partition.strip():
-        raise ValueError("partition must not be blank")
-    if partition != "default" and not bench.capabilities.supports_partitions:
-        raise ValueError(f"Dataset {bench.name!r} does not support custom partitions.")
-    if time_steps is not None:
-        if type(time_steps) is not int:
-            raise TypeError("time_steps must be an integer or None")
-        if time_steps < 1:
-            raise ValueError("time_steps must be positive")
-        if not bench.capabilities.multi_temporal:
-            raise ValueError(f"{bench.name} is not multi-temporal; drop time_steps.")
     return cast(Split, split)
-
-
-def _resolve_input(
-    bench: DatasetSpec, bands: str | Iterable[str] | None, time_steps: int | None
-) -> ResolvedInput:
-    selection: str | tuple[str, ...]
-    if bands is None:
-        selection = "all"
-    elif isinstance(bands, str):
-        selection = bands
-    else:
-        if not isinstance(bands, Iterable) or isinstance(bands, dict | set | frozenset):
-            raise TypeError("bands must be rgb, all, None, or an ordered iterable of band names")
-        selection = tuple(bands)
-        if any(not isinstance(name, str) for name in selection):
-            raise TypeError("band names must be strings")
-    specs = tuple(bench.resolve_band_specs(selection))
-    if not specs:
-        raise ValueError("bands must select at least one channel")
-    return ResolvedInput(specs, selection, time_steps)
 
 
 def _validate_resize_options(image_size: int | None, interpolation: str) -> None:
@@ -110,6 +82,7 @@ def load_split(  # noqa: PLR0913 - explicit public input options, without batchi
     interpolation: str = "bilinear",
     bands: str | Iterable[str] | None = "rgb",
     time_steps: int | None = None,
+    inputs: ResolvedInput | None = None,
 ) -> LoadedSplit:
     """Load exactly one split and its resolved metadata, without batching.
 
@@ -126,10 +99,15 @@ def load_split(  # noqa: PLR0913 - explicit public input options, without batchi
             square size at sample time.
         interpolation: Resize interpolation for images (``"area"``, ``"bicubic"``,
             ``"bilinear"``, ``"nearest"``).
-        bands: ``"rgb"`` (use the dataset's ``rgb_bands``), ``"all"`` /
-            ``None`` (load all bands), or an explicit iterable of band names.
+        bands: ``"rgb"`` (genuine RGB only), ``"default"`` (the dataset's
+            reduced/default inputs), ``"all"`` / ``None`` (all bands), or
+            an explicit ordered iterable of names. Non-RGB datasets require
+            an explicit selection; there is no implicit fallback.
         time_steps: Number of acquisition dates per sample.  Only accepted by
             multi-temporal sources (PASTIS); ``None`` keeps the source default.
+        inputs: Optional metadata-only preflight result from ``resolve_input``.
+            Its dataset, bands selector, partition and time_steps must match
+            the supplied options. Reused unchanged, without selecting again.
 
     Returns:
         The requested Dataset and immutable metadata describing its output.
@@ -143,9 +121,20 @@ def load_split(  # noqa: PLR0913 - explicit public input options, without batchi
     bench = get_dataset_spec(dataset_name) if isinstance(dataset_name, str) else dataset_name
     if not isinstance(bench, DatasetSpec):
         raise TypeError("dataset_name must be a DatasetSpec or canonical name")
-    bench.validate_source()
-    validated_split = _validate_split_options(bench, split, partition, time_steps)
-    inputs = _resolve_input(bench, bands, time_steps)
+    validated_split = _validate_split(split)
+    if inputs is None:
+        inputs = resolve_input(bench, bands=bands, partition=partition, time_steps=time_steps)
+    else:
+        if not isinstance(inputs, ResolvedInput):
+            raise TypeError("inputs must be a ResolvedInput or None")
+        validate_input_options(bench, partition, time_steps)
+        if (
+            inputs.spec != bench
+            or inputs.selection != _band_selection(bands)
+            or inputs.partition != partition
+            or inputs.time_steps != time_steps
+        ):
+            raise ValueError("Preflight inputs disagree with requested dataset/input options")
     _validate_resize_options(image_size, interpolation)
 
     from torchgeo.datasets import DatasetNotFoundError

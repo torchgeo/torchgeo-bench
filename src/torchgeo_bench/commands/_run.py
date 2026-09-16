@@ -55,8 +55,6 @@ def load_config(args: argparse.Namespace) -> RunConfig:
         raise ValueError(
             f"unknown model or dataset: model={config.model.name}, datasets={unknown_datasets}"
         )
-    if isinstance(config.input.bands, str) and config.input.bands not in {"rgb", "all"}:
-        raise ValueError("input.bands must be rgb, all, or a YAML list of band names")
     if preset.track != "image":
         raise ValueError(f"{config.model.name!r} is a coordinate encoder; use 'coord'")
     return config

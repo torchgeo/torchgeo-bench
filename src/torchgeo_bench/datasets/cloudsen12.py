@@ -11,6 +11,7 @@ SPEC = DatasetSpec(
     num_classes=4,
     multilabel=False,
     rgb_bands=("b04", "b03", "b02"),
+    default_bands=("b04", "b03", "b02"),
     split_sizes=SplitSizes(train=4000, val=535, test=975),
     source=V2Source("GeoBenchCloudSen12"),
 

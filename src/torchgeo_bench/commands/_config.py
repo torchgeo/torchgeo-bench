@@ -39,7 +39,7 @@ class FlagOverride:
 
 def comma_separated_bands(value: Any) -> Any:
     """Convert explicit comma-separated bands while leaving named selections alone."""
-    if isinstance(value, str) and value not in {"rgb", "all"}:
+    if isinstance(value, str) and value not in {"rgb", "default", "all"}:
         return [band.strip() for band in value.split(",")]
     return value
 

@@ -11,6 +11,7 @@ SPEC = DatasetSpec(
     num_classes=4,
     multilabel=False,
     rgb_bands=("red", "green", "blue"),
+    default_bands=("red", "green", "blue"),
     split_sizes=SplitSizes(train=4000, val=1000, test=2000),
     source=V2Source("GeoBenchFieldsOfTheWorld", sample_adapter="later_acquisition"),
 

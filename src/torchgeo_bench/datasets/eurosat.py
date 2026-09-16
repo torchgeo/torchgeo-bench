@@ -13,6 +13,7 @@ SPEC = DatasetSpec(
     num_classes=10,
     multilabel=False,
     rgb_bands=("red", "green", "blue"),
+    default_bands=("red", "green", "blue"),
     split_sizes=SplitSizes(train=16200, val=5400, test=5400),
     source=TorchGeoSource("EuroSAT", root="data/eurosat"),
     geography=GeographySpec(alias_of="m-eurosat"),

@@ -257,12 +257,14 @@ class TestKuroSiwoCanonicalization:
             (("vh", "dem", "vv"), [7.0, 99.0, 3.0]),
             (("vv", "vh", "dem"), [3.0, 7.0, 99.0]),
             (None, [3.0, 7.0, 99.0]),
+            ("all", [3.0, 7.0, 99.0]),
+            ("default", [3.0, 7.0]),
         ],
     )
     def test_image_combines_post_event_sar_and_dem_in_order(
         self,
         mocked_kuro_siwo: MagicMock,
-        bands: tuple[str, ...] | None,
+        bands: str | tuple[str, ...] | None,
         expected_values: list[float],
     ) -> None:
         bench = get_dataset_spec("kuro_siwo")
@@ -274,7 +276,7 @@ class TestKuroSiwoCanonicalization:
             img, torch.tensor(expected_values)[:, None, None].expand(len(expected_values), 16, 16)
         )
         assert img.dtype == torch.float32
-        expected_specs = bench.select_band_specs(bands)
+        expected_specs = bench.resolve_band_specs("all" if bands is None else bands)
         assert len(ds.band_specs) == len(expected_specs)
         assert loaded.bands is ds.band_specs
         assert all(

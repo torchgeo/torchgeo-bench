@@ -66,7 +66,7 @@ def _segmentation_config(output: Path, *, cached: bool) -> RunConfig:
         {
             "model": {"name": "timm/resnet18", "kwargs": {"pretrained": False}},
             "datasets": ["caffe"],
-            "input": {"image_size": 16},
+            "input": {"image_size": 16, "bands": "default"},
             "runtime": {
                 "device": "cpu",
                 "batch_size": 4,
@@ -97,6 +97,29 @@ def _segmentation_arguments(output: Path, *, cached: bool) -> list[str]:
     return ["run", "--config", str(path)]
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_caffe_run_rejects_rgb_even_with_resume_and_no_data(
+    tmp_path: Path, *, explicit: bool
+) -> None:
+    output = tmp_path / "no-results.csv"
+    settings = _segmentation_config(output, cached=True).model_dump_yaml()
+    settings["input"].pop("bands")
+    config = tmp_path / "rgb.yaml"
+    config.write_text(yaml.safe_dump(settings))
+    result = run_cli(
+        "run",
+        "--config",
+        str(config),
+        "--resume",
+        *(["--bands", "rgb"] if explicit else []),
+        cwd=tmp_path,
+    )
+    assert result.returncode != 0
+    assert "no genuine RGB" in result.stderr
+    assert "default" in result.stderr
+    assert not output.exists()
+
+
 def test_real_solver_learns_target_with_consistent_cached_and_uncached_updates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -104,7 +127,8 @@ def test_real_solver_learns_target_with_consistent_cached_and_uncached_updates(
     write_caffe_files(tmp_path, target_class=2)
     monkeypatch.chdir(tmp_path)
     splits = [
-        load_split("caffe", split, image_size=16, bands="rgb") for split in ("train", "val", "test")
+        load_split("caffe", split, image_size=16, bands="default")
+        for split in ("train", "val", "test")
     ]
     train, val, test = [
         DataLoader(
@@ -171,6 +195,9 @@ def _assert_segmentation_results(output: Path, *, cached: bool) -> None:
     assert len(rows) == 1
     row = rows.iloc[0]
     assert row["dataset"] == "caffe"
+    assert row["bands"] == "default"
+    assert row["resolved_bands"] == "gray"
+    assert len(row["dataset_input_fingerprint"]) == 64
     assert row["method"] == "seg-linear"
     assert row["metric_name"] == "mIoU"
     assert row["num_classes"] == 4

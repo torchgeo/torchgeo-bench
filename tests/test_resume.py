@@ -11,9 +11,9 @@ import pytest
 from tests.support.runner import _resume_row
 from torchgeo_bench.config.presets import merge_settings, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.datasets import get_dataset_spec
+from torchgeo_bench.datasets import get_dataset_spec, resolve_input
+from torchgeo_bench.results import append_rows_atomic
 from torchgeo_bench.resume import (
-    DATASET_INPUT_PROTOCOL_VERSION,
     ResumeState,
     load_completed,
     plan_dataset_run,
@@ -29,7 +29,13 @@ def _cfg(**sections) -> RunConfig:
 
 def _hash(config: RunConfig, dataset: str = "m-eurosat") -> str:
     resolved, preset = resolve_run_config(config, dataset)
-    return resume_config_hash(resolved, preset)
+    inputs = resolve_input(
+        dataset,
+        bands=resolved.input.bands,
+        partition=resolved.input.partition,
+        time_steps=resolved.input.time_steps,
+    )
+    return resume_config_hash(resolved, preset, inputs)
 
 
 @pytest.mark.parametrize(
@@ -93,13 +99,15 @@ def test_config_hash_reflects_dataset_resolved_preset_overrides() -> None:
     assert _hash(config, "m-eurosat") != _hash(config, "forestnet")
 
 
-@pytest.mark.parametrize("unversioned", [True, False], ids=["pre-fix", "current"])
-def test_dataset_input_protocol_controls_resume(tmp_path: Path, *, unversioned: bool) -> None:
+@pytest.mark.parametrize("version", [None, 1, 2], ids=["pre-fix", "channel-order-only", "current"])
+def test_dataset_input_protocol_controls_resume(tmp_path: Path, version: int | None) -> None:
     config = _cfg(classification={"methods": ["knn"]}, output={"resume": True})
     with patch("torchgeo_bench.resume.hashlib.sha256", wraps=hashlib.sha256) as digest:
         current_hash = _hash(config)
     payload = json.loads(digest.call_args.args[0])
-    assert payload.pop("dataset_input_protocol_version") == DATASET_INPUT_PROTOCOL_VERSION
+    assert payload.pop("dataset_input_fingerprint") == resolve_input("m-eurosat").fingerprint
+    if version == 1:
+        payload["dataset_input_protocol_version"] = 1
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     old_hash = hashlib.sha256(encoded.encode()).hexdigest()[:16]
     assert current_hash != old_hash
@@ -107,16 +115,31 @@ def test_dataset_input_protocol_controls_resume(tmp_path: Path, *, unversioned: 
 
     metadata = _resume_row(config, method="knn5", metric_name="accuracy")
     assert metadata["config_hash"] == current_hash
-    row = {**metadata, "config_hash": old_hash if unversioned else current_hash}
+    row = {**metadata, "config_hash": current_hash if version == 2 else old_hash}
+    if version != 2:
+        row.pop("dataset_input_fingerprint")
+        row.pop("resolved_bands")
     path = tmp_path / "results.csv"
     pd.DataFrame([row]).to_csv(path, index=False)
     before = path.read_bytes()
     completed = ResumeState(*load_completed(str(path)))
     resolved, _ = resolve_run_config(config, "m-eurosat")
     plan = plan_dataset_run(resolved, get_dataset_spec("m-eurosat"), metadata, completed)
-    assert plan.skip_knn is not unversioned
-    assert plan.skip_dataset is not unversioned
+    assert plan.skip_knn is (version == 2)
+    assert plan.skip_dataset is (version == 2)
     assert path.read_bytes() == before
+    if version != 2:
+        historical = pd.read_csv(path).iloc[0]
+        append_rows_atomic(str(path), [metadata])
+        rows = pd.read_csv(path)
+        pd.testing.assert_series_equal(rows.loc[0, historical.index], historical)
+        assert rows.iloc[0]["config_hash"] == old_hash
+        assert pd.isna(rows.iloc[0]["dataset_input_fingerprint"])
+        assert rows.iloc[1]["dataset_input_fingerprint"] == metadata["dataset_input_fingerprint"]
+        current = ResumeState(*load_completed(str(path)))
+        assert plan_dataset_run(
+            resolved, get_dataset_spec("m-eurosat"), metadata, current
+        ).skip_dataset
 
 
 def test_resume_keys_require_the_requested_metric(tmp_path: Path) -> None:

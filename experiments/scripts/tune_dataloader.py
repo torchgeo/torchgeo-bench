@@ -77,7 +77,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True, help="e.g. terratorch/prithvi_eo_v2_300")
     p.add_argument("--dataset", default="m-bigearthnet")
-    p.add_argument("--bands", default="all")
+    p.add_argument("--bands", default="all", help="rgb, default, all, or comma-separated names")
     p.add_argument("--batch-sizes", default="64,128,256,512")
     p.add_argument("--num-workers", default="4,8,16,32")
     p.add_argument("--max-batches", type=int, default=20, help="cap per cell to stay quick")
@@ -89,7 +89,9 @@ def main() -> None:
     bs_list = [int(x) for x in args.batch_sizes.split(",")]
     nw_list = [int(x) for x in args.num_workers.split(",")]
 
-    selection = args.bands if args.bands in ("rgb", "all") else tuple(args.bands.split(","))
+    selection = (
+        args.bands if args.bands in ("rgb", "default", "all") else tuple(args.bands.split(","))
+    )
     train = load_split(args.dataset, "train", bands=selection)
     model = (
         _build_model(args.model, list(train.bands), args.dataset, train.dataset).to(device).eval()

@@ -369,6 +369,28 @@ def test_flops_config_resolves_rcf_seed():
     assert preset.kwargs["seed"] == resolved.runtime.seed == 0
 
 
+@pytest.mark.parametrize(("source", "channels"), [("caffe", 1), ("kuro_siwo", 3)])
+def test_synthetic_all_source_track_keeps_non_rgb_channel_counts(
+    flops_config, monkeypatch, source: str, channels: int
+) -> None:
+    from torchgeo_bench.config.flops import FlopsInputConfig
+
+    flops_config.input = FlopsInputConfig(band_source=source, band_configs=["s2"])
+    flops_config.segmentation.heads = []
+    seen = []
+
+    def build(preset, bands, *args):
+        seen.append(bands)
+        return _TinyConvNet()
+
+    monkeypatch.setattr("torchgeo_bench.flops_pipeline._build_model", build)
+    monkeypatch.setattr("torchgeo_bench.flops_pipeline.classification_row", lambda *args: None)
+    main(flops_config)
+    assert len(seen) == 1
+    assert len(seen[0]) == channels
+    assert tuple(seen[0]) == get_dataset_spec(source).bands
+
+
 type FlopsRun = tuple[FlopsConfig, list[dict[str, object]], list[str]]
 
 

@@ -2,9 +2,9 @@
 
 from typing import Literal, Self
 
-from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
+from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator, model_validator
 
-from ..datasets import list_datasets
+from ..datasets import get_dataset_spec, list_datasets
 from .presets import ModelPreset, load_model_preset, merge_settings
 from .schema import (
     Device,
@@ -42,6 +42,8 @@ class FlopsInputConfig(StrictModel):
 
     ``s2`` retains the historical meaning: all bands from ``band_source``.
     The default CloudSen12 source contains twelve Sentinel-2 optical bands.
+    ``rgb`` requires genuine RGB; these synthetic tracks do not accept the
+    dataset-specific ``default`` selector.
     """
 
     band_source: StrictStr = "cloudsen12"
@@ -66,6 +68,19 @@ class FlopsInputConfig(StrictModel):
         if len(set(value)) != len(value):
             raise ValueError("band_configs must not contain duplicates")
         return value
+
+    @model_validator(mode="after")
+    def validate_rgb_source(self) -> Self:
+        """Reject synthetic RGB tracks backed by grayscale or SAR metadata."""
+        if "rgb" in self.band_configs:
+            spec = get_dataset_spec(self.band_source)
+            if spec.rgb_bands is None:
+                raise ValueError(
+                    f"{self.band_source}: synthetic rgb requires genuine RGB; choose an RGB "
+                    "band_source or explicitly use band_configs: [s2] for all source bands. "
+                    "Dataset selection 'default' is not a synthetic band config."
+                )
+        return self
 
 
 class FlopsClassificationConfig(StrictModel):

@@ -26,6 +26,7 @@ from _seg_sweep_common import (
 )
 
 from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.datasets import get_dataset_spec
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ DATASETS = [
     "spacenet7",
 ]
 HEADS = ["linear", "conv_block", "fpn", "dpt"]
-BANDS = ["rgb", "all"]
+BANDS = ["default", "all"]
 EPOCHS = 10
 
 
@@ -85,7 +86,7 @@ MODELS = [
 
 # These models cannot handle the selected input bands; changing heads or batch sizes cannot help.
 UNSUPPORTED_INPUTS = {
-    ("torchgeo/scalemae_large_fmow", "caffe", "rgb"),
+    ("torchgeo/scalemae_large_fmow", "caffe", "default"),
     ("torchgeo/scalemae_large_fmow", "caffe", "all"),
     ("torchgeo/scalemae_large_fmow", "pastis", "all"),
     ("torchgeo/swinv2b_s2rgb_satlas_mi", "pastis", "all"),
@@ -98,7 +99,12 @@ def build_jobs() -> list[Job]:
     for model in MODELS:
         for dataset in DATASETS:
             for head in HEADS:
-                for bands in BANDS:
+                for selection in BANDS:
+                    bands = (
+                        "rgb"
+                        if selection == "default" and get_dataset_spec(dataset).rgb_bands
+                        else selection
+                    )
                     job = Job(model, dataset, head, bands)
                     if (model.config, dataset, bands) not in UNSUPPORTED_INPUTS:
                         jobs.append(job)
@@ -132,7 +138,10 @@ def sweep_metadata(root: Path, image_size: int, seed: int) -> dict[str, object]:
         "models": [asdict(model) for model in MODELS],
         "datasets": DATASETS,
         "heads": HEADS,
-        "bands": BANDS,
+        "bands": {
+            name: ["rgb" if get_dataset_spec(name).rgb_bands else "default", "all"]
+            for name in DATASETS
+        },
         "unsupported_inputs": [list(item) for item in sorted(UNSUPPORTED_INPUTS)],
     }
 
@@ -340,7 +349,9 @@ def main() -> None:
     output = resolve_path(
         root,
         args.output
-        or Path(f"results/segmentation_representative_rgb_all_{args.image_size}_{EPOCHS}ep.csv"),
+        or Path(
+            f"results/segmentation_representative_default_all_{args.image_size}_{EPOCHS}ep.csv"
+        ),
     )
     state_dir = (
         resolve_path(root, args.state_dir)

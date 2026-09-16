@@ -152,6 +152,7 @@
       "multi_temporal": false,
       "multilabel": true,
       "name": "benv2",
+      "default_bands": ["b04", "b03", "b02"],
       "num_classes": 19,
       "rgb_bands": [
         "b04",
@@ -244,6 +245,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "burn_scars",
+      "default_bands": ["b04", "b03", "b02"],
       "num_classes": 3,
       "rgb_bands": [
         "b04",
@@ -287,7 +289,8 @@
       "multilabel": false,
       "name": "caffe",
       "num_classes": 4,
-      "rgb_bands": [
+      "rgb_bands": null,
+      "default_bands": [
         "gray"
       ],
       "sample_adapter": "_V2Dataset.canonicalize_sample",
@@ -436,6 +439,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "cloudsen12",
+      "default_bands": ["b04", "b03", "b02"],
       "num_classes": 4,
       "rgb_bands": [
         "b04",
@@ -628,6 +632,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "dynamic_earthnet",
+      "default_bands": ["r", "g", "b"],
       "num_classes": 7,
       "rgb_bands": [
         "r",
@@ -788,6 +793,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "eurosat",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 10,
       "rgb_bands": [
         "red",
@@ -946,6 +952,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "eurosat-spatial",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 10,
       "rgb_bands": [
         "red",
@@ -1026,6 +1033,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "flair2",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 13,
       "rgb_bands": [
         "red",
@@ -1118,6 +1126,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "forestnet",
+      "default_bands": ["b04", "b03", "b02"],
       "num_classes": 12,
       "rgb_bands": [
         "b04",
@@ -1190,6 +1199,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "fotw",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 4,
       "rgb_bands": [
         "red",
@@ -1256,7 +1266,8 @@
       "multilabel": false,
       "name": "kuro_siwo",
       "num_classes": 4,
-      "rgb_bands": [
+      "rgb_bands": null,
+      "default_bands": [
         "vv",
         "vh"
       ],
@@ -1409,6 +1420,7 @@
       "multi_temporal": false,
       "multilabel": true,
       "name": "m-bigearthnet",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 43,
       "rgb_bands": [
         "red",
@@ -1566,6 +1578,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "m-brick-kiln",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 2,
       "rgb_bands": [
         "red",
@@ -1723,6 +1736,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "m-eurosat",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 10,
       "rgb_bands": [
         "red",
@@ -1810,6 +1824,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "m-forestnet",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 12,
       "rgb_bands": [
         "red",
@@ -1867,6 +1882,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "m-pv4ger",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 2,
       "rgb_bands": [
         "red",
@@ -2074,6 +2090,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "m-so2sat",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 17,
       "rgb_bands": [
         "red",
@@ -2263,6 +2280,7 @@
       "multi_temporal": true,
       "multilabel": false,
       "name": "pastis",
+      "default_bands": ["b04", "b03", "b02"],
       "num_classes": 20,
       "rgb_bands": [
         "b04",
@@ -2323,6 +2341,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "resisc45",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 45,
       "rgb_bands": [
         "red",
@@ -2473,6 +2492,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "so2sat",
+      "default_bands": ["b04", "b03", "b02"],
       "num_classes": 17,
       "rgb_bands": [
         "b04",
@@ -2595,6 +2615,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "spacenet2",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 2,
       "rgb_bands": [
         "red",
@@ -2657,6 +2678,7 @@
       "multi_temporal": false,
       "multilabel": false,
       "name": "spacenet7",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 2,
       "rgb_bands": [
         "red",
@@ -2879,6 +2901,7 @@
       "multi_temporal": false,
       "multilabel": true,
       "name": "treesatai",
+      "default_bands": ["red", "green", "blue"],
       "num_classes": 15,
       "rgb_bands": [
         "red",

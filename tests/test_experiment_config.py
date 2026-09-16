@@ -18,7 +18,7 @@ from experiments.scripts import (
 from tests.support.runner import _synthetic_splits
 from torchgeo_bench.config.presets import ModelPreset, load_model_preset, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.config.schema import ModelConfig
+from torchgeo_bench.config.schema import InputConfig, ModelConfig
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +28,47 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_analysis_scripts_preserve_requested_rgb_order(script: ModuleType) -> None:
     bands = script.band_specs("m-eurosat", "rgb")
     assert [band.name for band in bands] == ["red", "green", "blue"]
+
+
+@pytest.mark.parametrize("script", [audit_model_native, introspect_seg_layers])
+@pytest.mark.parametrize(("dataset", "names"), [("caffe", ["gray"]), ("kuro_siwo", ["vv", "vh"])])
+def test_analysis_scripts_require_explicit_non_rgb_selection(
+    script: ModuleType, dataset: str, names: list[str]
+) -> None:
+    assert [band.name for band in script.band_specs(dataset, "default")] == names
+    with pytest.raises(ValueError, match="no genuine RGB"):
+        script.band_specs(dataset, "rgb")
+    with pytest.raises(ValueError, match="Unknown band selection"):
+        script.band_specs(dataset, "typo")
+
+
+def test_main_study_explicitly_selects_non_rgb_without_overriding_all_band_presets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "experiments"))
+    script = importlib.import_module("experiments.run_main_experiments")
+    monkeypatch.setattr(script, "MODELS", ["timm/resnet18", "torchgeo/dofa_base"])
+
+    def load(selection: ModelConfig, **kwargs) -> ModelPreset:
+        preset = load_model_preset(selection, **kwargs)
+        if selection.name == "torchgeo/dofa_base":
+            return preset.model_copy(update={"input": InputConfig(bands="all")})
+        return preset
+
+    monkeypatch.setattr("torchgeo_bench.config.presets.load_model_preset", load)
+    jobs = script.build_jobs()
+    selections = {}
+    for job in jobs:
+        for dataset in job.config.datasets:
+            effective, _ = resolve_run_config(job.config, dataset)
+            key = (job.config.model.name, dataset)
+            assert key not in selections
+            selections[key] = effective.input.bands
+    for dataset in ("caffe", "kuro_siwo"):
+        assert selections[("timm/resnet18", dataset)] == "default"
+        assert selections[("torchgeo/dofa_base", dataset)] == "all"
+    assert selections[("timm/resnet18", "m-eurosat")] == "rgb"
+    assert selections[("torchgeo/dofa_base", "m-eurosat")] == "all"
 
 
 def test_tuner_builds_packaged_model_config() -> None:

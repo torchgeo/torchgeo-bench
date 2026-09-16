@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 
 from torchgeo_bench.config.presets import merge_settings, resolve_run_config
 from torchgeo_bench.config.run import RunConfig
-from torchgeo_bench.datasets import LoadedSplit, ResolvedInput, get_dataset_spec
+from torchgeo_bench.datasets import LoadedSplit, get_dataset_spec, resolve_input
 from torchgeo_bench.datasets.input import Split
 from torchgeo_bench.main import dataset_metadata
 from torchgeo_bench.resume import resume_config_hash
@@ -61,7 +61,7 @@ def make_loaded_split(  # noqa: PLR0913 - mirror split metadata for offline test
         spec=bench,
         split=split,
         partition=partition,
-        input=ResolvedInput(tuple(bench.resolve_band_specs(bands)), bands, time_steps),
+        input=resolve_input(bench, bands=bands, time_steps=time_steps, partition=partition),
     )
 
 
@@ -92,20 +92,32 @@ def _synthetic_embeddings() -> list[tuple[np.ndarray, np.ndarray]]:
 
 
 def _hash_for(cfg: RunConfig, ds_name: str | None = None) -> str:
-    resolved, preset = resolve_run_config(cfg, ds_name or cfg.datasets[0])
-    return resume_config_hash(resolved, preset)
+    name = ds_name or cfg.datasets[0]
+    resolved, preset = resolve_run_config(cfg, name)
+    inputs = resolve_input(
+        name,
+        bands=resolved.input.bands,
+        partition=resolved.input.partition,
+        time_steps=resolved.input.time_steps,
+    )
+    return resume_config_hash(resolved, preset, inputs)
 
 
 def _resume_row(cfg: RunConfig, *, method: str, metric_name: str) -> dict[str, object]:
     ds_name = cfg.datasets[0]
     resolved, preset = resolve_run_config(cfg, ds_name)
+    inputs = resolve_input(
+        ds_name,
+        bands=resolved.input.bands,
+        partition=resolved.input.partition,
+        time_steps=resolved.input.time_steps,
+    )
     return {
         **dataset_metadata(
             resolved,
-            ds_name,
-            get_dataset_spec(ds_name),
             preset,
-            resume_config_hash(resolved, preset),
+            resume_config_hash(resolved, preset, inputs),
+            inputs,
         ),
         "method": method,
         "metric_name": metric_name,

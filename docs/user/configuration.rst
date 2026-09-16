@@ -96,9 +96,13 @@ Input and runtime
      seed: 0
      verbose: false
 
-``bands`` accepts ``rgb``, ``all``, or an ordered YAML list of dataset band
+``bands`` accepts ``rgb``, ``default``, ``all``, or an ordered YAML list of dataset band
 names. The equivalent flag accepts comma-separated names, for example
 ``--bands red,green,blue``. Band names differ by dataset; see :doc:`datasets`.
+Omitted bands still use ``rgb`` unless a model preset explicitly chooses otherwise.
+``default`` is opt-in: CaFFe uses gray and KuroSiwo uses vv/vh. Neither dataset
+has genuine RGB, so an effective ``rgb`` selection fails before loading or resume.
+Use ``--bands default``, ``--bands all``, or supported explicit names instead.
 ``time_steps`` selects a positive temporal length where supported.
 ``image_size: null`` (``--image-size none``) retains native dimensions.
 Interpolation is ``area``, ``bilinear``, ``bicubic``, or ``nearest``.
@@ -286,6 +290,7 @@ subdirectories. They are validated separately from run files:
    dataset_overrides:
      caffe:
        input:
+         bands: default
          image_size: 128
 
 Only ``kwargs`` are constructor options. ``name``, ``target``, ``track``,
@@ -349,7 +354,11 @@ It supports ``--model``, ``--dataset``, ``--device``, ``--batch-size``,
 operation support depends on the model and device.
 ``--count-flops`` / ``--no-count-flops`` add or omit FLOP counting.
 The JSON includes effective preprocessing, device, precision, timing, and
-memory metadata. Local dataset samples must already be available.
+memory metadata. ``band_selection`` records the requested selector and ``bands``
+lists the resolved channels in tensor order. ``model_config.dataset_input`` and
+``dataset_input_fingerprint`` record the same versioned description/fingerprint
+used by split loading; the model-config hash includes this description.
+Local dataset samples must already be available.
 Profiling supports only CPU and CUDA measurement devices.
 
 Synthetic compute measurements
@@ -399,6 +408,10 @@ Its YAML schema is independent of image runs:
 ``--band-source`` selects the dataset metadata. ``--band-configs rgb s2``
 selects input stacks: ``s2`` means **all bands from the source**, which is
 twelve Sentinel-2 bands for the default CloudSen12 source.
+The synthetic ``rgb`` track always requires genuine RGB metadata; CaFFe and
+KuroSiwo cannot supply it. Choose an RGB band source, or explicitly choose
+``--band-configs s2`` to measure all source bands. The synthetic track names
+remain ``rgb`` and ``s2``; dataset selection ``default`` is not a FLOPs token.
 ``--image-size`` must be positive; synthetic inputs cannot use native
 dataset dimensions. ``--normalization`` has the same five choices as image
 runs. ``--probe-head`` is ``linear`` or ``mlp``, and

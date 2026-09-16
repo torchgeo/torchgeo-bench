@@ -39,7 +39,7 @@ def registered_dataset(
         task=request.param,
         num_classes=2,
         bands=(BandSpec("aerial", "gray", "gray", 0, 1, 0, 1),),
-        rgb_bands=("gray",),
+        default_bands=("gray",),
         split_sizes=SplitSizes(1, 1, 1),
         source=V2Source("UnavailableReader"),
     )
@@ -102,7 +102,8 @@ def test_all_metadata_matches_pre_migration_definition(name: str) -> None:
         "num_classes": spec.num_classes,
         "multilabel": spec.multilabel,
         "bands": [asdict(band) for band in spec.bands],
-        "rgb_bands": list(spec.rgb_bands),
+        "rgb_bands": list(spec.rgb_bands) if spec.rgb_bands is not None else None,
+        "default_bands": list(spec.default_bands),
         "split_sizes": dict(spec.split_sizes),
         "supports_partitions": spec.capabilities.supports_partitions,
         "multi_temporal": spec.capabilities.multi_temporal,

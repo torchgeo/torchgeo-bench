@@ -43,9 +43,11 @@ def _source(
 
 
 @pytest.mark.parametrize("size", [None, 3, 7])
+@pytest.mark.parametrize("bands", ["default", "all", ("gray",)])
 def test_grayscale_raw_dtype_targets_and_auxiliary_metadata(
     monkeypatch: pytest.MonkeyPatch,
     size: int | None,
+    bands: str | tuple[str, ...],
 ) -> None:
     image = torch.tensor([[[-8.0, 400.5, 255.0], [2048.0, 1024.5, 0.0]]], dtype=torch.float64)
     mask = torch.tensor([[[-1, 255, 4], [3, 2, 1]]], dtype=torch.int16)
@@ -61,7 +63,7 @@ def test_grayscale_raw_dtype_targets_and_auxiliary_metadata(
             "image_preview": auxiliary,
         },
     )
-    loaded = load_split("caffe", "val", image_size=size)
+    loaded = load_split("caffe", "val", image_size=size, bands=bands)
     sample = loaded.dataset[0]
     expected_image = image.float()
     expected_mask = mask[0].long()
@@ -144,10 +146,10 @@ def test_nonintegral_targets_are_rejected_before_resize_or_label_offset(
     value: object,
 ) -> None:
     spec = get_dataset_spec(name)
-    image = torch.ones(len(spec.rgb_bands), 2, 2)
+    image = torch.ones(len(spec.default_bands), 2, 2)
     target = [[0, value], [0, 0]] if spec.task == "segmentation" else value
     _source(monkeypatch, name, {"image": image, spec.target_key: target})
-    loaded = load_split(name, "train", image_size=1)
+    loaded = load_split(name, "train", image_size=1, bands="default")
     with pytest.raises(ValueError, match="integer"):
         loaded.dataset[0]
 
@@ -159,13 +161,13 @@ def test_mask_only_supports_hw_or_singleton_channel(
 ) -> None:
     _source(monkeypatch, "caffe", {"image": torch.zeros(1, 2, 2), "mask": mask})
     with pytest.raises(ValueError, match="H,W mask"):
-        load_split("caffe", "train").dataset[0]
+        load_split("caffe", "train", bands="default").dataset[0]
 
 
 def test_nearest_masks_do_not_round_large_integer_ids(monkeypatch: pytest.MonkeyPatch) -> None:
     mask = torch.tensor([[2**53 + 1, -1], [255, 0]])
     _source(monkeypatch, "caffe", {"image": torch.zeros(1, 2, 2), "mask": mask})
-    sample = load_split("caffe", "train", image_size=4).dataset[0]
+    sample = load_split("caffe", "train", image_size=4, bands="default").dataset[0]
     torch.testing.assert_close(sample["mask"], mask.repeat_interleave(2, 0).repeat_interleave(2, 1))
 
 
@@ -211,7 +213,7 @@ def test_exact_resolved_temporal_layout_is_enforced(
     key = "image_s2" if name == "pastis" else "image"
     _source(monkeypatch, name, {key: torch.zeros(shape), "mask": torch.zeros(2, 2)})
     with pytest.raises(ValueError, match=message):
-        load_split(name, "train", time_steps=steps).dataset[0]
+        load_split(name, "train", time_steps=steps, bands="default").dataset[0]
 
 
 def test_actual_backend_within_sensor_band_order_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,7 +273,7 @@ def test_v2_loading_has_no_sample_probes_or_unrelated_splits(
     name: str,
 ) -> None:
     backend = _source(monkeypatch, name, {})
-    loaded = load_split(name, "train")
+    loaded = load_split(name, "train", bands="default")
     backend.assert_called_once()
     assert backend.call_args.kwargs["split"] == "train"
     assert backend.call_args.kwargs["transforms"] is None
