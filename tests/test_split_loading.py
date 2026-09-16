@@ -1,79 +1,57 @@
 """Single-split ownership, validation, and caller-owned batching regressions."""
 
-import io
 import json
 import tarfile
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from unittest import mock
 
-import h5py
 import numpy as np
 import pandas as pd
 import pytest
 import torch
 from torch.utils.data import RandomSampler, SequentialSampler
 
-from tests.support.data import write_classification_files
+from tests.support.data import write_classification_files, write_v1_sample
 from tests.support.runner import _compose_cfg, _synthetic_splits
 from torchgeo_bench.commands import _profile_runtime
 from torchgeo_bench.config.profile import ProfileConfig
 from torchgeo_bench.datasets import DatasetSpec, get_dataset_spec, load_split
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
-from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1, load_v1_split
+from torchgeo_bench.datasets.geobench_v1 import load_v1_split
 from torchgeo_bench.main import run_dataset
 from torchgeo_bench.resume import ResumeState
 
 
-def _write_train_only(root: Path, dataset_name: str, storage: str) -> None:
+def _write_train_only(root: Path, dataset_name: str) -> None:
     bench = get_dataset_spec(dataset_name)
-    family = "classification_v1.0_wds" if storage == "shards" else "classification_v1.0"
-    directory = root / "data" / family / dataset_name
+    directory = root / bench.source.root / bench.storage_name
     directory.mkdir(parents=True)
     ids = [f"sample-{index}" for index in range(4)]
     (directory / "default_partition.json").write_text(json.dumps({"train": ids}))
     label = [int(index in (0, 5)) for index in range(bench.num_classes)] if bench.multilabel else 2
-    metadata = json.dumps({"label": label, "bands_order": [b.source_name for b in bench.bands]})
+    metadata = {"label": label, "bands_order": [b.source_name for b in bench.bands]}
     arrays = {
         band.source_name: np.full((4, 4), 1000 + index, dtype=np.float32)
         for index, band in enumerate(bench.bands)
     }
-    if storage == "hdf5":
+    with tarfile.open(directory / "shard_00000.tar", "w") as archive:
         for sample_id in ids:
-            with h5py.File(directory / f"{sample_id}.hdf5", "w") as sample:
-                for name, pixels in arrays.items():
-                    sample[name] = pixels
-                sample.attrs["metadata_json"] = metadata
-    else:
-        pixels = io.BytesIO()
-        np.savez(pixels, **arrays)
-        with tarfile.open(directory / "shard_00000.tar", "w") as archive:
-            for sample_id in ids:
-                for suffix, payload in (
-                    ("meta.json", metadata.encode()),
-                    ("bands.npz", pixels.getvalue()),
-                ):
-                    member = tarfile.TarInfo(f"{sample_id}.{suffix}")
-                    member.size = len(payload)
-                    archive.addfile(member, io.BytesIO(payload))
+            write_v1_sample(archive, sample_id, arrays, metadata)
 
 
-@pytest.fixture(params=["hdf5", "shards"])
-def train_only(
-    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> str:
-    storage = request.param
+@pytest.fixture
+def train_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("m-eurosat", "m-bigearthnet"):
-        _write_train_only(tmp_path, name, storage)
+        _write_train_only(tmp_path, name)
     monkeypatch.chdir(tmp_path)
-    return storage
 
 
 def test_train_only_constructs_no_unrelated_splits_loaders_or_sample_probes(
-    train_only: str,
+    train_only: None,
 ) -> None:
     bench = get_dataset_spec("m-eurosat")
-    backend = GeoBenchv1 if train_only == "hdf5" else GeoBenchv1Sharded
+    backend = GeoBenchv1Sharded
     state = torch.get_rng_state()
     with (
         mock.patch(
@@ -110,7 +88,7 @@ def test_train_only_constructs_no_unrelated_splits_loaders_or_sample_probes(
 @pytest.mark.parametrize("dataset_name", ["m-eurosat", "m-bigearthnet"])
 @pytest.mark.parametrize("selection", ["rgb", "all", None, ("nir", "red"), ("red", "red")])
 def test_ordered_metadata_and_raw_targets_are_preserved(
-    train_only: str, dataset_name: str, selection: str | tuple[str, ...] | None
+    train_only: None, dataset_name: str, selection: str | tuple[str, ...] | None
 ) -> None:
     loaded = load_split(dataset_name, "train", bands=selection, image_size=8)
     bench = get_dataset_spec(dataset_name)
@@ -137,7 +115,7 @@ def test_ordered_metadata_and_raw_targets_are_preserved(
         assert [band.name for band in loaded.bands] == list(selection)
 
 
-def test_resolved_metadata_is_immutable(train_only: str) -> None:
+def test_resolved_metadata_is_immutable(train_only: None) -> None:
     names = ["nir", "red"]
     loaded = load_split("m-eurosat", "train", bands=iter(names))
     names.reverse()
@@ -150,7 +128,7 @@ def test_resolved_metadata_is_immutable(train_only: str) -> None:
         loaded.bands[0].mean = 0
 
 
-def test_definition_input_keeps_scientific_and_storage_identity_separate(train_only: str) -> None:
+def test_definition_input_keeps_scientific_and_storage_identity_separate(train_only: None) -> None:
     original = get_dataset_spec("m-eurosat")
     spec = replace(
         original,
@@ -216,9 +194,9 @@ def test_unsupported_partition_is_never_ignored(dataset_name: str) -> None:
 
 
 def test_profile_reads_only_its_bounded_training_batch(
-    train_only: str, monkeypatch: pytest.MonkeyPatch
+    train_only: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = GeoBenchv1 if train_only == "hdf5" else GeoBenchv1Sharded
+    backend = GeoBenchv1Sharded
     original = backend.__getitem__
     indices = []
 
@@ -278,7 +256,7 @@ def test_image_runner_owns_batching_partition_policy_and_model_metadata(
         mock.patch("torchgeo_bench.main.build_model", side_effect=build),
         mock.patch("torchgeo_bench.main.run_classification", side_effect=evaluate),
         mock.patch.object(
-            GeoBenchv1, "__getitem__", autospec=True, wraps=GeoBenchv1.__getitem__
+            GeoBenchv1Sharded, "__getitem__", autospec=True, wraps=GeoBenchv1Sharded.__getitem__
         ) as probe,
     ):
         probe.side_effect = lambda self, index: {
@@ -323,7 +301,7 @@ def test_runner_rejects_split_input_disagreement_before_model_construction(tmp_p
     build.assert_not_called()
 
 
-def test_gallery_loads_only_the_requested_split(train_only: str) -> None:
+def test_gallery_loads_only_the_requested_split(train_only: None) -> None:
     from projects.cleanlab.render_flagged_gallery import _load_gallery_split
 
     loaded = _load_gallery_split("m-eurosat", "train")
@@ -347,9 +325,9 @@ def test_gallery_uses_resolved_channel_order(
     assert output.is_file()
 
 
-def test_explicit_partition_applies_to_requested_validation_split(train_only: str) -> None:
-    family = "classification_v1.0_wds" if train_only == "shards" else "classification_v1.0"
-    partition = Path("data") / family / "m-eurosat" / "validation-only_partition.json"
+def test_explicit_partition_applies_to_requested_validation_split(train_only: None) -> None:
+    spec = get_dataset_spec("m-eurosat")
+    partition = Path(spec.source.root) / spec.storage_name / "validation-only_partition.json"
     partition.write_text(json.dumps({"valid": ["sample-3"]}))
     loaded = load_split("m-eurosat", "val", partition="validation-only")
     assert loaded.partition == "validation-only"

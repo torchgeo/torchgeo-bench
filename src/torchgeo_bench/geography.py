@@ -19,7 +19,7 @@ Three statuses:
 Two coordinate sources are handled:
 
 * **V2**: read coordinates and place labels from ``.tortilla`` metadata, not imagery.
-* **V1**: reproject JSON affine/CRS origins from shards or HDF5 to EPSG:4326.
+* **V1**: reproject JSON affine/CRS origins from shards to EPSG:4326.
 
 Unchanged raw data produces byte-identical JSON.
 """
@@ -38,8 +38,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .datasets import V1Source, get_dataset_spec, list_datasets
-from .datasets._metadata import read_hdf5_metadata
+from .datasets import get_dataset_spec, list_datasets
 from .datasets.catalog import download_command
 
 logger = logging.getLogger(__name__)
@@ -167,24 +166,12 @@ def _metadata_origin(meta: dict) -> tuple[float | None, float | None, str]:
     return None, None, "NOGEO"
 
 
-def _v1_origin(path: str) -> tuple[float | None, float | None, str]:
-    """Return the raster origin and CRS for one custom V1 HDF5 sample."""
-    import h5py
-
-    try:
-        with h5py.File(path, "r") as f:
-            meta = read_hdf5_metadata(f.attrs)
-        return _metadata_origin(meta)
-    except (KeyError, TypeError, ValueError) as exc:  # allow-except: report invalid sample metadata
-        return None, None, f"ERR {type(exc).__name__}: {exc}"
-
-
 def _v1_shard_origins(path: str) -> list[tuple[float | None, float | None, str]]:
     """Read sample origins from JSON shard members without loading image arrays."""
     from .datasets._metadata import decode_metadata
 
     results: dict[str, tuple[float | None, float | None, str]] = {}
-    with tarfile.open(path, "r") as archive:
+    with tarfile.open(path, "r:") as archive:
         for member in archive:
             if member.name.endswith(".bands.npz"):
                 sample_id = member.name.removesuffix(".bands.npz")
@@ -226,10 +213,7 @@ def _extract_v1(name: str, files: list[str], workers: int) -> dict | None:
     from pyproj import Transformer
 
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        if files and files[0].endswith(".tar"):
-            results = [origin for shard in pool.map(_v1_shard_origins, files) for origin in shard]
-        else:
-            results = list(pool.map(_v1_origin, files, chunksize=64))
+        results = [origin for shard in pool.map(_v1_shard_origins, files) for origin in shard]
 
     errors = [r[2] for r in results if r[0] is None and r[2].startswith("ERR")]
     if errors:
@@ -295,21 +279,12 @@ def _attribute_continents(lon: np.ndarray, lat: np.ndarray) -> Counter:
 
 
 def _dataset_dir(name: str) -> Path | None:
-    """Return the on-disk directory for a dataset, or ``None`` if absent.
-
-    V1 prefers the same sharded cache as the benchmark; roots come from the spec.
-    """
+    """Return the catalog's on-disk directory, or ``None`` if absent."""
     spec = get_dataset_spec(name)
     source = spec.source
-    if isinstance(source, V1Source):
-        sharded = Path(source.root) / spec.storage_name
-        if any(sharded.glob("shard_*.tar")):
-            return sharded
-        candidate = Path(source.hdf5_root) / spec.storage_name
-    else:
-        candidate = Path(source.root)
-        if source.kind == "v2":
-            candidate /= spec.storage_name
+    candidate = Path(source.root)
+    if source.kind != "torchgeo":
+        candidate /= spec.storage_name
     return candidate if candidate.is_dir() else None
 
 
@@ -390,23 +365,23 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
 
     tortillas = sorted(glob.glob(str(directory / "*.tortilla")))
     shards = sorted(glob.glob(str(directory / "shard_*.tar")))
-    hdf5s = sorted(glob.glob(str(directory / "*.hdf5")))
 
-    if tortillas:
+    if spec.source.kind == "v2" and tortillas:
         data = _extract_v2(tortillas)
         if data is None:
             return GeoRecord(
                 name=name, status="no_geo", reason="tortilla metadata has no lon/lat columns"
             )
-    elif shards or hdf5s:
-        data = _extract_v1(name, shards or hdf5s, workers)
+    elif spec.source.kind == "v1" and shards:
+        data = _extract_v1(name, shards, workers)
         if data is None:
             return GeoRecord(
                 name=name, status="no_geo", reason="no sample carries a usable transform/crs"
             )
     else:
         raise FileNotFoundError(
-            f"No .tortilla, V1 shard, or .hdf5 files under {directory}. Run `{command}`."
+            f"No supported imagery (.tortilla or V1 JSON shards) under {directory}. "
+            f"Run `{command}`."
         )
 
     if len(data["lon"]) == 0:

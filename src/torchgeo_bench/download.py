@@ -67,10 +67,12 @@ def download_geobench_v1(output_dir: Path, datasets: list[str] | None = None) ->
     if unknown:
         raise ValueError(f"Unknown GeoBench V1 dataset(s): {', '.join(unknown)}")
 
-    from torchgeo_bench.datasets._v1_webdataset import download_sharded_root
+    from torchgeo_bench._v1_download import download_sharded_root
 
     root = Path(V1Source().root).relative_to("data")
-    download_sharded_root(Path(output_dir) / root, names)
+    download_sharded_root(
+        Path(output_dir) / root, [get_dataset_spec(name).storage_name for name in names]
+    )
 
 
 def download_geobench_v2_dataset(name: str, v2_root: Path) -> None:

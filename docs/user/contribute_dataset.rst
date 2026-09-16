@@ -49,7 +49,7 @@ Declare the exact task, class count, and multilabel semantics from verified sour
 Source policies and capabilities
 --------------------------------
 
-* ``V1Source`` selects verified JSON shards, with a retained custom JSON-metadata HDF5 fallback. Pickle metadata is not supported. ``DatasetCapabilities(supports_partitions=True)`` enables non-default partitions.
+* ``V1Source`` selects only local JSON/NPZ tar shards under ``data/classification_v1.0_wds/``. The explicit downloader pins and verifies the mirror; runtime reading never downloads or converts data. HDF5 and pickle metadata are not supported. ``DatasetCapabilities(supports_partitions=True)`` enables non-default partitions.
 * ``V2Source`` contains the upstream class identifier, split-name policy, and typed options. Set ``band_order_strategy="by_sensor"`` when the upstream reader groups channels by modality. Declare an existing named sample adapter for nonstandard image or mask keys; do not import runtime adapter functions into the definition module.
 * ``TorchGeoSource`` identifies the upstream reader, fixed root, optional shared storage name, and download-checksum policy.
 
@@ -105,6 +105,6 @@ Every registered dataset needs a JSON record and index entry under :file:`docs/_
 
    $ uv run python experiments/scripts/extract_dataset_geography.py --dataset my_dataset
 
-Commit the new record and regenerated index. Existing records must keep exact catalog coverage and reasons for absent coordinates; :file:`tests/test_geography.py` checks these requirements. V2 reads tortilla coordinate metadata; V1 reads JSON affine/CRS metadata from shards or custom HDF5. A different format needs an explicit extraction implementation.
+Commit the new record and regenerated index. Existing records must keep exact catalog coverage and reasons for absent coordinates; :file:`tests/test_geography.py` checks these requirements. V2 reads tortilla coordinate metadata; V1 reads JSON affine/CRS metadata from its canonical shards. A different source family needs an explicit extraction implementation.
 
 See :file:`src/torchgeo_bench/datasets/resisc45.py` and its runtime factory for a TorchGeo example, and :doc:`contribute_model` for the PR workflow.

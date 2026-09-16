@@ -16,7 +16,6 @@ from torchgeo_bench.datasets import (
     DatasetSpec,
     SplitSizes,
     TorchGeoSource,
-    V1Source,
     V2Source,
     catalog,
     get_dataset_spec,
@@ -108,15 +107,13 @@ def test_all_metadata_matches_pre_migration_definition(name: str) -> None:
         "supports_partitions": spec.capabilities.supports_partitions,
         "multi_temporal": spec.capabilities.multi_temporal,
         "target_key": spec.target_key,
-        "data_root": source.hdf5_root if isinstance(source, V1Source) else source.root,
+        "data_root": source.root,
         "source_kind": source.kind,
         "storage_name": spec.storage_name,
         "geography_alias": spec.geography.alias_of,
         "geography_reason": spec.geography.reason,
         "validation_split": source.validation_split,
     }
-    if isinstance(source, V1Source):
-        actual["sharded_root"] = source.root
     if isinstance(source, V2Source):
         upstream_kwargs = {}
         if source.return_stacked_image is not None:

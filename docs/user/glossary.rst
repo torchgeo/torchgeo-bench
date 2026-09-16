@@ -20,9 +20,9 @@ Glossary
        in the results CSV.
 
    GeoBench V1
-       The original GeoBench benchmark released as a set of HDF5 files.
+       The original GeoBench benchmark, loaded here from JSON/NPZ tar shards.
        Datasets in V1 use the ``m-`` prefix in the CLI
-       (e.g. ``m-eurosat``) and live under ``data/classification_v1.0/``.
+       (e.g. ``m-eurosat``) and live under ``data/classification_v1.0_wds/``.
 
    GeoBench V2
        The second-generation GeoBench distribution, packaged as one

@@ -59,7 +59,7 @@ Request validation/test explicitly when needed. The image runner applies a non-d
 Source identities
 -----------------
 
-``V1Source`` uses JSON shards under ``data/classification_v1.0_wds/`` and retains the custom JSON-metadata HDF5 fallback under ``data/classification_v1.0/``. V1 partitions translate ``val`` to the stored ``valid`` split.
+``V1Source`` uses only JSON-metadata shards under ``data/classification_v1.0_wds/<name>/``. HDF5 and pickle caches are not supported or converted. Missing shards require an explicit ``torchgeo-bench download geobench_v1 --datasets <name>``; loading never downloads data or falls back to another format. V1 partitions translate ``val`` to the stored ``valid`` split.
 
 ``V2Source`` identifies an upstream class and explicitly declares modality grouping, validation-split naming, and any acquisition or label adapter. Runtime loading preserves upstream sensor alignment and restores the requested channel order, including multi-sensor temporal PASTIS inputs.
 

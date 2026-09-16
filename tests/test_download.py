@@ -11,8 +11,9 @@ from unittest import mock
 import numpy as np
 import pytest
 
-from torchgeo_bench.datasets import _v1_webdataset as v1
+from torchgeo_bench import _v1_download as v1
 from torchgeo_bench.datasets import get_dataset_spec, list_datasets, list_v2_datasets, load_split
+from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
 from torchgeo_bench.download import (
     DEFAULT_V2_DATASETS,
     download_datasets,
@@ -76,7 +77,7 @@ def test_download_geobench_v1_uses_verified_json_shards(
     )
     assert not (tmp_path / "classification_v1.0").exists()
     for name in selected:
-        sample = v1.GeoBenchv1Sharded(tmp_path / "classification_v1.0_wds", name, "train")[0]
+        sample = GeoBenchv1Sharded(tmp_path / "classification_v1.0_wds", name, "train")[0]
         assert sample["image"].shape == (3, 2, 2)
         assert sample["label"].item() == 0
 
@@ -99,6 +100,16 @@ def test_v1_download_requires_every_expected_archive(
         download_geobench_v1(tmp_path, datasets=["m-eurosat"])
 
 
+def test_v1_download_requires_manifest_coverage_before_acquisition(
+    tmp_path: Path, v1_download: mock.MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(v1, "_shard_checksums", dict)
+    with pytest.raises(ValueError, match=r"No archive checksums.*m-eurosat"):
+        download_geobench_v1(tmp_path, datasets=["m-eurosat"])
+    v1_download.assert_not_called()
+    assert not list(tmp_path.iterdir())
+
+
 @pytest.mark.parametrize("names", [[], ["unknown"], ["../m-eurosat"]])
 def test_v1_download_rejects_invalid_names(
     tmp_path: Path, v1_download: mock.MagicMock, names: list[str]
@@ -108,11 +119,20 @@ def test_v1_download_rejects_invalid_names(
     v1_download.assert_not_called()
 
 
+@pytest.mark.parametrize("old_cache", [False, True])
 def test_v1_requires_explicit_download_before_loading(
-    tmp_path: Path, v1_download: mock.MagicMock, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    v1_download: mock.MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    old_cache: bool,
 ) -> None:
     monkeypatch.chdir(tmp_path)
     root = tmp_path / "data/classification_v1.0_wds"
+    if old_cache:
+        old_directory = tmp_path / "data/classification_v1.0/m-eurosat"
+        old_directory.mkdir(parents=True)
+        (old_directory / "sample.hdf5").write_bytes(b"unsupported")
     with pytest.raises(FileNotFoundError, match="download geobench_v1 --datasets m-eurosat"):
         load_split("m-eurosat", "train")
     v1_download.assert_not_called()
@@ -124,6 +144,18 @@ def test_v1_requires_explicit_download_before_loading(
     v1_download.assert_called_once()
     assert v1_download.call_args.kwargs["local_dir"] == root
     assert v1_download.call_args.kwargs["allow_patterns"] == ["m-eurosat/*"]
+
+
+def test_v1_local_reader_has_no_acquisition_imports() -> None:
+    import subprocess
+    import sys
+
+    code = """
+import sys
+from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
+assert 'torchgeo_bench._v1_download' not in sys.modules
+"""
+    subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True)
 
 
 def test_v1_archive_checksums_cover_the_published_suite() -> None:

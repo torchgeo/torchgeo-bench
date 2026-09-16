@@ -21,8 +21,8 @@ class BandSpec:
             ``"aerial"``, ``"sar"``, ``"planet"``, ``"worldview"``).
         name: Canonical short band name used in the public API
             (e.g. ``"red"``, ``"b02"``, ``"nir"``, ``"vv"``).
-        source_name: Band key as it appears in the data files. For V1 HDF5
-            files this is the long form (``"04 - Red"``); for V2 datasets
+        source_name: Band key as it appears in the data files. For V1 NPZ
+            shards this is the long form (``"04 - Red"``); for V2 datasets
             this is typically the uppercase band code (``"B04"``).
         mean: Train-split mean pixel value (raw units, no normalization).
         std: Train-split standard deviation.

@@ -8,7 +8,6 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-import h5py
 import numpy as np
 import pandas as pd
 import pytest
@@ -16,24 +15,33 @@ from PIL import Image
 from rasterio.io import MemoryFile
 from rasterio.transform import Affine
 
-from torchgeo_bench.datasets import V1Source, get_dataset_spec
+from torchgeo_bench.datasets import get_dataset_spec
 
 
 def require_dataset_data(name: str) -> None:
     """Skip absent optional real data, never an incompatible existing cache."""
     spec = get_dataset_spec(name)
     source = spec.source
-    if isinstance(source, V1Source):
-        paths = [
-            Path(source.hdf5_root) / spec.storage_name,
-            Path(source.root) / spec.storage_name,
-        ]
-    elif source.kind == "torchgeo":
-        paths = [Path(source.root)]
-    else:
-        paths = [Path(source.root) / spec.storage_name]
-    if not any(path.exists() for path in paths):
-        pytest.skip(f"{name} data not supplied; expected one of {paths}")
+    path = Path(source.root)
+    if source.kind != "torchgeo":
+        path /= spec.storage_name
+    if not path.exists():
+        pytest.skip(f"{name} data not supplied; expected {path}")
+
+
+def write_v1_sample(
+    archive: tarfile.TarFile, sample_id: str, arrays: dict[str, np.ndarray], metadata: dict
+) -> None:
+    """Write the mirror's JSON/NPZ members without any intermediate representation."""
+    pixels = io.BytesIO()
+    np.savez(pixels, **arrays)
+    for suffix, payload in (
+        ("bands.npz", pixels.getvalue()),
+        ("meta.json", json.dumps(metadata, allow_nan=False).encode()),
+    ):
+        member = tarfile.TarInfo(f"{sample_id}.{suffix}")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
 
 
 def write_classification_files(
@@ -42,52 +50,38 @@ def write_classification_files(
     labels: tuple[int | list[int], ...],
     *,
     all_bands: bool = False,
+    splits: tuple[str, ...] = ("train", "valid", "test"),
 ) -> Path:
-    """Write separable V1 JSON-HDF5 samples with distinct IDs and pixels in each split."""
-    directory = root / "data" / "classification_v1.0" / dataset_name
-    directory.mkdir(parents=True)
+    """Write separable V1 JSON/NPZ shards with distinct IDs and pixels in each split."""
     bench = get_dataset_spec(dataset_name)
+    directory = root / bench.source.root / bench.storage_name
+    directory.mkdir(parents=True)
     specs = bench.select_band_specs(None if all_bands else tuple(bench.rgb_bands))
     partition: dict[str, list[str]] = {}
     for split_index, (split, per_class) in enumerate((("train", 12), ("valid", 4), ("test", 4))):
+        if split not in splits:
+            continue
         partition[split] = []
-        for class_index, label in enumerate(labels):
-            for index in range(per_class):
-                sample_id = f"{split}-{class_index}-{index}"
-                partition[split].append(sample_id)
-                with h5py.File(directory / f"{sample_id}.hdf5", "w") as sample:
-                    for band in specs:
-                        signal = 0.5 + 2.5 * class_index + 0.03 * split_index + 0.001 * index
-                        sample.create_dataset(
-                            band.source_name,
-                            data=np.full((16, 16), band.mean + band.std * signal, np.float32),
+        with tarfile.open(directory / f"shard_{split_index:05d}.tar", "w") as archive:
+            for class_index, label in enumerate(labels):
+                for index in range(per_class):
+                    sample_id = f"{split}-{class_index}-{index}"
+                    partition[split].append(sample_id)
+                    signal = 0.5 + 2.5 * class_index + 0.03 * split_index + 0.001 * index
+                    arrays = {
+                        band.source_name: np.full(
+                            (16, 16), band.mean + band.std * signal, np.float32
                         )
-                    sample.attrs["metadata_json"] = json.dumps(
-                        {"label": label, "bands_order": [band.source_name for band in specs]}
+                        for band in specs
+                    }
+                    write_v1_sample(
+                        archive,
+                        sample_id,
+                        arrays,
+                        {"label": label, "bands_order": [band.source_name for band in specs]},
                     )
     (directory / "default_partition.json").write_text(json.dumps(partition))
     return directory
-
-
-def write_v1_shards(root: Path, dataset_name: str = "m-eurosat") -> Path:
-    """Package the same samples in the download mirror's real JSON/NPZ tar format."""
-    source = write_classification_files(root, dataset_name, (2, 7))
-    target = root / "data" / "classification_v1.0_wds" / dataset_name
-    target.mkdir(parents=True)
-    (target / "default_partition.json").write_bytes(
-        (source / "default_partition.json").read_bytes()
-    )
-    with tarfile.open(target / "shard_00000.tar", "w") as archive:
-        for path in sorted(source.glob("*.hdf5")):
-            with h5py.File(path) as sample:
-                bands = io.BytesIO()
-                np.savez(bands, **{name: sample[name][:] for name in sample})
-                metadata = sample.attrs["metadata_json"].encode()
-            for suffix, payload in (("bands.npz", bands.getvalue()), ("meta.json", metadata)):
-                member = tarfile.TarInfo(f"{path.stem}.{suffix}")
-                member.size = len(payload)
-                archive.addfile(member, io.BytesIO(payload))
-    return target
 
 
 def geotiff_bytes(pixels: np.ndarray) -> bytes:

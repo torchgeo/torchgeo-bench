@@ -1,24 +1,23 @@
-"""Exercise JSON metadata and reject pickle inputs through the V1 readers and repacker."""
+"""Exercise real V1 JSON/NPZ shards, acquisition order, and visible corrupt-data failures."""
 
 import io
 import json
 import pickle
 import tarfile
+import zipfile
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
-import h5py
 import numpy as np
 import pytest
 import torch
 
-from experiments.scripts.repack_geobench_v1 import repack, validate
-from torchgeo_bench.datasets import load_split
+from tests.support.data import write_v1_sample
+from torchgeo_bench.datasets import get_dataset_spec, load_split
 from torchgeo_bench.datasets._metadata import decode_metadata
 from torchgeo_bench.datasets._v1_webdataset import GeoBenchv1Sharded
-from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
-from torchgeo_bench.geography import _v1_origin, _v1_shard_origins, extract_geography
+from torchgeo_bench.geography import _v1_shard_origins, extract_geography
 
 RED = "04 - Red_2020-01-01"
 GREEN = "03 - Green_2020-01-01"
@@ -64,25 +63,7 @@ def _payload(encoding: str) -> bytes | str | np.void:
 
 def _write_partition(directory: Path, sample_ids: list[str]) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "default_partition.json").write_text(
-        json.dumps(dict.fromkeys(("train", "valid", "test"), sample_ids))
-    )
-
-
-def _write_hdf5(
-    directory: Path,
-    value: object,
-    *,
-    attribute: str = "metadata_json",
-    sample_id: str = SID,
-) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{sample_id}.hdf5"
-    with h5py.File(path, "w") as sample:
-        sample.create_dataset(RED, data=np.full((2, 3), 10, dtype=np.uint16))
-        sample.create_dataset(GREEN, data=np.full((2, 3), 20, dtype=np.uint16))
-        sample.attrs[attribute] = value
-    return path
+    (directory / "default_partition.json").write_text(json.dumps({"train": sample_ids}))
 
 
 def _bands_npz(*, objects: bool = False) -> bytes:
@@ -96,13 +77,19 @@ def _bands_npz(*, objects: bool = False) -> bytes:
     return buffer.getvalue()
 
 
-def _write_shard(directory: Path, metadata: bytes, suffix: str = "meta.json") -> None:
+def _write_members(directory: Path, members: dict[str, bytes]) -> Path:
     _write_partition(directory, [SID])
-    with tarfile.open(directory / "shard_00000.tar", "w") as shard:
-        for name, payload in (("bands.npz", _bands_npz()), (suffix, metadata)):
-            member = tarfile.TarInfo(f"{SID}.{name}")
+    path = directory / "shard_00000.tar"
+    with tarfile.open(path, "w") as shard:
+        for suffix, payload in members.items():
+            member = tarfile.TarInfo(f"{SID}.{suffix}")
             member.size = len(payload)
             shard.addfile(member, io.BytesIO(payload))
+    return path
+
+
+def _write_shard(directory: Path, metadata: bytes, suffix: str = "meta.json") -> Path:
+    return _write_members(directory, {"bands.npz": _bands_npz(), suffix: metadata})
 
 
 @pytest.mark.parametrize("as_bytes", [False, True])
@@ -112,7 +99,6 @@ def test_metadata_accepts_json_text_and_bytes(*, as_bytes: bool) -> None:
     assert decode_metadata(payload.encode() if as_bytes else payload) == metadata
 
 
-@pytest.mark.parametrize("reader", [GeoBenchv1, GeoBenchv1Sharded])
 @pytest.mark.parametrize(
     ("selection", "error", "message"),
     [
@@ -129,21 +115,15 @@ def test_metadata_accepts_json_text_and_bytes(*, as_bytes: bool) -> None:
         ),
     ],
 )
-def test_readers_reject_invalid_dataset_partition_and_split(
-    tmp_path: Path,
-    reader: type[GeoBenchv1] | type[GeoBenchv1Sharded],
-    selection: dict[str, str],
-    error: type[Exception],
-    message: str,
+def test_reader_rejects_invalid_dataset_partition_and_split(
+    tmp_path: Path, selection: dict[str, str], error: type[Exception], message: str
 ) -> None:
-    source = tmp_path / "m-eurosat"
-    _write_shard(source, json.dumps(_metadata()).encode())
-    _write_hdf5(source, json.dumps(_metadata()))
+    _write_shard(tmp_path / "m-eurosat", json.dumps(_metadata()).encode())
     with pytest.raises(error, match=message):
-        reader(root=tmp_path, **selection)
+        GeoBenchv1Sharded(root=tmp_path, **selection)
 
 
-def test_v1_wrapper_rejects_unknown_band_without_data(
+def test_v1_rejects_unknown_band_without_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -153,93 +133,83 @@ def test_v1_wrapper_rejects_unknown_band_without_data(
 
 @pytest.mark.parametrize("label", [2, [1, 0, 1]])
 @pytest.mark.parametrize("bands", [None, ("03 - Green", "04 - Red")])
-def test_hdf5_repack_and_sharded_reader_round_trip(
+def test_shards_preserve_raw_values_labels_and_dotted_sample_ids(
     tmp_path: Path, label: int | list[int], bands: tuple[str, ...] | None
 ) -> None:
-    source = tmp_path / "hdf5" / "m-eurosat"
-    output = tmp_path / "shards" / "m-eurosat"
+    directory = tmp_path / "m-eurosat"
     ids = [SID + ".second", SID]
-    _write_partition(source, ids)
-    metadata = _metadata(label)
-    for sid in ids:
-        path = _write_hdf5(source, json.dumps(metadata), sample_id=sid)
-        with h5py.File(path, "a") as sample:
-            sample.attrs["pickle"] = np.void(pickle.dumps(_ObjectMetadata()))
-    (source / "unused.pkl").write_bytes(pickle.dumps(_ObjectMetadata()))
-
-    assert repack(source, output, shard_size=1) == 2
-    validate(source, output, n_samples=2)
-    assert not (output / "unused.pkl").exists()
-    assert (output / "default_partition.json").read_bytes() == (
-        source / "default_partition.json"
-    ).read_bytes()
-    for shard_path in output.glob("shard_*.tar"):
-        with tarfile.open(shard_path) as shard:
-            assert len(shard.getmembers()) == 2
-            assert all(member.name.endswith((".bands.npz", ".meta.json")) for member in shard)
-
-    original = GeoBenchv1(source.parent, source.name, "train", bands=bands)
-    sharded = GeoBenchv1Sharded(output.parent, output.name, "train", bands=bands)
+    _write_partition(directory, ids)
+    arrays = {
+        RED: np.full((2, 3), 10, np.uint16),
+        GREEN: np.full((2, 3), 20, np.uint16),
+    }
+    # Reverse archive order: the partition, not tar traversal, owns sample order.
+    for index, sid in enumerate(reversed(ids)):
+        with tarfile.open(directory / f"shard_{index:05d}.tar", "w") as archive:
+            write_v1_sample(archive, sid, arrays, _metadata(label))
+    dataset = GeoBenchv1Sharded(directory.parent, directory.name, "train", bands=bands)
     expected_image = torch.tensor([10, 20], dtype=torch.float32).view(2, 1, 1).expand(2, 2, 3)
     if bands is not None:
         expected_image = expected_image.flip(0)
+    assert dataset.sample_ids == ids
     for index, sid in enumerate(ids):
-        for dataset in (original, sharded):
-            sample = dataset[index]
-            assert sample["sample_id"] == sid
-            torch.testing.assert_close(sample["image"], expected_image)
-            expected_label = torch.tensor(
-                label, dtype=torch.float32 if isinstance(label, list) else torch.long
+        sample = dataset[index]
+        assert sample["sample_id"] == sid
+        torch.testing.assert_close(sample["image"], expected_image)
+        expected_label = torch.tensor(
+            label, dtype=torch.float32 if isinstance(label, list) else torch.long
+        )
+        torch.testing.assert_close(sample["label"], expected_label)
+
+
+@pytest.mark.parametrize("exact_match", [False, True])
+def test_date_suffixed_bands_keep_first_npz_acquisition_and_custom_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, exact_match: bool
+) -> None:
+    spec = get_dataset_spec("m-forestnet")
+    directory = tmp_path / spec.source.root / spec.storage_name
+    ids = ["later-in-partition", SID]
+    _write_partition(directory, ids)
+    # Metadata order and chronological order must not replace NPZ's first prefix match.
+    arrays = {
+        "04 - Red_2022-01-01": np.full((2, 3), 22, np.uint16),
+        "03 - Green_2021-01-01": np.full((2, 3), 31, np.uint16),
+        RED: np.full((2, 3), 20, np.uint16),
+        GREEN: np.full((2, 3), 30, np.uint16),
+    }
+    if exact_match:
+        arrays["04 - Red"] = np.full((2, 3), 99, np.uint16)
+    with tarfile.open(directory / "shard_00000.tar", "w") as archive:
+        for sid in reversed(ids):
+            write_v1_sample(
+                archive, sid, arrays, {"label": 4, "bands_order": list(reversed(arrays))}
             )
-            torch.testing.assert_close(sample["label"], expected_label)
+    (directory / "small_partition.json").write_text(json.dumps({"train": [SID]}))
+    monkeypatch.chdir(tmp_path)
+    for partition, expected_ids in (("default", ids), ("small", [SID])):
+        loaded = load_split("m-forestnet", "train", bands=("green", "red"), partition=partition)
+        assert loaded.dataset.sample_ids == expected_ids
+        assert loaded.bands == (spec.bands[1], spec.bands[2])
+        assert all(
+            a is b for a, b in zip(loaded.bands, (spec.bands[1], spec.bands[2]), strict=True)
+        )
+        expected = torch.tensor([31, 99 if exact_match else 22], dtype=torch.float32)
+        for sample in loaded.dataset:
+            torch.testing.assert_close(sample["image"], expected[:, None, None].expand(2, 2, 3))
+            assert sample["label"].dtype == torch.long
+            assert sample["label"].item() == 4
 
 
-@pytest.mark.parametrize("sharded", [False, True])
 @pytest.mark.parametrize("label", [0.5, 1.0000000001])
 def test_v1_scalar_labels_are_not_silently_truncated(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    label: float,
-    *,
-    sharded: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label: float
 ) -> None:
-    family = "classification_v1.0_wds" if sharded else "classification_v1.0"
-    directory = tmp_path / "data" / family / "m-eurosat"
-    metadata = json.dumps({**_metadata(), "label": label})
-    if sharded:
-        _write_shard(directory, metadata.encode())
-    else:
-        _write_partition(directory, [SID])
-        _write_hdf5(directory, metadata)
+    directory = tmp_path / "data/classification_v1.0_wds/m-eurosat"
+    _write_shard(directory, json.dumps({**_metadata(), "label": label}).encode())
     monkeypatch.chdir(tmp_path)
     loaded = load_split("m-eurosat", "train", bands=("red", "green"), image_size=1)
     with pytest.raises(ValueError, match="integer values"):
         loaded.dataset[0]
-
-
-@pytest.mark.parametrize("sharded", [False, True])
-def test_v1_source_loads_data_only_metadata(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, sharded: bool
-) -> None:
-    hdf_root = tmp_path / "data/classification_v1.0"
-    shard_root = tmp_path / "data/classification_v1.0_wds"
-    source = hdf_root / "m-eurosat"
-    _write_partition(source, [SID])
-    _write_hdf5(source, json.dumps(_metadata()))
-    if sharded:
-        repack(source, shard_root / source.name)
-    monkeypatch.chdir(tmp_path)
-    dataset = load_split("m-eurosat", "train", bands=("red", "green")).dataset
-    assert dataset[0]["image"].shape == (2, 2, 3)
-    assert dataset[0]["label"].item() == 1
-
-
-def test_repack_validation_does_not_require_partition_files(tmp_path: Path) -> None:
-    source = tmp_path / "source"
-    output = tmp_path / "output"
-    _write_hdf5(source, json.dumps(_metadata()))
-    assert repack(source, output) == 1
-    validate(source, output)
 
 
 @pytest.mark.parametrize("encoding", ["bytes", "repr", "void", "expression"])
@@ -270,26 +240,6 @@ def test_metadata_decoder_requires_json_object(metadata: object) -> None:
         decode_metadata(json.dumps(metadata))
 
 
-@pytest.mark.parametrize("attribute", ["pickle", "metadata_json"])
-@pytest.mark.parametrize("encoding", ["repr", "void", "expression"])
-def test_hdf5_consumers_reject_non_json_metadata(
-    tmp_path: Path, attribute: str, encoding: str
-) -> None:
-    source = tmp_path / "source"
-    _write_partition(source, [SID])
-    path = _write_hdf5(source, _payload(encoding), attribute=attribute)
-
-    with pytest.raises((TypeError, ValueError)):
-        GeoBenchv1(source.parent, source.name, "train", bands=("04 - Red",))[0]
-    x, y, status = _v1_origin(str(path))
-    assert x is None
-    assert y is None
-    assert status.startswith("ERR ")
-    assert "ImportError" not in status
-    with pytest.raises((TypeError, ValueError)):
-        repack(source, tmp_path / "output")
-
-
 @pytest.mark.parametrize("suffix", ["meta.pkl", "meta.json"])
 @pytest.mark.parametrize("encoding", ["bytes", "repr", "expression"])
 @pytest.mark.parametrize("bands", [None, ("04 - Red",)])
@@ -297,39 +247,24 @@ def test_sharded_reader_rejects_executable_metadata(
     tmp_path: Path, suffix: str, encoding: str, bands: tuple[str, ...] | None
 ) -> None:
     payload = _payload(encoding)
-    if isinstance(payload, str):
-        payload = payload.encode()
+    assert isinstance(payload, bytes | str)
     source = tmp_path / "source"
-    _write_shard(source, payload, suffix)
+    _write_shard(source, payload.encode() if isinstance(payload, str) else payload, suffix)
     with pytest.raises(ValueError, match=r"meta\.json|codec|Expecting value"):
         GeoBenchv1Sharded(source.parent, source.name, "train", bands=bands)[0]
-
-
-@pytest.mark.parametrize("legacy_source", [False, True])
-def test_repack_validation_rejects_pickle_metadata(tmp_path: Path, *, legacy_source: bool) -> None:
-    source = tmp_path / "source"
-    output = tmp_path / "output"
-    metadata = json.dumps(_metadata())
-    if legacy_source:
-        _write_hdf5(source, _payload("repr"), attribute="pickle")
-        _write_shard(output, metadata.encode())
-    else:
-        _write_hdf5(source, metadata)
-        _write_shard(output, pickle.dumps(_ObjectMetadata()), "meta.pkl")
-    with pytest.raises(ValueError, match="meta"):
-        validate(source, output)
 
 
 @pytest.mark.parametrize("valid_json", [False, True])
 def test_sharded_reader_never_falls_back_to_pickle(tmp_path: Path, *, valid_json: bool) -> None:
     source = tmp_path / "source"
-    payload = json.dumps(_metadata()).encode() if valid_json else b"{"
-    _write_shard(source, payload)
-    with tarfile.open(source / "shard_00000.tar", "a") as archive:
-        raw = pickle.dumps(_ObjectMetadata())
-        member = tarfile.TarInfo(f"{SID}.meta.pkl")
-        member.size = len(raw)
-        archive.addfile(member, io.BytesIO(raw))
+    _write_members(
+        source,
+        {
+            "bands.npz": _bands_npz(),
+            "meta.json": json.dumps(_metadata()).encode() if valid_json else b"{",
+            "meta.pkl": pickle.dumps(_ObjectMetadata()),
+        },
+    )
     if valid_json:
         assert GeoBenchv1Sharded(source.parent, source.name, "train")[0]["label"].item() == 1
     else:
@@ -337,26 +272,94 @@ def test_sharded_reader_never_falls_back_to_pickle(tmp_path: Path, *, valid_json
             GeoBenchv1Sharded(source.parent, source.name, "train")[0]
 
 
-def test_legacy_cache_error_explains_how_to_replace_it(tmp_path: Path) -> None:
-    source = tmp_path / "m-eurosat"
-    _write_shard(source, pickle.dumps(_ObjectMetadata()), "meta.pkl")
+@pytest.mark.parametrize("cache", ["absent", "empty-shards", "old-hdf5"])
+def test_only_shards_are_runtime_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cache: str
+) -> None:
+    if cache == "old-hdf5":
+        directory = tmp_path / "data/classification_v1.0/m-eurosat"
+        _write_partition(directory, [SID])
+        (directory / f"{SID}.hdf5").write_bytes(b"unsupported old sample")
+    elif cache == "empty-shards":
+        _write_partition(tmp_path / "data/classification_v1.0_wds/m-eurosat", [SID])
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(
+        FileNotFoundError, match="torchgeo-bench download geobench_v1 --datasets m-eurosat"
+    ):
+        load_split("m-eurosat", "train")
+
+
+def test_public_loading_rejects_pickle_cache_with_replacement_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "data/classification_v1.0_wds/m-eurosat"
+    _write_shard(directory, pickle.dumps(_ObjectMetadata()), "meta.pkl")
+    monkeypatch.chdir(tmp_path)
     with pytest.raises(
         ValueError, match="torchgeo-bench download geobench_v1 --datasets m-eurosat"
     ):
-        GeoBenchv1Sharded(source.parent, source.name, "train")[0]
+        load_split("m-eurosat", "train")
 
 
-def test_sharded_reader_rejects_object_band_arrays(tmp_path: Path) -> None:
-    source = tmp_path / "source"
-    _write_shard(source, json.dumps(_metadata()).encode())
-    with tarfile.open(source / "shard_00000.tar", "a") as shard:
-        payload = _bands_npz(objects=True)
-        member = tarfile.TarInfo(f"{SID}.bands.npz")
-        member.size = len(payload)
-        shard.addfile(member, io.BytesIO(payload))
-    dataset = GeoBenchv1Sharded(source.parent, source.name, "train")
-    with pytest.raises(ValueError, match="Object arrays"):
+@pytest.mark.parametrize("missing", ["meta.json", "bands.npz", "sample"])
+def test_selected_samples_require_both_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    members = {"bands.npz": _bands_npz(), "meta.json": json.dumps(_metadata()).encode()}
+    if missing == "sample":
+        members.clear()
+    else:
+        del members[missing]
+    directory = tmp_path / "data/classification_v1.0_wds/m-eurosat"
+    _write_members(directory, members)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match=rf"{SID!r} requires"):
+        load_split("m-eurosat", "train")
+
+
+@pytest.mark.parametrize(
+    "payload", [b"", b"not an npz archive", _bands_npz()[:-50], _bands_npz(objects=True)]
+)
+def test_sharded_reader_rejects_corrupt_or_object_arrays(tmp_path: Path, payload: bytes) -> None:
+    directory = tmp_path / "source"
+    _write_members(directory, {"bands.npz": payload, "meta.json": json.dumps(_metadata()).encode()})
+    dataset = GeoBenchv1Sharded(directory.parent, directory.name, "train")
+    with pytest.raises((EOFError, ValueError, zipfile.BadZipFile)):
         dataset[0]
+
+
+@pytest.mark.parametrize("suffix", ["bands.npz", "meta.json"])
+def test_sharded_reader_requires_regular_sample_members(tmp_path: Path, suffix: str) -> None:
+    directory = tmp_path / "source"
+    path = _write_shard(directory, json.dumps(_metadata()).encode())
+    member = tarfile.TarInfo(f"{SID}.{suffix}")
+    member.type = tarfile.DIRTYPE
+    with tarfile.open(path, "a") as archive:
+        archive.addfile(member)
+    with pytest.raises(ValueError, match="Not a sample file"):
+        GeoBenchv1Sharded(directory.parent, directory.name, "train")
+
+
+def test_missing_band_is_not_substituted(tmp_path: Path) -> None:
+    directory = tmp_path / "source"
+    _write_shard(directory, json.dumps(_metadata()).encode())
+    dataset = GeoBenchv1Sharded(directory.parent, directory.name, "train", bands=("05 - NIR",))
+    with pytest.raises(KeyError, match="05 - NIR"):
+        dataset[0]
+
+
+@pytest.mark.parametrize("file", ["partition", "tar"])
+def test_corrupt_local_files_fail_without_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, file: str
+) -> None:
+    directory = tmp_path / "data/classification_v1.0_wds/m-eurosat"
+    path = _write_shard(directory, json.dumps(_metadata()).encode())
+    if file == "partition":
+        path = directory / "default_partition.json"
+    path.write_bytes(b"corrupt")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises((json.JSONDecodeError, tarfile.ReadError)):
+        load_split("m-eurosat", "train")
 
 
 @pytest.mark.parametrize("nine_coefficients", [False, True])
@@ -364,24 +367,22 @@ def test_geography_reads_json_affine_and_crs(tmp_path: Path, *, nine_coefficient
     metadata = _metadata()
     if nine_coefficients:
         metadata[RED]["transform"].extend([0, 0, 1])
-    path = _write_hdf5(tmp_path, json.dumps(metadata))
-    assert _v1_origin(str(path)) == (500000.0, 5200000.0, "EPSG:32631")
+    path = _write_shard(tmp_path, json.dumps(metadata).encode())
+    assert _v1_shard_origins(str(path)) == [(500000.0, 5200000.0, "EPSG:32631")]
 
 
 def test_geography_reports_missing_coordinates(tmp_path: Path) -> None:
-    path = _write_hdf5(tmp_path, json.dumps({"label": 1, "bands_order": [RED, GREEN]}))
-    assert _v1_origin(str(path)) == (None, None, "NOGEO")
+    path = _write_shard(tmp_path, json.dumps({"label": 1, "bands_order": [RED, GREEN]}).encode())
+    assert _v1_shard_origins(str(path)) == [(None, None, "NOGEO")]
 
 
 def test_geography_reports_invalid_crs_type(tmp_path: Path) -> None:
     metadata = _metadata()
     metadata[RED]["crs"] = 32631
-    path = _write_hdf5(tmp_path, json.dumps(metadata))
-    assert _v1_origin(str(path)) == (
-        None,
-        None,
-        "ERR TypeError: GeoBench JSON metadata CRS must be a string.",
-    )
+    path = _write_shard(tmp_path, json.dumps(metadata).encode())
+    assert _v1_shard_origins(str(path)) == [
+        (None, None, "ERR TypeError: GeoBench JSON metadata CRS must be a string.")
+    ]
 
 
 def test_geography_reports_non_file_metadata_members(tmp_path: Path) -> None:
@@ -395,14 +396,14 @@ def test_geography_reports_non_file_metadata_members(tmp_path: Path) -> None:
     ]
 
 
-def test_geography_prefers_the_json_sharded_cache(
+def test_geography_extracts_only_the_canonical_shards(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    sharded_root = tmp_path / "data/classification_v1.0_wds"
-    directory = sharded_root / "m-eurosat"
+    directory = tmp_path / "data/classification_v1.0_wds/m-eurosat"
     _write_shard(directory, json.dumps(_metadata()).encode())
-    hdf5_root = tmp_path / "data/classification_v1.0"
-    _write_hdf5(hdf5_root / "m-eurosat", _payload("repr"), attribute="pickle")
+    old_directory = tmp_path / "data/classification_v1.0/m-eurosat"
+    old_directory.mkdir(parents=True)
+    (old_directory / "unused.hdf5").write_bytes(b"unsupported")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("torchgeo_bench.geography._attribute_continents", lambda *_args: Counter())
     record = extract_geography("m-eurosat", workers=1)
@@ -413,8 +414,25 @@ def test_geography_prefers_the_json_sharded_cache(
 
 
 def test_geography_reports_pickle_shards_as_errors(tmp_path: Path) -> None:
-    _write_shard(tmp_path, pickle.dumps(_ObjectMetadata()), "meta.pkl")
-    results = _v1_shard_origins(str(tmp_path / "shard_00000.tar"))
+    path = _write_shard(tmp_path, pickle.dumps(_ObjectMetadata()), "meta.pkl")
+    results = _v1_shard_origins(str(path))
     assert len(results) == 1
     assert results[0][:2] == (None, None)
     assert "ERR ValueError: missing .meta.json" in results[0][2]
+
+
+@pytest.mark.parametrize("metadata", [None, b"{"])
+def test_geography_extraction_reports_absent_or_corrupt_coordinates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: bytes | None
+) -> None:
+    directory = tmp_path / "data/classification_v1.0_wds/m-eurosat"
+    payload = json.dumps({"label": 1, "bands_order": [RED]}).encode()
+    _write_shard(directory, metadata if metadata is not None else payload)
+    monkeypatch.chdir(tmp_path)
+    if metadata is not None:
+        with pytest.raises(RuntimeError, match=r"100\.0% of samples failed to read"):
+            extract_geography("m-eurosat", workers=1)
+    else:
+        record = extract_geography("m-eurosat", workers=1)
+        assert record.status == "no_geo"
+        assert record.reason == "no sample carries a usable transform/crs"

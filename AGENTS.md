@@ -31,7 +31,6 @@ src/torchgeo_bench/        # Main source package (importable as torchgeo_bench)
   └── models/              # Model implementations (interface.py, timm.py, torchgeo_models.py, etc.)
 data/                      # Datasets always live here (relative to CWD, untracked)
   ├── classification_v1.0_wds/ # GeoBench V1 JSON-metadata shards
-  ├── classification_v1.0/ # Custom V1 HDF5 with JSON metadata
   ├── geobenchv2/          # GeoBench V2
   └── eurosat/             # torchgeo EuroSAT
 docs/                      # Documentation sources, including runnable examples/
@@ -356,7 +355,7 @@ Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everythin
 
 ## Common Gotchas
 
-1. **Data lives at `data/`**: Always `data/<canonical-subdir>/` from CWD. No env vars, no overrides. V1 uses the pinned `calebrob6/geobenchv1-webdataset` JSON mirror with archive SHA-256 checks. Pickle metadata is not supported.
+1. **Data lives at `data/`**: Always `data/<canonical-subdir>/` from CWD. No env vars, no overrides. V1 only reads JSON/NPZ tar shards in `data/classification_v1.0_wds/`. Explicit acquisition in `_v1_download.py` uses the pinned `calebrob6/geobenchv1-webdataset` mirror with archive SHA-256 checks. No runtime downloading, HDF5 fallback, pickle metadata, or converter.
 2. **No documentation for refactoring**: Don't create docs for internal refactors.
 3. **Tests need data**: Tests skip if `data/classification_v1.0_wds` / `data/geobenchv2` / `data/eurosat` aren't on disk.
 4. **Model reinitialization**: Models are reinitialized per-dataset to handle varying input channels.

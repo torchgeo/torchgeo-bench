@@ -1403,7 +1403,7 @@
           "wavelength_um": 2.19
         }
       ],
-      "data_root": "data/classification_v1.0",
+      "data_root": "data/classification_v1.0_wds",
       "geography_alias": null,
       "geography_reason": null,
       "multi_temporal": false,
@@ -1415,7 +1415,6 @@
         "green",
         "blue"
       ],
-      "sharded_root": "data/classification_v1.0_wds",
       "source_kind": "v1",
       "split_sizes": {
         "test": 1000,
@@ -1561,7 +1560,7 @@
           "wavelength_um": 2.19
         }
       ],
-      "data_root": "data/classification_v1.0",
+      "data_root": "data/classification_v1.0_wds",
       "geography_alias": null,
       "geography_reason": null,
       "multi_temporal": false,
@@ -1573,7 +1572,6 @@
         "green",
         "blue"
       ],
-      "sharded_root": "data/classification_v1.0_wds",
       "source_kind": "v1",
       "split_sizes": {
         "test": 999,
@@ -1719,7 +1717,7 @@
           "wavelength_um": 2.19
         }
       ],
-      "data_root": "data/classification_v1.0",
+      "data_root": "data/classification_v1.0_wds",
       "geography_alias": null,
       "geography_reason": null,
       "multi_temporal": false,
@@ -1731,7 +1729,6 @@
         "green",
         "blue"
       ],
-      "sharded_root": "data/classification_v1.0_wds",
       "source_kind": "v1",
       "split_sizes": {
         "test": 1000,
@@ -1807,7 +1804,7 @@
           "wavelength_um": null
         }
       ],
-      "data_root": "data/classification_v1.0",
+      "data_root": "data/classification_v1.0_wds",
       "geography_alias": null,
       "geography_reason": null,
       "multi_temporal": false,
@@ -1819,7 +1816,6 @@
         "green",
         "blue"
       ],
-      "sharded_root": "data/classification_v1.0_wds",
       "source_kind": "v1",
       "split_sizes": {
         "test": 993,
@@ -1865,7 +1861,7 @@
           "wavelength_um": 0.65
         }
       ],
-      "data_root": "data/classification_v1.0",
+      "data_root": "data/classification_v1.0_wds",
       "geography_alias": null,
       "geography_reason": null,
       "multi_temporal": false,
@@ -1877,7 +1873,6 @@
         "green",
         "blue"
       ],
-      "sharded_root": "data/classification_v1.0_wds",
       "source_kind": "v1",
       "split_sizes": {
         "test": 999,
@@ -2073,7 +2068,7 @@
           "wavelength_um": 2.19
         }
       ],
-      "data_root": "data/classification_v1.0",
+      "data_root": "data/classification_v1.0_wds",
       "geography_alias": null,
       "geography_reason": "every sample has transform=None and crs=None",
       "multi_temporal": false,
@@ -2085,7 +2080,6 @@
         "green",
         "blue"
       ],
-      "sharded_root": "data/classification_v1.0_wds",
       "source_kind": "v1",
       "split_sizes": {
         "test": 986,

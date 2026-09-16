@@ -58,11 +58,10 @@ class GeographySpec:
 
 @dataclass(frozen=True)
 class V1Source:
-    """Local JSON shards with the retained custom JSON-metadata HDF5 fallback."""
+    """Local JSON-metadata shards acquired through the explicit verified download."""
 
     kind: Literal["v1"] = field(default="v1", init=False)
     root: str = "data/classification_v1.0_wds"
-    hdf5_root: str = "data/classification_v1.0"
     storage_name: str | None = None
     validation_split: Literal["valid"] = "valid"
 

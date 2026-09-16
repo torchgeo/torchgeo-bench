@@ -8,7 +8,7 @@ import pytest
 from tests.support.data import require_dataset_data
 from torchgeo_bench.datasets import get_dataset_spec, load_split
 
-# V1 counts come from data/classification_v1.0/<name>/default_partition.json.
+# V1 counts come from data/classification_v1.0_wds/<name>/default_partition.json.
 # V2 counts come from len(...) on each upstream geobench_v2.datasets.GeoBench<X> split.
 # EuroSAT uses torchgeo split-file counts: 27000 images split 60/20/20.
 # RESISC45 uses torchgeo split-file counts: 31500 images split 60/20/20.

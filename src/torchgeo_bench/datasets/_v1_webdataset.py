@@ -1,93 +1,46 @@
 """Read GeoBench V1 from indexed WebDataset tar shards.
 
-Use indexed tar shards to avoid per-sample HDF5 opens over NFS.
-
-:func:`download_sharded_root` fetches the pinned JSON mirror and verifies each archive.
-
 Shards hold ``<sid>.bands.npz`` and ``<sid>.meta.json`` pairs for roughly 1000 samples.
 
 Index byte offsets once; each worker opens its own file descriptors for fork-safe reads.
-
-Output matches :class:`~torchgeo_bench.datasets.geobench_v1.GeoBenchv1`.
+Acquisition and archive verification belong to ``torchgeo_bench._v1_download``;
+this reader only opens local files and never downloads or converts data.
 """
 
-import hashlib
 import io
 import json
-import logging
-import os
 import tarfile
 from collections.abc import Callable
-from functools import cache
-from importlib.resources import files
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import torch
-from huggingface_hub import snapshot_download
 from torch.utils.data import Dataset
 
 from ._metadata import decode_metadata
 from .transforms import integer_target
 
-logger = logging.getLogger(__name__)
 
-V1_HF_REPO_ID = "calebrob6/geobenchv1-webdataset"
-V1_HF_REVISION = "18c293d3a963c73e8e055a2fef6fca9e029c6e95"
-
-
-@cache
-def _shard_checksums() -> dict[str, str]:
-    with files("torchgeo_bench.datasets").joinpath("_v1_checksums.sha256").open("r") as stream:
-        return {name: checksum for checksum, name in (line.split() for line in stream)}
-
-
-def download_sharded_root(
-    sharded_root: Path,
-    datasets: list[str] | None = None,
-    *,
-    cache_dir: str | os.PathLike[str] | None = None,
-) -> None:
-    """Download and verify the selected pickle-free V1 datasets.
-
-    Args:
-        sharded_root: Destination collection directory.
-        datasets: Dataset names, or ``None`` for the full classification suite.
-        cache_dir: Optional Hugging Face download cache.
-    """
-    checksums = _shard_checksums()
-    available = {name.split("/", 1)[0] for name in checksums}
-    names = sorted(available) if datasets is None else list(dict.fromkeys(datasets))
-    if not names:
-        raise ValueError("datasets must contain at least one GeoBench V1 dataset name")
-    unknown = sorted(set(names) - available)
-    if unknown:
-        raise ValueError(f"Unknown GeoBench V1 dataset(s): {', '.join(unknown)}.")
-    sharded_root = Path(sharded_root)
-    sharded_root.mkdir(parents=True, exist_ok=True)
-    logger.info("Downloading GeoBench V1 from %s -> %s", V1_HF_REPO_ID, sharded_root)
-    snapshot_download(
-        repo_id=V1_HF_REPO_ID,
-        repo_type="dataset",
-        revision=V1_HF_REVISION,
-        local_dir=sharded_root,
-        allow_patterns=[f"{name}/*" for name in names],
-        cache_dir=Path(cache_dir) if cache_dir is not None else None,
-    )
-    logger.info("Verifying GeoBench V1 archive checksums.")
-    for name, expected in checksums.items():
-        if name.split("/", 1)[0] not in names:
-            continue
-        path = sharded_root / name
-        with path.open("rb") as stream:
-            actual = hashlib.file_digest(stream, "sha256").hexdigest()
-        if actual != expected:
-            raise ValueError(
-                f"GeoBench V1 archive checksum mismatch: {path}. "
-                "Remove this file and retry the download."
-            )
-    logger.info("GeoBench V1 download complete.")
+def _index_shards(paths: list[Path]) -> dict[str, dict[str, tuple[Path, int, int]]]:
+    index: dict[str, dict[str, tuple[Path, int, int]]] = {}
+    for path in paths:
+        with tarfile.open(path, "r:") as archive:
+            for member in archive:
+                for ext in ("bands.npz", "meta.json"):
+                    suffix = "." + ext
+                    if member.name.endswith(suffix):
+                        if not member.isfile():
+                            raise ValueError(f"Not a sample file: {member.name} in {path}.")
+                        # IDs can contain dots; remove the suffix, not everything after a dot.
+                        sample_id = member.name.removesuffix(suffix)
+                        index.setdefault(sample_id, {})[ext] = (
+                            path,
+                            member.offset_data,
+                            member.size,
+                        )
+                        break
+    return index
 
 
 class GeoBenchv1Sharded(Dataset):
@@ -125,22 +78,20 @@ class GeoBenchv1Sharded(Dataset):
 
         shard_paths = sorted(self.dataset_dir.glob("shard_*.tar"))
         if not shard_paths:
-            raise FileNotFoundError(f"No shard_*.tar in {self.dataset_dir}")
-        # Sample IDs can contain dots; strip the suffix instead of splitting on the first dot.
-        self._index: dict[str, dict[str, tuple[Path, int, int]]] = {}
-        for path in shard_paths:
-            with tarfile.open(path, "r") as t:
-                for m in t.getmembers():
-                    for ext in ("bands.npz", "meta.json"):
-                        suffix = "." + ext
-                        if m.name.endswith(suffix):
-                            base = m.name[: -len(suffix)]
-                            self._index.setdefault(base, {})[ext] = (
-                                path,
-                                m.offset_data,
-                                m.size,
-                            )
-                            break
+            raise FileNotFoundError(
+                f"No shard_*.tar in {self.dataset_dir}. "
+                f"Run `torchgeo-bench download geobench_v1 --datasets {dataset_name}`."
+            )
+        self._index = _index_shards(shard_paths)
+        for sample_id in self.sample_ids:
+            parts = self._index.get(sample_id, {})
+            for ext in ("meta.json", "bands.npz"):
+                if ext not in parts:
+                    raise ValueError(
+                        f"Sample {sample_id!r} requires '.{ext}' in {self.dataset_dir}. "
+                        "Legacy pickle shards are not supported. Replace this cache with "
+                        f"'torchgeo-bench download geobench_v1 --datasets {dataset_name}'."
+                    )
 
         if bands is None:
             sample_meta = self._load_meta(self.sample_ids[0])
@@ -156,12 +107,6 @@ class GeoBenchv1Sharded(Dataset):
 
     def _load_meta(self, sample_id: str) -> dict:
         parts = self._index[sample_id]
-        if "meta.json" not in parts:
-            raise ValueError(
-                f"Sample {sample_id!r} requires '.meta.json' metadata. "
-                "Legacy pickle shards are not supported. Replace this cache with "
-                f"'torchgeo-bench download geobench_v1 --datasets {self.dataset_dir.name}'."
-            )
         return decode_metadata(self._read(parts["meta.json"]))
 
     def __len__(self) -> int:
@@ -180,6 +125,7 @@ class GeoBenchv1Sharded(Dataset):
             if band_name in bands_dict:
                 bands_data.append(bands_dict[band_name])
                 continue
+            # NPZ insertion order chooses the first matching acquisition; never sort dates.
             matching = [k for k in available if k.startswith(band_name)]
             if not matching:
                 raise KeyError(

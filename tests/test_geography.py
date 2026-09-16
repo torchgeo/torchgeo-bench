@@ -1,13 +1,14 @@
 """Check committed geography records without loading raw imagery."""
 
 import json
+import tarfile
 from pathlib import Path
 
-import h5py
 import numpy as np
 import pytest
 
-from torchgeo_bench.datasets import V1Source, get_dataset_spec, list_datasets
+from tests.support.data import write_v1_sample
+from torchgeo_bench.datasets import get_dataset_spec, list_datasets
 from torchgeo_bench.geography import (
     GEO_ALIAS,
     INDEX_NAME,
@@ -15,7 +16,7 @@ from torchgeo_bench.geography import (
     STORE_DIR,
     GeoRecord,
     _dataset_dir,
-    _v1_origin,
+    _v1_shard_origins,
     build_index,
     extract_geography,
     list_geography,
@@ -33,35 +34,31 @@ def store() -> dict[str, GeoRecord]:
     return list_geography()
 
 
-@pytest.mark.parametrize("storage", ["string", "bytes"])
-def test_v1_origin_reads_hdf5_metadata(tmp_path: Path, storage: str) -> None:
+def test_v1_origin_reads_shard_metadata(tmp_path: Path) -> None:
     metadata = {
         "label": 0,
         "bands_order": ["B04"],
         "B04": {"transform": [10, 0, 456000, 0, -10, 1230000], "crs": "EPSG:32615"},
     }
-    payload = json.dumps(metadata)
-    path = tmp_path / "sample.hdf5"
-    with h5py.File(path, "w") as file:
-        file.attrs["metadata_json"] = (
-            payload if storage == "string" else np.bytes_(payload.encode("utf-8"))
-        )
+    path = tmp_path / "shard_00000.tar"
+    with tarfile.open(path, "w") as archive:
+        write_v1_sample(archive, "sample", {"B04": np.zeros((2, 2))}, metadata)
 
-    assert _v1_origin(str(path)) == (456000.0, 1230000.0, "EPSG:32615")
+    assert _v1_shard_origins(str(path)) == [(456000.0, 1230000.0, "EPSG:32615")]
 
 
 def test_v1_origin_requires_sample_file(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        _v1_origin(str(tmp_path / "missing.hdf5"))
+        _v1_shard_origins(str(tmp_path / "missing.tar"))
 
 
-@pytest.mark.parametrize("directory_exists", [False, True])
+@pytest.mark.parametrize("directory", [None, "classification_v1.0", "classification_v1.0_wds"])
 def test_extract_geography_requires_imagery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, directory_exists: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, directory: str | None
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    if directory_exists:
-        (tmp_path / "data/classification_v1.0/m-eurosat").mkdir(parents=True)
+    if directory is not None:
+        (tmp_path / "data" / directory / "m-eurosat").mkdir(parents=True)
 
     with pytest.raises(
         FileNotFoundError, match="`torchgeo-bench download geobench_v1 --datasets m-eurosat`"
@@ -80,7 +77,7 @@ def test_geography_routes_from_source_identity(
     if source.kind != "torchgeo":
         directory /= spec.storage_name
     directory.mkdir(parents=True)
-    if isinstance(source, V1Source):
+    if source.kind == "v1":
         (directory / "shard_00000.tar").touch()
     assert _dataset_dir(name) == directory
 

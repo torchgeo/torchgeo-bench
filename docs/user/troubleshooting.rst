@@ -8,7 +8,7 @@ Datasets must live under ``./data/`` from the directory where you run
 ``torchgeo-bench``.  The runner does **not** honour ``GEOBENCH_ROOT``
 or ``GEOBENCH_V2_ROOT`` environment variables — paths are fixed:
 
-* V1: :file:`data/classification_v1.0/<name>/`
+* V1: :file:`data/classification_v1.0_wds/<name>/`
 * V2: :file:`data/geobenchv2/<name>/`
 * EuroSAT: :file:`data/eurosat/`
 
@@ -19,8 +19,8 @@ data lives elsewhere, symlink ``data/`` to the real location.
 ---------------------------------
 
 The legacy ``geobench`` package is no longer a dependency.  V1 datasets
-are read directly from HDF5 (the internal ``GeoBenchv1`` loader in
-:file:`src/torchgeo_bench/datasets/geobench_v1.py`); V2 dispatches to
+are read from local JSON/NPZ tar shards (the internal ``GeoBenchv1Sharded`` reader in
+:file:`src/torchgeo_bench/datasets/_v1_webdataset.py`); V2 dispatches to
 upstream ``geobench_v2.datasets.GeoBench<X>``.  Make sure your
 environment matches the pinned ``geobenchv2`` version in
 :file:`pyproject.toml`.
@@ -90,7 +90,7 @@ is missing the spatial split files, rerun this command before benchmarking
 V1 reports missing JSON metadata
 --------------------------------
 
-Old V1 downloads contain ``.meta.pkl`` shard members or HDF5 ``pickle`` attributes. These are no longer loaded. Replace the cached data with the pickle-free mirror:
+Old V1 downloads contain ``.meta.pkl`` shard members or HDF5 files. Neither is supported, and no converter is provided. Even custom JSON-metadata HDF5 directories are no longer used. Replace the cached data with the pickle-free mirror:
 
 .. code-block:: console
 

@@ -2,7 +2,6 @@
 
 import json
 import math
-from collections.abc import Mapping
 
 
 def decode_metadata(value: object) -> dict:
@@ -30,14 +29,3 @@ def decode_metadata(value: object) -> dict:
     ):
         raise ValueError("GeoBench metadata label must be a number or a non-empty list of numbers.")
     return metadata
-
-
-def read_hdf5_metadata(attrs: Mapping[str, object]) -> dict:
-    """Read JSON metadata without interpreting pickle attributes."""
-    if "metadata_json" not in attrs:
-        raise ValueError(
-            "GeoBench V1 HDF5 samples require a 'metadata_json' attribute. "
-            "Legacy pickle metadata is not supported. Replace old caches with "
-            "'torchgeo-bench download geobench_v1' or supply JSON metadata."
-        )
-    return decode_metadata(attrs["metadata_json"])

@@ -66,7 +66,9 @@ Downloads use the pickle-free ``calebrob6/geobenchv1-webdataset`` mirror at a pi
 V1 metadata format
 ^^^^^^^^^^^^^^^^^^
 
-V1 readers use JSON metadata only. Tar shards pair ``<sample_id>.bands.npz`` with ``<sample_id>.meta.json``; image arrays are loaded with ``allow_pickle=False``. Custom HDF5 samples under ``data/classification_v1.0/<name>/`` must store a UTF-8 JSON string in the ``metadata_json`` attribute. The JSON object must contain a numeric ``label`` (or a numeric list for multilabel data) and a non-empty ``bands_order`` list of source-band names.
+V1 reads only local, uncompressed ``shard_*.tar`` files. Shards pair ``<sample_id>.bands.npz`` with ``<sample_id>.meta.json``; image arrays are loaded with ``allow_pickle=False``. The JSON object must contain a numeric ``label`` (or a numeric list for multilabel data) and a non-empty ``bands_order`` list of source-band names. Classification labels are integer scalars; multilabel targets are float32 vectors. Imagery retains raw float32 values in the requested channel order, without reader-side normalization.
+
+``<partition>_partition.json`` lists sample IDs under ``train``, ``valid``, and ``test``. Only the requested split is required; its ID order is preserved. For date-suffixed source bands, an exact name takes precedence; otherwise the first prefix match in the NPZ member order is used. Dates are not sorted or replaced by another acquisition.
 
 .. code-block:: json
 
@@ -83,9 +85,9 @@ Per-band ``transform`` and ``crs`` entries are optional. Geographic extraction a
 
 .. warning::
 
-   Existing pickle-based V1 caches are not converted or unpickled. Replace them with ``torchgeo-bench download geobench_v1`` (or ``--datasets m-eurosat`` for a subset). If an archive checksum fails, remove the named corrupt archive and retry the download. Custom datasets must supply JSON metadata.
+   HDF5 and pickle-based V1 caches are not supported, converted, or unpickled. Replace them with ``torchgeo-bench download geobench_v1`` (or ``--datasets m-eurosat`` for a subset). If an archive checksum fails, remove the named corrupt archive and retry the download. A missing or invalid shard cache never triggers an automatic download or fallback, even if an old HDF5 directory exists.
 
-Geography extraction reads the JSON metadata directly from the default shards or custom HDF5 files. ``experiments/scripts/repack_geobench_v1.py`` repacks custom JSON-metadata HDF5 files into JSON-based shards; it does not read or convert pickle metadata.
+Geography extraction reads affine/CRS JSON metadata directly from the same canonical shards, without loading image arrays. Local runtime reading is separate from explicit downloading and archive verification.
 
 Supported V1 datasets
 ^^^^^^^^^^^^^^^^^^^^^
