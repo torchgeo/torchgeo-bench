@@ -7,6 +7,8 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from torchgeo_bench.devices import resolve_device
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,6 +17,9 @@ class LogisticRegression:
 
     Supports both single-label (softmax cross-entropy) and multi-label
     (sigmoid BCE) classification via the ``multi_label`` flag.
+
+    ``device=None`` uses CPU; ``"auto"`` selects current CUDA when available, otherwise CPU.
+    Explicit CUDA requests raise ``ValueError`` when unavailable or out of range.
 
     Objective::
 
@@ -51,11 +56,7 @@ class LogisticRegression:
         self.tol = float(tol)
         self.patience = int(patience)
         self.random_state = random_state
-        requested_device = torch.device(device) if device is not None else torch.device("cpu")
-        if requested_device.type == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA requested but not available; falling back to CPU.")
-            requested_device = torch.device("cpu")
-        self.device = requested_device
+        self.device = resolve_device("cpu" if device is None else device)
         self.verbose = verbose
         self.use_tf32 = use_tf32
         self.multi_label = multi_label

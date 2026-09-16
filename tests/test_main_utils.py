@@ -8,7 +8,8 @@ import torch
 from pydantic import ValidationError
 from torch.utils.data import DataLoader, Dataset
 
-from torchgeo_bench.config_schema import RunConfig, SegmentationConfig
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import SegmentationConfig
 from torchgeo_bench.main import _expand_dataset_list, evaluate_profile
 from torchgeo_bench.resume import (
     _completed_run_keys,

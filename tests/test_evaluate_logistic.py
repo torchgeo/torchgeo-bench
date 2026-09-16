@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from sklearn.metrics import average_precision_score
 
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import LinearProbeDivergedError, evaluate_logistic
 from torchgeo_bench.utils import FeatureSplit, FeatureSplits
 

@@ -1,19 +1,20 @@
 """Strict settings for profiling one fixed, real dataset batch."""
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
 
-from .config_schema import (
+from ..datasets import list_datasets
+from .presets import ModelPreset, resolve_run_config
+from .run import RunConfig
+from .schema import (
     Device,
     InputConfig,
     ModelConfig,
-    RunConfig,
     RuntimeConfig,
+    SchemaVersion,
     StrictModel,
 )
-from .datasets import list_datasets
-from .presets import ModelPreset, resolve_run_config
 
 
 class ProfileRuntimeConfig(RuntimeConfig):
@@ -28,7 +29,7 @@ class ProfileRuntimeConfig(RuntimeConfig):
 class ProfileConfig(StrictModel):
     """Model, input, and timing settings for the standalone profile command."""
 
-    schema_version: Literal[1] = 1
+    schema_version: SchemaVersion = 1
     model: ModelConfig
     dataset: StrictStr = Field(min_length=1)
     input: InputConfig = Field(default_factory=InputConfig)
@@ -37,14 +38,6 @@ class ProfileConfig(StrictModel):
     measurements: StrictInt = Field(default=20, gt=0)
     precision: Literal["float32", "float16", "bfloat16"] = "float32"
     count_flops: StrictBool = False
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def validate_schema_version(cls, value: object) -> object:
-        """Require an integer rather than values that compare equal to one."""
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise ValueError("schema_version must be the integer 1")  # noqa: TRY004 - Pydantic field validation uses ValueError
-        return value
 
     @field_validator("dataset")
     @classmethod
@@ -61,10 +54,6 @@ class ProfileConfig(StrictModel):
         if isinstance(value.bands, str) and value.bands not in {"rgb", "all"}:
             raise ValueError("input.bands must be rgb, all, or a YAML list of band names")
         return value
-
-    def model_dump_yaml(self) -> dict[str, Any]:
-        """Serialize supplied settings without promoting defaults to overrides."""
-        return self.model_dump(mode="json", exclude_unset=True)
 
 
 def resolve_profile_config(config: ProfileConfig) -> tuple[ProfileConfig, ModelPreset]:

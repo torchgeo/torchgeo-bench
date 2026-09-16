@@ -1,17 +1,19 @@
 """Strict settings for synthetic backbone and probe compute measurements."""
 
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, field_validator
 
-from .config_schema import (
+from ..datasets import list_datasets
+from .presets import ModelPreset, load_model_preset, merge_settings
+from .schema import (
     Device,
     ModelConfig,
+    OutputPath,
+    SchemaVersion,
     SegmentationConfig,
     StrictModel,
 )
-from .datasets import list_datasets
-from .presets import ModelPreset, load_model_preset, merge_settings
 
 type BandConfig = Literal["rgb", "s2"]
 type Head = Literal["linear", "conv_block", "fpn", "dpt", "patch_linear"]
@@ -106,22 +108,14 @@ class FlopsTimingConfig(StrictModel):
 class FlopsOutputConfig(StrictModel):
     """Append-only CSV with the established per-cell resume keys."""
 
-    file: StrictStr = "results/compute_cost.csv"
+    file: OutputPath = "results/compute_cost.csv"
     resume: StrictBool = True
-
-    @field_validator("file")
-    @classmethod
-    def validate_file(cls, value: str) -> str:
-        """Reject blank output paths."""
-        if not value.strip():
-            raise ValueError("output.file must not be blank")
-        return value
 
 
 class FlopsConfig(StrictModel):
     """Complete synthetic compute measurement, independent of image evaluation."""
 
-    schema_version: Literal[1] = 1
+    schema_version: SchemaVersion = 1
     model: ModelConfig
     runtime: FlopsRuntimeConfig = Field(default_factory=FlopsRuntimeConfig)
     input: FlopsInputConfig = Field(default_factory=FlopsInputConfig)
@@ -129,18 +123,6 @@ class FlopsConfig(StrictModel):
     segmentation: FlopsSegmentationConfig = Field(default_factory=FlopsSegmentationConfig)
     timing: FlopsTimingConfig = Field(default_factory=FlopsTimingConfig)
     output: FlopsOutputConfig = Field(default_factory=FlopsOutputConfig)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def validate_version(cls, value: object) -> object:
-        """Keep booleans distinct from schema version one."""
-        if isinstance(value, bool):
-            raise ValueError("schema_version must be the integer 1")  # noqa: TRY004 - Pydantic validation contract
-        return value
-
-    def model_dump_yaml(self) -> dict[str, Any]:
-        """Serialize supplied values without overriding omitted preset defaults."""
-        return self.model_dump(mode="json", exclude_unset=True)
 
     def resolve(self) -> tuple[Self, ModelPreset]:
         """Apply model/dataset defaults beneath explicit YAML or CLI settings."""

@@ -18,7 +18,7 @@ For example:
 
    $ torchgeo-bench run --model timm/resnet50 --dataset m-eurosat \
        --methods knn --bootstrap-samples 100 --device cpu
-   $ torchgeo-bench run --config examples/image-run.yaml --methods linear --dry-run
+   $ torchgeo-bench run --config docs/examples/image-run.yaml --methods linear --dry-run
    $ torchgeo-bench run --config-help
 
 ``--dry-run`` validates selections and prints reusable YAML without loading
@@ -50,6 +50,8 @@ Scientific notation such as ``1e-3`` is supported. Constructor options inside
 ``model.kwargs`` are passed to the selected constructor; they are not
 additional benchmark configuration fields.
 
+All four command configurations use integer ``schema_version: 1`` by default. If supplied, the version must be the integer ``1``; ``1.0``, booleans, strings, and other versions are rejected.
+
 Image runs
 ----------
 
@@ -71,7 +73,7 @@ Use ``datasets: [all]`` to select the image dataset catalog. On the CLI,
    $ torchgeo-bench run --model timm/resnet50 \
        --dataset m-eurosat --dataset m-pv4ger --device cpu
 
-The complete field example is :file:`examples/image-run.yaml`. It explicitly
+The complete field example is :file:`docs/examples/image-run.yaml`. It explicitly
 sets defaults for illustration; remove fields that should inherit preset
 settings.
 
@@ -100,6 +102,8 @@ names. The equivalent flag accepts comma-separated names, for example
 ``time_steps`` selects a positive temporal length where supported.
 ``image_size: null`` (``--image-size none``) retains native dimensions.
 Interpolation is ``area``, ``bilinear``, ``bicubic``, or ``nearest``.
+
+For ``run`` and ``profile``, ``--image-size`` accepts a positive integer or case-insensitive ``none``. FLOPs measurements require a concrete positive image size.
 
 Normalization choices map to the model interface as follows:
 
@@ -130,9 +134,9 @@ Normalization choices map to the model interface as follows:
 automatic substitute for dataset normalization. Wrappers that own their
 normalization retain their documented behavior.
 
-Use ``--device cpu`` without CUDA, a specific device such as ``cuda:1``, or
-``auto`` to choose an available CUDA device or CPU. The image default remains
-``cuda:0``. Runtime flags are ``--device``, ``--batch-size``, ``--workers``,
+Torch execution uses one device policy across image runs, profiling, synthetic compute measurements, coordinate encoders/probes, and intrinsic-dimension estimation. ``cpu`` uses CPU without checking CUDA. ``auto`` selects the current CUDA device when available, otherwise CPU. Explicit ``cuda`` selects the current CUDA device; ``cuda:N`` selects index N. Explicit CUDA requests now raise an error when CUDA is unavailable or the index is invalid, rather than silently falling back to CPU. Use ``auto`` to allow CPU fallback. The image default remains ``cuda:0``.
+
+Runtime flags are ``--device``, ``--batch-size``, ``--workers``,
 ``--seed``, and ``--verbose`` / ``--no-verbose``. Input flags are ``--bands``,
 ``--partition``, ``--time-steps``, ``--image-size``, ``--interpolation``, and
 ``--normalization``.
@@ -317,7 +321,7 @@ record to stdout, not to an image-results CSV:
 
    $ torchgeo-bench profile --model rcf --dataset m-eurosat --device cpu \
        --batch-size 8 --warmup 1 --measurements 5 > profile.json
-   $ torchgeo-bench profile --config examples/profile.yaml --dry-run
+   $ torchgeo-bench profile --config docs/examples/profile.yaml --dry-run
 
 Its YAML uses singular ``dataset`` and top-level measurement settings:
 
@@ -346,6 +350,7 @@ operation support depends on the model and device.
 ``--count-flops`` / ``--no-count-flops`` add or omit FLOP counting.
 The JSON includes effective preprocessing, device, precision, timing, and
 memory metadata. Local dataset samples must already be available.
+Profiling supports only CPU and CUDA measurement devices.
 
 Synthetic compute measurements
 -------------------------------
@@ -357,7 +362,7 @@ the selected model is an offline baseline or already cached.
 
 .. code-block:: console
 
-   $ torchgeo-bench flops --config examples/flops.yaml --dry-run
+   $ torchgeo-bench flops --config docs/examples/flops.yaml --dry-run
    $ torchgeo-bench flops --model rcf --device cpu --band-configs rgb \
        --seg-heads --output results/my_compute_cost.csv
 
@@ -425,7 +430,7 @@ and ``output`` sections. It does not accept image-run ``input`` or
 
    $ torchgeo-bench coord --model sincos --dataset california_housing \
        --methods linear --folds 2 --device cpu
-   $ torchgeo-bench coord --config examples/coord-run.yaml --dry-run
+   $ torchgeo-bench coord --config docs/examples/coord-run.yaml --dry-run
 
 See :doc:`coordbench` for the full YAML, encoder targets, method selection,
 random/spatial/official splits, and coordinate CSV resume semantics.

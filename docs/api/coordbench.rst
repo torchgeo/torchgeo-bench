@@ -15,7 +15,7 @@ The public runner accepts ``CoordConfig``, not image settings:
    from torchgeo_bench.coordbench import run_coordbench
    from torchgeo_bench.coordbench.config import load_coord_config
 
-   config = load_coord_config("examples/coord-run.yaml")
+   config = load_coord_config("docs/examples/coord-run.yaml")
    run_coordbench(config)
 
 Loading validates YAML without fetching tables or weights. Calling the runner

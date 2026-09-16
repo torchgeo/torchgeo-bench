@@ -16,7 +16,7 @@ from torchmetrics.functional.classification import (
 )
 
 from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
-from torchgeo_bench.config_schema import SegmentationConfig
+from torchgeo_bench.config.schema import SegmentationConfig
 from torchgeo_bench.results import bootstrap_miou
 from torchgeo_bench.segmentation_probe import (
     CachedFeaturesDataset,

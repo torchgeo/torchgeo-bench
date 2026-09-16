@@ -4,7 +4,6 @@ kwargs:
   model_name: regnety_008
   pretrained: true
   global_pool: avg
-  seed: null
 segmentation:
   layers:
     - s4

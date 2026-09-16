@@ -2,7 +2,7 @@
 
 Run from the repository root:
 
-    PYTHONPATH=. uv run torchgeo-bench coord --config examples/coord-run.yaml
+    PYTHONPATH=. uv run torchgeo-bench coord --config docs/examples/coord-run.yaml
 
 The YAML selects this class through ``model.target`` and passes
 ``num_frequencies`` under ``model.kwargs``. Add ``--dry-run`` to validate

@@ -15,7 +15,7 @@ from torchmetrics.classification import (
 )
 from tqdm.auto import tqdm
 
-from .config_schema import SegmentationConfig
+from .config.schema import SegmentationConfig
 from .segmentation_probe import (
     CachedFeaturesDataset,
     GPUTensorCache,

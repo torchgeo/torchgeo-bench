@@ -16,8 +16,9 @@ from tests.support.runner import (
     _synthetic_embeddings,
     _synthetic_loaders,
 )
+from torchgeo_bench.config.presets import ModelPreset, resolve_run_config
+from torchgeo_bench.config.run import validate_run_config
 from torchgeo_bench.main import LinearProbeDivergedError, main
-from torchgeo_bench.presets import ModelPreset, resolve_run_config
 
 
 def test_model_dataset_overrides_are_isolated_and_fall_back() -> None:
@@ -160,6 +161,7 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
     model = _chainable_model_mock()
     monkeypatch.setattr(knn, "gpu_faiss_available", lambda: False)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
@@ -173,6 +175,121 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
         main(cfg)
 
     assert knn_mock.call_args.kwargs["device"] == "cpu"
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected_hash"),
+    [
+        (None, "0391f898e8a4db0d"),
+        ("cpu", "21d7c33e4e3fb14b"),
+        ("cuda", "f3d1f875b722da7e"),
+        ("cuda:0", "0391f898e8a4db0d"),
+        ("cuda:1", "2ff6e9885cdca60c"),
+        ("auto", "2ff6e9885cdca60c"),
+    ],
+)
+@pytest.mark.parametrize("entrypoint", ["direct", "command"])
+def test_device_labels_preserve_existing_hashes_and_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    requested: str | None,
+    expected_hash: str,
+    entrypoint: str,
+) -> None:
+    from torchgeo_bench.commands._run_runtime import run
+
+    cfg = validate_run_config(
+        {
+            "model": {"name": "rcf"},
+            "datasets": ["m-eurosat"],
+            "runtime": {} if requested is None else {"device": requested},
+            "classification": {"methods": ["knn"]},
+            "output": {"file": str(tmp_path / "out.csv")},
+        }
+    )
+    original = cfg.model_dump_json()
+    execute = main if entrypoint == "direct" else run
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr("torchgeo_bench.knn.gpu_faiss_available", lambda: False)
+    expected_device = "cuda:1" if requested in ("auto", "cuda") else requested or "cuda:0"
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()) as data,
+        mock.patch(
+            "torchgeo_bench.main.build_model", return_value=_chainable_model_mock()
+        ) as build,
+        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()) as embed,
+        mock.patch(
+            "torchgeo_bench.main.evaluate_knn",
+            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
+        ),
+    ):
+        execute(cfg)
+        assert cfg.model_dump_json() == original
+        assert build.return_value.to.call_args.args[0] == torch.device(expected_device)
+        assert all(call.args[2] == torch.device(expected_device) for call in embed.call_args_list)
+        output = Path(cfg.output.file)
+        assert pd.read_csv(output)["config_hash"].tolist() == [expected_hash]
+        before = output.read_bytes()
+        data.reset_mock()
+        build.reset_mock()
+        cfg.output.resume = True
+        execute(cfg)
+    data.assert_not_called()
+    build.assert_not_called()
+    assert output.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("device", "available", "message"),
+    [
+        ("cuda", False, "CUDA is unavailable"),
+        ("cuda:0", False, "CUDA is unavailable"),
+        ("cuda:2", True, "CUDA index 2"),
+    ],
+)
+def test_direct_main_rejects_invalid_cuda_before_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    device: str,
+    *,
+    available: bool,
+    message: str,
+) -> None:
+    cfg = _compose_cfg(tmp_path / "out.csv", overrides={"runtime": {"device": device}})
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    with (
+        mock.patch("torchgeo_bench.main.get_datasets") as data,
+        mock.patch("torchgeo_bench.main.build_model") as build,
+        pytest.raises(ValueError, match=message),
+    ):
+        main(cfg)
+    data.assert_not_called()
+    build.assert_not_called()
+    assert not (tmp_path / "out.csv").exists()
+
+
+def test_auto_cpu_resumes_existing_cpu_results(tmp_path: Path) -> None:
+    output = tmp_path / "out.csv"
+    cfg = _compose_cfg(output, overrides={"classification": {"methods": ["knn"]}})
+    pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(
+        output, index=False
+    )
+    before = output.read_bytes()
+    cfg.runtime.device = "auto"
+    cfg.output.resume = True
+    with (
+        mock.patch.object(torch.cuda, "is_available", return_value=False),
+        mock.patch("torchgeo_bench.main.get_datasets") as data,
+        mock.patch("torchgeo_bench.main.build_model") as build,
+    ):
+        main(cfg)
+    data.assert_not_called()
+    build.assert_not_called()
+    assert output.read_bytes() == before
+    assert cfg.runtime.device == "auto"
 
 
 def test_explicit_gpu_knn_without_gpu_faiss_fails_before_data_loading(tmp_path: Path, monkeypatch):

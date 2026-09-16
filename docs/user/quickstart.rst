@@ -99,7 +99,7 @@ Validate without loading a model or data, then execute:
 
 Explicit flags override YAML. Omitted YAML fields inherit model and dataset
 defaults; explicit ``null``, ``false``, and ``[]`` are preserved.
-See :doc:`configuration` and :file:`examples/image-run.yaml` for calibration,
+See :doc:`configuration` and :file:`docs/examples/image-run.yaml` for calibration,
 segmentation, temporal inputs, optional profiling, and intrinsic dimension.
 
 .. warning::

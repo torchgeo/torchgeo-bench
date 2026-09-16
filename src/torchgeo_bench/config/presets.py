@@ -10,11 +10,11 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from .config_schema import (
+from .run import RunConfig
+from .schema import (
     ClassificationConfig,
     InputConfig,
     ModelConfig,
-    RunConfig,
     SegmentationConfig,
     StrictModel,
     load_yaml,
@@ -72,7 +72,7 @@ def load_model_preset(selection: ModelConfig, *, seed: int = 0) -> ModelPreset:
     """Load a packaged preset or a custom constructor without importing weights."""
     if selection.target is not None:
         return ModelPreset(name=selection.name, target=selection.target, kwargs=selection.kwargs)
-    from .config import model_config_path
+    from .catalog import model_config_path
 
     preset = ModelPreset.model_validate(load_yaml(model_config_path(selection.name)))
     kwargs = dict(preset.kwargs)
@@ -99,29 +99,13 @@ def resolve_run_config(config: RunConfig, dataset: str) -> tuple[RunConfig, Mode
 def build_model(preset: ModelPreset, **runtime_options: Any) -> Any:
     """Construct one model; nested target-like kwargs remain ordinary mappings."""
     options = {**preset.kwargs, **runtime_options}
-    if preset.target in {
-        "torchgeo_bench.models.TorchGeoScaleMAEBench",
-        "torchgeo_bench.models.torchgeo_models.TorchGeoScaleMAEBench",
-    }:
-        # Scale-MAE's positional grid must match the dataset's resolved resize.
-        options.setdefault("image_size", preset.input.image_size)
-    if preset.target in {
-        "torchgeo_bench.models.TimmPatchBenchModel",
-        "torchgeo_bench.models.RCFBench",
-    }:
-        from .models.build import (
-            RCFModelConfig,
-            TimmModelConfig,
-            build_rcf_model,
-            build_timm_model,
-        )
-
-        bands = options.pop("bands")
-        normalization = options.pop("normalization", "bandspec_zscore")
-        if preset.target.endswith("TimmPatchBenchModel"):
-            options.pop("seed", None)
-            return build_timm_model(TimmModelConfig(**options), bands, normalization=normalization)
-        return build_rcf_model(RCFModelConfig(**options), bands, normalization=normalization)
     module, _, symbol = preset.target.rpartition(".")
     constructor = getattr(importlib.import_module(module), symbol)
+    if getattr(constructor, "wants_resolved_image_size", False):
+        options.setdefault("image_size", preset.input.image_size)
+    validated = getattr(constructor, "validated_settings", None)
+    if validated is not None:
+        bands = options.pop("bands")
+        normalization = options.pop("normalization", "bandspec_zscore")
+        return validated(**options).build(bands, normalization=normalization)
     return constructor(**options)

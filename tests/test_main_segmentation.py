@@ -9,9 +9,9 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from tests.support.runner import _chainable_model_mock, _compose_cfg, _resume_row
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.config.presets import merge_settings
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import main, run_dataset
-from torchgeo_bench.presets import merge_settings
 from torchgeo_bench.resume import ResumeState
 
 

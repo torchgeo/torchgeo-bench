@@ -1,7 +1,7 @@
 # Copyright (c) TorchGeo Contributors. All rights reserved.
 # Licensed under the MIT License.
 
-"""Strict YAML configuration for the core image benchmark."""
+"""Shared strict configuration sections and safe YAML loading."""
 
 import pathlib
 import re
@@ -11,6 +11,7 @@ import yaml
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
@@ -74,6 +75,10 @@ class StrictModel(BaseModel):
         extra="forbid", strict=True, validate_default=True, allow_inf_nan=False
     )
 
+    def model_dump_yaml(self) -> dict[str, Any]:
+        """Return supplied settings without turning omitted defaults into overrides."""
+        return self.model_dump(mode="json", exclude_unset=True)
+
 
 def _check_device(value: str) -> str:
     """Reject malformed device strings without importing Torch."""
@@ -96,10 +101,26 @@ def _check_methods(value: list["Method"]) -> list["Method"]:
     return value
 
 
+def _check_schema_version(value: object) -> object:
+    """Reject non-integer versions before literal validation."""
+    if type(value) is not int:
+        raise ValueError("schema_version must be the integer 1")  # noqa: TRY004 - Pydantic field validation
+    return value
+
+
+def _check_output_path(value: str) -> str:
+    """Reject blank output paths without rewriting valid strings."""
+    if not value.strip():
+        raise ValueError("output path must not be blank")
+    return value
+
+
 type Method = Literal["knn", "linear"]
 type Device = Annotated[StrictStr, AfterValidator(_check_device)]
 type KnnDevice = Annotated[StrictStr, AfterValidator(_check_knn_device)]
 type Methods = Annotated[list[Method], AfterValidator(_check_methods)]
+type SchemaVersion = Annotated[Literal[1], BeforeValidator(_check_schema_version)]
+type OutputPath = Annotated[StrictStr, AfterValidator(_check_output_path)]
 
 
 def default_methods() -> list[Method]:
@@ -233,107 +254,6 @@ class RuntimeConfig(StrictModel):
     verbose: StrictBool = False
 
 
-class OutputConfig(StrictModel):
-    """Result storage settings."""
-
-    directory: StrictStr = "results/models"
-    file: StrictStr | None = None
-    resume: StrictBool = False
-    profile_directory: StrictStr = "results/profiles"
-    intrinsic_dim_directory: StrictStr = "results/intrinsic_dim"
-
-    @field_validator("directory", "file", "profile_directory", "intrinsic_dim_directory")
-    @classmethod
-    def validate_paths(cls, value: str | None) -> str | None:
-        """Reject blank paths while allowing a null optional file."""
-        if value is not None and not value.strip():
-            raise ValueError("paths must not be blank")
-        return value
-
-
-class CPUThroughputConfig(StrictModel):
-    """Optional bounded CPU measurement alongside an image run."""
-
-    enabled: StrictBool = False
-    batch_size: StrictInt = Field(default=8, gt=0)
-    n_warmup: StrictInt = Field(default=1, ge=0)
-    n_measure: StrictInt = Field(default=5, gt=0)
-    time_budget_s: StrictFloat = Field(default=300.0, gt=0)
-
-
-class FeatureProfileConfig(StrictModel):
-    """Additive encoder measurements stored separately from probe scores."""
-
-    enabled: StrictBool = False
-    n_warmup: StrictInt = Field(default=3, ge=0)
-    n_measure: StrictInt = Field(default=20, gt=0)
-    cpu_throughput: CPUThroughputConfig = Field(default_factory=CPUThroughputConfig)
-
-
-def _default_splits() -> list[Literal["train", "val", "test"]]:
-    """Return the default intrinsic-dimension split selection."""
-    return ["train"]
-
-
-class IntrinsicDimensionConfig(StrictModel):
-    """Additive feature-dimension and spectrum measurements."""
-
-    enabled: StrictBool = False
-    estimators: list[StrictStr] = Field(default_factory=lambda: ["TwoNN", "MLE", "lPCA"])
-    splits: list[Literal["train", "val", "test"]] = Field(
-        default_factory=_default_splits, min_length=1
-    )
-    max_samples: StrictInt | None = Field(default=10000, gt=0)
-    device: StrictStr | None = None
-
-    @field_validator("estimators", "splits")
-    @classmethod
-    def validate_selections(cls, values: list[str]) -> list[str]:
-        """Require distinct non-empty selections."""
-        if any(not value.strip() for value in values) or len(set(values)) != len(values):
-            raise ValueError("selections must contain distinct non-empty names")
-        return values
-
-
-class RunConfig(StrictModel):
-    """Complete core image benchmark configuration."""
-
-    schema_version: Literal[1] = 1
-    model: ModelConfig
-    datasets: list[StrictStr] = Field(min_length=1)
-    input: InputConfig = Field(default_factory=InputConfig)
-    classification: ClassificationConfig = Field(default_factory=ClassificationConfig)
-    segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
-    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
-    output: OutputConfig = Field(default_factory=OutputConfig)
-    profile: FeatureProfileConfig = Field(default_factory=FeatureProfileConfig)
-    intrinsic_dim: IntrinsicDimensionConfig = Field(default_factory=IntrinsicDimensionConfig)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def reject_bool_schema_version(cls, value: object) -> object:
-        """Reject ``true`` because booleans are integer subclasses in Python."""
-        if isinstance(value, bool):
-            raise ValueError("schema_version must be the integer 1")  # noqa: TRY004 - Pydantic requires ValueError for field errors
-        return value
-
-    @field_validator("datasets")
-    @classmethod
-    def validate_datasets(cls, value: list[StrictStr]) -> list[StrictStr]:
-        """Reject empty or repeated dataset names."""
-        if any(not name.strip() for name in value):
-            raise ValueError("datasets must contain non-empty names")
-        if len(set(value)) != len(value):
-            raise ValueError("datasets must not contain duplicates")
-        if "all" in value and len(value) != 1:
-            raise ValueError("'all' cannot be combined with other datasets")
-        return value
-
-    def model_dump_yaml(self) -> dict[str, Any]:
-        """Return supplied settings without turning omitted defaults into overrides."""
-        return self.model_dump(mode="json", exclude_unset=True)
-
-
 def load_yaml(path: str | pathlib.Path) -> dict[str, Any]:
     """Load one YAML mapping with safe tags and unique keys."""
     with pathlib.Path(path).open(encoding="utf-8") as file:
@@ -341,13 +261,3 @@ def load_yaml(path: str | pathlib.Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{path}: top level must be a YAML mapping")  # noqa: TRY004 - preserve the CLI configuration-error contract
     return value
-
-
-def load_run_config(path: str | pathlib.Path) -> RunConfig:
-    """Load and strictly validate a core image benchmark configuration."""
-    return RunConfig.model_validate(load_yaml(path), strict=True)
-
-
-def validate_run_config(value: dict[str, Any]) -> RunConfig:
-    """Validate a mapping after explicit CLI overrides are applied."""
-    return RunConfig.model_validate(value, strict=True)

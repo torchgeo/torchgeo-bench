@@ -46,10 +46,12 @@ dependencies = [
   "lazy-loader>=0.4",
   "numpy>=1.24",
   "pandas>=2",
-  "pyarrow>=14",                                                               # Required for CoordBench's Parquet files.
+  # Required for CoordBench's Parquet files.
+  "pyarrow>=14",
   "pydantic>=2",
   "pyyaml>=6",
-  "safetensors>=0.4",                                                          # Loads MIND's location-model weights.
+  # Loads MIND's location-model weights.
+  "safetensors>=0.4",
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
@@ -113,7 +115,7 @@ build.targets.wheel.packages = [ "src/torchgeo_bench" ]
 
 [tool.uv]
 build-backend.source-exclude = [ "/docs/_build" ]
-build-backend.source-include = [ "docs/**", "examples/**" ]
+build-backend.source-include = [ "docs/**" ]
 
 [tool.ruff]
 target-version = "py312"
@@ -131,9 +133,8 @@ exclude = [
 extend-exclude = [
   "src/torchgeo_bench/cli.py",
   "src/torchgeo_bench/commands",
-  "src/torchgeo_bench/config_schema.py",
+  "src/torchgeo_bench/config/schema.py",
   "src/torchgeo_bench/legacy_run.py",
-  "src/torchgeo_bench/models/build.py",
   "src/torchgeo_bench/preprocessing.py",
 ]
 lint.select = [

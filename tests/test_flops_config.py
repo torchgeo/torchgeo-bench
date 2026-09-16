@@ -7,9 +7,9 @@ import pytest
 from pydantic import ValidationError
 
 from torchgeo_bench.config import list_model_configs
-from torchgeo_bench.config_schema import ModelConfig
-from torchgeo_bench.flops_config import FlopsConfig
-from torchgeo_bench.presets import ModelPreset, load_model_preset
+from torchgeo_bench.config.flops import FlopsConfig
+from torchgeo_bench.config.presets import ModelPreset, load_model_preset
+from torchgeo_bench.config.schema import ModelConfig
 
 
 @pytest.mark.parametrize(
@@ -67,7 +67,7 @@ def test_presets_and_dataset_defaults_respect_explicit_values(
             },
         }
     )
-    monkeypatch.setattr("torchgeo_bench.flops_config.load_model_preset", lambda *a, **kw: preset)
+    monkeypatch.setattr("torchgeo_bench.config.flops.load_model_preset", lambda *a, **kw: preset)
     config = FlopsConfig(model=ModelConfig(name="example"))
     resolved, selected = config.resolve()
     assert resolved.input.image_size == 384
@@ -133,7 +133,7 @@ def test_custom_constructor_is_not_imported() -> None:
 def test_no_application_owned_omegaconf_in_flops_scope() -> None:
     source = Path(__file__).parents[1] / "src" / "torchgeo_bench"
     paths = [
-        source / "flops_config.py",
+        source / "config" / "flops.py",
         source / "flops_pipeline.py",
         source / "commands" / "_flops.py",
         source / "commands" / "_flops_runtime.py",

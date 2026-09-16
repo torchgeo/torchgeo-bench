@@ -24,10 +24,10 @@ def test_all_bands_e2e(tmp_path: Path) -> None:
     config.write_text(
         yaml.safe_dump(
             {
-                "model": {"name": "timm/resnet18", "kwargs": {"pretrained": False, "seed": 0}},
+                "model": {"name": "timm/resnet18", "kwargs": {"pretrained": False}},
                 "datasets": ["m-eurosat"],
                 "input": {"bands": "all", "partition": "0.01x_train", "image_size": 32},
-                "runtime": {"batch_size": 16, "workers": 0, "device": "cpu"},
+                "runtime": {"batch_size": 16, "workers": 0, "device": "cpu", "seed": 0},
                 "classification": {
                     "bootstrap_samples": 10,
                     "linear": {"c_log10_start": -2.0, "c_log10_stop": 2.0, "c_count": 3},

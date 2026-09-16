@@ -91,13 +91,13 @@ Results are appended to `results/models/<model name>.csv`, which **ship pre-popu
 
 ```bash
 # Linear-only probing, with explicit flags overriding the YAML
-torchgeo-bench run --config examples/image-run.yaml --methods linear --device cpu
+torchgeo-bench run --config docs/examples/image-run.yaml --methods linear --device cpu
 
 # Validate selections without loading a model or dataset
 torchgeo-bench run --model rcf --dataset m-eurosat --dry-run
 ```
 
-See [`examples/image-run.yaml`](examples/image-run.yaml) for the image configuration
+See [`docs/examples/image-run.yaml`](docs/examples/image-run.yaml) for the image configuration
 fields and `run --config-help` for the JSON schema. Omitted settings inherit
 model and dataset defaults; explicit YAML values override them, and supplied
 flags override YAML. This includes explicit `false`, `null`, and `[]`.
@@ -122,8 +122,8 @@ torchgeo-bench flops --model rcf --device cpu --band-configs rgb \
 ```
 
 Both accept `--config` and `--dry-run`. See
-[`examples/profile.yaml`](examples/profile.yaml),
-[`examples/flops.yaml`](examples/flops.yaml), and the
+[`docs/examples/profile.yaml`](docs/examples/profile.yaml),
+[`docs/examples/flops.yaml`](docs/examples/flops.yaml), and the
 [configuration reference](https://torchgeo.org/torchgeo-bench/user/configuration.html).
 Optional `profile` and `intrinsic_dim` passes within an image run retain their
 separate per-model CSVs unless `output.file` explicitly combines them.
@@ -157,7 +157,7 @@ then `--model climplicit` (etc.). Results land in
 importable Python name, with constructor options under `model.kwargs`. See the
 [CoordBench guide](https://torchgeo.org/torchgeo-bench/user/coordbench.html)
 and the runnable
-[`FourierLocationEncoder` example](https://github.com/torchgeo/torchgeo-bench/blob/main/examples/coordbench_location_encoder.py).
+[`FourierLocationEncoder` example](https://github.com/torchgeo/torchgeo-bench/blob/main/docs/examples/coordbench_location_encoder.py).
 
 <!-- skip-on-docs-landing-start -->
 

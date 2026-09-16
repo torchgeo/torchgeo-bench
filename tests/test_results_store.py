@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import _resolve_output_path
 from torchgeo_bench.results import (
     load_results,

@@ -4,5 +4,4 @@ kwargs:
   model_name: deit_base_patch16_224
   pretrained: true
   global_pool: avg
-  seed: null
   use_cls_token: false

@@ -229,7 +229,7 @@ Validate it before running, then use ``--resume`` to continue against the same o
    $ uv run torchgeo-bench run --config new_model_run.yaml
    $ uv run torchgeo-bench run --config new_model_run.yaml --resume
 
-Only explicitly supplied flags override YAML values. ``run --config-help`` describes the supported fields, and :file:`examples/image-run.yaml` provides a complete example.
+Only explicitly supplied flags override YAML values. ``run --config-help`` describes the supported fields, and :file:`docs/examples/image-run.yaml` provides a complete example.
 
 You can also evaluate an external class without adding a packaged preset. In the run YAML, provide its importable target and constructor options directly:
 

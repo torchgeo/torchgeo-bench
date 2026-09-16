@@ -5,17 +5,19 @@ from typing import Any, Literal
 
 from pydantic import Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
 
-from torchgeo_bench.config_schema import (
+from torchgeo_bench.config.presets import ModelPreset, load_model_preset
+from torchgeo_bench.config.schema import (
     Device,
     KnnDevice,
     Methods,
     ModelConfig,
+    OutputPath,
+    SchemaVersion,
     StrictModel,
     default_methods,
     load_yaml,
 )
 from torchgeo_bench.coordbench.catalog import FAMILY_BENCHMARKS
-from torchgeo_bench.presets import ModelPreset, load_model_preset
 
 
 class CoordRuntimeConfig(StrictModel):
@@ -28,16 +30,8 @@ class CoordRuntimeConfig(StrictModel):
 class CoordOutputConfig(StrictModel):
     """Coordinate result CSV and resume settings."""
 
-    file: StrictStr = "results/coordbench_results.csv"
+    file: OutputPath = "results/coordbench_results.csv"
     resume: StrictBool = False
-
-    @field_validator("file")
-    @classmethod
-    def validate_file(cls, value: str) -> str:
-        """Require a non-blank result path."""
-        if not value.strip():
-            raise ValueError("output.file must not be blank")
-        return value
 
 
 class CoordEvaluationConfig(StrictModel):
@@ -54,20 +48,12 @@ class CoordEvaluationConfig(StrictModel):
 class CoordConfig(StrictModel):
     """Complete coordinate benchmark configuration, independent of image settings."""
 
-    schema_version: Literal[1] = 1
+    schema_version: SchemaVersion = 1
     model: ModelConfig
     datasets: list[StrictStr] = Field(default_factory=lambda: ["all"], min_length=1)
     evaluation: CoordEvaluationConfig = Field(default_factory=CoordEvaluationConfig)
     runtime: CoordRuntimeConfig = Field(default_factory=CoordRuntimeConfig)
     output: CoordOutputConfig = Field(default_factory=CoordOutputConfig)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def validate_version(cls, value: object) -> object:
-        """Require integer schema versions without numeric coercion."""
-        if type(value) is not int:
-            raise ValueError("schema_version must be the integer 1")
-        return value
 
     @field_validator("datasets")
     @classmethod

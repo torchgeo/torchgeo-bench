@@ -14,9 +14,10 @@ from experiments.scripts import (
     introspect_seg_layers,
     tune_dataloader,
 )
-from torchgeo_bench.config_schema import ModelConfig, RunConfig
+from torchgeo_bench.config.presets import ModelPreset, load_model_preset, resolve_run_config
+from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import ModelConfig
 from torchgeo_bench.models._normalization import UnsupportedNormalizationError
-from torchgeo_bench.presets import ModelPreset, load_model_preset, resolve_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,7 +51,7 @@ def test_native_audit_only_classifies_unsupported_normalization(
     model_dir.mkdir()
     (model_dir / "rcf.yaml").write_text("target: torchgeo_bench.models.RCFBench\nname: rcf\n")
     output = tmp_path / "audit.json"
-    monkeypatch.setattr("torchgeo_bench.config.CONF_DIR", tmp_path)
+    monkeypatch.setattr("torchgeo_bench.config.catalog.CONF_DIR", tmp_path)
     monkeypatch.setattr("sys.argv", ["audit_model_native.py", "--out", str(output)])
 
     def fail(config: object, **kwargs: object) -> None:
@@ -133,7 +134,7 @@ def test_tuner_preserves_dataset_overrides_and_empirical_dataset(
             }
         )
     )
-    monkeypatch.setattr("torchgeo_bench.config.CONF_DIR", tmp_path)
+    monkeypatch.setattr("torchgeo_bench.config.catalog.CONF_DIR", tmp_path)
     bands = audit_model_native.band_specs("m-eurosat", "rgb")
     dataset = torch.utils.data.TensorDataset(torch.zeros(1, 3, 8, 8))
 

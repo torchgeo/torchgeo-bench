@@ -289,7 +289,7 @@ Segmentation knobs
 ------------------
 
 All keys live under ``segmentation`` in run YAML or model presets.
-Defaults are declared in :class:`~torchgeo_bench.config_schema.SegmentationConfig`.
+Defaults are declared in :class:`~torchgeo_bench.config.schema.SegmentationConfig`.
 Explicit run settings override preset defaults, including empty layer lists.
 
 Head type

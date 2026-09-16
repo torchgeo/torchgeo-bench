@@ -31,7 +31,7 @@ extensions = [
     "sphinx_design",
 ]
 
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "plans"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "plans", "examples"]
 
 # Class docstrings with section titles need Sphinx 5.3+: https://github.com/sphinx-doc/sphinx/pull/10887
 needs_sphinx = "5.3"

@@ -9,8 +9,9 @@ import json
 import yaml
 
 from .. import commands
-from ..config_schema import RunConfig, validate_run_config
-from ..presets import load_model_preset
+from ..config.presets import load_model_preset
+from ..config.run import RunConfig, validate_run_config
+from ..datasets import list_datasets
 from ._config import (
     FlagOverride,
     comma_separated_bands,
@@ -44,10 +45,11 @@ _FLAG_OVERRIDES = (
 )
 
 
-def _load_run(args: argparse.Namespace, datasets: tuple[str, ...]) -> RunConfig:
+def load_config(args: argparse.Namespace) -> RunConfig:
     """Load, validate, and return the selected image configuration."""
     config = load_from_flags(args, _FLAG_OVERRIDES, validate_run_config)
     preset = load_model_preset(config.model)
+    datasets = list_datasets()
     unknown_datasets = [name for name in config.datasets if name != "all" and name not in datasets]
     if unknown_datasets:
         raise ValueError(
@@ -60,13 +62,13 @@ def _load_run(args: argparse.Namespace, datasets: tuple[str, ...]) -> RunConfig:
     return config
 
 
-def run(args: argparse.Namespace, datasets: tuple[str, ...]) -> None:
+def run(args: argparse.Namespace) -> None:
     """Validate and execute one image benchmark."""
     if getattr(args, "config_help", False):
         print(json.dumps(RunConfig.model_json_schema(), indent=2))
         raise SystemExit(0)
-    config = load_config_or_exit(args, lambda value: _load_run(value, datasets))
+    config = load_config_or_exit(args, load_config)
     if getattr(args, "dry_run", False):
         print(yaml.safe_dump(config.model_dump_yaml(), sort_keys=False), end="")
         return
-    commands._image_runtime.run(config)
+    commands._run_runtime.run(config)

@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from .. import commands
-from ..flops_config import FlopsConfig
+from ..config.flops import FlopsConfig
 from ._config import (
     FlagOverride,
     load_config_or_exit,

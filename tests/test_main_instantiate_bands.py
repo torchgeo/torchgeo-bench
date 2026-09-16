@@ -2,15 +2,16 @@
 
 from unittest import mock
 
+import pytest
 import torch
 
 from tests.support.runner import _DictTensorDataset, _synthetic_loaders
-from torchgeo_bench.config_schema import RunConfig
+from torchgeo_bench.config.presets import resolve_run_config
+from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.main import instantiate_dataset_model
 from torchgeo_bench.models.interface import BenchModel
-from torchgeo_bench.presets import resolve_run_config
 
 
 def test_empirical_rcf_receives_run_seed_and_actual_dataset(monkeypatch) -> None:
@@ -30,7 +31,7 @@ def test_empirical_rcf_receives_run_seed_and_actual_dataset(monkeypatch) -> None
         captured.append((settings, bands, normalization))
         return mock.Mock()
 
-    monkeypatch.setattr("torchgeo_bench.models.build.build_rcf_model", build)
+    monkeypatch.setattr("torchgeo_bench.models.rcf.RCFModelSettings.build", build)
     instantiate_dataset_model(
         config, preset, get_bench_dataset_class("m-eurosat")(), dataset, torch.device("cpu")
     )
@@ -86,3 +87,19 @@ def test_temporal_input_uses_channel_dimension_not_time_dimension() -> None:
         config, preset, get_bench_dataset_class("m-eurosat")(), dataset, torch.device("cpu")
     )
     assert model.num_channels == 3
+
+
+def test_band_spec_count_must_match_tensor_channels() -> None:
+    config = RunConfig.model_validate(
+        {"model": {"name": "rcf"}, "datasets": ["m-eurosat"], "runtime": {"device": "cpu"}}
+    )
+    config, preset = resolve_run_config(config, "m-eurosat")
+    dataset = _DictTensorDataset(torch.zeros(1, 4, 8, 8), torch.zeros(1))
+    with (
+        mock.patch("torchgeo_bench.main.build_model") as build,
+        pytest.raises(ValueError, match="BandSpec count 3 != tensor channel count 4"),
+    ):
+        instantiate_dataset_model(
+            config, preset, get_bench_dataset_class("m-eurosat")(), dataset, torch.device("cpu")
+        )
+    build.assert_not_called()

@@ -16,6 +16,8 @@ from typing import override
 import numpy as np
 import torch
 
+from torchgeo_bench.devices import resolve_device
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,15 +25,18 @@ class LocationEncoder(ABC):
     """Frozen coordinate encoder: ``(lon, lat[, year]) -> (N, D)`` features.
 
     Args:
-        device: Torch device string for the forward pass.
+        device: Torch device or ``auto`` for current CUDA when available, otherwise CPU.
         batch_size: Points per forward chunk.
+
+    Raises:
+        ValueError: If the device is invalid, or explicit CUDA is unavailable or out of range.
     """
 
     #: Human-readable identifier recorded in result rows.
     name: str = "location_encoder"
 
     def __init__(self, device: str = "cpu", batch_size: int = 8192) -> None:
-        self.device = device if (device == "cpu" or torch.cuda.is_available()) else "cpu"
+        self.device = str(resolve_device(device))
         self.batch_size = int(batch_size)
 
     @abstractmethod
