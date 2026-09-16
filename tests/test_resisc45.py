@@ -3,13 +3,13 @@
 The upstream class is mocked, so no dataset download is needed.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import torch
 
-from torchgeo_bench.datasets import DatasetSpec, ResolvedInput, get_dataset_spec, load_split
-from torchgeo_bench.datasets.torchgeo import load_torchgeo_split
+from torchgeo_bench.datasets import DatasetSpec, get_dataset_spec, load_split
 
 
 class _FakeRESISC45:
@@ -60,13 +60,21 @@ class TestMetadata:
 
 
 class TestBandSelection:
+    def test_selection_uses_source_not_custom_metadata_order(self, patched: DatasetSpec) -> None:
+        spec = replace(patched, bands=tuple(reversed(patched.bands)))
+        loaded = load_split(spec, "train", bands="all")
+        assert loaded.bands == tuple(reversed(patched.bands))
+        torch.testing.assert_close(
+            loaded.dataset[0]["image"][:, 0, 0], torch.tensor([2.0, 1.0, 0.0])
+        )
+
     @pytest.mark.parametrize("bands", [None, ("red", "green", "blue")])
     def test_identity_selection_avoids_copying(
         self, patched: DatasetSpec, bands: tuple[str, ...] | None
     ) -> None:
         """Selecting all bands should avoid a per-sample channel copy."""
         ds = load_split("resisc45", "train", bands=bands).dataset
-        assert ds.kwargs["transforms"] is None
+        assert ds.kwargs["transforms"].indices == (0, 1, 2)
         torch.testing.assert_close(ds[0]["image"][:, 0, 0], torch.tensor([0.0, 1.0, 2.0]))
 
     @pytest.mark.parametrize(
@@ -101,34 +109,15 @@ class TestBandSelection:
 
 
 class TestTransformComposition:
-    def test_selection_runs_before_the_caller_transform(self, patched: DatasetSpec) -> None:
-        seen: list[tuple[int, ...]] = []
-
-        def _resize(sample: dict) -> dict:
-            seen.append(tuple(sample["image"].shape))
-            return sample
-
-        ds = load_torchgeo_split(
-            patched,
-            "train",
-            inputs=ResolvedInput((patched.bands[0],), ("red",)),
-            transform=_resize,
-        )
-        ds[0]
-        assert seen == [(1, 8, 8)]
-
-    def test_caller_transform_survives_when_selection_is_identity(
-        self, patched: DatasetSpec
+    @pytest.mark.parametrize("bands", [("red",), ("blue", "green", "red")])
+    def test_selection_and_raw_conversion_precede_resizing(
+        self,
+        patched: DatasetSpec,
+        bands: tuple[str, ...],
     ) -> None:
-        calls: list[int] = []
-
-        def _mark(sample: dict) -> dict:
-            calls.append(1)
-            return sample
-
-        ds = load_torchgeo_split(
-            patched, "train", inputs=ResolvedInput(tuple(patched.bands), "all"), transform=_mark
+        ds = load_split(patched, "train", bands=bands, image_size=4).dataset
+        sample = ds[0]
+        expected = torch.tensor([patched.bands.index(b) for b in patched.select_band_specs(bands)])
+        torch.testing.assert_close(
+            sample["image"], expected.float()[:, None, None].expand(-1, 4, 4)
         )
-        assert ds.kwargs["transforms"] is _mark
-        ds[0]
-        assert calls == [1]

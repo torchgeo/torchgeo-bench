@@ -10,6 +10,11 @@ import pandas as pd
 import pytest
 import torch
 import torch.nn.functional as F
+from geobench_v2.datasets import (
+    GeoBenchFieldsOfTheWorld,
+    GeoBenchKuroSiwo,
+    GeoBenchPASTIS,
+)
 from torch.utils.data import DataLoader
 
 from tests.support.data import require_dataset_data
@@ -46,19 +51,30 @@ class MockV2Dataset:
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         channels = torch.arange(1, self.c + 1, dtype=torch.float32) * 1000
         image = channels[:, None, None].expand(self.c, self.h, self.w).clone()
-        sample = {"image": image}
+        if isinstance(self.band_order, dict):
+            sample = {}
+            start = 0
+            for sensor, names in self.band_order.items():
+                sample[f"image_{sensor}"] = image[start : start + len(names)]
+                start += len(names)
+        else:
+            sample = {"image": image}
         if self.root.name == "burn_scars":
             sample["mask"] = torch.arange(self.h * self.w).reshape(self.h, self.w) % 2
         else:
-            sample["label"] = torch.tensor(idx % 2)
+            sample["label"] = torch.zeros(19)
+            sample["label"][idx % 2] = 1
         return self.transforms(sample) if self.transforms is not None else sample
 
 
 @pytest.fixture
 def mock_v2_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
+    import geobench_v2.datasets as backends
+
     upstream = {}
     for dataset, name in {"benv2": "GeoBenchBENV2", "burn_scars": "GeoBenchBurnScars"}.items():
         upstream[dataset] = MagicMock(side_effect=MockV2Dataset)
+        upstream[dataset].dataset_band_config = getattr(backends, name).dataset_band_config
         monkeypatch.setattr(f"geobench_v2.datasets.{name}", upstream[dataset])
     return upstream
 
@@ -103,8 +119,8 @@ class TestV2Loading:
 
         batch = next(iter(train_dl))
         assert batch["image"].shape == (4, 3, 32, 32)
-        assert batch["label"].shape == (4,)
-        assert batch["label"].dtype == torch.long
+        assert batch["label"].shape == (4, 19)
+        assert batch["label"].dtype == torch.float32
         torch.testing.assert_close(
             batch["image"][0, :, 0, 0], torch.tensor([1000.0, 2000.0, 3000.0])
         )
@@ -168,7 +184,7 @@ class TestV2Loading:
             assert kwargs["download"] is False
             assert kwargs["data_normalizer"] is torch.nn.Identity
             if dataset_name == "benv2":
-                assert kwargs["return_stacked_image"] is True
+                assert kwargs["return_stacked_image"] is False
 
 
 class MockKuroSiwo:
@@ -221,7 +237,9 @@ class TestKuroSiwoCanonicalization:
     def mocked_kuro_siwo(self) -> Iterator[MagicMock]:
         with patch(
             "geobench_v2.datasets.GeoBenchKuroSiwo",
-            MagicMock(side_effect=MockKuroSiwo),
+            MagicMock(
+                side_effect=MockKuroSiwo, dataset_band_config=GeoBenchKuroSiwo.dataset_band_config
+            ),
         ) as mocked:
             yield mocked
 
@@ -365,7 +383,9 @@ class TestPASTISSampleConstruction:
     def mocked_pastis(self):
         with patch(
             "geobench_v2.datasets.GeoBenchPASTIS",
-            MagicMock(side_effect=MockPASTIS),
+            MagicMock(
+                side_effect=MockPASTIS, dataset_band_config=GeoBenchPASTIS.dataset_band_config
+            ),
         ) as mocked:
             yield mocked
 
@@ -563,19 +583,6 @@ def test_installed_backend_preserves_requested_channels(
         torch.testing.assert_close(sample["label"], label.to(sample["label"].dtype))
 
 
-@pytest.mark.parametrize("dataset_name", ["treesatai", "benv2", "spacenet2", "pastis"])
-def test_correct_requests_preserve_upstream_numerics(
-    monkeypatch: pytest.MonkeyPatch, dataset_name: str
-) -> None:
-    _synthetic_sensor_sources(monkeypatch, dataset_name)
-    ds = load_split(dataset_name, "train", bands="all", image_size=8).dataset
-    upstream = ds._inner[0]
-    sample = ds[0]
-    assert sample.keys() == upstream.keys()
-    for key in upstream:
-        torch.testing.assert_close(sample[key], upstream[key], rtol=0, atol=0)
-
-
 def test_backend_resolved_sensor_order_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
     from geobench_v2.datasets import GeoBenchTreeSatAI
 
@@ -596,8 +603,14 @@ def test_backend_resolved_sensor_order_is_used(monkeypatch: pytest.MonkeyPatch) 
         image_size=8,
     ).dataset
     assert list(ds._inner.band_order) == ["aerial", "s2"]
-    upstream = ds._inner[0]["image"]
-    torch.testing.assert_close(ds[0]["image"], upstream[[2, 0, 1]], rtol=0, atol=0)
+    upstream = ds._inner[0]
+    images = [
+        F.interpolate(
+            upstream[f"image_{sensor}"][None], (8, 8), mode="bilinear", align_corners=False
+        )[0]
+        for sensor in ("aerial", "s2")
+    ]
+    torch.testing.assert_close(ds[0]["image"], torch.cat(images)[[2, 0, 1]], rtol=0, atol=0)
     bench = get_dataset_spec("treesatai")
     expected = bench.select_band_specs(("b04", "red", "green"))
     assert all(actual is spec for actual, spec in zip(ds.band_specs, expected, strict=True))
@@ -605,6 +618,8 @@ def test_backend_resolved_sensor_order_is_used(monkeypatch: pytest.MonkeyPatch) 
 
 def test_fotw_load_path_keeps_later_acquisition(monkeypatch: pytest.MonkeyPatch) -> None:
     class PairedImages(MockV2Dataset):
+        dataset_band_config = GeoBenchFieldsOfTheWorld.dataset_band_config
+
         def __getitem__(self, index: int) -> dict:
             values = torch.tensor([{"red": 1100.0, "nir": 4200.0}[b] for b in self.band_order])
             image = values[:, None, None].expand(-1, 6, 6)
@@ -613,7 +628,7 @@ def test_fotw_load_path_keeps_later_acquisition(monkeypatch: pytest.MonkeyPatch)
                 "image_b": image,
                 "mask": torch.arange(36).reshape(6, 6) % 4,
             }
-            return self.transforms(sample)
+            return sample
 
     monkeypatch.setattr("geobench_v2.datasets.GeoBenchFieldsOfTheWorld", PairedImages)
     ds = load_split("fotw", "train", bands=("nir", "red"), image_size=12).dataset
@@ -643,8 +658,10 @@ def test_malformed_backend_image_is_rejected(
     mock_v2_env: dict[str, MagicMock], monkeypatch: pytest.MonkeyPatch, shape: tuple[int, ...]
 ) -> None:
     monkeypatch.setattr(
-        MockV2Dataset, "__getitem__", lambda self, index: {"image": torch.ones(shape)}
+        MockV2Dataset,
+        "__getitem__",
+        lambda self, index: {"image": torch.ones(shape), "mask": torch.zeros(8, 8)},
     )
     ds = load_split("burn_scars", "train", bands=("b04", "b03", "b02")).dataset
-    with pytest.raises(ValueError, match="expected CHW or TCHW image with 3 channels"):
+    with pytest.raises(ValueError, match="expected CHW image with 3 channels"):
         ds[0]

@@ -231,6 +231,7 @@ from torchgeo_bench.datasets import get_dataset_spec, list_datasets
 with patch.object(Path, 'exists', side_effect=AssertionError('data access')):
     for name in list_datasets():
         spec = get_dataset_spec(name)
+        spec.validate_source()
         assert spec.bands and spec.split_sizes
 from torchgeo_bench.download import DEFAULT_V2_DATASETS, DOWNLOADABLE_DATASETS
 assert set(DOWNLOADABLE_DATASETS) == set(list_datasets())

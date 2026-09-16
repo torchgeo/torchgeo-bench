@@ -1,115 +1,102 @@
-"""Unit tests for dataset classes that don't require real data on disk."""
+"""Complete source paths enforce raw canonical images and targets."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 import torch
+import torchgeo.datasets
+from torchgeo.datasets import EuroSAT
 
-from torchgeo_bench.datasets import ResolvedInput, V2Source, get_dataset_spec, load_split
-from torchgeo_bench.datasets.geobench_v2 import canonicalize_sample
-from torchgeo_bench.datasets.torchgeo import load_torchgeo_split
-
-
-def _canonicalize(name: str, sample: dict) -> dict:
-    source = get_dataset_spec(name).source
-    assert isinstance(source, V2Source)
-    return canonicalize_sample(sample, source=source)
-
-
-class TestFOTWCanonicalize:
-    def test_existing_canonical_image_is_preserved(self) -> None:
-        image = torch.zeros(3, 8, 8)
-        image_b = torch.ones_like(image)
-        sample = {"image": image, "image_b": image_b, "label": 0}
-        result = _canonicalize("fotw", sample)
-        assert result["image"] is image
-        assert result["label"] == 0
-
-    @pytest.mark.parametrize("has_image_a", [False, True])
-    def test_image_b_becomes_image(self, *, has_image_a: bool) -> None:
-        img_b = torch.ones(3, 8, 8)
-        sample = {"image_b": img_b, "label": 1}
-        if has_image_a:
-            sample["image_a"] = torch.zeros_like(img_b)
-        result = _canonicalize("fotw", sample)
-        assert result["image"] is img_b
-        assert result["label"] == 1
-        assert "image_a" not in result
-        assert "image_b" not in result
-
-
-@pytest.mark.parametrize("dataset_name", ["spacenet2", "spacenet7"])
-class TestSpaceNetCanonicalize:
-    def test_mask_offset_and_reserved_zero(self, dataset_name: str) -> None:
-        mask = torch.tensor([[0, 1, 2], [2, 1, 0]])
-        image = torch.zeros(3, 2, 3)
-        result = _canonicalize(dataset_name, {"image": image, "mask": mask})
-        torch.testing.assert_close(result["mask"], torch.tensor([[0, 0, 1], [1, 0, 0]]))
-        assert result["image"] is image
-        assert int(result["mask"].max()) < get_dataset_spec(dataset_name).num_classes
-
-    def test_inference_sample_without_mask(self, dataset_name: str) -> None:
-        image = torch.zeros(3, 4, 4)
-        result = _canonicalize(dataset_name, {"image": image})
-        assert set(result) == {"image"}
-        assert result["image"] is image
-
-
-@pytest.mark.parametrize("dataset_name", ["eurosat", "eurosat-spatial"])
-def test_eurosat_rejects_unknown_split(dataset_name: str) -> None:
-    with pytest.raises(ValueError, match="Unknown split"):
-        load_split(dataset_name, "invalid")
+from tests.support.data import geotiff_bytes
+from torchgeo_bench.datasets import get_dataset_spec, load_split
 
 
 @pytest.mark.parametrize("dataset_name", ["eurosat", "eurosat-spatial"])
 @pytest.mark.parametrize("split", ["train", "val", "test"])
-@pytest.mark.parametrize(
-    ("bands", "expected_codes"),
-    [
-        (("blue", "red", "green"), ("B02", "B04", "B03")),
-        (
-            None,
-            (
-                "B01",
-                "B02",
-                "B03",
-                "B04",
-                "B05",
-                "B06",
-                "B07",
-                "B08",
-                "B09",
-                "B10",
-                "B11",
-                "B12",
-                "B8A",
-            ),
-        ),
-    ],
-)
-def test_eurosat_forwards_bands_split_and_transform(
+@pytest.mark.parametrize("bands", [None, ("blue", "red", "green")])
+def test_eurosat_explicit_source_and_canonical_sample(
     monkeypatch: pytest.MonkeyPatch,
     dataset_name: str,
     split: str,
     bands: tuple[str, ...] | None,
-    expected_codes: tuple[str, ...],
 ) -> None:
+    spec = get_dataset_spec(dataset_name)
+    selected = spec.select_band_specs(bands)
+    source_image = torch.arange(len(selected), dtype=torch.int16)[:, None, None].expand(-1, 2, 2)
     upstream = MagicMock()
-    transform = torch.nn.Identity()
-    bench = get_dataset_spec(dataset_name)
-    monkeypatch.setattr(f"torchgeo.datasets.{bench.source.upstream_class}", upstream)
-    result = load_torchgeo_split(
-        bench,
-        split,
-        inputs=ResolvedInput(tuple(bench.select_band_specs(bands)), bands or "all"),
-        transform=transform,
+    upstream.all_band_names = EuroSAT.all_band_names
+    upstream.return_value.__getitem__.side_effect = lambda index: upstream.call_args.kwargs[
+        "transforms"
+    ]({"image": source_image, "label": 7, "sample_id": "original"})
+    monkeypatch.setattr(f"torchgeo.datasets.{spec.source.upstream_class}", upstream)
+    loaded = load_split(spec, split, bands=bands, image_size=4)
+    options = upstream.call_args.kwargs
+    assert options["root"] == "data/eurosat"
+    assert options["split"] == split
+    assert options["bands"] == tuple(b.source_name for b in selected)
+    assert options["download"] is False
+    sample = loaded.dataset[0]
+    torch.testing.assert_close(
+        sample["image"], source_image.float().repeat_interleave(2, -2).repeat_interleave(2, -1)
     )
-    upstream.assert_called_once_with(
-        root=str(Path("data/eurosat")),
-        split=split,
-        bands=expected_codes,
-        transforms=transform,
-        download=False,
+    assert sample["label"].dtype == torch.long
+    assert sample["label"].shape == ()
+    assert sample["label"].item() == 7
+    assert sample["sample_id"] == "original"
+    assert all(a is b for a, b in zip(loaded.bands, selected, strict=True))
+
+
+@pytest.mark.parametrize("dataset_name", ["eurosat", "eurosat-spatial", "resisc45"])
+@pytest.mark.parametrize("label", [1.25, [1], float("nan"), float("inf")])
+def test_torchgeo_rejects_malformed_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    dataset_name: str,
+    label: object,
+) -> None:
+    spec = get_dataset_spec(dataset_name)
+    upstream = MagicMock()
+    upstream.all_band_names = EuroSAT.all_band_names
+    upstream.return_value.__getitem__.side_effect = lambda index: upstream.call_args.kwargs[
+        "transforms"
+    ]({"image": torch.zeros(3, 4, 4), "label": label})
+    monkeypatch.setattr(f"torchgeo.datasets.{spec.source.upstream_class}", upstream)
+    loaded = load_split(spec, "train")
+    with pytest.raises(ValueError, match=r"integer|scalar"):
+        loaded.dataset[0]
+
+
+@pytest.mark.parametrize("dataset_name", ["eurosat", "eurosat-spatial"])
+@pytest.mark.parametrize("bands", ["all", ("nir", "red", "nir", "blue")])
+def test_installed_torchgeo_train_only_source_keeps_channel_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dataset_name: str,
+    bands: str | tuple[str, ...],
+) -> None:
+    spec = get_dataset_spec(dataset_name)
+    cls = getattr(torchgeo.datasets, spec.source.upstream_class)
+    root = tmp_path / "data/eurosat"
+    directory = root / cls.base_dir / "AnnualCrop"
+    directory.mkdir(parents=True)
+    image = np.broadcast_to(
+        (1000 + 512 * np.arange(13, dtype=np.uint16))[:, None, None], (13, 2, 3)
     )
-    assert result is upstream.return_value
+    (directory / "AnnualCrop_train.tif").write_bytes(geotiff_bytes(image))
+    (root / cls.split_filenames["train"]).write_text("AnnualCrop_train.jpg\n")
+    monkeypatch.chdir(tmp_path)
+    with patch.object(cls, "_load_image", side_effect=AssertionError("sample probe")):
+        loaded = load_split(spec, "train", bands=bands, image_size=4)
+    assert len(loaded.dataset) == 1
+    sample = loaded.dataset[0]
+    values = [1000 + 512 * cls.all_band_names.index(b.source_name) for b in loaded.bands]
+    torch.testing.assert_close(
+        sample["image"], torch.tensor(values).float()[:, None, None].expand(-1, 4, 4)
+    )
+    assert sample["label"].shape == ()
+    assert sample["label"].dtype == torch.int64
+    assert sample["label"].item() == 0
+    assert all(b is spec.bands[spec.bands.index(b)] for b in loaded.bands)
+    with pytest.raises(FileNotFoundError, match="split 'val'"):
+        load_split(spec, "val")

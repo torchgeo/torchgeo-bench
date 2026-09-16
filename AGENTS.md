@@ -194,6 +194,8 @@ Per-dataset modules declare frozen `DatasetSpec` records (`SPEC`), not metadata 
 
 `load_split(spec_or_name, split, ...)` validates options, resolves input once, and constructs only that split. `LoadedSplit.spec` owns the authoritative metadata; callers pass `list(loaded.bands)` to model construction and own their DataLoaders. Keep source-specific policies in typed records and runtime adapters, not definition-module loader imports or scattered dataset-name conditions. Preserve the pre-migration metadata fixture and exact geography JSON/index coverage. Do not change labels, statistics, sensor tags, or RGB selections as part of metadata refactoring.
 
+V2 factories request raw, unstacked source components with downloading disabled. Adapters select acquisitions and restore actual upstream channel order before common resizing. Only sources declaring `align_to_output` align sensor grids directly onto the requested output size; do not add intermediate grids or temporal aggregation. TorchGeo and V1 share canonical validation: float32 CHW/TCHW imagery, scalar integer or float32 vector labels, and integer H,W masks (a singleton source mask channel is removed). Reject malformed targets before conversion/resizing; do not redefine class or ignore-label policies.
+
 ### GeoBench V1 (Classification) - use `m-` prefix
 `m-eurosat`, `m-forestnet`, `m-so2sat`, `m-pv4ger`, `m-brick-kiln`, `m-bigearthnet`
 

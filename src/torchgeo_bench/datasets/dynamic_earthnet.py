@@ -12,7 +12,7 @@ SPEC = DatasetSpec(
     multilabel=False,
     rgb_bands=("r", "g", "b"),
     split_sizes=SplitSizes(train=700, val=100, test=200),
-    source=V2Source("GeoBenchDynamicEarthNet", band_order_strategy="by_sensor"),
+    source=V2Source("GeoBenchDynamicEarthNet", band_order_strategy="by_sensor", align_to_output=True),
 
     bands=(
         BandSpec("planet", "b", "b", mean=664.423, std=639.946, min=10, max=10051),

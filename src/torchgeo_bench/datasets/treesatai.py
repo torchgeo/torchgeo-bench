@@ -17,7 +17,7 @@ SPEC = DatasetSpec(
     multilabel=True,
     rgb_bands=("red", "green", "blue"),
     split_sizes=SplitSizes(train=4000, val=1000, test=2000),
-    source=V2Source("GeoBenchTreeSatAI", band_order_strategy="by_sensor"),
+    source=V2Source("GeoBenchTreeSatAI", band_order_strategy="by_sensor", align_to_output=True),
 
     bands=(
         # German DOP ortho-aerial centre wavelengths (R/G/B/NIR).

@@ -29,6 +29,7 @@ from huggingface_hub import snapshot_download
 from torch.utils.data import Dataset
 
 from ._metadata import decode_metadata
+from .transforms import integer_target
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +196,7 @@ class GeoBenchv1Sharded(Dataset):
         if label_arr.ndim > 0:
             label_t: torch.Tensor = torch.from_numpy(label_arr.astype(np.float32))
         else:
-            label_t = torch.tensor(label_arr.item(), dtype=torch.long)
+            label_t = integer_target(label_arr.item(), name=f"{self.dataset_dir.name} label")
 
         sample: dict = {"image": image_t, "label": label_t, "sample_id": sid}
         if self.transform is not None:

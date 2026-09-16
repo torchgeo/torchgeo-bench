@@ -1,4 +1,4 @@
-"""Input resolution, resizing, and single-split loading from immutable definitions."""
+"""Input resolution and single-split loading from immutable definitions."""
 
 import logging
 from collections.abc import Iterable
@@ -9,67 +9,11 @@ from .input import LoadedSplit, ResolvedInput, Split
 from .spec import DatasetSpec, TorchGeoSource, V1Source, V2Source
 
 if TYPE_CHECKING:
-    import torch
     from torch.utils.data import Dataset
 
+    from .transforms import Resize
+
 logger = logging.getLogger(__name__)
-
-
-class _ResizeTransform:
-    """Sample-level transform that resizes ``image`` (and ``mask``)."""
-
-    valid_modes = ("area", "bicubic", "bilinear", "nearest")
-
-    def __init__(self, image_size: int, interp_mode: str) -> None:
-        if interp_mode not in self.valid_modes:
-            raise ValueError(
-                f"interpolation must be one of {self.valid_modes}, got {interp_mode!r}."
-            )
-        self.image_size = image_size
-        self.interp_mode = interp_mode
-        self.align_corners = False if interp_mode in ("bicubic", "bilinear") else None
-
-    def __call__(self, sample: dict) -> dict:
-        import torch.nn.functional as F
-
-        image_size = self.image_size
-        img: torch.Tensor = sample["image"]
-        h, w = img.shape[-2], img.shape[-1]
-        if h != image_size or w != image_size:
-            squeeze_batch = img.ndim == 3
-            resize_input = img.unsqueeze(0) if squeeze_batch else img
-            img = F.interpolate(
-                resize_input,
-                size=(image_size, image_size),
-                mode=self.interp_mode,
-                align_corners=self.align_corners,
-            )
-            if squeeze_batch:
-                img = img.squeeze(0)
-            sample["image"] = img
-        if "mask" in sample:
-            mask: torch.Tensor = sample["mask"].float()
-            h_m, w_m = mask.shape[-2], mask.shape[-1]
-            if h_m != image_size or w_m != image_size:
-                if mask.ndim == 2:
-                    resize_mask = mask.unsqueeze(0).unsqueeze(0)
-                    squeeze_dims = 2
-                elif mask.ndim == 3:
-                    resize_mask = mask.unsqueeze(0)
-                    squeeze_dims = 1
-                else:
-                    resize_mask = mask
-                    squeeze_dims = 0
-                mask = F.interpolate(
-                    resize_mask,
-                    size=(image_size, image_size),
-                    mode="nearest",
-                )
-                for _ in range(squeeze_dims):
-                    mask = mask.squeeze(0)
-                mask = mask.long()
-                sample["mask"] = mask
-        return sample
 
 
 def _validate_split_options(
@@ -113,17 +57,16 @@ def _resolve_input(
     return ResolvedInput(specs, selection, time_steps)
 
 
-def _resize_transform(image_size: int | None, interpolation: str) -> _ResizeTransform | None:
+def _validate_resize_options(image_size: int | None, interpolation: str) -> None:
     if image_size is not None:
         if type(image_size) is not int:
             raise TypeError("image_size must be an integer or None")
         if image_size < 1:
             raise ValueError("image_size must be positive")
-    if interpolation not in _ResizeTransform.valid_modes:
+    if interpolation not in ("area", "bicubic", "bilinear", "nearest"):
         raise ValueError(
-            f"interpolation must be one of {_ResizeTransform.valid_modes}, got {interpolation!r}."
+            f"interpolation must be one of area, bicubic, bilinear, nearest; got {interpolation!r}"
         )
-    return _ResizeTransform(image_size, interpolation) if image_size is not None else None
 
 
 def _load_source(
@@ -132,23 +75,30 @@ def _load_source(
     *,
     inputs: ResolvedInput,
     partition: str,
-    transform: _ResizeTransform | None,
+    resize: "Resize | None",
 ) -> "Dataset":
     match spec.source:
         case V1Source():
             from .geobench_v1 import load_v1_split
+            from .transforms import CanonicalTransform
 
             return load_v1_split(
-                spec, split, inputs=inputs, partition=partition, transform=transform
+                spec,
+                split,
+                inputs=inputs,
+                partition=partition,
+                transform=CanonicalTransform(spec, inputs, resize),
             )
         case V2Source():
             from .geobench_v2 import load_v2_split
 
-            return load_v2_split(spec, split, inputs=inputs, transform=transform)
+            return load_v2_split(spec, split, inputs=inputs, resize=resize)
         case TorchGeoSource():
             from .torchgeo import load_torchgeo_split
 
-            return load_torchgeo_split(spec, split, inputs=inputs, transform=transform)
+            return load_torchgeo_split(spec, split, inputs=inputs, resize=resize)
+        case _:
+            raise TypeError(f"Unsupported dataset source {type(spec.source).__name__}")
 
 
 def load_split(  # noqa: PLR0913 - explicit public input options, without batching policy.
@@ -193,15 +143,19 @@ def load_split(  # noqa: PLR0913 - explicit public input options, without batchi
     bench = get_dataset_spec(dataset_name) if isinstance(dataset_name, str) else dataset_name
     if not isinstance(bench, DatasetSpec):
         raise TypeError("dataset_name must be a DatasetSpec or canonical name")
+    bench.validate_source()
     validated_split = _validate_split_options(bench, split, partition, time_steps)
     inputs = _resolve_input(bench, bands, time_steps)
-    transform = _resize_transform(image_size, interpolation)
+    _validate_resize_options(image_size, interpolation)
 
     from torchgeo.datasets import DatasetNotFoundError
 
+    from .transforms import Resize
+
+    resize = Resize(image_size, interpolation) if image_size is not None else None
     try:
         dataset = _load_source(
-            bench, validated_split, inputs=inputs, partition=partition, transform=transform
+            bench, validated_split, inputs=inputs, partition=partition, resize=resize
         )
     except (
         FileNotFoundError,

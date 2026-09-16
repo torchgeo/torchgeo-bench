@@ -18,6 +18,7 @@ from torch.utils.data import Dataset
 from ._metadata import read_hdf5_metadata
 from .input import ResolvedInput, Split
 from .spec import DatasetSpec, V1Source
+from .transforms import integer_target
 
 
 class GeoBenchv1(Dataset):
@@ -119,7 +120,7 @@ class GeoBenchv1(Dataset):
         if label_arr.ndim > 0:
             label_t = torch.from_numpy(label_arr.astype(np.float32))
         else:
-            label_t = torch.tensor(label_arr.item(), dtype=torch.long)
+            label_t = integer_target(label_arr.item(), name=f"{self.dataset_name} label")
 
         sample: dict = {"image": image_t, "label": label_t, "sample_id": sample_id}
         if self.transform is not None:

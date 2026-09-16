@@ -12,7 +12,7 @@ SPEC = DatasetSpec(
     multilabel=False,
     rgb_bands=("b04", "b03", "b02"),
     split_sizes=SplitSizes(train=1455, val=482, test=496),
-    source=V2Source("GeoBenchPASTIS", band_order_strategy="by_sensor"),
+    source=V2Source("GeoBenchPASTIS", band_order_strategy="by_sensor", align_to_output=True),
     capabilities=DatasetCapabilities(multi_temporal=True),
 
     bands=(

@@ -195,6 +195,29 @@ def test_hdf5_repack_and_sharded_reader_round_trip(
 
 
 @pytest.mark.parametrize("sharded", [False, True])
+@pytest.mark.parametrize("label", [0.5, 1.0000000001])
+def test_v1_scalar_labels_are_not_silently_truncated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    label: float,
+    *,
+    sharded: bool,
+) -> None:
+    family = "classification_v1.0_wds" if sharded else "classification_v1.0"
+    directory = tmp_path / "data" / family / "m-eurosat"
+    metadata = json.dumps({**_metadata(), "label": label})
+    if sharded:
+        _write_shard(directory, metadata.encode())
+    else:
+        _write_partition(directory, [SID])
+        _write_hdf5(directory, metadata)
+    monkeypatch.chdir(tmp_path)
+    loaded = load_split("m-eurosat", "train", bands=("red", "green"), image_size=1)
+    with pytest.raises(ValueError, match="integer values"):
+        loaded.dataset[0]
+
+
+@pytest.mark.parametrize("sharded", [False, True])
 def test_v1_source_loads_data_only_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, sharded: bool
 ) -> None:

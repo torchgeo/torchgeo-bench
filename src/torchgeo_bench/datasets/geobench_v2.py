@@ -1,179 +1,135 @@
-"""GeoBench V2 runtime readers with raw values and explicit source policies."""
+"""Explicit GeoBench V2 construction and source-to-canonical sample conversion."""
 
-import logging
-from collections.abc import Callable
-from functools import partial
+from collections import Counter, defaultdict, deque
 from pathlib import Path
+from typing import Literal, NotRequired, TypedDict
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import Dataset
 
 from torchgeo_bench.bands import BandSpec
 
 from .input import ResolvedInput, Split
 from .spec import DatasetSpec, V2Source
+from .transforms import CanonicalTransform, Resize, canonical_image, canonical_target
 
-logger = logging.getLogger(__name__)
-
-
-class _ChainedTransform:
-    """Canonicalize an upstream V2 sample, then apply the framework transform."""
-
-    def __init__(self, canonicalize: Callable[[dict], dict], transform: Callable | None) -> None:
-        self.canonicalize = canonicalize
-        self.transform = transform
-
-    def __call__(self, sample: dict) -> dict:
-        sample = self.canonicalize(sample)
-        if self.transform is None:
-            return sample
-        if "image" in sample:
-            return self.transform(sample)
-        image_keys = [k for k in sample if k.startswith("image_")]
-        for index, key in enumerate(image_keys):
-            wrapped = {"image": sample[key]}
-            if index == 0 and "mask" in sample:
-                wrapped["mask"] = sample["mask"]
-            wrapped = self.transform(wrapped)
-            sample[key] = wrapped["image"]
-            if "mask" in wrapped:
-                sample["mask"] = wrapped["mask"]
-        return sample
+type BandOrder = list[str] | dict[str, list[str]]
 
 
-class GeoBenchv2(Dataset):
-    """Load a GeoBench V2 dataset through its upstream class.
+class _SourceOptions(TypedDict):
+    root: Path
+    split: str
+    band_order: BandOrder
+    data_normalizer: type[nn.Identity]
+    transforms: None
+    download: Literal[False]
+    return_stacked_image: NotRequired[Literal[False]]
+    time_step: NotRequired[list[Literal["post"]]]
+    num_time_steps: NotRequired[int]
+    temporal_output_format: NotRequired[Literal["TCHW"]]
+    temporal_aggregation: NotRequired[None]
+    temporal_setting: NotRequired[Literal["single"]]
+    label_type: NotRequired[Literal["semantic_seg"]]
+    return_window: NotRequired[list[Literal["win_a", "win_b"]]]
 
-    Args:
-        spec: Definition containing the upstream source identity and split policy.
-        split: ``"train"``, ``"val"``, or ``"test"``.
-        band_specs: Requested band metadata, in output channel order.
-        band_order: Bands to load in upstream-expected shape (a flat ``list``
-            for single-modality datasets, or ``dict[modality, list[str]]`` for
-            multi-modality ones).
-        sensor_order: Override the upstream stack order for custom canonicalizers.
-        transforms: Optional sample transform forwarded to the upstream class.
-        **kwargs: Additional keyword arguments forwarded to the upstream class.
-    """
 
-    def __init__(  # noqa: PLR0913 - adapter construction with resolved band metadata.
+def _band_order(source: V2Source, bands: tuple[BandSpec, ...]) -> BandOrder:
+    if source.band_order_strategy == "flat":
+        return [band.source_name for band in bands]
+    grouped: dict[str, list[str]] = {}
+    for band in bands:
+        grouped.setdefault(band.sensor, []).append(band.source_name)
+    return grouped
+
+
+def _channel_indices(order: BandOrder, bands: tuple[BandSpec, ...]) -> tuple[int, ...]:
+    """Match actual emitted source bands, including duplicates and within-sensor order."""
+    if isinstance(order, dict):
+        emitted = [(sensor, name) for sensor, names in order.items() for name in names]
+        requested = [(band.sensor, band.source_name) for band in bands]
+    else:
+        emitted = [("", name) for name in order]
+        requested = [("", band.source_name) for band in bands]
+    if Counter(emitted) != Counter(requested):
+        raise ValueError("Backend band order does not match requested bands")
+    positions: dict[tuple[str, str], deque[int]] = defaultdict(deque)
+    for index, band in enumerate(emitted):
+        positions[band].append(index)
+    return tuple(positions[band].popleft() for band in requested)
+
+
+class _V2Samples(Dataset):
+    """Convert known upstream components before canonical validation and resizing."""
+
+    def __init__(
         self,
+        inner: Dataset,
         spec: DatasetSpec,
-        split: str,
-        *,
-        band_specs: tuple[BandSpec, ...],
-        band_order: list[str] | dict[str, list[str]] | None = None,
-        sensor_order: tuple[str, ...] | None = None,
-        transforms: Callable | None = None,
-        **kwargs,
+        inputs: ResolvedInput,
+        order: BandOrder,
+        resize: Resize | None,
     ) -> None:
-        super().__init__()
-        source = spec.source
-        assert isinstance(source, V2Source)
-        # Import GeoBench V2 only when needed to keep CLI startup fast.
-        import geobench_v2.datasets as _gb_v2
-        from geobench_v2.datasets.base import GeoBenchBaseDataset
-
-        cls = getattr(_gb_v2, source.upstream_class)
-        upstream_split = source.validation_split if split == "val" else split
-
-        forward: dict[str, object] = {
-            "root": Path(source.root) / spec.storage_name,
-            "split": upstream_split,
-            "transforms": transforms,
-        }
-        if band_order is not None:
-            forward["band_order"] = band_order
-        forward.update(kwargs)
-
-        self._inner: GeoBenchBaseDataset = cls(**forward)
-        self.dataset_name = spec.name
-        self.split = split
-        self.band_specs = band_specs
-        # Upstream preserves within-sensor band order, but stacks using its resolved
-        # band_order, not necessarily the dictionary supplied to its constructor.
-        upstream_order = self._inner.band_order
-        if sensor_order is not None:
-            self._sensor_order = sensor_order
-        elif isinstance(upstream_order, dict):
-            self._sensor_order = tuple(upstream_order)
-        else:
-            self._sensor_order = ()
-        emitted = list(range(len(band_specs)))
-        if self._sensor_order:
-            emitted = [
-                index
-                for sensor in self._sensor_order
-                for index, spec in enumerate(band_specs)
-                if spec.sensor == sensor
-            ]
-        if sorted(emitted) != list(range(len(band_specs))):
-            raise ValueError(f"{spec.name}: backend sensor order does not match requested bands")
-        self._channel_indices = [emitted.index(index) for index in range(len(band_specs))]
+        self._inner = inner
+        self.spec = spec
+        self.inputs = inputs
+        self.band_specs = inputs.bands
+        self.order = order
+        self.indices = _channel_indices(order, inputs.bands)
+        self.transform = CanonicalTransform(spec, inputs, resize)
 
     def __len__(self) -> int:
         return len(self._inner)  # type: ignore[arg-type]
 
     def __getitem__(self, index: int) -> dict:
-        sample = self._inner[index]
-        if "image" not in sample and self._sensor_order:
-            # Upstream PASTIS stacks along dim=0 even for TCHW. Keep its acquisition
-            # selection and transforms, then concatenate along the channel axis here.
-            sample["image"] = torch.cat(
-                [sample.pop(f"image_{sensor}") for sensor in self._sensor_order], dim=-3
+        sample = dict(self._inner[index])
+        source = self.spec.source
+        assert isinstance(source, V2Source)
+        canonical_target(sample, self.spec)
+        if source.sample_adapter == "offset_mask":
+            # Upstream adds one to native {0, 1}; reserved zero remains background.
+            sample["mask"] = sample["mask"].clamp_min(1) - 1
+        if isinstance(self.order, dict):
+            keys = (
+                {"sar": "image_post", "dem": "image_dem"}
+                if source.sample_adapter == "post_sar_dem"
+                else {sensor: f"image_{sensor}" for sensor in self.order}
             )
-        image = sample["image"]
-        if image.ndim not in (3, 4) or image.shape[-3] != len(self.band_specs):
-            raise ValueError(
-                f"{self.dataset_name}: expected CHW or TCHW image with "
-                f"{len(self.band_specs)} channels, got {tuple(image.shape)}"
-            )
-        if self._channel_indices != list(range(len(self.band_specs))):
-            sample["image"] = image.index_select(
-                -3, torch.tensor(self._channel_indices, device=image.device)
-            )
-        return sample
-
-
-def build_band_order(
-    source: V2Source, bands: tuple[BandSpec, ...]
-) -> list[str] | dict[str, list[str]]:
-    """Translate the single resolved band sequence into the upstream request."""
-    if source.band_order_strategy == "by_sensor":
-        grouped: dict[str, list[str]] = {}
-        for band in bands:
-            grouped.setdefault(band.sensor, []).append(band.source_name)
-        return grouped
-    return [band.source_name for band in bands]
-
-
-def canonicalize_sample(sample: dict, *, source: V2Source) -> dict:
-    """Apply the declared existing acquisition or label policy before resizing."""
-    match source.sample_adapter:
-        case "later_acquisition":
-            if "image" not in sample and "image_b" in sample:
-                sample["image"] = sample.pop("image_b")
-                sample.pop("image_a", None)
-        case "post_sar_dem":
-            # Upstream cannot stack SAR and DEM with different channel counts.
-            keys = {"sar": "image_post", "dem": "image_dem"}
-            assert source.canonical_sensor_order is not None
-            modalities = [
-                sample.pop(keys[sensor])
-                for sensor in source.canonical_sensor_order
-                if keys[sensor] in sample
-            ]
-            if modalities:
-                sample["image"] = (
-                    modalities[0] if len(modalities) == 1 else torch.cat(modalities, dim=0)
+            images = [
+                canonical_image(
+                    self._component(sample, keys[sensor]),
+                    self.inputs,
+                    name=f"{self.spec.name} {keys[sensor]}",
+                    channels=len(names),
                 )
-        case "offset_mask":
-            # SpaceNet upstream adds 1 to native {0, 1}; reserved zero stays background.
-            mask = sample.get("mask")
-            if mask is not None:
-                sample["mask"] = (torch.as_tensor(mask) - 1).clamp_(min=0)
-    return sample
+                for sensor, names in self.order.items()
+            ]
+            if len({image.shape[-2:] for image in images}) > 1:
+                if not source.align_to_output:
+                    raise ValueError(f"{self.spec.name}: source sensor grids must already match")
+                resize = self.transform.resize
+                if resize is None:
+                    raise ValueError(
+                        f"{self.spec.name}: different sensor grids require image_size for alignment"
+                    )
+                # Previously each sensor was resized directly onto the requested grid
+                # before stacking. Avoid a new intermediate grid/double interpolation.
+                images = [resize.image(image) for image in images]
+            image = torch.cat(images, dim=-3)
+        else:
+            key = "image_b" if source.sample_adapter == "later_acquisition" else "image"
+            image = canonical_image(self._component(sample, key), self.inputs, name=self.spec.name)
+            if source.sample_adapter == "later_acquisition":
+                sample.pop("image_a", None)
+        if self.indices != tuple(range(len(self.indices))):
+            image = image[list(self.indices)] if image.ndim == 3 else image[:, list(self.indices)]
+        sample["image"] = image
+        return self.transform(sample)
+
+    def _component(self, sample: dict, key: str) -> object:
+        if key not in sample:
+            raise ValueError(f"{self.spec.name}: missing required source component {key!r}")
+        return sample.pop(key)
 
 
 def load_v2_split(
@@ -181,29 +137,52 @@ def load_v2_split(
     split: Split,
     *,
     inputs: ResolvedInput,
-    transform: Callable | None = None,
+    resize: Resize | None = None,
 ) -> Dataset:
-    """Construct the common V2 reader from immutable, explicit source policies."""
+    """Construct only supported source options; leave acquisition sampling upstream."""
     source = spec.source
-    assert isinstance(source, V2Source)
-    kwargs: dict[str, object] = {"data_normalizer": nn.Identity, "download": False}
-    if source.band_order_strategy == "by_sensor":
-        kwargs["return_stacked_image"] = True
-    if source.return_stacked_image is not None:
-        kwargs["return_stacked_image"] = source.return_stacked_image
-    if source.time_step is not None:
-        kwargs["time_step"] = list(source.time_step)
-    if inputs.time_steps is not None:
-        kwargs["num_time_steps"] = inputs.time_steps
-        kwargs["temporal_output_format"] = "TCHW"
-        if inputs.time_steps > 1:
-            kwargs["return_stacked_image"] = False
-    return GeoBenchv2(
-        spec=spec,
-        split=split,
-        band_specs=inputs.bands,
-        band_order=build_band_order(source, inputs.bands),
-        sensor_order=source.canonical_sensor_order,
-        transforms=_ChainedTransform(partial(canonicalize_sample, source=source), transform),
-        **kwargs,
-    )
+    if not isinstance(source, V2Source):
+        raise TypeError("load_v2_split requires a V2Source")
+    import geobench_v2.datasets as upstream
+
+    cls = getattr(upstream, source.upstream_class)
+    order = _band_order(source, inputs.bands)
+    available = cls.dataset_band_config.modalities
+    if isinstance(order, dict):
+        valid = all(
+            sensor in available and all(name in available[sensor].default_order for name in names)
+            for sensor, names in order.items()
+        )
+    else:
+        names = {name for config in available.values() for name in config.default_order}
+        valid = all(name in names for name in order)
+    if not valid:
+        raise ValueError(
+            f"{spec.name}: requested source bands are unsupported by {source.upstream_class}"
+        )
+    options: _SourceOptions = {
+        "root": Path(source.root) / spec.storage_name,
+        "split": source.validation_split if split == "val" else split,
+        "band_order": order,
+        "data_normalizer": nn.Identity,
+        "transforms": None,
+        "download": False,
+    }
+    if source.band_order_strategy == "by_sensor" or source.sample_adapter == "later_acquisition":
+        options["return_stacked_image"] = False
+    if source.sample_adapter == "post_sar_dem":
+        options["time_step"] = ["post"]
+    if source.sample_adapter == "later_acquisition":
+        options["return_window"] = ["win_a", "win_b"]
+        options["label_type"] = "semantic_seg"
+    if source.upstream_class == "GeoBenchSpaceNet2":
+        options["label_type"] = "semantic_seg"
+    if source.upstream_class == "GeoBenchDynamicEarthNet":
+        options["temporal_setting"] = "single"
+    if spec.capabilities.multi_temporal:
+        options["num_time_steps"] = inputs.num_time_steps
+        options["temporal_output_format"] = "TCHW"
+        options["temporal_aggregation"] = None
+        options["label_type"] = "semantic_seg"
+    inner = cls(**options)
+    return _V2Samples(inner, spec, inputs, inner.band_order, resize)

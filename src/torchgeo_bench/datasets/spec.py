@@ -37,6 +37,16 @@ class DatasetCapabilities:
     supports_partitions: bool = False
     multi_temporal: bool = False
 
+    def validate(self, source: "DatasetSource") -> None:
+        """Check that declared options can actually be honored by this backend."""
+        if type(self.supports_partitions) is not bool or type(self.multi_temporal) is not bool:
+            raise TypeError("capabilities must contain boolean supported-option flags")
+        if self.supports_partitions and not isinstance(source, V1Source):
+            raise ValueError("Only V1 sources support partitions")
+        temporal = isinstance(source, V2Source) and source.upstream_class == "GeoBenchPASTIS"
+        if self.multi_temporal != temporal:
+            raise ValueError("Only the PASTIS source supports multi-temporal inputs")
+
 
 @dataclass(frozen=True)
 class GeographySpec:
@@ -73,6 +83,7 @@ class V2Source:
     return_stacked_image: bool | None = None
     time_step: tuple[str, ...] | None = None
     canonical_sensor_order: tuple[str, ...] | None = None
+    align_to_output: bool = False
 
 
 @dataclass(frozen=True)
@@ -85,6 +96,13 @@ class TorchGeoSource:
     storage_name: str | None = None
     validation_split: Literal["val"] = "val"
     download_checksum: bool = False
+
+    def validate(self) -> None:
+        """Reject unsupported TorchGeo reader identities and options."""
+        if self.upstream_class not in ("EuroSAT", "EuroSATSpatial", "RESISC45"):
+            raise ValueError(f"Unsupported TorchGeo source {self.upstream_class!r}")
+        if self.validation_split != "val" or type(self.download_checksum) is not bool:
+            raise ValueError("Unsupported TorchGeo source options")
 
 
 type DatasetSource = V1Source | V2Source | TorchGeoSource
@@ -109,6 +127,28 @@ class DatasetSpec:
     multilabel: bool = False
     capabilities: DatasetCapabilities = DatasetCapabilities()
     geography: GeographySpec = GeographySpec()
+
+    def validate_source(self) -> None:
+        """Reject unsupported source/capability combinations before importing readers."""
+        if self.task not in ("classification", "segmentation"):
+            raise ValueError(f"Unsupported task {self.task!r}")
+        if type(self.multilabel) is not bool or (self.multilabel and self.task != "classification"):
+            raise ValueError("multilabel must be boolean and requires classification")
+        if type(self.num_classes) is not int or self.num_classes < 1:
+            raise ValueError("num_classes must be a positive integer")
+        if not isinstance(self.capabilities, DatasetCapabilities):
+            raise TypeError("capabilities must be DatasetCapabilities")
+        source = self.source
+        if not isinstance(source, V1Source | V2Source | TorchGeoSource):
+            raise TypeError(f"Unsupported dataset source {type(source).__name__}")
+        self.capabilities.validate(source)
+        if isinstance(source, V1Source):
+            if source.validation_split != "valid":
+                raise ValueError("V1 validation_split must be 'valid'")
+        elif isinstance(source, TorchGeoSource):
+            source.validate()
+        else:
+            _validate_v2_source(source)
 
     @property
     def num_channels(self) -> int:
@@ -156,3 +196,57 @@ class DatasetSpec:
         raise ValueError(
             f"Unknown band selection {selection!r}; use rgb, all, or explicit band names"
         )
+
+
+def _validate_v2_source(source: V2Source) -> None:
+    flat = {
+        "GeoBenchBurnScars",
+        "GeoBenchCaFFe",
+        "GeoBenchCloudSen12",
+        "GeoBenchFLAIR2",
+        "GeoBenchForestnet",
+        "GeoBenchFieldsOfTheWorld",
+        "GeoBenchSpaceNet7",
+    }
+    grouped = {
+        "GeoBenchBENV2",
+        "GeoBenchDynamicEarthNet",
+        "GeoBenchKuroSiwo",
+        "GeoBenchPASTIS",
+        "GeoBenchSo2Sat",
+        "GeoBenchSpaceNet2",
+        "GeoBenchTreeSatAI",
+    }
+    if source.upstream_class not in flat | grouped:
+        raise ValueError(f"Unsupported V2 source {source.upstream_class!r}")
+    strategy = "by_sensor" if source.upstream_class in grouped else "flat"
+    adapter = {
+        "GeoBenchFieldsOfTheWorld": "later_acquisition",
+        "GeoBenchKuroSiwo": "post_sar_dem",
+        "GeoBenchSpaceNet2": "offset_mask",
+        "GeoBenchSpaceNet7": "offset_mask",
+    }.get(source.upstream_class, "identity")
+    if source.band_order_strategy != strategy or source.sample_adapter != adapter:
+        raise ValueError(f"{source.upstream_class}: unsupported band/sample source policy")
+    alignment = source.upstream_class in {
+        "GeoBenchTreeSatAI",
+        "GeoBenchSpaceNet2",
+        "GeoBenchPASTIS",
+        "GeoBenchDynamicEarthNet",
+    }
+    if type(source.align_to_output) is not bool or source.align_to_output != alignment:
+        raise ValueError(f"{source.upstream_class}: unsupported sensor alignment policy")
+    if source.validation_split not in ("val", "validation"):
+        raise ValueError("Unsupported V2 validation_split")
+    if adapter == "post_sar_dem":
+        if (
+            source.return_stacked_image is not False
+            or source.time_step != ("post",)
+            or source.canonical_sensor_order != ("sar", "dem")
+        ):
+            raise ValueError("KuroSiwo requires unstacked post-event SAR/DEM source options")
+    elif any(
+        option is not None
+        for option in (source.return_stacked_image, source.time_step, source.canonical_sensor_order)
+    ):
+        raise ValueError(f"{source.upstream_class}: unsupported source options")
