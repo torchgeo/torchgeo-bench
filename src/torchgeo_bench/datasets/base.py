@@ -30,7 +30,7 @@ class BenchDataset(ABC):
     """Abstract base class for benchmark datasets.
 
     Subclasses must define the class-level metadata attributes listed below
-    and implement :meth:`_load_split` and :meth:`data_root`.
+    and implement ``_load_split`` and :meth:`data_root`.
 
     Attributes:
         name: Dataset identifier used on the command line (e.g. ``"m-eurosat"``).
