@@ -2,6 +2,7 @@
 
 import pickle
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,10 @@ from projects.cleanlab import (
     cleanlab_per_class_singlelabel,
     run_cleanlab_audit,
 )
+from tests.support.runner import _DictTensorDataset
 from torchgeo_bench.config.presets import ModelPreset
+from torchgeo_bench.datasets import DatasetSpec, LoadedSplit, get_dataset_spec, resolve_input
+from torchgeo_bench.datasets.spec import Split
 
 EXECUTED: list[bool] = []
 
@@ -189,14 +193,18 @@ def test_audit_model_name_comes_from_the_artifact_name(
 
 @pytest.mark.parametrize("dataset", ["m-eurosat", "m-bigearthnet"])
 @pytest.mark.parametrize("custom_model", [False, True])
+@pytest.mark.parametrize("band_selection", ["rgb", "default"])
 def test_probability_writer_emits_no_object_arrays(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     dataset: str,
+    band_selection: str,
     *,
     custom_model: bool,
 ) -> None:
     model_name = "custom-rcf" if custom_model else "rcf"
+    spec = _probability_spec(dataset, temporal=custom_model)
+
     results = tmp_path / "results.csv"
     pd.DataFrame(
         [
@@ -206,7 +214,7 @@ def test_probability_writer_emits_no_object_arrays(
                 "name": model_name,
                 "metric_value": 0.9,
                 "normalization": "bandspec_zscore",
-                "bands": "rgb",
+                "bands": band_selection,
                 "image_size": 16,
                 "interpolation": "bilinear",
                 "partition": "default",
@@ -259,17 +267,19 @@ def test_probability_writer_emits_no_object_arrays(
         "test": _probability_samples(test_labels, temporal=custom_model),
     }
 
-    def datasets(dataset_name: str, split: str, **kwargs: object):
-        from tests.support.runner import make_loaded_split
-
+    def datasets(dataset_name: str, split: Split, **kwargs: object) -> LoadedSplit:
         assert dataset_name == dataset
         assert kwargs["image_size"] == 16
         assert kwargs["interpolation"] == "bilinear"
-        assert kwargs["bands"] == "rgb"
+        assert kwargs["bands"] == band_selection
         assert kwargs["partition"] == "default"
         assert kwargs["time_steps"] == (2 if custom_model else None)
-        return make_loaded_split(
-            splits[split], dataset, split, time_steps=2 if custom_model else None
+        return LoadedSplit(
+            dataset=splits[split],
+            spec=spec,
+            split=split,
+            partition="default",
+            input=resolve_input(spec, bands=band_selection, time_steps=2 if custom_model else None),
         )
 
     def build(preset: ModelPreset, **kwargs: object) -> torch.nn.Module:
@@ -313,16 +323,26 @@ def test_probability_writer_emits_no_object_arrays(
     _assert_probability_artifacts(output, dataset, model_name, train_labels, test_labels)
 
 
-def _probability_samples(
-    labels: np.ndarray, *, temporal: bool = False
-) -> list[dict[str, torch.Tensor]]:
-    return [
-        {
-            "image": torch.full((2, 3, 2, 2) if temporal else (3, 2, 2), float(index)),
-            "label": torch.from_numpy(np.asarray(label)),
-        }
-        for index, label in enumerate(labels)
+def _probability_spec(name: str, *, temporal: bool) -> DatasetSpec:
+    """Give the two-class mock a temporal source instead of weakening real V1 capabilities."""
+    definition = get_dataset_spec(name)
+    if temporal:
+        return replace(
+            get_dataset_spec("pastis"),
+            name=name,
+            task=definition.task,
+            multilabel=definition.multilabel,
+            num_classes=2,
+        )
+    return replace(definition, num_classes=2)
+
+
+def _probability_samples(labels: np.ndarray, *, temporal: bool = False) -> _DictTensorDataset:
+    images = [
+        torch.full((2, 3, 2, 2) if temporal else (3, 2, 2), float(index))
+        for index in range(len(labels))
     ]
+    return _DictTensorDataset(torch.stack(images), torch.from_numpy(labels))
 
 
 def _assert_probability_artifacts(

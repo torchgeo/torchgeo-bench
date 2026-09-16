@@ -178,12 +178,12 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
 @pytest.mark.parametrize(
     ("requested", "expected_hash"),
     [
-        (None, "4d2b8c799a228059"),
-        ("cpu", "dd8b8443e738da5f"),
-        ("cuda", "b2ce2a88d10202d2"),
-        ("cuda:0", "4d2b8c799a228059"),
-        ("cuda:1", "8b5895d29e02776e"),
-        ("auto", "8b5895d29e02776e"),
+        (None, "c49888d6a409f4da"),
+        ("cpu", "95405b0bc5aeecf3"),
+        ("cuda", "473d2c743105853e"),
+        ("cuda:0", "c49888d6a409f4da"),
+        ("cuda:1", "74bbabc74cdea545"),
+        ("auto", "74bbabc74cdea545"),
     ],
 )
 @pytest.mark.parametrize("entrypoint", ["direct", "command"])

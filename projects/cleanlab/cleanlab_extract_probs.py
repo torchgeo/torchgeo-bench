@@ -89,7 +89,7 @@ def lookup_top1(results_path: Path, dataset: str) -> pd.Series:
 def parse_bands(value: object) -> str | list[str]:
     """Convert a CSV bands cell back to the form ``load_split`` accepts."""
     s = str(value)
-    if s in ("rgb", "all"):
+    if s in ("rgb", "default", "all"):
         return s
     return [b.strip() for b in s.split(",") if b.strip()]
 
