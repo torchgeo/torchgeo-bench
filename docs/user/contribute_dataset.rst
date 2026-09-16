@@ -47,7 +47,7 @@ Declare the exact task, class count, and multilabel semantics from verified sour
 ``BandSpec`` stores source names, sensor tags, statistics, and available wavelengths in tensor order. ``rgb_bands`` currently preserves the benchmark's existing selector, including CaFFe grayscale and KuroSiwo SAR. Do not change those choices incidentally. Normalization remains model-owned.
 
 Source policies and capabilities
--------------------------------
+--------------------------------
 
 * ``V1Source`` selects verified JSON shards, with a retained custom JSON-metadata HDF5 fallback. Pickle metadata is not supported. ``DatasetCapabilities(supports_partitions=True)`` enables non-default partitions.
 * ``V2Source`` contains the upstream class identifier, split-name policy, and typed options. Set ``band_order_strategy="by_sensor"`` when the upstream reader groups channels by modality. Declare an existing named sample adapter for nonstandard image or mask keys; do not import runtime adapter functions into the definition module.
@@ -62,7 +62,7 @@ Each reader loads only the requested split, with downloading disabled. Samples u
 For readers without a band argument, apply channel selection before resizing. The RESISC45 implementation in :file:`src/torchgeo_bench/datasets/torchgeo.py` demonstrates this, including avoiding a copy for identity selection.
 
 Compute the band statistics
---------------------------
+---------------------------
 
 Measure ``mean``, ``std``, ``min``, and ``max`` over the **train split only**, in **raw sensor units**. Validation/test statistics would leak evaluation data. Statistics drive dataset normalization and model-native unit detection.
 
@@ -73,7 +73,7 @@ Measure ``mean``, ``std``, ``min``, and ``max`` over the **train split only**, i
 The script accumulates in float64. Copy its measured BandSpec values into the definition's tuple, and retain a short provenance comment. Do not infer missing physical calibration or borrow another dataset's statistics.
 
 Register, download, and document
--------------------------------
+--------------------------------
 
 Import the definition module in :file:`src/torchgeo_bench/datasets/catalog.py` and include its ``SPEC`` in ``_make_catalog``. The catalog derives IDs from the records; do not add another name/task/routing registry or export wrapper classes. ``list_datasets()``, ``get_dataset_spec(name)``, CLI details, config validation, FLOPs metadata, downloads, and geography all use this catalog.
 
@@ -84,7 +84,7 @@ Use the existing dataset catalog tests as the parity pattern. The committed :fil
 Update :file:`docs/user/datasets.rst`, relevant API documentation, and :file:`docs/user/changelog.rst` for a new dataset.
 
 Validate the loading contract
-----------------------------
+-----------------------------
 
 Add fast tests with tiny local files for requested-split isolation, input-option validation, channel values and metadata identity/order, raw dtype, targets, source-specific adapters, and visible missing-data failures. Keep real-data tests marked ``slow``. Exercise applicable offline integrations.
 

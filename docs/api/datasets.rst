@@ -15,6 +15,13 @@ Metadata API
 .. autofunction:: list_datasets
 .. autofunction:: list_v2_datasets
 .. autoclass:: DatasetSpec
+   :members: rgb_bands
+   :undoc-members:
+
+.. autodata:: torchgeo_bench.datasets.spec.Task
+.. autodata:: torchgeo_bench.datasets.spec.Split
+.. autodata:: torchgeo_bench.datasets.spec.DatasetSource
+
 .. autoclass:: BandSpec
 .. autoclass:: SplitSizes
 .. autoclass:: DatasetCapabilities
