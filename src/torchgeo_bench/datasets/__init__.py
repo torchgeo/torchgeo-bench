@@ -48,6 +48,7 @@ __all__ = [
     "SpaceNet2",
     "SpaceNet7",
     "TreeSatAI",
+    "UCMerced",
     "get_bench_dataset_class",
     "get_dataset_task",
     "get_datasets",
@@ -78,6 +79,7 @@ _LAZY_CLASSES: dict[str, str] = {
     "SpaceNet2": "spacenet2",
     "SpaceNet7": "spacenet7",
     "TreeSatAI": "treesatai",
+    "UCMerced": "ucmerced",
 }
 
 
