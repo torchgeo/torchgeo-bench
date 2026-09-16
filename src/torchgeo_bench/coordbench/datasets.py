@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 
 from torchgeo_bench.coordbench.catalog import (
     CDC_PLACES_MEASURES,
@@ -52,6 +53,37 @@ PDFM_NON_TASK = frozenset(
         "extrapolation_split",
     }
 )
+
+SUSTAINBENCH_TASKS = {
+    "asset": "asset_index",
+    "water": "water_index",
+    "sanitation": "sanitation_index",
+    "child_mortality": "under5_mort",
+    "women_edu": "women_edu",
+    "women_bmi": "women_bmi",
+}
+
+CDC_PLACES_MEASURES = {  # task name -> GIS-friendly column prefix (CrudePrev = crude prevalence %)
+    "phys_health": "PHLTH",
+    "diabetes": "DIABETES",
+    "copd": "COPD",
+    "cancer": "CANCER",
+    "chd": "CHD",
+    "mental_health": "MHLTH",
+    "checkup": "CHECKUP",
+    "sleep_lt7": "SLEEP",
+    "asthma": "CASTHMA",
+    "obesity": "OBESITY",
+    "smoking": "CSMOKING",
+    "high_chol": "HIGHCHOL",
+}
+
+ELECTRIC_LOAD_VARIABLES = [
+    "mean",
+    "min",
+    "max",
+    "median",
+]
 
 
 @dataclass
@@ -228,6 +260,29 @@ def load_sustainbench() -> list[CoordBenchmark]:
                 test_mask=is_test[m.to_numpy()],
             )
         )
+    return out
+
+def load_usa_electric_usage() -> list[CoordBenchmark]:
+    """Data.gov electrical demand profiles for each county in the contiguous USA.
+    Data is hourly and aggregated to a vector of daily mean/min/max/median.
+    """
+    counties_path = "INSERT_COUNTIES_GEOPARQUET_PATH_HERE" #TODO: after uploading parquet files to huggingface
+    df = load_config("usa_electric_usage")
+    counties = gpd.read_file(counties_path)
+
+    finalized_df = df.merge(counties, on="county", how="left")
+
+    out: list[CoordBenchmark] = []
+    for col in ELECTRIC_LOAD_VARIABLES:
+        out.append(
+            CoordBenchmark(
+                name=f"usa_electric_usage-{col}",
+                lat=finalized_df["lat"].to_numpy(np.float64),
+                lon=finalized_df["lon"].to_numpy(np.float64),
+                tasks={col: finalized_df[col].to_numpy(np.float64)},
+            )
+        )
+
     return out
 
 
