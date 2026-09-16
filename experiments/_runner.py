@@ -31,7 +31,8 @@ class Job:
     Attributes:
         label: Short human-readable identifier for log lines.
         config: Validated run settings passed through a temporary YAML file.
-            The runner overrides device, output file, and resume with explicit flags.
+            The runner overrides device and resume with explicit flags. It also overrides the
+            output file when a combined CSV is requested.
     """
 
     label: str
@@ -72,9 +73,9 @@ def default_output(script_file: str | Path) -> str:
     return f"results/{stem}.csv"
 
 
-def _command(config_path: str, gpu: int, output: str) -> list[str]:
+def _command(config_path: str, gpu: int, output: str | None) -> list[str]:
     """Build the public benchmark invocation for a serialized job."""
-    return [
+    command = [
         sys.executable,
         "-m",
         "torchgeo_bench",
@@ -83,13 +84,14 @@ def _command(config_path: str, gpu: int, output: str) -> list[str]:
         config_path,
         "--device",
         f"cuda:{gpu}",
-        "--output",
-        output,
         "--resume",
     ]
+    if output is not None:
+        command.extend(["--output", output])
+    return command
 
 
-def _run_one(job: Job, gpu: int, idx: int, total: int, output: str) -> _JobResult:
+def _run_one(job: Job, gpu: int, idx: int, total: int, output: str | None) -> _JobResult:
     """Run one benchmark job on the assigned GPU."""
     logger.info("[%d/%d] START %s on cuda:%d", idx, total, job.label, gpu)
     start = time.time()
@@ -128,7 +130,7 @@ def _worker(
     gpu: int,
     job_queue: "Queue[tuple[int, Job] | None]",
     total: int,
-    output: str,
+    output: str | None,
     results: "Queue[_JobResult]",
 ) -> None:
     """Pull jobs off the queue and run them on the assigned GPU until empty."""
@@ -137,7 +139,9 @@ def _worker(
         results.put(_run_one(job, gpu, idx, total, output))
 
 
-def summarize_results(results: list[_JobResult], total: int, elapsed: float, output: str) -> int:
+def summarize_results(
+    results: list[_JobResult], total: int, elapsed: float, output: str | None
+) -> int:
     """Log job timings and failures, returning the run exit code."""
     passed = sum(1 for r in results if r.returncode == 0)
     failed = total - passed
@@ -148,7 +152,7 @@ def summarize_results(results: list[_JobResult], total: int, elapsed: float, out
         total,
         failed,
         elapsed,
-        output,
+        output or "per-model CSVs",
     )
 
     if failed:
@@ -173,7 +177,7 @@ def run_jobs(
     jobs: list[Job],
     devices: list[int],
     *,
-    output: str,
+    output: str | None = None,
     dry_run: bool = False,
 ) -> int:
     """Run jobs on the selected GPUs and return an exit code.
@@ -181,7 +185,8 @@ def run_jobs(
     Args:
         jobs: List of :class:`Job` instances to execute.
         devices: GPU indices, with at most one job running on each GPU.
-        output: CSV path passed as ``--output <path>`` to every invocation.
+        output: Combined CSV path passed as ``--output <path>`` to every invocation.
+            When omitted, each job uses its configured per-model output directory.
         dry_run: Log planned commands without starting jobs.
 
     Returns:
@@ -190,7 +195,12 @@ def run_jobs(
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     total = len(jobs)
-    logger.info("Running %d jobs on devices %s; output=%s, resume=true", total, devices, output)
+    logger.info(
+        "Running %d jobs on devices %s; output=%s, resume=true",
+        total,
+        devices,
+        output or "per-model CSVs",
+    )
 
     if total == 0:
         logger.warning("No jobs to run.")
