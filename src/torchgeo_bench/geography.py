@@ -483,7 +483,7 @@ def load_geography(name: str, store_dir: Path | None = None) -> GeoRecord:
     if not path.exists():
         raise FileNotFoundError(
             f"No geography record for {name!r} at {path}. "
-            "Run experiments/scripts/extract_dataset_geography.py to generate it."
+            "Run scripts/extract_dataset_geography.py to generate it."
         )
     return GeoRecord.from_json(json.loads(path.read_text()))
 

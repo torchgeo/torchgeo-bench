@@ -9,7 +9,7 @@ import pytest
 import torch
 import yaml
 
-from experiments.scripts import (
+from scripts import (
     audit_model_native,
     introspect_seg_layers,
     tune_dataloader,

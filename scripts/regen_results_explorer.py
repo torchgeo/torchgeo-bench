@@ -8,7 +8,7 @@ Include classification, segmentation, profiling, and intrinsic-dimension measure
 
 Usage::
 
-    python experiments/scripts/regen_results_explorer.py [--label 2026-05-08]
+    python scripts/regen_results_explorer.py [--label 2026-05-08]
 """
 
 import argparse
@@ -21,7 +21,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "results" / "models"
 PROFILE_RESULTS_DIR = ROOT / "results" / "profiles"
 INTRINSIC_DIM_RESULTS_DIR = ROOT / "results" / "intrinsic_dim"
@@ -270,6 +270,7 @@ def _replace_snapshot_data(
 
 
 def main() -> None:
+    """Regenerate the Results Explorer data snapshots from the tracked result CSVs."""
     today = date.today()
     parser = argparse.ArgumentParser()
     parser.add_argument(

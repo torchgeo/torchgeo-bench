@@ -17,7 +17,7 @@ benchmark results. The committed page is regenerated from
 ``results/models/*.csv``, ``results/profiles/*.csv``,
 ``results/intrinsic_dim/*.csv``, ``results/compute_cost.csv``, and the
 archived JSON snapshots with
-:file:`experiments/scripts/regen_results_explorer.py`.
+:file:`scripts/regen_results_explorer.py`.
 
 It covers classification (``knn5`` / ``linear``), segmentation (``seg-linear``,
 ``seg-conv_block``, ``seg-fpn``, ``seg-dpt``, reported as mIoU), intrinsic

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from experiments.scripts import regen_results_explorer as explorer
+from scripts import regen_results_explorer as explorer
 
 HTML = """\
 <h1 class="headline" id="headline-text">Old headline</h1>

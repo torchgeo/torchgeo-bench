@@ -2,9 +2,9 @@
 
 Usage::
 
-    python experiments/scripts/repack_geobench_v1.py m-eurosat
-    python experiments/scripts/repack_geobench_v1.py m-bigearthnet --shard-size 1000
-    python experiments/scripts/repack_geobench_v1.py m-eurosat --validate
+    python scripts/repack_geobench_v1.py m-eurosat
+    python scripts/repack_geobench_v1.py m-bigearthnet --shard-size 1000
+    python scripts/repack_geobench_v1.py m-eurosat --validate
 
 Each output sample is::
 
@@ -42,6 +42,7 @@ def _read_sample(hdf5_path: Path) -> tuple[dict[str, np.ndarray], dict]:
 
 
 def repack(dataset_dir: Path, out_dir: Path, shard_size: int = 1000) -> int:
+    """Repack per-sample HDF5 files into WebDataset shards, returning the shard count."""
     if shard_size < 1:
         raise ValueError("shard_size must be positive.")
     sample_paths = sorted(dataset_dir.glob("*.hdf5"))
@@ -143,6 +144,7 @@ def validate(dataset_dir: Path, out_dir: Path, n_samples: int = 50) -> None:
 
 
 def main() -> None:
+    """Repack one GeoBench V1 dataset into WebDataset shards."""
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset", help="V1 dataset name (e.g. m-eurosat)")
     parser.add_argument(

@@ -12,7 +12,7 @@ Preserve row order and append moved rows after existing destination rows.
 
 Usage::
 
-    python experiments/scripts/migrate_split_profile_intrinsic_dim.py
+    python scripts/migrations/migrate_split_profile_intrinsic_dim.py
 """
 
 import csv
@@ -84,6 +84,7 @@ def migrate_one(path: Path) -> tuple[int, dict[str, int]]:
 
 
 def main() -> None:
+    """Split profile and intrinsic-dimension rows out of the per-model result CSVs."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     csv_paths = sorted(MODELS_DIR.glob("*.csv"))
     total_original = 0
