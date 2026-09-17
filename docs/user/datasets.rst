@@ -3,7 +3,7 @@ Datasets
 
 ``torchgeo-bench`` supports two generations of GeoBench datasets — V1 and
 V2 — plus wrappers around torchgeo's standalone EuroSAT and NWPU-RESISC45
-datasets.  All datasets share the
+datasets, and AID (rehosted from Hugging Face).  All datasets share the
 :class:`~torchgeo_bench.datasets.BenchDataset` interface and are
 registered by name so they can be selected without importing every loader.
 
@@ -34,6 +34,9 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
    * - ``resisc45``
      - ``data/resisc45/``
      - torchgeo's ``RESISC45`` downloader
+   * - ``aid``
+     - ``data/aid/``
+     - Hugging Face ``isaaccorley/aid``, pinned commit + checksum-verified
 
 Downloading
 -----------
@@ -49,6 +52,7 @@ The :doc:`/api/cli` accepts one or more dataset names. Collection aliases remain
    $ torchgeo-bench download geobench_v2 --datasets benv2,burn_scars  # V2 subset
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT
    $ torchgeo-bench download resisc45                                 # torchgeo RESISC45
+   $ torchgeo-bench download aid                                      # isaaccorley/aid rehost
    $ torchgeo-bench download geobench_v2 --output-dir /scratch/data   # custom root
 
 Do not mix collection aliases and individual names in one invocation. ``--datasets`` applies only to a collection alias. ``--output-dir`` changes the download destination, not the runner's fixed ``data/`` location; link the downloaded root to ``data/`` before loading it from another working directory.
@@ -208,6 +212,7 @@ CLI name             Class
 ``eurosat``          :class:`~torchgeo_bench.datasets.EuroSAT`  (torchgeo wrapper, random split)
 ``eurosat-spatial``  :class:`~torchgeo_bench.datasets.EuroSATSpatial`  (longitude-based split)
 ``resisc45``         :class:`~torchgeo_bench.datasets.RESISC45`  (45-class aerial scenes, RGB)
+``aid``              :class:`~torchgeo_bench.datasets.AID`  (30-class aerial scenes, RGB)
 ==================== ============================================================================
 
 ``resisc45`` is 31,500 RGB scenes at 256x256 across 45 classes, on torchgeo's
@@ -217,6 +222,8 @@ linear-probe accuracy by different papers under the same nominal protocol —
 which is why it is worth running under a fixed harness.  The imagery carries
 no geolocation, so it appears on the coverage map as an explicit gap rather
 than being silently omitted.
+
+``aid`` contains 10,000 RGB scenes at 600x600 across 30 classes (Xia et al., 2017). With no official split, ``scripts/generate_aid_splits.py`` generates a deterministic, stratified 60/20/20 split. Downloads use the pinned, checksum-verified ``isaaccorley/aid`` rehost. Upstream specifies no license or image geolocation. Band subsets and ordering are applied before user transforms.
 
 Selecting datasets
 ------------------

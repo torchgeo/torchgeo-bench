@@ -69,3 +69,5 @@ torchgeo wrappers
 .. autoclass:: EuroSATSpatial
 
 .. autoclass:: RESISC45
+
+.. autoclass:: AID

@@ -33,6 +33,7 @@ EXPECTED_SIZES: dict[str, dict[str, int]] = {
     "eurosat": {"train": 16200, "val": 5400, "test": 5400},
     "resisc45": {"train": 18900, "val": 6300, "test": 6300},
     "eurosat-spatial": {"train": 16200, "val": 5400, "test": 5400},
+    "aid": {"train": 6000, "val": 2000, "test": 2000},
 }
 
 
