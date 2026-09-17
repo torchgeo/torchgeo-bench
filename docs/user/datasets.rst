@@ -223,14 +223,7 @@ which is why it is worth running under a fixed harness.  The imagery carries
 no geolocation, so it appears on the coverage map as an explicit gap rather
 than being silently omitted.
 
-``aid`` is Xia et al. 2017's Aerial Image Dataset: 10,000 RGB scenes at
-600x600 across 30 classes, one of the three most-used benchmarks in the GFM
-literature alongside EuroSAT and RESISC45.  No official split exists
-upstream, so ``scripts/generate_aid_splits.py`` derives a deterministic,
-stratified 60/20/20 split per class.  Rehosted at Hugging Face
-``isaaccorley/aid``, pinned to a commit and checksum-verified on download;
-license is unspecified upstream.  Like ``resisc45``, the imagery carries no
-geolocation.
+``aid`` contains 10,000 RGB scenes at 600x600 across 30 classes (Xia et al., 2017). With no official split, ``scripts/generate_aid_splits.py`` generates a deterministic, stratified 60/20/20 split. Downloads use the pinned, checksum-verified ``isaaccorley/aid`` rehost. Upstream specifies no license or image geolocation. Band subsets and ordering are applied before user transforms.
 
 Selecting datasets
 ------------------

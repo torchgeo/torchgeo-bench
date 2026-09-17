@@ -4,11 +4,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
 
-import torch
 from torch.utils.data import Dataset
 from torchgeo.datasets import RESISC45 as TGRESISC45
-from torchvision.transforms import Compose
 
+from ._transforms import select_bands
 from .base import BandSpec, BenchDataset
 
 
@@ -70,28 +69,9 @@ class RESISC45(BenchDataset):
             raise ValueError(f"Unknown split {split!r}. Expected train, val, or test.")
         specs = self.select_band_specs(bands)
         indices = [self.bands.index(spec) for spec in specs]
-        select = _make_band_select(indices, len(self.bands))
-        if select is not None:
-            transform = select if transform is None else Compose([select, transform])
+        transform = select_bands(indices, len(self.bands), transform)
         return TGRESISC45(
             root=str(self.data_root()),
             split=split,
             transforms=transform,
         )
-
-
-def _make_band_select(indices: list[int], n_bands: int) -> Callable[[dict], dict] | None:
-    """Return a transform selecting ``indices`` from the channel axis.
-
-    ``None`` when the selection is the identity (every band, in order), so the
-    common ``bands="all"`` and ``bands="rgb"`` paths add no per-sample work.
-    """
-    if indices == list(range(n_bands)):
-        return None
-    index = torch.tensor(indices)
-
-    def _select(sample: dict) -> dict:
-        sample["image"] = sample["image"].index_select(-3, index)
-        return sample
-
-    return _select
