@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review torchgeo-bench pull requests for correctness and unnecessary complexity, tests, comments, private helpers, duplicated behavior, and inflated prose. Use during automated Copilot PR reviews and requested code reviews.
+description: Review torchgeo-bench pull requests for correctness, security, unnecessary code and tests, duplicated behavior, and inflated prose. Use during automated Copilot PR reviews and requested code reviews. Keep findings brief and conversational.
 ---
 
 # Code review
@@ -42,6 +42,22 @@ Apply these rules to added documentation, docstrings, error messages, and PR tex
 - Flag dramatic colon reveals, repeated em-dash asides, “not just X, but Y” pivots, invented `X-first` labels, and marketing claims that replace an explanation. State what the code does and why the reader needs to know.
 - Prefer `setup` to a vague `protocol`, `format` to a vague `schema`, and a specific verb to catch-all `supports`. These are contextual prose preferences, not token bans: keep technical uses such as Pydantic schemas, `typing.Protocol`, robust statistics, published titles, and quoted text. Do not rename APIs to satisfy a word list.
 
+## Security
+
+- Ban new pickle-based persistence and deserialization, including `pickle`, `dill`, `cloudpickle`, `shelve`, Joblib persistence, `pandas.read_pickle`/`to_pickle`, and NumPy `allow_pickle=True`. Use JSON or Parquet for records, non-object NumPy arrays, and safetensors for tensors. Do not add writers that create more pickle artifacts or a fallback that restores legacy pickle metadata.
+- Flag new `torch.save`/`torch.load` checkpoint paths and recommend safetensors. `weights_only=True` still uses an unpickler and is not a security sandbox. Changes maintaining existing checkpoint compatibility must keep explicit `weights_only=True`; reject `weights_only=False`, unsafe retry fallbacks, or allowlisting checkpoint-supplied globals just to make a load succeed. See [PyTorch's loading guidance](https://docs.pytorch.org/docs/stable/generated/torch.load).
+- Reject unsafe YAML loaders and `eval`/`exec` on configuration or dataset content. Require `yaml.safe_load` or a verified `SafeLoader` subclass. The repository's `_UniqueKeyLoader` is such a subclass; do not flag its `yaml.load(..., Loader=_UniqueKeyLoader)` solely by name.
+- Flag shell command interpolation, `os.system`, and `shell=True` with untrusted values. Prefer argument lists with `shell=False`, and check whether user-controlled arguments can be interpreted as options. A normal `subprocess.run([...])` call is not itself a vulnerability.
+- Treat `trust_remote_code=True`, `torch.hub.load`, and configurable import targets as code execution. Require reviewed code sources and immutable commit pins for downloaded code; a trust flag or checksum alone does not establish that code is safe. Keep arbitrary model targets limited to trusted configuration.
+- For archive extraction or paths derived from dataset metadata, check destination containment, absolute paths, `..`, and symlink escapes. Use `filter="data"` for tar extraction plus appropriate file-count and unpacked-size limits for untrusted archives. Do not confuse reading tar members with extracting them onto disk. See [Python's extraction guidance](https://docs.python.org/3.12/library/tarfile.html#extraction-filters).
+- Flag disabled TLS verification, removed integrity checks, hardcoded credentials, and secrets or signed URLs written to logs. For dependency changes, check advisories against the actual resolved version before claiming a known vulnerability.
+- In GitHub Actions, flag executing untrusted PR code with secrets or write tokens, including unsafe `pull_request_target`/`workflow_run` combinations, and interpolating PR titles or other attacker-controlled text into shell scripts. Prefer minimal token permissions and full commit SHA pins for external actions. See [GitHub's workflow security guidance](https://docs.github.com/en/actions/reference/security/secure-use).
+
 ## Useful review findings
 
-Report concrete violations introduced by the PR, including these style rules, with a changed line, the applicable rule or consequence, and the smallest useful correction. For duplication, name the existing implementation; for a weak test, explain why it cannot catch the claimed failure. Group repeated instances of the same issue. Keep correctness findings ahead of style findings and label style findings accordingly. Skip generic praise, summaries of the diff, speculative hardening, unrelated cleanup, and comments that only say something “looks like AI.” Do not invent findings when the change already meets these rules.
+- Write like a colleague leaving an inline comment. Usually one or two short sentences are enough: state the specific problem and the smallest useful fix. Add detail only when the failure path would otherwise be unclear. Apply the plain-prose rules above to your own comments.
+- Anchor each finding to a changed line. For duplication, name the existing function; for a weak test, say what it fails to exercise. For a security claim, identify the untrusted input and dangerous operation, or state the explicit policy violation. Do not inflate a style preference into a correctness or security defect.
+- Skip canned headings, bold labels, numbered mini-essays, praise, apologies, rhetorical questions, and phrases such as “It is important to note,” “This could potentially,” or “To ensure robustness.” Do not explain basic Python or repeat the code the reader can already see. Include a small suggested patch when it is clearer than prose.
+- Group repeated instances and put correctness and security before style. Use the platform's required severity fields without repeating them in the comment body. Skip diff summaries, speculative hardening, unrelated cleanup, and claims about AI authorship. No finding is better than an invented one.
+
+For example, write “`load_yaml` already rejects duplicate keys. Reuse it here so the two loaders cannot drift.” For a weak test, write “This replaces the parser with a mock, so it never exercises parsing. Pass a small YAML input through the real parser.”
