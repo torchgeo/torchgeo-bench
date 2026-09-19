@@ -24,7 +24,7 @@ small CPU example evaluates one regression benchmark with two random folds:
        --output results/coordbench_quickstart.csv
 
 Results are appended to ``output.file`` (``--output``). Add ``--resume`` to
-skip rows that already match ``(dataset, task, method, model_name, split)``.
+skip rows that already match ``(dataset, task, method, model_name, split, fold_algorithm)``.
 Unlike image-run resume, this key does not include a configuration hash;
 use a separate output file when changing encoder kwargs or evaluation
 settings that are not part of the key.

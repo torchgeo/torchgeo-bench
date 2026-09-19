@@ -37,7 +37,8 @@ from torchgeo_bench.results import append_rows_atomic
 
 logger = logging.getLogger(__name__)
 
-RESUME_KEY_COLS = ("dataset", "task", "method", "model_name", "split")
+RANDOM_FOLD_ALGORITHM = "torch-randperm-v1"
+RESUME_KEY_COLS = ("dataset", "task", "method", "model_name", "split", "fold_algorithm")
 
 
 @dataclass
@@ -61,6 +62,7 @@ class CoordResult:
     seed: int
     model_name: str
     model_target: str
+    fold_algorithm: str
 
     def to_row(self) -> dict[str, Any]:
         """Convert to a flat dict suitable for CSV/DataFrame export."""
@@ -191,6 +193,7 @@ def _evaluate_benchmark(
         for task, labels in bench.tasks.items():
             for method_label, kind in method_kinds:
                 key = (bench.name, task, method_label, preset.name, split_label)
+                key = (*key, RANDOM_FOLD_ALGORITHM)
                 if key in completed:
                     continue
                 if features is None:
@@ -237,6 +240,7 @@ def _evaluate_benchmark(
                     seed=seed,
                     model_name=preset.name,
                     model_target=preset.target,
+                    fold_algorithm=RANDOM_FOLD_ALGORITHM,
                 ).to_row()
         # An official test set is evaluated once, even when both CV modes were requested.
         if bench.test_mask is not None:

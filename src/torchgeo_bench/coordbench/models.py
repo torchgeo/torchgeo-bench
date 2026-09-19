@@ -90,17 +90,16 @@ class SinCosLocationEncoder(LocationEncoder):
         ).astype(np.float32)
 
 
-def _unit_xyz(lon: np.ndarray, lat: np.ndarray) -> torch.Tensor:
-    """Convert finite geographic coordinates in degrees to unit XYZ tensors."""
+def _unit_xyz(lon: np.ndarray, lat: np.ndarray, device: str) -> torch.Tensor:
+    """Convert geographic coordinates in degrees to unit XYZ tensors on ``device``."""
     if lon.ndim != 1 or lat.ndim != 1 or lon.shape != lat.shape:
         raise ValueError("lon and lat must be one-dimensional arrays with equal length")
-    if not np.isfinite(lon).all() or not np.isfinite(lat).all():
-        raise ValueError("lon and lat must contain only finite values")
-    if ((lat < -90.0) | (lat > 90.0)).any():
+    finite_lat = lat[np.isfinite(lat)]
+    if ((finite_lat < -90.0) | (finite_lat > 90.0)).any():
         raise ValueError("lat must be in the inclusive range [-90, 90] degrees")
 
-    lon_radians = torch.as_tensor(np.deg2rad(lon), dtype=torch.float32)
-    lat_radians = torch.as_tensor(np.deg2rad(lat), dtype=torch.float32)
+    lon_radians = torch.as_tensor(np.deg2rad(lon), dtype=torch.float32, device=device)
+    lat_radians = torch.as_tensor(np.deg2rad(lat), dtype=torch.float32, device=device)
     cos_lat = torch.cos(lat_radians)
     return torch.stack(
         (
@@ -120,7 +119,7 @@ class XYZLocationEncoder(LocationEncoder):
     @override
     @torch.no_grad()
     def _encode(self, lon: np.ndarray, lat: np.ndarray, year: np.ndarray | None) -> np.ndarray:
-        return _unit_xyz(lon, lat).numpy()
+        return _unit_xyz(lon, lat, self.device).cpu().numpy()
 
 
 class NeRFLocationEncoder(LocationEncoder):
@@ -147,21 +146,27 @@ class NeRFLocationEncoder(LocationEncoder):
         batch_size: int = 8192,
     ) -> None:
         super().__init__(device=device, batch_size=batch_size)
+        if isinstance(num_frequencies, bool) or not isinstance(num_frequencies, int):
+            raise TypeError("num_frequencies must be an integer")
         if num_frequencies < 1:
             raise ValueError("num_frequencies must be positive")
-        self.num_frequencies = int(num_frequencies)
-        self.include_xyz = bool(include_xyz)
+        if not isinstance(include_xyz, bool):
+            raise TypeError("include_xyz must be a boolean")
+        self.num_frequencies = num_frequencies
+        self.include_xyz = include_xyz
 
     @override
     @torch.no_grad()
     def _encode(self, lon: np.ndarray, lat: np.ndarray, year: np.ndarray | None) -> np.ndarray:
-        xyz = _unit_xyz(lon, lat)
-        frequencies = torch.pow(2.0, torch.arange(self.num_frequencies, dtype=torch.float32))
+        xyz = _unit_xyz(lon, lat, self.device)
+        frequencies = torch.pow(
+            2.0, torch.arange(self.num_frequencies, dtype=torch.float32, device=xyz.device)
+        )
         angles = xyz[:, :, None] * frequencies[None, None, :] * torch.pi
         features = [torch.sin(angles).flatten(1), torch.cos(angles).flatten(1)]
         if self.include_xyz:
             features.insert(0, xyz)
-        return torch.cat(features, dim=1).numpy()
+        return torch.cat(features, dim=1).cpu().numpy()
 
 
 class SphericalHarmonicLocationEncoder(LocationEncoder):
@@ -185,14 +190,16 @@ class SphericalHarmonicLocationEncoder(LocationEncoder):
         batch_size: int = 8192,
     ) -> None:
         super().__init__(device=device, batch_size=batch_size)
+        if isinstance(degree, bool) or not isinstance(degree, int):
+            raise TypeError("degree must be an integer")
         if degree < 0 or degree > 3:
             raise ValueError("degree must be between 0 and 3")
-        self.degree = int(degree)
+        self.degree = degree
 
     @override
     @torch.no_grad()
     def _encode(self, lon: np.ndarray, lat: np.ndarray, year: np.ndarray | None) -> np.ndarray:
-        x, y, z = _unit_xyz(lon, lat).unbind(dim=1)
+        x, y, z = _unit_xyz(lon, lat, self.device).unbind(dim=1)
         one = torch.ones_like(x)
         features = [0.28209479177387814 * one]
         if self.degree >= 1:
@@ -221,7 +228,7 @@ class SphericalHarmonicLocationEncoder(LocationEncoder):
                     -0.5900435899266435 * x * (x.square() - 3.0 * y.square()),
                 )
             )
-        return torch.stack(features, dim=1).numpy()
+        return torch.stack(features, dim=1).cpu().numpy()
 
 
 class MINDLocationEncoder(LocationEncoder):

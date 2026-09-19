@@ -185,6 +185,77 @@ def test_nerf_frequency_and_feature_order(
     np.testing.assert_allclose(features, np.concatenate(parts, axis=1), atol=1e-6)
 
 
+@pytest.mark.parametrize(
+    "encoder",
+    [XYZLocationEncoder(), NeRFLocationEncoder(), SphericalHarmonicLocationEncoder()],
+)
+def test_coordinate_encoders_preserve_non_finite_rows(encoder: LocationEncoder) -> None:
+    lon = np.array([0.0, np.nan, 45.0])
+    lat = np.array([10.0, 30.0, np.inf])
+    features = encoder.encode(lon, lat)
+    assert np.isfinite(features[0]).all()
+    assert not np.isfinite(features[1]).all()
+    assert not np.isfinite(features[2]).all()
+
+
+def test_coordinate_encoders_reject_out_of_range_finite_latitude() -> None:
+    with pytest.raises(ValueError, match=r"\[-90, 90\]"):
+        XYZLocationEncoder().encode(np.array([0.0, 1.0]), np.array([0.0, 91.0]))
+
+
+def test_coordinate_encoders_allocate_tensors_on_configured_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    devices: list[str] = []
+    as_tensor = torch.as_tensor
+
+    def spy_as_tensor(data: object, **kwargs: Any) -> torch.Tensor:
+        devices.append(str(kwargs.get("device")))
+        return as_tensor(data, **kwargs)
+
+    monkeypatch.setattr(torch, "as_tensor", spy_as_tensor)
+    lon = np.array([0.0, 45.0])
+    lat = np.array([10.0, 20.0])
+    XYZLocationEncoder(device="cpu").encode(lon, lat)
+    NeRFLocationEncoder(device="cpu").encode(lon, lat)
+    SphericalHarmonicLocationEncoder(device="cpu").encode(lon, lat)
+    assert devices
+    assert set(devices) == {"cpu"}
+
+
+@pytest.mark.parametrize(
+    ("factory", "kwargs", "message", "error_type"),
+    [
+        (
+            NeRFLocationEncoder,
+            {"num_frequencies": 1.5},
+            "num_frequencies must be an integer",
+            TypeError,
+        ),
+        (
+            NeRFLocationEncoder,
+            {"include_xyz": "false"},
+            "include_xyz must be a boolean",
+            TypeError,
+        ),
+        (
+            SphericalHarmonicLocationEncoder,
+            {"degree": 1.5},
+            "degree must be an integer",
+            TypeError,
+        ),
+    ],
+)
+def test_coordinate_encoder_kwargs_require_strict_types(
+    factory: type[LocationEncoder],
+    kwargs: dict[str, object],
+    message: str,
+    error_type: type[Exception],
+) -> None:
+    with pytest.raises(error_type, match=message):
+        factory(**kwargs)
+
+
 @pytest.mark.parametrize("degree", range(4))
 def test_spherical_harmonic_normalization(
     points: tuple[np.ndarray, np.ndarray], degree: int
@@ -362,6 +433,25 @@ def test_run_coordbench_resume_skips(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert Path(cfg.output.file).read_bytes() == before
 
 
+def test_run_coordbench_resume_recomputes_rows_without_fold_algorithm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
+    )
+    cfg = _coord_cfg(tmp_path)
+    run_coordbench(cfg)
+
+    old_rows = pd.read_csv(cfg.output.file).drop(columns=["fold_algorithm"])
+    old_rows.to_csv(cfg.output.file, index=False)
+
+    cfg.output.resume = True
+    run_coordbench(cfg)
+    rows = pd.read_csv(cfg.output.file)
+    assert "fold_algorithm" in rows.columns
+    assert set(rows.fold_algorithm.dropna()) == {"torch-randperm-v1"}
+
+
 def test_run_coordbench_reports_official_test_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -501,6 +591,7 @@ def test_runtime_method_selection(
         "seed",
         "model_name",
         "model_target",
+        "fold_algorithm",
     ]
 
 
