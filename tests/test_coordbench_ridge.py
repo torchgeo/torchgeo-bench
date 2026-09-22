@@ -6,13 +6,16 @@ import torch
 from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score
 
-from torchgeo_bench.coordbench.probe import linear_probe_score
+from torchgeo_bench.coordbench.probe import RidgeData, _ridge_eval, linear_probe_score
 
 
+@pytest.mark.parametrize("penalize_intercept", [False, True])
 @pytest.mark.parametrize("standardize", [False, True])
 @pytest.mark.parametrize("task_type", ["regression", "classification"])
 @pytest.mark.parametrize("official", [False, True])
-def test_ridge_matches_sklearn(*, standardize: bool, task_type: str, official: bool) -> None:
+def test_ridge_matches_sklearn(
+    *, standardize: bool, task_type: str, official: bool, penalize_intercept: bool
+) -> None:
     rng = np.random.default_rng(42)
     features = (rng.normal(size=(90, 8)) + 12).astype(np.float32)
     features[:, -1] = 7  # Constant and duplicate columns exercise rank-deficient features.
@@ -34,7 +37,10 @@ def test_ridge_matches_sklearn(*, standardize: bool, task_type: str, official: b
             mean = x_train.mean(0, keepdim=True)
             std = x_train.std(0, keepdim=True).clamp_min(1e-6)
             x_train, x_test = (x_train - mean) / std, (x_test - mean) / std
-        model = Ridge(alpha=alpha, fit_intercept=True, solver="cholesky")
+        if penalize_intercept:
+            x_train = torch.cat([x_train, torch.ones_like(x_train[:, :1])], dim=1)
+            x_test = torch.cat([x_test, torch.ones_like(x_test[:, :1])], dim=1)
+        model = Ridge(alpha=alpha, fit_intercept=not penalize_intercept, solver="cholesky")
         model.fit(x_train.double().numpy(), targets[train].astype(np.float64))
         pred = model.predict(x_test.double().numpy())
         if task_type == "classification":
@@ -55,6 +61,19 @@ def test_ridge_matches_sklearn(*, standardize: bool, task_type: str, official: b
         test_mask=test_mask,
         fold_assign=np.arange(90) % 3,
         standardize=standardize,
+        penalize_intercept=penalize_intercept,
     )
     np.testing.assert_allclose(fold_scores, expected, atol=2e-7, rtol=2e-7)
     assert actual == pytest.approx(np.mean(expected), abs=2e-7)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("penalize_intercept", [False, True])
+def test_ridge_preserves_shared_tensors(*, dtype: torch.dtype, penalize_intercept: bool) -> None:
+    features = torch.arange(60, dtype=dtype).reshape(20, 3)
+    targets = features[:, :1].clone() + 10
+    before_features, before_targets = features.clone(), targets.clone()
+    data = RidgeData(features, targets, None, penalize_intercept)
+    _ridge_eval(data, torch.arange(15), torch.arange(15, 20), 1.0, standardize=True)
+    torch.testing.assert_close(features, before_features, rtol=0, atol=0)
+    torch.testing.assert_close(targets, before_targets, rtol=0, atol=0)

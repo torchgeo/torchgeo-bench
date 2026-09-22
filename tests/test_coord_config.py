@@ -27,6 +27,7 @@ def test_coord_defaults() -> None:
     assert config.datasets == ["all"]
     assert config.evaluation.methods == ["knn", "linear"]
     assert config.evaluation.knn_device == "cpu"
+    assert not config.evaluation.penalize_intercept
     assert config.runtime.device == "cpu"
     assert config.output.file == "results/coordbench_results.csv"
     assert not config.output.resume
@@ -60,6 +61,8 @@ def test_coord_defaults() -> None:
         {"evaluation": {"cell_deg": 0}},
         {"evaluation": {"cell_deg": "10.0"}},
         {"evaluation": {"cell_deg": float("nan")}},
+        {"evaluation": {"penalize_intercept": "true"}},
+        {"evaluation": {"penalize_intercept": 1}},
         {"evaluation": {"knn_k": 0}},
         {"evaluation": {"knn_device": "auto"}},
         {"evaluation": {"knn_device": None}},
@@ -108,6 +111,7 @@ def test_all_typed_flags() -> None:
             "3",
             "--cell-deg",
             "2.5",
+            "--penalize-intercept",
             "--knn-k",
             "7",
             "--knn-device",
@@ -126,6 +130,7 @@ def test_all_typed_flags() -> None:
         "split": "both",
         "folds": 3,
         "cell_deg": 2.5,
+        "penalize_intercept": True,
         "knn_k": 7,
         "knn_device": "cpu",
     }
@@ -255,3 +260,11 @@ def test_command_dispatches_typed_config(monkeypatch: pytest.MonkeyPatch) -> Non
     assert len(configs) == 1
     assert isinstance(configs[0], CoordConfig)
     assert configs[0].datasets == ["country"]
+
+
+def test_no_penalize_intercept_overrides_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "coord.yaml"
+    path.write_text("model: {name: sincos}\nevaluation: {penalize_intercept: true}\n")
+    assert load_coord_config(path).evaluation.penalize_intercept
+    config = load_config(_parse("--config", str(path), "--no-penalize-intercept"))
+    assert not config.evaluation.penalize_intercept
