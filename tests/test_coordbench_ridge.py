@@ -92,6 +92,7 @@ def test_ridge_preserves_shared_tensors(*, dtype: torch.dtype) -> None:
 
 @pytest.mark.parametrize("shape", [(80, 6), (20, 40)])
 @pytest.mark.parametrize("outputs", [1, 3])
+@pytest.mark.parametrize("alpha", [0.01, 1.0, 100.0])
 @pytest.mark.parametrize(
     "device",
     [
@@ -102,8 +103,8 @@ def test_ridge_preserves_shared_tensors(*, dtype: torch.dtype) -> None:
         ),
     ],
 )
-def test_ridge_predictions_match_sklearn_defaults(
-    shape: tuple[int, int], outputs: int, device: str
+def test_ridge_predictions_match_sklearn(
+    shape: tuple[int, int], outputs: int, alpha: float, device: str
 ) -> None:
     rng = np.random.default_rng(17)
     n_train, n_features = shape
@@ -112,7 +113,7 @@ def test_ridge_predictions_match_sklearn_defaults(
     features[:, -2] = features[:, 0]
     targets = features @ rng.normal(size=(n_features, outputs)) + 250
     targets += rng.normal(size=targets.shape)
-    reference = Ridge().fit(features[:n_train], targets[:n_train])
+    reference = Ridge(alpha=alpha).fit(features[:n_train], targets[:n_train])
     expected = reference.predict(features[n_train:]).reshape(-1, outputs)
     data = RidgeData(
         torch.as_tensor(features, device=device), torch.as_tensor(targets, device=device), None
@@ -121,7 +122,7 @@ def test_ridge_predictions_match_sklearn_defaults(
         data,
         torch.arange(n_train, device=device),
         torch.arange(n_train, len(features), device=device),
-        alpha=1.0,
+        alpha=alpha,
         standardize=False,
     )
     np.testing.assert_allclose(actual.cpu().numpy(), expected, rtol=1e-10, atol=1e-10)
