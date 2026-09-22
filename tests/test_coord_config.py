@@ -27,6 +27,7 @@ def test_coord_defaults() -> None:
     assert config.datasets == ["all"]
     assert config.evaluation.methods == ["knn", "linear"]
     assert config.evaluation.knn_device == "cpu"
+    assert not config.evaluation.penalize_intercept
     assert config.runtime.device == "cpu"
     assert config.output.file == "results/coordbench_results.csv"
     assert not config.output.resume
@@ -67,6 +68,8 @@ def test_coord_defaults() -> None:
         {"evaluation": {"ridge_alphas": ["1.0"]}},
         {"evaluation": {"ridge_alphas": [float("nan")]}},
         {"evaluation": {"ridge_alphas": [float("inf")]}},
+        {"evaluation": {"penalize_intercept": "true"}},
+        {"evaluation": {"penalize_intercept": 1}},
         {"evaluation": {"knn_k": 0}},
         {"evaluation": {"knn_device": "auto"}},
         {"evaluation": {"knn_device": None}},
@@ -119,6 +122,7 @@ def test_all_typed_flags() -> None:
             "0.1",
             "1",
             "10",
+            "--penalize-intercept",
             "--knn-k",
             "7",
             "--knn-device",
@@ -138,6 +142,7 @@ def test_all_typed_flags() -> None:
         "folds": 3,
         "cell_deg": 2.5,
         "ridge_alphas": [0.1, 1.0, 10.0],
+        "penalize_intercept": True,
         "knn_k": 7,
         "knn_device": "cpu",
     }
@@ -275,3 +280,11 @@ def test_ridge_grid_yaml_and_fixed_alpha_override(tmp_path: Path) -> None:
     assert load_coord_config(path).evaluation.ridge_alphas == [0.1, 1.0, 10.0]
     config = load_config(_parse("--config", str(path), "--ridge-alphas", "2"))
     assert config.evaluation.ridge_alphas == [2.0]
+
+
+def test_no_penalize_intercept_overrides_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "coord.yaml"
+    path.write_text("model: {name: sincos}\nevaluation: {penalize_intercept: true}\n")
+    assert load_coord_config(path).evaluation.penalize_intercept
+    config = load_config(_parse("--config", str(path), "--no-penalize-intercept"))
+    assert not config.evaluation.penalize_intercept

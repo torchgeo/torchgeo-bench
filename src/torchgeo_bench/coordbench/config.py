@@ -48,6 +48,7 @@ class CoordEvaluationConfig(StrictModel):
     ridge_alphas: list[Annotated[StrictFloat, Field(gt=0)]] = Field(
         default_factory=lambda: list(RIDGE_ALPHAS), min_length=1
     )
+    penalize_intercept: StrictBool = False
 
 
 class CoordConfig(StrictModel):
