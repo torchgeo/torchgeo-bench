@@ -33,6 +33,8 @@ from torchgeo_bench.models import RCFBench
         ("rcf", "caffe", "rgb", "minmax_zscore"),
         ("timm/resnet50", "m-eurosat", "red,green,blue", "model"),
         ("torchgeo/scalemae_large_fmow", "m-eurosat", "rgb", "model"),
+        ("torchgeo/deo_rgb", "m-eurosat", "rgb", "model"),
+        ("torchgeo/deo_s2", "m-eurosat", "all", "model"),
         ("olmoearth_nano", "m-eurosat", "all", "model"),
     ],
 )
