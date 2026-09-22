@@ -6,12 +6,14 @@ import sys
 import pytest
 
 from torchgeo_bench.config import list_model_configs, model_config_path
+from torchgeo_bench.config.flops import FlopsConfig
 from torchgeo_bench.config.presets import (
     ModelPreset,
     build_model,
     load_model_preset,
     resolve_run_config,
 )
+from torchgeo_bench.config.profile import ProfileConfig, resolve_profile_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig, load_yaml
 from torchgeo_bench.models.torchgeo_models import TorchGeoScaleMAEBench
@@ -49,6 +51,27 @@ def test_rcf_seed_is_explicit_and_overridable() -> None:
     assert (
         load_model_preset(ModelConfig(name="rcf", kwargs={"seed": 9}), seed=17).kwargs["seed"] == 9
     )
+
+
+@pytest.mark.parametrize("name", ["torchgeo/deo_rgb", "torchgeo/deo_s2"])
+@pytest.mark.parametrize("normalization", [None, "dataset"])
+def test_deo_normalization_defaults_and_explicit_override(
+    name: str, normalization: str | None
+) -> None:
+    settings = {"model": {"name": name}}
+    if normalization is not None:
+        settings["input"] = {"normalization": normalization}
+    run = RunConfig.model_validate({**settings, "datasets": ["m-eurosat"]})
+    profile = ProfileConfig.model_validate({**settings, "dataset": "m-eurosat"})
+    flops = FlopsConfig.model_validate(settings)
+
+    for effective, preset in (
+        resolve_run_config(run, "m-eurosat"),
+        resolve_profile_config(profile),
+        flops.resolve(),
+    ):
+        assert effective.input.normalization == (normalization or "model")
+        assert "normalization" not in preset.kwargs
 
 
 def test_preset_layers_do_not_override_an_explicit_empty_selection() -> None:
