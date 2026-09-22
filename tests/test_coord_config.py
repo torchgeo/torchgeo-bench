@@ -60,6 +60,13 @@ def test_coord_defaults() -> None:
         {"evaluation": {"cell_deg": 0}},
         {"evaluation": {"cell_deg": "10.0"}},
         {"evaluation": {"cell_deg": float("nan")}},
+        {"evaluation": {"ridge_alphas": []}},
+        {"evaluation": {"ridge_alphas": [0]}},
+        {"evaluation": {"ridge_alphas": [-1]}},
+        {"evaluation": {"ridge_alphas": [True]}},
+        {"evaluation": {"ridge_alphas": ["1.0"]}},
+        {"evaluation": {"ridge_alphas": [float("nan")]}},
+        {"evaluation": {"ridge_alphas": [float("inf")]}},
         {"evaluation": {"knn_k": 0}},
         {"evaluation": {"knn_device": "auto"}},
         {"evaluation": {"knn_device": None}},
@@ -108,6 +115,10 @@ def test_all_typed_flags() -> None:
             "3",
             "--cell-deg",
             "2.5",
+            "--ridge-alphas",
+            "0.1",
+            "1",
+            "10",
             "--knn-k",
             "7",
             "--knn-device",
@@ -126,6 +137,7 @@ def test_all_typed_flags() -> None:
         "split": "both",
         "folds": 3,
         "cell_deg": 2.5,
+        "ridge_alphas": [0.1, 1.0, 10.0],
         "knn_k": 7,
         "knn_device": "cpu",
     }
@@ -255,3 +267,11 @@ def test_command_dispatches_typed_config(monkeypatch: pytest.MonkeyPatch) -> Non
     assert len(configs) == 1
     assert isinstance(configs[0], CoordConfig)
     assert configs[0].datasets == ["country"]
+
+
+def test_ridge_grid_yaml_and_fixed_alpha_override(tmp_path: Path) -> None:
+    path = tmp_path / "coord.yaml"
+    path.write_text("model: {name: sincos}\nevaluation: {ridge_alphas: [0.1, 1, 10]}\n")
+    assert load_coord_config(path).evaluation.ridge_alphas == [0.1, 1.0, 10.0]
+    config = load_config(_parse("--config", str(path), "--ridge-alphas", "2"))
+    assert config.evaluation.ridge_alphas == [2.0]

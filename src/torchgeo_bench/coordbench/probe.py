@@ -17,13 +17,11 @@ import numpy as np
 import torch
 from sklearn.preprocessing import StandardScaler
 
+from torchgeo_bench.coordbench.config import RIDGE_ALPHAS
 from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.knn import KNNClassifier
 
 logger = logging.getLogger(__name__)
-
-# Half-decade L2 grid (1e-4..1e6), selected by cross-validation.
-RIDGE_ALPHAS = tuple(float(10.0**e) for e in np.arange(-4.0, 6.5, 0.5))
 
 
 def spatial_fold_ids(
@@ -200,7 +198,9 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
         train_pool, test_idx = all_idx[~is_test], all_idx[is_test]
         tp = train_pool.cpu().numpy()
         inner = [torch.as_tensor(tp[i::folds], device=dev) for i in range(folds)]
-        best_alpha, _ = _cv_alpha_scores(data, inner, alphas, standardize=standardize)
+        best_alpha = alphas[0]
+        if len(alphas) > 1:
+            best_alpha, _ = _cv_alpha_scores(data, inner, alphas, standardize=standardize)
         score = _ridge_eval(data, train_pool, test_idx, best_alpha, standardize=standardize)
         return score, [score]
 

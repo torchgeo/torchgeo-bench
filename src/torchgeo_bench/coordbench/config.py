@@ -1,7 +1,7 @@
 """Strict, lightweight configuration for coordinate encoder evaluation."""
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
 
@@ -18,6 +18,8 @@ from torchgeo_bench.config.schema import (
     load_yaml,
 )
 from torchgeo_bench.coordbench.catalog import FAMILY_BENCHMARKS
+
+RIDGE_ALPHAS = tuple(10.0 ** (step / 2) for step in range(-8, 13))
 
 
 class CoordRuntimeConfig(StrictModel):
@@ -43,6 +45,9 @@ class CoordEvaluationConfig(StrictModel):
     cell_deg: StrictFloat = Field(default=10.0, gt=0)
     knn_k: StrictInt = Field(default=5, gt=0)
     knn_device: KnnDevice = "cpu"
+    ridge_alphas: list[Annotated[StrictFloat, Field(gt=0)]] = Field(
+        default_factory=lambda: list(RIDGE_ALPHAS), min_length=1
+    )
 
 
 class CoordConfig(StrictModel):

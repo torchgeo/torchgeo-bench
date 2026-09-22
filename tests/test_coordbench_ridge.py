@@ -58,3 +58,17 @@ def test_ridge_matches_sklearn(*, standardize: bool, task_type: str, official: b
     )
     np.testing.assert_allclose(fold_scores, expected, atol=2e-7, rtol=2e-7)
     assert actual == pytest.approx(np.mean(expected), abs=2e-7)
+
+
+def test_fixed_alpha_skips_holdout_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_cv(*args: object, **kwargs: object) -> None:
+        pytest.fail("A fixed alpha must not trigger inner CV")
+
+    monkeypatch.setattr("torchgeo_bench.coordbench.probe._cv_alpha_scores", unexpected_cv)
+    features = np.arange(40, dtype=np.float32).reshape(20, 2)
+    labels = features[:, 0] + 50
+    score, folds = linear_probe_score(
+        features, labels, "regression", alphas=(0.01,), test_mask=np.arange(20) >= 15
+    )
+    assert score > 0.99
+    assert folds == [score]
