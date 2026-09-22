@@ -1,0 +1,6 @@
+# Compact spherical-harmonic position encoding.
+name: spherical-harmonics
+target: torchgeo_bench.coordbench.models.SphericalHarmonicLocationEncoder
+track: coord
+kwargs:
+  degree: 3

@@ -24,7 +24,7 @@ small CPU example evaluates one regression benchmark with two random folds:
        --output results/coordbench_quickstart.csv
 
 Results are appended to ``output.file`` (``--output``). Add ``--resume`` to
-skip rows that already match ``(dataset, task, method, model_name, split)``.
+skip rows that already match ``(dataset, task, method, model_name, split, fold_algorithm)``.
 Unlike image-run resume, this key does not include a configuration hash;
 use a separate output file when changing encoder kwargs or evaluation
 settings that are not part of the key.
@@ -36,17 +36,69 @@ are equivalent entry points. The former ``run mode=coord`` and dotted
 Included encoders
 -----------------
 
-================  ==============  =============================================
-Model preset      Installation    Description
-================  ==============  =============================================
-``sincos``        base            Four-dimensional periodic coordinate baseline.
-``mind``          base            64-dimensional MIND Matryoshka prefix.
-``mind-small``    base            128-dimensional distilled MIND student.
-``climplicit``    ``coordbench``  Climplicit climate-specialist encoder.
-``geoclip``       ``coordbench``  GeoCLIP Equal-Earth/RFF encoder.
-``satclip``       ``coordbench``  SatCLIP spherical-harmonic encoder.
-``sinr``          ``coordbench``  SINR species-distribution encoder.
-================  ==============  =============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 30 14 60
+
+   * - Model preset
+     - Installation
+     - Description
+   * - ``sincos``
+     - base
+     - Four-dimensional periodic coordinate baseline.
+   * - ``mind``
+     - base
+     - 64-dimensional MIND Matryoshka prefix.
+   * - ``mind-small``
+     - base
+     - 128-dimensional distilled MIND student.
+   * - ``climplicit``
+     - ``coordbench``
+     - Climplicit climate-specialist encoder.
+   * - ``geoclip``
+     - ``coordbench``
+     - GeoCLIP Equal-Earth/RFF encoder.
+   * - ``satclip``
+     - ``coordbench``
+     - SatCLIP spherical-harmonic encoder.
+   * - ``sinr``
+     - ``coordbench``
+     - SINR species-distribution encoder.
+   * - ``xyz``
+     - base
+     - Unit-sphere XYZ position encoding.
+   * - ``nerf``
+     - base
+     - NeRF Fourier position encoding.
+   * - ``spherical-harmonics``
+     - base
+     - Compact real spherical-harmonic encoding.
+
+The ``xyz`` encoder returns three unit-sphere coordinates. The ``nerf`` preset applies 16 frequency bands (``2**k * pi``) to each XYZ coordinate, returning 96 sine/cosine features; ``include_xyz: true`` adds the three raw coordinates. The ``spherical-harmonics`` preset returns 16 normalized real harmonics through degree 3, with configurable degrees from 0 to 3.
+
+Run a position encoder with the same explicit coordinate command:
+
+.. code-block:: console
+
+   $ torchgeo-bench coord --model xyz --dataset california_housing \
+       --methods linear --device cpu
+
+To customize an encoder, pass constructor options under ``model.kwargs`` in a coordinate YAML file:
+
+.. code-block:: yaml
+
+   model:
+     name: nerf
+     kwargs:
+       num_frequencies: 8
+       include_xyz: true
+   datasets: [california_housing]
+   evaluation:
+     methods: [linear]
+   runtime:
+     device: cpu
+   output:
+     file: results/nerf_coordbench.csv
 
 Install the optional reference encoders from PyPI with:
 
@@ -135,6 +187,13 @@ remote tables:
 The coordinate schema deliberately has no image ``input``, ``segmentation``,
 or ``classification`` sections. See :doc:`/api/coordbench` for
 ``CoordConfig`` and the Python loader.
+
+External released weights are often dataset-specific classifiers whose
+checkpoints also encode the original task head and, for some families, anchor
+locations. They are not silently reinterpreted as universal CoordBench models.
+The coordinate-only pretrained encoders remain available through the
+``coordbench`` extra. Retrieval-augmented models that require an external
+database are intentionally outside this apples-to-apples encoder track.
 
 Add a location encoder
 ----------------------

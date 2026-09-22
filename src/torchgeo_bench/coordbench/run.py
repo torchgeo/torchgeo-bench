@@ -27,6 +27,7 @@ from torchgeo_bench.coordbench.config import (
 from torchgeo_bench.coordbench.datasets import CoordBenchmark, load_benchmarks
 from torchgeo_bench.coordbench.models import LocationEncoder
 from torchgeo_bench.coordbench.probe import (
+    _valid_mask,
     knn_probe_score,
     linear_probe_score,
     spatial_fold_ids,
@@ -36,7 +37,8 @@ from torchgeo_bench.results import append_rows_atomic
 
 logger = logging.getLogger(__name__)
 
-RESUME_KEY_COLS = ("dataset", "task", "method", "model_name", "split")
+RANDOM_FOLD_ALGORITHM = "torch-randperm-v1"
+RESUME_KEY_COLS = ("dataset", "task", "method", "model_name", "split", "fold_algorithm")
 
 
 @dataclass
@@ -60,6 +62,7 @@ class CoordResult:
     seed: int
     model_name: str
     model_target: str
+    fold_algorithm: str
 
     def to_row(self) -> dict[str, Any]:
         """Convert to a flat dict suitable for CSV/DataFrame export."""
@@ -87,7 +90,7 @@ def _resolve_splits(split: str) -> list[str]:
 
 
 def _completed_keys(output_path: str) -> set[tuple[str, ...]]:
-    """Existing (dataset, task, method, model_name, split) keys for resume."""
+    """Return existing ``(dataset, task, method, model, split)`` keys."""
     if not os.path.exists(output_path):
         return set()
     df = pd.read_csv(output_path)
@@ -155,13 +158,14 @@ def run_coordbench(cfg: CoordConfig) -> None:
     logger.info("CoordBench complete. Results appended to %s", output_path)
 
 
-def test_sample_count(labels: np.ndarray, task_type: str, test_mask: np.ndarray | None) -> int:
-    """Count held-out samples, or finite regression labels for cross-validation."""
+def test_sample_count(
+    features: np.ndarray, labels: np.ndarray, task_type: str, test_mask: np.ndarray | None
+) -> int:
+    """Count valid held-out samples, or all valid samples for cross-validation."""
+    valid = _valid_mask(features, np.asarray(labels), task_type)
     if test_mask is not None:
-        return int(np.asarray(test_mask, dtype=bool).sum())
-    if task_type == "regression":
-        return int(np.isfinite(np.asarray(labels, dtype=np.float64)).sum())
-    return len(labels)
+        valid &= np.asarray(test_mask, dtype=bool)
+    return int(valid.sum())
 
 
 def _evaluate_benchmark(
@@ -189,6 +193,7 @@ def _evaluate_benchmark(
         for task, labels in bench.tasks.items():
             for method_label, kind in method_kinds:
                 key = (bench.name, task, method_label, preset.name, split_label)
+                key = (*key, RANDOM_FOLD_ALGORITHM)
                 if key in completed:
                     continue
                 if features is None:
@@ -216,7 +221,7 @@ def _evaluate_benchmark(
                         fold_assign=fold_assign,
                     )
                 std = float(np.std(fold_scores)) if len(fold_scores) > 1 else 0.0
-                n_test = test_sample_count(labels, bench.task_type, test_mask)
+                n_test = test_sample_count(features, labels, bench.task_type, test_mask)
                 yield CoordResult(
                     dataset=bench.name,
                     task=task,
@@ -235,6 +240,7 @@ def _evaluate_benchmark(
                     seed=seed,
                     model_name=preset.name,
                     model_target=preset.target,
+                    fold_algorithm=RANDOM_FOLD_ALGORITHM,
                 ).to_row()
         # An official test set is evaluated once, even when both CV modes were requested.
         if bench.test_mask is not None:

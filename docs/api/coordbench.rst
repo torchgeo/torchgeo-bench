@@ -42,6 +42,9 @@ Encoders
 .. autoclass:: GeoCLIPLocationEncoder
 .. autoclass:: SatCLIPLocationEncoder
 .. autoclass:: SINRLocationEncoder
+.. autoclass:: XYZLocationEncoder
+.. autoclass:: NeRFLocationEncoder
+.. autoclass:: SphericalHarmonicLocationEncoder
 
 Benchmarks
 ----------

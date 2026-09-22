@@ -24,6 +24,9 @@ from .models import (
     MINDLocationEncoder as MINDLocationEncoder,
 )
 from .models import (
+    NeRFLocationEncoder as NeRFLocationEncoder,
+)
+from .models import (
     SatCLIPLocationEncoder as SatCLIPLocationEncoder,
 )
 from .models import (
@@ -31,6 +34,12 @@ from .models import (
 )
 from .models import (
     SINRLocationEncoder as SINRLocationEncoder,
+)
+from .models import (
+    SphericalHarmonicLocationEncoder as SphericalHarmonicLocationEncoder,
+)
+from .models import (
+    XYZLocationEncoder as XYZLocationEncoder,
 )
 from .probe import (
     knn_probe_score as knn_probe_score,

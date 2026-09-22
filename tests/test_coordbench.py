@@ -13,7 +13,11 @@ from tests.support.numerical import isolated_torch_rng as isolated_torch_rng
 from torchgeo_bench.config.presets import ModelPreset
 from torchgeo_bench.coordbench import (
     CoordBenchmark,
+    LocationEncoder,
+    NeRFLocationEncoder,
     SinCosLocationEncoder,
+    SphericalHarmonicLocationEncoder,
+    XYZLocationEncoder,
     knn_probe_score,
     linear_probe_score,
     load_benchmarks,
@@ -21,8 +25,10 @@ from torchgeo_bench.coordbench import (
     spatial_fold_ids,
 )
 from torchgeo_bench.coordbench import datasets as cb_datasets
+from torchgeo_bench.coordbench import probe as cb_probe
 from torchgeo_bench.coordbench.config import CoordConfig
 from torchgeo_bench.coordbench.run import _instantiate_encoder
+from torchgeo_bench.coordbench.run import test_sample_count as sample_count
 
 pytestmark = pytest.mark.usefixtures("isolated_torch_rng")
 
@@ -135,6 +141,165 @@ def test_coordinate_auto_probe_selects_device_and_preserves_solution(
     assert devices
     assert set(devices) == {expected}
     assert score == expected_score
+
+
+@pytest.mark.parametrize(
+    ("encoder", "width"),
+    [
+        (XYZLocationEncoder(device="cpu"), 3),
+        (NeRFLocationEncoder(num_frequencies=2, device="cpu"), 12),
+        (SphericalHarmonicLocationEncoder(degree=3, device="cpu"), 16),
+    ],
+)
+def test_coordinate_encoders_shape_and_batching(
+    points: tuple[np.ndarray, np.ndarray], encoder: LocationEncoder, width: int
+) -> None:
+    lon, lat = points
+    expected = encoder.encode(lon, lat)
+    encoder.batch_size = 37
+    feats = encoder.encode(lon, lat)
+    assert feats.shape == (len(lon), width)
+    assert feats.dtype == np.float32
+    assert np.isfinite(feats).all()
+    np.testing.assert_array_equal(feats, expected)
+
+
+def test_xyz_known_spherical_coordinates() -> None:
+    features = XYZLocationEncoder().encode(
+        np.array([0.0, 90.0, 180.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0, 90.0, -90.0])
+    )
+    expected = [[1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
+    np.testing.assert_allclose(features, expected, atol=1e-7)
+
+
+@pytest.mark.parametrize("include_xyz", [False, True])
+def test_nerf_frequency_and_feature_order(
+    points: tuple[np.ndarray, np.ndarray], *, include_xyz: bool
+) -> None:
+    xyz = XYZLocationEncoder().encode(*points)
+    angles = xyz[:, :, None] * np.array([1.0, 2.0, 4.0], dtype=np.float32) * np.pi
+    parts = [np.sin(angles).reshape(len(xyz), -1), np.cos(angles).reshape(len(xyz), -1)]
+    if include_xyz:
+        parts.insert(0, xyz)
+    features = NeRFLocationEncoder(num_frequencies=3, include_xyz=include_xyz).encode(*points)
+    np.testing.assert_allclose(features, np.concatenate(parts, axis=1), atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "encoder",
+    [XYZLocationEncoder(), NeRFLocationEncoder(), SphericalHarmonicLocationEncoder()],
+)
+def test_coordinate_encoders_preserve_non_finite_rows(encoder: LocationEncoder) -> None:
+    lon = np.array([0.0, np.nan, 45.0])
+    lat = np.array([10.0, 30.0, np.inf])
+    features = encoder.encode(lon, lat)
+    assert np.isfinite(features[0]).all()
+    assert not np.isfinite(features[1]).all()
+    assert not np.isfinite(features[2]).all()
+
+
+def test_coordinate_encoders_reject_out_of_range_finite_latitude() -> None:
+    with pytest.raises(ValueError, match=r"\[-90, 90\]"):
+        XYZLocationEncoder().encode(np.array([0.0, 1.0]), np.array([0.0, 91.0]))
+
+
+def test_coordinate_encoders_allocate_tensors_on_configured_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    devices: list[str] = []
+    as_tensor = torch.as_tensor
+
+    def spy_as_tensor(data: object, **kwargs: Any) -> torch.Tensor:
+        devices.append(str(kwargs.get("device")))
+        return as_tensor(data, **kwargs)
+
+    monkeypatch.setattr(torch, "as_tensor", spy_as_tensor)
+    lon = np.array([0.0, 45.0])
+    lat = np.array([10.0, 20.0])
+    XYZLocationEncoder(device="cpu").encode(lon, lat)
+    NeRFLocationEncoder(device="cpu").encode(lon, lat)
+    SphericalHarmonicLocationEncoder(device="cpu").encode(lon, lat)
+    assert devices
+    assert set(devices) == {"cpu"}
+
+
+@pytest.mark.parametrize(
+    ("factory", "kwargs", "message", "error_type"),
+    [
+        (
+            NeRFLocationEncoder,
+            {"num_frequencies": 1.5},
+            "num_frequencies must be an integer",
+            TypeError,
+        ),
+        (
+            NeRFLocationEncoder,
+            {"include_xyz": "false"},
+            "include_xyz must be a boolean",
+            TypeError,
+        ),
+        (
+            SphericalHarmonicLocationEncoder,
+            {"degree": 1.5},
+            "degree must be an integer",
+            TypeError,
+        ),
+    ],
+)
+def test_coordinate_encoder_kwargs_require_strict_types(
+    factory: type[LocationEncoder],
+    kwargs: dict[str, object],
+    message: str,
+    error_type: type[Exception],
+) -> None:
+    with pytest.raises(error_type, match=message):
+        factory(**kwargs)
+
+
+@pytest.mark.parametrize("degree", range(4))
+def test_spherical_harmonic_normalization(
+    points: tuple[np.ndarray, np.ndarray], degree: int
+) -> None:
+    features = SphericalHarmonicLocationEncoder(degree=degree).encode(*points)
+    assert features.shape == (len(points[0]), (degree + 1) ** 2)
+    np.testing.assert_allclose(features[:, 0], 1 / np.sqrt(4 * np.pi))
+    for order in range(degree + 1):
+        power = np.square(features[:, order**2 : (order + 1) ** 2]).sum(axis=1)
+        np.testing.assert_allclose(power, (2 * order + 1) / (4 * np.pi), atol=5e-7)
+
+
+@pytest.mark.parametrize("seed", [0, 42, 2**64 - 1])
+def test_random_folds_use_local_torch_seed(seed: int) -> None:
+    state = torch.random.get_rng_state()
+    actual = cb_probe._fold_indices(31, 5, seed, None)
+    permutation = torch.randperm(31, generator=torch.Generator().manual_seed(seed)).numpy()
+    for fold, indices in enumerate(actual):
+        np.testing.assert_array_equal(indices, permutation[fold::5])
+    torch.testing.assert_close(torch.random.get_rng_state(), state)
+
+
+def test_official_split_randomizes_only_valid_training_pool() -> None:
+    features = np.arange(80, dtype=np.float32).reshape(40, 2)
+    labels = features[:, 0].copy()
+    labels[1] = np.nan
+    test_mask = np.arange(40) % 4 == 0
+    train_pool = np.flatnonzero(~test_mask[np.isfinite(labels)])
+    expected = cb_probe._fold_indices(len(train_pool), 3, 42, None)
+    with mock.patch.object(cb_probe, "_cv_alpha_scores", wraps=cb_probe._cv_alpha_scores) as cv:
+        linear_probe_score(
+            features, labels, "regression", folds=3, seed=42, test_mask=test_mask, alphas=(0.1,)
+        )
+    for actual, indices in zip(cv.call_args.args[1], expected, strict=True):
+        np.testing.assert_array_equal(actual.numpy(), train_pool[indices])
+
+
+@pytest.mark.parametrize("task_type", ["regression", "classification"])
+@pytest.mark.parametrize("split", ["random", "official"])
+def test_sample_count_excludes_invalid_features_and_labels(task_type: str, split: str) -> None:
+    features = np.array([[0.0], [np.nan], [1.0], [2.0]])
+    labels = np.array([0.0, 1.0, np.nan, 1.0])
+    mask = np.array([True, True, True, False]) if split == "official" else None
+    assert sample_count(features, labels, task_type, mask) == (1 if split == "official" else 2)
 
 
 def test_documented_fourier_encoder_example(points: tuple[np.ndarray, np.ndarray]) -> None:
@@ -268,12 +433,33 @@ def test_run_coordbench_resume_skips(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert Path(cfg.output.file).read_bytes() == before
 
 
+def test_run_coordbench_resume_recomputes_rows_without_fold_algorithm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
+    )
+    cfg = _coord_cfg(tmp_path)
+    run_coordbench(cfg)
+
+    old_rows = pd.read_csv(cfg.output.file).drop(columns=["fold_algorithm"])
+    old_rows.to_csv(cfg.output.file, index=False)
+
+    cfg.output.resume = True
+    run_coordbench(cfg)
+    rows = pd.read_csv(cfg.output.file)
+    assert "fold_algorithm" in rows.columns
+    assert set(rows.fold_algorithm.dropna()) == {"torch-randperm-v1"}
+
+
 def test_run_coordbench_reports_official_test_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bench = _synthetic_benchmarks()[0]
     test_mask = np.zeros(len(bench.lat), dtype=bool)
     test_mask[::3] = True
+    bench.tasks["target"][test_mask] = np.nan
+    test_mask[1] = True
     bench.test_mask = test_mask
     monkeypatch.setattr("torchgeo_bench.coordbench.run.load_benchmarks", lambda names: [bench])
 
@@ -282,7 +468,7 @@ def test_run_coordbench_reports_official_test_count(
 
     df = pd.read_csv(cfg.output.file)
     assert set(df.split) == {"official"}
-    assert set(df.n_test) == {int(test_mask.sum())}
+    assert set(df.n_test) == {1}
 
 
 def test_load_benchmarks_selection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -405,6 +591,7 @@ def test_runtime_method_selection(
         "seed",
         "model_name",
         "model_target",
+        "fold_algorithm",
     ]
 
 

@@ -37,6 +37,23 @@ def test_coord_defaults() -> None:
 
 
 @pytest.mark.parametrize(
+    ("name", "encoder", "kwargs"),
+    [
+        ("xyz", "XYZLocationEncoder", {}),
+        ("nerf", "NeRFLocationEncoder", {"num_frequencies": 16}),
+        ("spherical-harmonics", "SphericalHarmonicLocationEncoder", {"degree": 3}),
+    ],
+)
+def test_position_encoder_presets(name: str, encoder: str, kwargs: dict[str, int]) -> None:
+    config = load_config(_parse("--model", name, "--dataset", "country", "--device", "cpu"))
+    preset = resolve_coord_preset(config)
+    assert preset.name == name
+    assert preset.track == "coord"
+    assert preset.target == f"torchgeo_bench.coordbench.models.{encoder}"
+    assert preset.kwargs == kwargs
+
+
+@pytest.mark.parametrize(
     "values",
     [
         {"unexpected": True},
@@ -206,6 +223,9 @@ def test_dry_run_roundtrip(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -
     [
         {"name": "sincos"},
         {"name": "mind"},
+        {"name": "xyz"},
+        {"name": "nerf"},
+        {"name": "spherical-harmonics"},
         {"name": "custom", "target": "uncached_optional_encoder.Custom", "kwargs": {"dim": 8}},
     ],
 )
