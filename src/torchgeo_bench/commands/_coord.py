@@ -16,6 +16,7 @@ _FLAG_OVERRIDES = (
     FlagOverride("split", ("evaluation", "split")),
     FlagOverride("folds", ("evaluation", "folds")),
     FlagOverride("cell_deg", ("evaluation", "cell_deg")),
+    FlagOverride("penalize_intercept", ("evaluation", "penalize_intercept")),
     FlagOverride("knn_k", ("evaluation", "knn_k")),
     FlagOverride("knn_device", ("evaluation", "knn_device")),
     FlagOverride("device", ("runtime", "device")),

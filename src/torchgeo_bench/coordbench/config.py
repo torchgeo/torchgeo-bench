@@ -43,6 +43,7 @@ class CoordEvaluationConfig(StrictModel):
     cell_deg: StrictFloat = Field(default=10.0, gt=0)
     knn_k: StrictInt = Field(default=5, gt=0)
     knn_device: KnnDevice = "cpu"
+    penalize_intercept: StrictBool = False
 
 
 class CoordConfig(StrictModel):

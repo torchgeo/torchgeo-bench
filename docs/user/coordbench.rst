@@ -66,6 +66,8 @@ Benchmarks and probes
 
 The ``linear`` probe uses ridge with an unpenalized intercept, matching ``sklearn.linear_model.Ridge(fit_intercept=True)`` on the same preprocessed features. Each fit centers features and targets using training-fold means and restores the target mean for prediction. Feature standardization and alpha selection remain fold-local.
 
+Set ``--penalize-intercept`` or ``evaluation.penalize_intercept: true`` to reproduce the legacy penalized bias. The default is false; ``--no-penalize-intercept`` overrides a YAML value of true. The selected convention applies to both CV selection and holdout fitting.
+
 Older versions penalized the intercept. To recompute those results, select a fresh ``--output`` CSV; resume keys do not distinguish the two conventions, and runs append to existing files.
 
 ``--dataset`` accepts one or more family or benchmark names, for example

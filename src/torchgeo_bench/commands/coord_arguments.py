@@ -23,6 +23,10 @@ def add_coord_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--split", choices=("random", "spatial", "both"), default=argparse.SUPPRESS)
     parser.add_argument("--folds", type=int, default=argparse.SUPPRESS)
     parser.add_argument("--cell-deg", type=float, default=argparse.SUPPRESS)
+    parser.add_argument(
+        "--penalize-intercept", action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS, help="Apply the ridge penalty to the intercept (legacy behavior)",
+    )
     parser.add_argument("--knn-k", type=int, default=argparse.SUPPRESS)
     parser.add_argument("--knn-device", default=argparse.SUPPRESS)
     parser.add_argument("--device", default=argparse.SUPPRESS)
