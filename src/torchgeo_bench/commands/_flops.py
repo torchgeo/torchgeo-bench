@@ -10,6 +10,7 @@ import yaml
 from .. import commands
 from ..config.flops import FlopsConfig
 from ._config import (
+    OUTPUT_FLAG_OVERRIDES,
     FlagOverride,
     load_config_or_exit,
     load_from_flags,
@@ -37,7 +38,7 @@ _FLAG_OVERRIDES = (
     FlagOverride("timing_batch_size", ("timing", "batch_size")),
     FlagOverride("n_warmup", ("timing", "n_warmup")),
     FlagOverride("n_measure", ("timing", "n_measure")),
-    FlagOverride("output", ("output", "file")),
+    *OUTPUT_FLAG_OVERRIDES,
     FlagOverride("resume", ("output", "resume")),
 )
 

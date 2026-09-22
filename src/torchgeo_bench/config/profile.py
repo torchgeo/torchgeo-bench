@@ -11,6 +11,7 @@ from .schema import (
     Device,
     InputConfig,
     ModelConfig,
+    OutputPath,
     RuntimeConfig,
     SchemaVersion,
     StrictModel,
@@ -26,6 +27,13 @@ class ProfileRuntimeConfig(RuntimeConfig):
     seed: StrictInt = Field(default=0, ge=0, le=2**32 - 1)
 
 
+class ProfileOutputConfig(StrictModel):
+    """Write JSON to stdout unless a directory or file is supplied."""
+
+    directory: OutputPath | None = None
+    file: OutputPath | None = None
+
+
 class ProfileConfig(StrictModel):
     """Model, input, and timing settings for the standalone profile command."""
 
@@ -34,6 +42,7 @@ class ProfileConfig(StrictModel):
     dataset: StrictStr = Field(min_length=1)
     input: InputConfig = Field(default_factory=InputConfig)
     runtime: ProfileRuntimeConfig = Field(default_factory=ProfileRuntimeConfig)
+    output: ProfileOutputConfig = Field(default_factory=ProfileOutputConfig)
     warmup: StrictInt = Field(default=3, ge=0)
     measurements: StrictInt = Field(default=20, gt=0)
     precision: Literal["float32", "float16", "bfloat16"] = "float32"

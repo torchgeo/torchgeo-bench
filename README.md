@@ -107,9 +107,7 @@ There is no separate legacy configuration entry point.
 
 ## Measure encoder cost
 
-The standalone `profile` command measures one fixed **real dataset batch** and
-writes JSON to stdout. The `flops` command uses **synthetic inputs**, does not
-load dataset samples, and appends compute measurements to a CSV:
+The standalone `profile` command measures one fixed **real dataset batch** and writes JSON to stdout by default. The `flops` command uses **synthetic inputs**, does not load dataset samples, and appends compute measurements to a CSV:
 
 ```bash
 torchgeo-bench profile --model rcf --dataset m-eurosat --device cpu \
@@ -118,6 +116,8 @@ torchgeo-bench profile --model rcf --dataset m-eurosat --device cpu \
 torchgeo-bench flops --model rcf --device cpu --band-configs rgb \
   --seg-heads --output results/my_compute_cost.csv
 ```
+
+`run`, `flops`, `coord`, and `profile` share `--output-dir` for a common output root and `--output` for an exact file path that takes precedence. Image runs retain their `models/`, `profiles/`, and `intrinsic_dim/` subdirectories. Standalone profiling writes `profile.json` beneath an explicit output root.
 
 Both accept `--config` and `--dry-run`. See
 [`docs/examples/profile.yaml`](docs/examples/profile.yaml),

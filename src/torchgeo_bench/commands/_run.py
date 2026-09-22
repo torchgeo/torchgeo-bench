@@ -13,6 +13,7 @@ from ..config.presets import load_model_preset
 from ..config.run import RunConfig, validate_run_config
 from ..datasets import list_datasets
 from ._config import (
+    OUTPUT_FLAG_OVERRIDES,
     FlagOverride,
     comma_separated_bands,
     load_config_or_exit,
@@ -40,10 +41,7 @@ _FLAG_OVERRIDES = (
     FlagOverride("refit_train_val", ("classification", "linear", "refit_train_val")),
     FlagOverride("temp_scale", ("classification", "calibration", "temp_scale")),
     FlagOverride("resume", ("output", "resume")),
-    FlagOverride("output", ("output", "file")),
-    FlagOverride("results_dir", ("output", "directory")),
-    FlagOverride("profile_dir", ("output", "profile_directory")),
-    FlagOverride("intrinsic_dim_dir", ("output", "intrinsic_dim_directory")),
+    *OUTPUT_FLAG_OVERRIDES,
 )
 
 

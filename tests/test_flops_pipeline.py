@@ -323,7 +323,10 @@ def flops_config(tmp_path):
     )
 
 
-def test_completed_profile_survives_incompatible_segmentation_head(flops_config, monkeypatch):
+@pytest.mark.parametrize("explicit_file", [False, True])
+def test_completed_profile_survives_incompatible_segmentation_head(
+    flops_config, monkeypatch, tmp_path: Path, *, explicit_file: bool
+) -> None:
     import pandas as pd
 
     monkeypatch.setattr(
@@ -332,10 +335,16 @@ def test_completed_profile_survives_incompatible_segmentation_head(flops_config,
     flops_config.segmentation = FlopsSegmentationConfig(
         heads=["dpt"], probe=SegmentationConfig(layers=["stem"])
     )
+    flops_config.output.directory = str(tmp_path / "nested")
+    output_path = tmp_path / "flops.csv"
+    if not explicit_file:
+        flops_config.output.file = None
+        output_path = tmp_path / "nested" / "compute_cost.csv"
     with pytest.raises(ValueError, match="DPT"):
         main(flops_config)
 
-    rows = pd.read_csv(flops_config.output.file)
+    assert set(tmp_path.rglob("*.csv")) == {output_path}
+    rows = pd.read_csv(output_path)
     assert list(rows["task"]) == ["classification"]
     assert rows.iloc[0]["gflops_total"] > 0
     assert not rows.iloc[0]["lenient_grad_hooks"]

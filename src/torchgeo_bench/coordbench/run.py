@@ -4,7 +4,7 @@ Driven by a :class:`CoordConfig`: instantiate a coordinate encoder from its
 model preset, embed each benchmark's points once, then probe
 with KNN and/or a ridge linear head under random and/or spatial-block
 cross-validation. One CSV row per (benchmark, task, method, split) is appended
-to ``output.file`` via the shared atomic writer, with resume support.
+to the resolved output path via the shared atomic writer, with resume support.
 """
 
 import logging
@@ -19,6 +19,7 @@ import torch
 from tqdm.auto import tqdm
 
 from torchgeo_bench.config.presets import ModelPreset, build_model
+from torchgeo_bench.config.schema import resolve_output_path
 from torchgeo_bench.coordbench.config import (
     CoordConfig,
     CoordEvaluationConfig,
@@ -133,7 +134,9 @@ def run_coordbench(cfg: CoordConfig) -> None:
         cfg = cfg.model_copy(update={"runtime": cfg.runtime.model_copy(update={"device": device})})
     splits = _resolve_splits(cfg.evaluation.split)
 
-    output_path = cfg.output.file
+    output_path = resolve_output_path(
+        cfg.output.directory, cfg.output.file, "coordbench_results.csv"
+    )
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     encoder = _instantiate_encoder(preset, device)

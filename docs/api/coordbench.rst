@@ -18,8 +18,7 @@ The public runner accepts ``CoordConfig``, not image settings:
    config = load_coord_config("docs/examples/coord-run.yaml")
    run_coordbench(config)
 
-Loading validates YAML without fetching tables or weights. Calling the runner
-executes the benchmark and appends results to ``config.output.file``.
+Loading validates YAML without fetching tables or weights. Calling the runner executes the benchmark and appends results to ``coordbench_results.csv`` beneath ``config.output.directory``, unless ``config.output.file`` selects an exact path.
 
 .. currentmodule:: torchgeo_bench.coordbench.config
 

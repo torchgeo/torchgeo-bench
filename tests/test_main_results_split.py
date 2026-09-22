@@ -31,9 +31,7 @@ def _compose_default_routing_cfg(tmp_path: Path, overrides: dict | None = None) 
             {
                 "output": {
                     "file": None,
-                    "directory": str(tmp_path / "models"),
-                    "profile_directory": str(tmp_path / "profiles"),
-                    "intrinsic_dim_directory": str(tmp_path / "intrinsic_dim"),
+                    "directory": str(tmp_path),
                 }
             },
             overrides or {},
@@ -46,18 +44,7 @@ def _compose_default_routing_cfg(tmp_path: Path, overrides: dict | None = None) 
     [
         ([], ("results/models", "results/profiles", "results/intrinsic_dim")),
         (
-            ["--results-dir", "custom/models"],
-            ("custom/models", "results/profiles", "results/intrinsic_dim"),
-        ),
-        (
-            [
-                "--results-dir",
-                "custom/models",
-                "--profile-dir",
-                "custom/profiles",
-                "--intrinsic-dim-dir",
-                "custom/intrinsic_dim",
-            ],
+            ["--output-dir", "custom"],
             ("custom/models", "custom/profiles", "custom/intrinsic_dim"),
         ),
     ],

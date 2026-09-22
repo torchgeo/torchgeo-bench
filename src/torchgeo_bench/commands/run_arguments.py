@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 
-from ._config import parse_image_size
+from ._config import add_output_arguments, parse_image_size
 
 
 def add_run_arguments(parser: argparse.ArgumentParser) -> None:
@@ -57,24 +57,7 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--resume", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS
     )
-    parser.add_argument(
-        "-o", "--output", default=argparse.SUPPRESS, help="CSV for all image result kinds"
-    )
-    parser.add_argument(
-        "--results-dir",
-        default=argparse.SUPPRESS,
-        help="Directory for per-model classification/segmentation CSVs",
-    )
-    parser.add_argument(
-        "--profile-dir",
-        default=argparse.SUPPRESS,
-        help="Directory for per-model profile CSVs",
-    )
-    parser.add_argument(
-        "--intrinsic-dim-dir",
-        default=argparse.SUPPRESS,
-        help="Directory for per-model intrinsic-dimension CSVs",
-    )
+    add_output_arguments(parser)
     parser.add_argument(
         "--verbose", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS
     )

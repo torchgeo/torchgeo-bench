@@ -9,7 +9,7 @@ from .presets import ModelPreset, load_model_preset, merge_settings
 from .schema import (
     Device,
     ModelConfig,
-    OutputPath,
+    OutputPaths,
     SchemaVersion,
     SegmentationConfig,
     StrictModel,
@@ -105,10 +105,9 @@ class FlopsTimingConfig(StrictModel):
     n_measure: StrictInt = Field(default=20, gt=0)
 
 
-class FlopsOutputConfig(StrictModel):
+class FlopsOutputConfig(OutputPaths):
     """Append-only CSV with the established per-cell resume keys."""
 
-    file: OutputPath = "results/compute_cost.csv"
     resume: StrictBool = True
 
 

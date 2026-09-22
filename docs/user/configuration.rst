@@ -241,24 +241,24 @@ Results and resume
 .. code-block:: yaml
 
    output:
-     directory: results/models
+     directory: results
      file: null
      resume: false
-     profile_directory: results/profiles
-     intrinsic_dim_directory: results/intrinsic_dim
 
-Classification and segmentation metrics append to ``output.directory/<model name>.csv``. ``--results-dir`` sets only this directory. Use ``--profile-dir`` and ``--intrinsic-dim-dir`` to set ``output.profile_directory`` and ``output.intrinsic_dim_directory`` for the optional side files. Each flag overrides its corresponding YAML setting; omitted directories keep their YAML values or the defaults above.
+``--output-dir`` sets ``output.directory``, the common root for all command outputs. Image runs append classification and segmentation CSVs under ``models/``, profiling CSVs under ``profiles/``, and intrinsic-dimension CSVs under ``intrinsic_dim/``. Filenames remain ``<model name>.csv``.
 
-To keep an image run's CSVs out of the tracked reference results while retaining separate files:
+To keep every output from an image run outside the tracked reference results:
 
 .. code-block:: bash
 
    torchgeo-bench run --config docs/examples/image-run.yaml \
-     --results-dir outputs/my-run/models \
-     --profile-dir outputs/my-run/profiles \
-     --intrinsic-dim-dir outputs/my-run/intrinsic_dim
+     --output-dir outputs/my-run
 
-An explicit ``--output`` / ``output.file`` takes precedence over all three directories and combines all selected image-run measurements in that CSV. These settings do not change standalone profile JSON or other commands' outputs.
+The same flags apply to ``flops``, ``coord``, and standalone ``profile``. Beneath the root, they write ``compute_cost.csv``, ``coordbench_results.csv``, and ``profile.json``, respectively. The CSV commands default to the ``results`` root; standalone profiling defaults to stdout when neither destination is supplied.
+
+``--output`` / ``output.file`` selects an exact path, relative to the working directory or absolute. An explicit file takes precedence over the directory, even when the file comes from YAML; clear ``output.file`` to ``null`` to use the directory instead. For image runs, the explicit file combines all selected measurement kinds in one CSV. Each CLI flag overrides its corresponding YAML field, regardless of flag order.
+
+When migrating older image YAML, change ``output.directory: results/models`` to ``output.directory: results`` and remove ``profile_directory`` and ``intrinsic_dim_directory``. Those fields and the old ``--results-dir``, ``--profile-dir``, and ``--intrinsic-dim-dir`` flags are no longer accepted.
 
 ``--resume`` / ``--no-resume`` control skipping completed measurements.
 Resume compares method/config keys and metric completeness; additive profile
@@ -319,15 +319,14 @@ and :doc:`eval_own_model` for the model interface.
 Standalone profiling
 --------------------
 
-``profile`` repeatedly measures one fixed real dataset batch, with the same
-model/dataset input-default resolution as an image run. It writes one JSON
-record to stdout, not to an image-results CSV:
+``profile`` repeatedly measures one fixed real dataset batch, with the same model/dataset input-default resolution as an image run. It writes one JSON record to stdout by default. Use ``--output-dir`` to write ``profile.json`` beneath a directory, or ``--output`` for an exact filename; file output leaves stdout empty and replaces any existing JSON file.
 
 .. code-block:: console
 
    $ torchgeo-bench profile --model rcf --dataset m-eurosat --device cpu \
        --batch-size 8 --warmup 1 --measurements 5 > profile.json
    $ torchgeo-bench profile --config docs/examples/profile.yaml --dry-run
+   $ torchgeo-bench profile --model rcf --dataset m-eurosat --output-dir outputs/profile
 
 Its YAML uses singular ``dataset`` and top-level measurement settings:
 
@@ -346,6 +345,9 @@ Its YAML uses singular ``dataset`` and top-level measurement settings:
    measurements: 5
    precision: float32
    count_flops: false
+   output:
+     directory: null
+     file: null
 
 It supports ``--model``, ``--dataset``, ``--device``, ``--batch-size``,
 ``--seed``, ``--bands``, ``--partition``, ``--image-size``,
@@ -399,7 +401,8 @@ Its YAML schema is independent of image runs:
      n_warmup: 3
      n_measure: 20
    output:
-     file: results/compute_cost.csv
+     directory: results
+     file: null
      resume: true
 
 ``--band-source`` selects the dataset metadata. ``--band-configs rgb s2``
@@ -419,8 +422,7 @@ with the image segmentation fields. Omitted probe layers inherit model
 and dataset defaults; explicit ``[]`` clears them.
 
 ``--timing-batch-size``, ``--n-warmup``, and ``--n-measure`` control timing;
-FLOPs are always counted for one sample. ``--output`` selects the CSV,
-and ``--no-resume`` disables the default per-cell resume behavior.
+FLOPs are always counted for one sample. ``--output-dir`` relocates ``compute_cost.csv``, ``--output`` selects an exact CSV path, and ``--no-resume`` disables the default per-cell resume behavior.
 ``--model-target`` and ``--model-kwargs`` accept a custom constructor and a
 YAML mapping of constructor options; reusable custom models can use
 ``model.target`` and ``model.kwargs`` in the file instead.

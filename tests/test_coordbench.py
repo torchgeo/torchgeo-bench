@@ -230,14 +230,23 @@ def _coord_cfg(tmp_path: Path, **coord_overrides: object) -> CoordConfig:
     )
 
 
-def test_run_coordbench_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("explicit_file", [False, True])
+def test_run_coordbench_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, explicit_file: bool
+) -> None:
     monkeypatch.setattr(
         "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
     )
     cfg = _coord_cfg(tmp_path, split="both")
+    cfg.output.directory = str(tmp_path / "nested")
+    output_path = tmp_path / "coord.csv"
+    if not explicit_file:
+        cfg.output.file = None
+        output_path = tmp_path / "nested" / "coordbench_results.csv"
     run_coordbench(cfg)
 
-    df = pd.read_csv(cfg.output.file)
+    assert set(tmp_path.rglob("*.csv")) == {output_path}
+    df = pd.read_csv(output_path)
     assert {"dataset", "task", "method", "split", "metric_name", "metric_value"} <= set(df.columns)
     reg = df[df.dataset == "synthetic-reg"]
     clf = df[df.dataset == "synthetic-clf"]

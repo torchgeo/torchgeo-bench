@@ -23,8 +23,7 @@ small CPU example evaluates one regression benchmark with two random folds:
        --methods linear --folds 2 --device cpu \
        --output results/coordbench_quickstart.csv
 
-Results are appended to ``output.file`` (``--output``). Add ``--resume`` to
-skip rows that already match ``(dataset, task, method, model_name, split)``.
+Results are appended to ``coordbench_results.csv`` beneath ``output.directory`` (``--output-dir``, default ``results``), unless ``output.file`` (``--output``) selects an exact path. Add ``--resume`` to skip rows that already match ``(dataset, task, method, model_name, split)``.
 Unlike image-run resume, this key does not include a configuration hash;
 use a separate output file when changing encoder kwargs or evaluation
 settings that are not part of the key.
@@ -116,7 +115,8 @@ Pass a file to ``torchgeo-bench coord --config my-coord.yaml``:
      device: cpu
      seed: 0
    output:
-     file: results/coordbench_results.csv
+     directory: results
+     file: null
      resume: false
 
 Explicit flags override YAML, including ``--no-resume``.
