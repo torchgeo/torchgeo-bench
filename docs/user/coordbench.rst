@@ -64,6 +64,10 @@ spatial-block cross-validation:
 Benchmarks and probes
 ---------------------
 
+The ``linear`` probe uses ridge with an unpenalized intercept, matching ``sklearn.linear_model.Ridge(fit_intercept=True)`` on the same preprocessed features. Each fit centers features and targets using training-fold means and restores the target mean for prediction. Feature standardization and alpha selection remain fold-local.
+
+Older versions penalized the intercept. To recompute those results, select a fresh ``--output`` CSV; resume keys do not distinguish the two conventions, and runs append to existing files.
+
 ``--dataset`` accepts one or more family or benchmark names, for example
 ``--dataset pdfm satclip``. The corresponding YAML field is a list:
 ``datasets: [pdfm, satclip]``. Use ``--dataset all`` or ``datasets: [all]``

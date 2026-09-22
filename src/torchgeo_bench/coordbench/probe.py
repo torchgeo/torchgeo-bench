@@ -97,13 +97,13 @@ def _ridge_eval(
         x_tr, x_te = (x_tr - mean) / std, (x_te - mean) / std
     # float64 normal equations: for high-dim features a small alpha is otherwise lost to
     # float32 rounding and the Gram matrix goes singular.
-    x_tr = torch.cat([x_tr, torch.ones(x_tr.shape[0], 1, device=x_tr.device)], dim=1).double()
-    x_te = torch.cat([x_te, torch.ones(x_te.shape[0], 1, device=x_te.device)], dim=1).double()
+    x_tr, x_te = x_tr.double(), x_te.double()
+    y_tr = data.targets[train_idx].double()
+    x_mean, y_mean = x_tr.mean(0, keepdim=True), y_tr.mean(0, keepdim=True)
+    x_tr, x_te = x_tr - x_mean, x_te - x_mean
     eye = torch.eye(x_tr.shape[1], device=x_tr.device, dtype=torch.float64)
-    weight = torch.linalg.solve(
-        x_tr.T @ x_tr + alpha * eye, x_tr.T @ data.targets[train_idx].double()
-    )
-    pred = x_te @ weight
+    weight = torch.linalg.solve(x_tr.T @ x_tr + alpha * eye, x_tr.T @ (y_tr - y_mean))
+    pred = x_te @ weight + y_mean
     if data.class_indices is None:
         y_te = data.targets[test_idx]
         ss_res = ((y_te - pred) ** 2).sum()
@@ -158,6 +158,9 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
     standardize: bool = True,
 ) -> tuple[float, list[float]]:
     """Closed-form ridge linear probe (regression R^2 / one-hot-ridge accuracy).
+
+    Center features and targets on each training fold and restore the target mean
+    after prediction, leaving the intercept unpenalized as in sklearn Ridge.
 
     Args:
         features: Feature matrix ``(N, D)``.
