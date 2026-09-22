@@ -7,6 +7,7 @@ Targets:
 - ``eurosat`` — torchgeo's EuroSAT downloader, into ``<output>/eurosat``.
 - ``resisc45`` — torchgeo's NWPU-RESISC45 downloader, into ``<output>/resisc45``.
 - ``aid`` — pinned ``isaaccorley/aid`` rehost, into ``<output>/aid``.
+- ``ucmerced`` — torchgeo's UC Merced downloader, into ``<output>/ucmerced``.
 
 V1 uses the pinned ``calebrob6/geobenchv1-webdataset`` mirror.
 
@@ -19,7 +20,7 @@ import zipfile
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
-from torchgeo.datasets import RESISC45, EuroSAT, EuroSATSpatial
+from torchgeo.datasets import RESISC45, EuroSAT, EuroSATSpatial, UCMerced
 
 from torchgeo_bench.datasets._v1_webdataset import download_sharded_root
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
@@ -47,7 +48,7 @@ V1_DATASETS: tuple[str, ...] = (
     "m-brick-kiln",
     "m-bigearthnet",
 )
-TORCHGEO_DATASETS: tuple[str, ...] = ("eurosat", "resisc45")
+TORCHGEO_DATASETS: tuple[str, ...] = ("eurosat", "resisc45", "ucmerced")
 DIRECT_DATASETS: tuple[str, ...] = ("aid",)
 DOWNLOADABLE_DATASETS: tuple[str, ...] = (
     V1_DATASETS + DEFAULT_V2_DATASETS + TORCHGEO_DATASETS + DIRECT_DATASETS
@@ -175,6 +176,16 @@ def download_aid(output_dir: Path) -> None:
     logger.info("AID download complete.")
 
 
+def download_ucmerced(output_dir: Path) -> None:
+    """Download verified UC Merced imagery and splits into ``output_dir/ucmerced``."""
+    target = Path(output_dir) / "ucmerced"
+    target.mkdir(parents=True, exist_ok=True)
+    logger.info("Downloading torchgeo UCMerced -> %s", target)
+    for split in ("train", "val", "test"):
+        UCMerced(root=str(target), split=split, download=True, checksum=True)
+    logger.info("UCMerced download complete.")
+
+
 def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None:
     """Download individually named benchmark datasets.
 
@@ -198,3 +209,5 @@ def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None
         download_resisc45(output_dir)
     if "aid" in selected:
         download_aid(output_dir)
+    if "ucmerced" in selected:
+        download_ucmerced(output_dir)

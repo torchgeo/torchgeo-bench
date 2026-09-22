@@ -71,3 +71,5 @@ torchgeo wrappers
 .. autoclass:: RESISC45
 
 .. autoclass:: AID
+
+.. autoclass:: UCMerced
