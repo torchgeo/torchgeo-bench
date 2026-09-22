@@ -659,12 +659,17 @@ def test_dpt_head_upsamples_purely_through_fusion_cascade():
 
 
 @pytest.mark.parametrize(("grid", "size", "patch"), [(4, 64, 16), (16, 64, 4), (16, 65, 4)])
-def test_patch_linear_head_infers_patch_geometry(grid: int, size: int, patch: int) -> None:
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_patch_linear_head_infers_patch_geometry(
+    grid: int, size: int, patch: int, dtype: torch.dtype
+) -> None:
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
-    head = PatchLinearHead([8], num_classes=3)
-    logits = head([torch.randn(2, 8, grid, grid)], size, size)
+    head = PatchLinearHead([8], num_classes=3).to(dtype=dtype)
+    logits = head([torch.randn(2, 8, grid, grid, dtype=dtype)], size, size)
     assert head.patch_size == patch
+    assert all(param.dtype == dtype for param in head.parameters())
+    assert logits.dtype == dtype
     assert logits.shape == (2, 3, size, size)
     assert torch.isfinite(logits).all()
 
@@ -681,15 +686,49 @@ def test_patch_linear_head_ignores_extra_channels():
     torch.testing.assert_close(head([primary, extra * 100], 64, 64), expected)
 
 
-def test_probe_patch_linear_head_vit():
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param("meta", id="meta-device-without-cuda"),
+        pytest.param(
+            "cuda:0",
+            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable"),
+        ),
+    ],
+)
+def test_probe_patch_linear_head_initializes_on_backbone_device(device: str) -> None:
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    probe = make_probe(ViTBackbone().to(device), ["blocks"], head_type="patch_linear")
+
+    assert isinstance(probe.head, PatchLinearHead)
+    assert probe.head.conv is not None
+    assert probe.head.patch_size == 16
+    for param in probe.head.parameters():
+        assert param.device == torch.device(device)
+        assert param.dtype == torch.get_default_dtype()
+
+
+def test_probe_patch_linear_head_vit() -> None:
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
     probe = make_probe(ViTBackbone(), ["blocks"], head_type="patch_linear")
+    assert isinstance(probe.head, PatchLinearHead)
+    assert probe.head.conv is not None
+    params = list(probe.head.parameters())
+    optimizer = torch.optim.SGD(params, lr=0.1)
+    initial_weight = probe.head.conv.weight.detach().clone()
+
     images = torch.randn(2, 3, 64, 64)
     logits = probe(images)
-
-    assert isinstance(probe.head, PatchLinearHead)
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
+    logits.square().mean().backward()
+    optimizer.step()
+
+    assert all(param.grad is not None for param in params)
+    assert [id(param) for param in probe.head.parameters()] == [id(param) for param in params]
+    assert not torch.equal(probe.head.conv.weight, initial_weight)
 
 
 def test_probe_patch_linear_cached_features():
