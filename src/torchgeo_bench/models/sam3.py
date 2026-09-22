@@ -34,9 +34,10 @@ Layer naming for SegmentationProbe:
 """
 
 import logging
+from typing import cast
 
 import torch
-from transformers import Sam3Config, Sam3Model
+from transformers import Sam3Config, Sam3Model, Sam3VisionConfig
 
 from torchgeo_bench.datasets.base import BandSpec
 
@@ -106,7 +107,10 @@ class SAM3Encoder(BenchModel):
         logger.info("Loading SAM3 from %r at %dx%d …", source, image_size, image_size)
 
         config = Sam3Config.from_pretrained(source, local_files_only=local_files_only)
-        config.vision_config.image_size = image_size
+        # ``Sam3Config`` types its sub-configs as ``dict | PreTrainedConfig | None``;
+        # ``__post_init__`` has already turned this one into a ``Sam3VisionConfig``.
+        vision_config = cast(Sam3VisionConfig, config.vision_config)
+        vision_config.image_size = image_size
         full_model = Sam3Model.from_pretrained(
             source,
             config=config,

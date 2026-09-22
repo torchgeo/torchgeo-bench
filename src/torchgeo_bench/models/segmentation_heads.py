@@ -1,7 +1,5 @@
 """Segmentation decoder heads for use with SegmentationProbe."""
 
-from types import SimpleNamespace
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -266,17 +264,18 @@ class ChannelLayerNorm(nn.Module):
 def _dpt_fusion_layer(hidden_dim: int) -> nn.Module:
     """Construct a reference ``DPTFeatureFusionLayer`` at ``hidden_dim`` channels.
 
-    The fusion and residual layers read only three config values.
-    A ``SimpleNamespace`` avoids constructing ``DPTConfig``, ``DPTNeck``, or the bundled ViT.
+    The fusion and residual layers read only three config values; the rest of
+    ``DPTConfig`` stays at its defaults, which build neither ``DPTNeck`` nor a backbone.
 
     Stock ViT-DPT uses ``use_batch_norm_in_fusion_residual=False``.
     This disables BatchNorm and enables biased residual convolutions.
 
     The ``transformers`` import is deferred because only the optional ``dpt`` head needs it.
     """
+    from transformers import DPTConfig
     from transformers.models.dpt.modeling_dpt import DPTFeatureFusionLayer
 
-    config = SimpleNamespace(
+    config = DPTConfig(
         fusion_hidden_size=hidden_dim,
         use_batch_norm_in_fusion_residual=False,
         use_bias_in_fusion_residual=None,  # → ``not use_batch_norm`` → True
