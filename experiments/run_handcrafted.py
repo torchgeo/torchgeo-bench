@@ -92,15 +92,7 @@ def feature_manifest(level: int, datasets: list[str], devices: list[int]) -> dic
             "multilabel": bench.multilabel,
             "split_sizes": bench.split_sizes,
             "config_hashes": {
-                resume_config_hash(
-                    cfg.model_copy(
-                        update={
-                            "runtime": cfg.runtime.model_copy(update={"device": f"cuda:{device}"})
-                        }
-                    ),
-                    preset,
-                ): f"cuda:{device}"
-                for device in devices
+                resume_config_hash(cfg, preset): [f"cuda:{device}" for device in devices]
             },
         }
     return result

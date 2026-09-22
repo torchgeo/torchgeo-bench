@@ -92,7 +92,7 @@ def _spec():
         "multilabel": True,
         "feature_dim": 50,
         "num_classes": 19,
-        "config_hashes": {"current": "cuda:0"},
+        "config_hashes": {"current": ["cuda:0"]},
         "split_sizes": {"train": 20, "val": 4, "test": 4},
     }
 
@@ -104,7 +104,7 @@ def test_success_requires_both_methods_not_just_a_successful_process(sweep):
 
 
 def test_other_resume_configurations_do_not_count_as_current_rows(sweep):
-    older = {**_row("linear"), "config_hash": "different-device"}
+    older = {**_row("linear"), "config_hash": "different-config"}
     assert not sweep.validate_case([_row("knn5"), _row("linear"), older], "toy", _spec())
     assert sweep.validate_case([_row("knn5"), older], "toy", _spec())
 
@@ -132,14 +132,16 @@ def test_feature_manifest_uses_resolved_current_hashes(sweep, level):
     json.dumps(manifest, allow_nan=False)
     for dataset, spec in manifest.items():
         assert len(spec["feature_names"]) == spec["feature_dim"]
-        assert len(spec["config_hashes"]) == 2
+        assert len(spec["config_hashes"]) == 1
         for device in ("cuda:0", "cuda:2"):
             job = sweep.build_jobs(level, [dataset])[0]
             config = RunConfig.model_validate(
                 {**job.config.model_dump_yaml(), "runtime": {"device": device}}
             )
             effective, preset = resolve_run_config(config, dataset)
-            assert spec["config_hashes"][resume_config_hash(effective, preset)] == device
+            assert spec["config_hashes"] == {
+                resume_config_hash(effective, preset): ["cuda:0", "cuda:2"]
+            }
         if level:
             assert sorted(
                 column for record in spec["feature_metadata"] for column in record["columns"]

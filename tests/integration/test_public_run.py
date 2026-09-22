@@ -79,7 +79,9 @@ def test_public_classification_and_resume(tmp_path: Path, *, temperature_scaling
 
     before = output.read_bytes()
     shutil.rmtree(tmp_path / "data")
-    resumed = run_public_cli("run", "--config", str(config), "--resume", cwd=tmp_path)
+    resumed = run_public_cli(
+        "run", "--config", str(config), "--resume", "--workers", "8", cwd=tmp_path
+    )
     assert resumed.returncode == 0, cli_output(resumed)
     assert output.read_bytes() == before
 

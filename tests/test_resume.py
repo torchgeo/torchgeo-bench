@@ -51,13 +51,21 @@ def test_config_hash_ignores_output_paths_and_method_selection() -> None:
     )
 
 
+@pytest.mark.parametrize("device", ["cpu", "cuda", "cuda:0", "cuda:1", "cuda:7"])
+@pytest.mark.parametrize("workers", [0, 4, 8])
+def test_config_hash_ignores_device_and_workers(device: str, workers: int) -> None:
+    assert _hash(_cfg()) == _hash(_cfg(runtime={"device": device, "workers": workers}))
+
+
+@pytest.mark.parametrize("runtime", [{"seed": 1}, {"batch_size": 8}])
+def test_config_hash_retains_seed_and_batch_size(runtime: dict[str, int]) -> None:
+    model = {"name": "custom", "target": "example.Model"}
+    assert _hash(_cfg(model=model)) != _hash(_cfg(model=model, runtime=runtime))
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"runtime": {"seed": 1}},
-        {"runtime": {"device": "cpu"}},
-        {"runtime": {"batch_size": 8}},
-        {"runtime": {"workers": 0}},
         {"input": {"bands": "all"}},
         {"input": {"normalization": "minmax"}},
         {"classification": {"knn_k": 7}},
@@ -102,6 +110,41 @@ def test_resume_keys_require_the_requested_metric(tmp_path: Path) -> None:
     assert metrics.get("id_mle_train", set()) == set()
 
 
+@pytest.mark.parametrize("stored_hash", ["0391f898e8a4db0d", "21d7c33e4e3fb14b", ""])
+def test_resume_rejects_legacy_runtime_hashes(tmp_path: Path, stored_hash: str) -> None:
+    # Pre-#401 hashes for default RCF / m-eurosat on cuda:0 and cpu, plus an unhashed row.
+    config = _cfg(classification={"methods": ["knn"]}, output={"resume": True})
+    metadata = _resume_row(config, method="knn5", metric_name="accuracy")
+    path = tmp_path / "results.csv"
+    pd.DataFrame([{**metadata, "config_hash": stored_hash}]).to_csv(path, index=False)
+    completed = ResumeState(*load_completed(str(path)))
+    dataset = get_bench_dataset_class("m-eurosat")
+    plan = plan_dataset_run(config, dataset, metadata, completed)
+    assert not plan.skip_dataset
+    assert not plan.skip_knn
+
+
+def test_runtime_change_keeps_missing_additive_passes_pending(tmp_path: Path) -> None:
+    config = _cfg(classification={"methods": ["knn"]}, output={"resume": True})
+    path = tmp_path / "results.csv"
+    pd.DataFrame([_resume_row(config, method="knn5", metric_name="accuracy")]).to_csv(
+        path, index=False
+    )
+    completed = ResumeState(*load_completed(str(path)))
+    config.runtime.device = "cpu"
+    config.runtime.workers = 8
+    config.profile.enabled = True
+    config.intrinsic_dim.enabled = True
+    metadata = _resume_row(config, method="knn5", metric_name="accuracy")
+    plan = plan_dataset_run(config, get_bench_dataset_class("m-eurosat"), metadata, completed)
+    assert plan.skip_knn
+    assert plan.skip_linear
+    assert not plan.skip_dataset
+    assert not plan.skip_profile
+    assert not plan.skip_id
+    assert plan.id_missing_metrics
+
+
 @pytest.mark.parametrize("cpu_enabled", [False, True])
 def test_profile_resume_requires_every_enabled_metric(tmp_path: Path, *, cpu_enabled: bool) -> None:
     config, _ = resolve_run_config(
@@ -115,10 +158,12 @@ def test_profile_resume_requires_every_enabled_metric(tmp_path: Path, *, cpu_ena
     if cpu_enabled:
         expected |= {"throughput_samples_per_sec_cpu", "latency_ms_per_batch_p50_cpu"}
     path = tmp_path / "profile.csv"
-    metadata = _resume_row(config, method="profile", metric_name="params_m")
     rows = [_resume_row(config, method="profile", metric_name=name) for name in sorted(expected)]
     pd.DataFrame(rows).to_csv(path, index=False)
     completed = ResumeState(*load_completed(str(path)))
+    config.runtime.device = "cpu"
+    config.runtime.workers = 8
+    metadata = _resume_row(config, method="profile", metric_name="params_m")
     dataset = get_bench_dataset_class("m-eurosat")
     assert plan_dataset_run(config, dataset, metadata, completed).skip_profile
     for name in expected:

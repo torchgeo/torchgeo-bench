@@ -151,12 +151,11 @@ all three files -- ``results/models/<name>.csv``,
    (dataset, method, model, name, normalization, image_size, interpolation,
     partition, bands, num_classes, res, pool, config_hash)
 
-Note that ``method`` is per-method (``knn5`` / ``linear`` /
-``intrinsic_dim`` / ``seg-<head_type>``), so re-running with
-``--methods linear`` never requires a KNN row. Resume accepts historical
-configuration hashes only when their effective preprocessing and evaluation
-settings match. Changed evaluation settings can require a new run; additive
-profile and intrinsic-dimension passes do not invalidate probe hashes.
+Resume checks each method separately, so ``--methods linear`` never requires a KNN row. Additive profile and intrinsic-dimension passes do not invalidate classification hashes; their requested metrics must each be present before those passes are skipped.
+
+The ``config_hash`` fingerprints resolved preprocessing, model, and evaluation settings, plus the runtime seed and batch size. Changing ``runtime.device`` (including CPU/CUDA or the CUDA index) or ``runtime.workers`` does not invalidate completed work. Batch size remains part of the hash because changing it can affect floating-point results. Completed profile measurements are also reused across device and worker changes; use ``--no-resume`` or a separate output file when remeasuring performance.
+
+Resume requires an exact hash match. Rows saved with earlier hash payloads, including the payload that included device and workers, do not match the new hashes even with unchanged settings. On the next ``--resume`` run they are recomputed and appended under the new hash; existing rows and checked-in reference results are not rewritten. Resume does not infer compatibility from partial CSV metadata.
 
 Rows written before version 0.5.0 do not have ``num_classes`` and are treated
 as incomplete by resume mode. The checked-in SpaceNet2/7 rows produced under

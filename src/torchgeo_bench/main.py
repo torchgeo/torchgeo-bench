@@ -896,7 +896,6 @@ def run_dataset(
             logger.info("[%s] Resume preflight: all requested work already complete", ds_name)
         return
 
-    # Runtime canonicalization must not change the requested device in the resume hash above.
     if device is not None:
         cfg = cfg.model_copy(
             update={"runtime": cfg.runtime.model_copy(update={"device": str(device)})}
@@ -967,7 +966,6 @@ def load_completed_outputs(
 def main(cfg: RunConfig, *, strict: bool = False) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     device = resolve_device(cfg.runtime.device)
-    # Explicit labels are part of existing resume hashes; only auto needs rewriting.
     if cfg.runtime.device == "auto":
         cfg = cfg.model_copy(
             update={"runtime": cfg.runtime.model_copy(update={"device": str(device)})}
