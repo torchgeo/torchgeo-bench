@@ -3,21 +3,29 @@
 Uses SAM3's ViT-H vision encoder (with built-in FPN neck) as a frozen backbone
 for dense segmentation probing. Only RGB (3-channel) input is supported.
 
-The vision encoder supports arbitrary input sizes. On the first forward pass the
-RoPE position embeddings are reset to match the actual image dimensions (rounded
-down to the nearest multiple of patch_size=14 if needed). Absolute position
-embeddings are already tiled dynamically by the transformers implementation.
+Each ``Sam3ViTLayer`` bakes its RoPE grid into buffers at construction from
+``config.image_size // config.patch_size``, so the input resolution is fixed
+when the model is built and cannot change per forward pass.  The absolute
+position embeddings are sized from ``pretrain_image_size`` instead and tiled
+dynamically at forward time, so overriding ``image_size`` causes no weight-shape
+conflict on load.
 
 Checkpoint:
-    Load from a local HuggingFace-format directory (``model.safetensors`` +
-    ``config.json``) via the ``checkpoint_path`` config key, or pass
-    ``model_name_or_path="facebook/sam3"`` to download from the Hub (requires
-    authentication and access approval for the gated repo).
+    Defaults to the Hub repo ``facebook/sam3``, which is gated: accept the terms
+    on the model page and authenticate (``hf auth login``) once, after which the
+    weights download into the standard HuggingFace cache automatically.  Set
+    ``checkpoint_path`` to load from a local HuggingFace-format directory
+    (``model.safetensors`` + ``config.json``) instead.
+
+    ``facebook/sam3.1`` is deliberately *not* used: it ships only an
+    original-format ``.pt`` with no transformers integration, and its Object
+    Multiplex speedup applies to multi-object video tracking, which this
+    encoder-only wrapper never runs.
 
 Layer naming for SegmentationProbe:
     The FPN neck produces 4 multi-scale feature maps, each with 256 channels.
-    Their spatial dimensions scale with the input resolution:
-    at 252x252 input (18x18 patch grid) the levels are:
+    Their spatial dimensions scale with the input resolution
+    (``scale_factors = [4.0, 2.0, 1.0, 0.5]``):
         neck.fpn_layers.3 — coarsest (scale 0.5x)
         neck.fpn_layers.2 — medium   (scale 1x)
         neck.fpn_layers.1 — fine     (scale 2x)
@@ -26,84 +34,20 @@ Layer naming for SegmentationProbe:
 """
 
 import logging
-from typing import TYPE_CHECKING
 
 import torch
+from transformers import Sam3Config, Sam3Model
 
 from torchgeo_bench.datasets.base import BandSpec
 
+from ._input_units import InputUnit
 from .interface import BenchModel
-
-if TYPE_CHECKING:
-    from transformers.models.sam3.modeling_sam3 import Sam3VisionModel
 
 logger = logging.getLogger(__name__)
 
-_PATCH_SIZE = 14  # SAM3 ViT-H patch size (fixed by architecture)
-
-
-def _reset_sam3_rope(vision_encoder: "Sam3VisionModel", input_h: int, input_w: int) -> None:
-    """Recompute RoPE buffers in every ViT layer for a new input resolution.
-
-    Each ``Sam3ViTLayer`` owns a ``Sam3ViTRotaryEmbedding`` (``self.rotary_emb``)
-    with pre-computed ``rope_embeddings_cos / rope_embeddings_sin`` buffers sized
-    for the pretrain token grid (72x72 at 1008x1008 input).  We rebuild them for
-    the actual token grid derived from ``input_h x input_w``.
-
-    For windowed-attention layers the RoPE grid is always ``(window_size,
-    window_size)`` — identical to pretrain, so nothing changes there.  For global
-    attention layers the RoPE grid is ``(h_tokens, w_tokens)`` and the scale
-    factor is adjusted accordingly.
-    """
-    cfg = vision_encoder.config.backbone_config  # Sam3ViTConfig
-    patch_size: int = cfg.patch_size  # 14
-    window_size: int = cfg.window_size  # 24
-    global_attn_indexes: set[int] = set(cfg.global_attn_indexes)
-
-    h_tokens = input_h // patch_size
-    w_tokens = input_w // patch_size
-
-    if h_tokens == 0 or w_tokens == 0:
-        raise ValueError(
-            f"Input size {input_h}x{input_w} is smaller than patch_size={patch_size}. "
-            "Images must be at least patch_size pixels in each spatial dimension."
-        )
-
-    logger.info(
-        "SAM3: resetting RoPE embeddings for %dx%d (%dx%d token grid)",
-        input_h,
-        input_w,
-        h_tokens,
-        w_tokens,
-    )
-
-    for i, layer in enumerate(vision_encoder.backbone.layers):
-        rotary_emb = layer.rotary_emb
-
-        if i in global_attn_indexes:
-            end_x, end_y = h_tokens, w_tokens
-            scale = window_size / h_tokens
-        else:
-            end_x, end_y = window_size, window_size
-            scale = 1.0
-
-        dim: int = rotary_emb.dim
-        freqs = 1.0 / (
-            rotary_emb.rope_theta ** (torch.arange(0, dim, 4)[: (dim // 4)].float() / dim)
-        )
-        flat = torch.arange(end_x * end_y, dtype=torch.long)
-        x_pos = (flat % end_x).float() * scale
-        y_pos = torch.div(flat, end_x, rounding_mode="floor").float() * scale
-        inv_freq = torch.cat(
-            [torch.outer(x_pos, freqs), torch.outer(y_pos, freqs)], dim=-1
-        ).repeat_interleave(2, dim=-1)
-
-        device = rotary_emb.rope_embeddings_cos.device
-        dtype = rotary_emb.rope_embeddings_cos.dtype
-        rotary_emb.rope_embeddings_cos = inv_freq.cos().to(device=device, dtype=dtype)
-        rotary_emb.rope_embeddings_sin = inv_freq.sin().to(device=device, dtype=dtype)
-        rotary_emb.end_x = end_x
-        rotary_emb.end_y = end_y
+#: ``transformers`` IMAGENET_STANDARD_MEAN / IMAGENET_STANDARD_STD.
+_STANDARD_MEAN = [0.5, 0.5, 0.5]
+_STANDARD_STD = [0.5, 0.5, 0.5]
 
 
 class SAM3Encoder(BenchModel):
@@ -113,24 +57,33 @@ class SAM3Encoder(BenchModel):
     The text encoder, geometry encoder, DETR encoder/decoder, and mask decoder
     are discarded to save memory.
 
-    On the first forward pass the RoPE buffers are reset to match the actual
-    input resolution.  If the image dimensions are not multiples of
-    ``patch_size=14``, images are cropped to the nearest valid size and a warning
-    is logged.  Only 3-channel RGB input is supported.
+    The encoder is built for one fixed square input size and rejects anything
+    else at forward time.  Only 3-channel RGB input is supported.
 
     Args:
         bands: Ordered :class:`BandSpec` list. Must have exactly 3 entries
             (RGB only).
+        image_size: Side length the encoder is built for. Supplied
+            automatically from the resolved ``input.image_size``; required.
         checkpoint_path: Path to a local HuggingFace-format checkpoint
             directory containing ``model.safetensors`` and ``config.json``.
         model_name_or_path: HuggingFace Hub model ID. Used only if
             ``checkpoint_path`` is not set.
     """
 
+    #: SAM3 bakes RoPE into each ViT layer at construction, so it needs the resolved size.
+    wants_resolved_image_size = True
+
+    #: ``Sam3ImageProcessor`` rescales by 1/255, then applies IMAGENET_STANDARD_MEAN/STD.
+    expected_input_unit = InputUnit.UINT8
+    pretrain_mean = _STANDARD_MEAN
+    pretrain_std = _STANDARD_STD
+
     def __init__(
         self,
         bands: list[BandSpec],
         *,
+        image_size: int | None = None,
         checkpoint_path: str | None = None,
         model_name_or_path: str = "facebook/sam3",
         **_kwargs,
@@ -142,62 +95,31 @@ class SAM3Encoder(BenchModel):
                 f"SAM3Encoder only supports 3-channel RGB input, got {self.num_channels}. "
                 "Run with --bands red,green,blue or skip this dataset."
             )
-
-        from transformers import Sam3Model
+        if image_size is None:
+            raise ValueError(
+                "SAM3Encoder needs a fixed input size: its RoPE grid is built at "
+                "construction. Set input.image_size (it is currently null)."
+            )
 
         source = checkpoint_path or model_name_or_path
-        logger.info("Loading SAM3 from %r …", source)
+        local_files_only = checkpoint_path is not None
+        logger.info("Loading SAM3 from %r at %dx%d …", source, image_size, image_size)
+
+        config = Sam3Config.from_pretrained(source, local_files_only=local_files_only)
+        config.vision_config.image_size = image_size
         full_model = Sam3Model.from_pretrained(
             source,
-            local_files_only=(checkpoint_path is not None),
+            config=config,
+            local_files_only=local_files_only,
         )
 
         self.backbone = full_model.vision_encoder
         del full_model
 
+        self.image_size = image_size
         for param in self.backbone.parameters():
             param.requires_grad = False
         self.backbone.eval()
-
-        self._rope_size: tuple[int, int] | None = None
-
-    def _maybe_reset_rope(self, H: int, W: int) -> None:
-        """Reset RoPE buffers the first time a new spatial size is seen."""
-        h = (H // _PATCH_SIZE) * _PATCH_SIZE
-        w = (W // _PATCH_SIZE) * _PATCH_SIZE
-        if (h, w) == self._rope_size:
-            return
-        if h != H or w != W:
-            logger.warning(
-                "SAM3: input %dx%d is not a multiple of patch_size=%d; "
-                "images will be cropped to %dx%d before encoding.",
-                H,
-                W,
-                _PATCH_SIZE,
-                h,
-                w,
-            )
-        _reset_sam3_rope(self.backbone, h, w)
-        self._rope_size = (h, w)
-
-    def _crop_to_patch_multiple(self, images: torch.Tensor) -> torch.Tensor:
-        """Crop spatial dims to the nearest multiple of ``_PATCH_SIZE``.
-
-        Raises:
-            ValueError: If the input is smaller than one patch (H < _PATCH_SIZE
-                or W < _PATCH_SIZE), which would produce empty tensors.
-        """
-        H, W = images.shape[-2:]
-        if H < _PATCH_SIZE or W < _PATCH_SIZE:
-            raise ValueError(
-                f"Input spatial size {H}x{W} is smaller than patch_size={_PATCH_SIZE}. "
-                "Images must be at least patch_size pixels in each spatial dimension."
-            )
-        h = (H // _PATCH_SIZE) * _PATCH_SIZE
-        w = (W // _PATCH_SIZE) * _PATCH_SIZE
-        if h == H and w == W:
-            return images
-        return images[..., :h, :w]
 
     @torch.no_grad()
     def _forward_patch_features(
@@ -212,13 +134,22 @@ class SAM3Encoder(BenchModel):
         probe.
 
         Args:
-            images: ``(B, 3, H, W)`` normalized float tensor.
+            images: ``(B, 3, H, W)`` normalized float tensor, where ``H`` and
+                ``W`` both equal the configured ``image_size``.
 
         Returns:
             Pooled image embedding ``(B, 256)`` (average of the coarsest FPN level).
+
+        Raises:
+            ValueError: If the spatial size differs from the configured one,
+                which would otherwise surface as an opaque broadcast error
+                inside attention.
         """
-        images = self._crop_to_patch_multiple(images)
-        self._maybe_reset_rope(*images.shape[-2:])
+        if images.shape[-2:] != (self.image_size, self.image_size):
+            raise ValueError(
+                f"SAM3Encoder was built for {self.image_size}x{self.image_size} but got "
+                f"{tuple(images.shape[-2:])}; RoPE is fixed at construction."
+            )
         out = self.backbone(pixel_values=images)
         coarsest = out.fpn_hidden_states[-1]  # (B, 256, H', W')
         return coarsest.mean(dim=[-2, -1])  # (B, 256)

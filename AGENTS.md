@@ -364,9 +364,9 @@ class TestGeoBenchDatasetBasics:
 
 ## Key Dependencies
 
-Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision>=0.15`, `numpy>=1.24`, `scikit-learn>=1.3`, `timm>=0.9`, `torchgeo>=0.10`, `torchmetrics>=1.4`, `pydantic>=2`, `pyyaml>=6`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform), `huggingface-hub>=0.20`, `geobenchv2>=0.9`, `pandas>=2`, `pyarrow>=14`, `safetensors>=0.4`, `filelock>=3.12`, `lazy-loader>=0.4`, `tqdm>=4.66`.
+Core (see `pyproject.toml` for the authoritative list): `torch>=2`, `torchvision>=0.15`, `numpy>=1.24`, `scikit-learn>=1.3`, `timm>=0.9`, `torchgeo>=0.10`, `torchmetrics>=1.4`, `pydantic>=2`, `pyyaml>=6`, `h5py>=3.8`, `faissknn` (CPU or CUDA variant, picked by platform), `huggingface-hub>=0.20`, `geobenchv2>=0.9`, `pandas>=2`, `pyarrow>=14`, `safetensors>=0.4`, `filelock>=3.12`, `lazy-loader>=0.4`, `tqdm>=4.66`, `transformers>=5.14` (SAM 3 encoder and the DPT segmentation head).
 
-Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everything): `coordbench`, `dev`, `docs`, `id` (intrinsic-dimension estimators), `olmoearth`, `sam3`, `terratorch`. Model wrappers behind an extra (OlmoEarth, SAM3, terratorch-backed models) import that dependency lazily — don't add a top-level import for one at module scope.
+Optional extras (`pip install 'torchgeo-bench[extra]'`, or `[all]` for everything): `coordbench`, `dev`, `docs`, `id` (intrinsic-dimension estimators), `olmoearth`, `terratorch`. Model wrappers behind an extra (OlmoEarth, terratorch-backed models) import that dependency lazily — don't add a top-level import for one at module scope.
 
 ## Common Gotchas
 

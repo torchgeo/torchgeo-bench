@@ -59,6 +59,8 @@ dependencies = [
   "torchmetrics>=1.4",
   "torchvision>=0.15",
   "tqdm>=4.66",
+  # SAM3 (Sam3Model / Sam3Config) and the DPT segmentation head.
+  "transformers>=5.14",
 ]
 optional-dependencies.all = [
   "torchgeo-bench[coordbench]",
@@ -66,7 +68,6 @@ optional-dependencies.all = [
   "torchgeo-bench[docs]",
   "torchgeo-bench[id]",
   "torchgeo-bench[olmoearth]",
-  "torchgeo-bench[sam3]",
   "torchgeo-bench[terratorch]",
 ]
 optional-dependencies.coordbench = [
@@ -97,9 +98,6 @@ optional-dependencies.id = [
 ]
 optional-dependencies.olmoearth = [
   "olmoearth-pretrain-minimal>=0.0.6", # OlmoEarth v1.2 weights require this version.
-]
-optional-dependencies.sam3 = [
-  "transformers>=4.50",
 ]
 optional-dependencies.terratorch = [
   "terratorch>=1",
@@ -212,8 +210,6 @@ ignore-missing-imports = [
   "rshf.*",
   "terratorch.*",
   "torchid",
-  "transformers",
-  "transformers.*",
 ]
 
 [tool.pytest]

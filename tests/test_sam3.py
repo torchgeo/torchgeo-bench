@@ -1,6 +1,5 @@
 """Unit tests for the SAM3 wrapper."""
 
-import sys
 import types
 from pathlib import Path
 from typing import Any
@@ -45,7 +44,7 @@ def _rgb_bands() -> list[BandSpec]:
 
 @pytest.fixture(autouse=True)
 def mock_sam3_pretrained(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    state: dict[str, Any] = {"loads": [], "rope": [], "inputs": []}
+    state: dict[str, Any] = {"loads": [], "configs": [], "inputs": []}
 
     class _FakeVisionEncoder(nn.Module):
         def __init__(self) -> None:
@@ -62,35 +61,51 @@ def mock_sam3_pretrained(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             super().__init__()
             self.vision_encoder = _FakeVisionEncoder()
 
-    def _from_pretrained(
+    def _config_from_pretrained(
         source: str, *, local_files_only: bool = False, **_kwargs: object
+    ) -> types.SimpleNamespace:
+        if local_files_only and not Path(source).exists():
+            raise FileNotFoundError(source)
+        return types.SimpleNamespace(vision_config=types.SimpleNamespace(image_size=1008))
+
+    def _model_from_pretrained(
+        source: str,
+        *,
+        config: Any = None,
+        local_files_only: bool = False,
+        **_kwargs: object,
     ) -> _FakeSam3:
         state["loads"].append((source, local_files_only))
+        state["configs"].append(config)
         if local_files_only and not Path(source).exists():
             raise FileNotFoundError(source)
         return _FakeSam3()
 
-    fake_transformers = types.ModuleType("transformers")
-    fake_transformers.Sam3Model = type(
-        "Sam3Model", (), {"from_pretrained": staticmethod(_from_pretrained)}
-    )
-    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
     monkeypatch.setattr(
-        "torchgeo_bench.models.sam3._reset_sam3_rope",
-        lambda _encoder, h, w: state["rope"].append((h, w)),
+        "torchgeo_bench.models.sam3.Sam3Config",
+        type("Sam3Config", (), {"from_pretrained": staticmethod(_config_from_pretrained)}),
+    )
+    monkeypatch.setattr(
+        "torchgeo_bench.models.sam3.Sam3Model",
+        type("Sam3Model", (), {"from_pretrained": staticmethod(_model_from_pretrained)}),
     )
     return state
 
 
 def test_rgb_only_enforcement() -> None:
     with pytest.raises(ValueError, match="RGB"):
-        SAM3Encoder(bands=_bands(4))
+        SAM3Encoder(bands=_bands(4), image_size=224)
+
+
+def test_missing_image_size_raises() -> None:
+    with pytest.raises(ValueError, match="fixed input size"):
+        SAM3Encoder(bands=_rgb_bands())
 
 
 def test_local_checkpoint_path(tmp_path: Path, mock_sam3_pretrained: dict[str, Any]) -> None:
     ckpt = tmp_path / "checkpoint"
     ckpt.mkdir()
-    model = SAM3Encoder(bands=_rgb_bands(), checkpoint_path=str(ckpt))
+    model = SAM3Encoder(bands=_rgb_bands(), image_size=224, checkpoint_path=str(ckpt))
     assert mock_sam3_pretrained["loads"] == [(str(ckpt), True)]
     assert not model.backbone.training
     assert all(not p.requires_grad for p in model.backbone.parameters())
@@ -99,24 +114,26 @@ def test_local_checkpoint_path(tmp_path: Path, mock_sam3_pretrained: dict[str, A
 def test_missing_local_checkpoint_raises(tmp_path: Path) -> None:
     missing = tmp_path / "missing.pt"
     with pytest.raises(FileNotFoundError):
-        SAM3Encoder(bands=_rgb_bands(), checkpoint_path=str(missing))
+        SAM3Encoder(bands=_rgb_bands(), image_size=224, checkpoint_path=str(missing))
 
 
-def test_forward_crops_and_pools_coarsest_level(mock_sam3_pretrained: dict[str, Any]) -> None:
-    model = SAM3Encoder(bands=_rgb_bands(), normalization="identity")
-    images = torch.arange(2 * 3 * 31 * 45, dtype=torch.float32).reshape(2, 3, 31, 45)
+def test_image_size_reaches_config(mock_sam3_pretrained: dict[str, Any]) -> None:
+    """The config-time override replaces the old runtime RoPE reset."""
+    SAM3Encoder(bands=_rgb_bands(), image_size=252)
+    assert mock_sam3_pretrained["configs"][0].vision_config.image_size == 252
+
+
+def test_forward_pools_coarsest_level(mock_sam3_pretrained: dict[str, Any]) -> None:
+    model = SAM3Encoder(bands=_rgb_bands(), image_size=28, normalization="identity")
+    images = torch.arange(2 * 3 * 28 * 28, dtype=torch.float32).reshape(2, 3, 28, 28)
     out = model(images)
-    expected_input = images[..., :28, :42]
-    torch.testing.assert_close(mock_sam3_pretrained["inputs"][0], expected_input)
-    expected = expected_input.mean(dim=(1, 2, 3)).view(2, 1).expand(2, 256)
+    torch.testing.assert_close(mock_sam3_pretrained["inputs"][0], images)
+    expected = images.mean(dim=(1, 2, 3)).view(2, 1).expand(2, 256)
     torch.testing.assert_close(out, expected)
-    model(images)
-    model(images[..., :20, :20])
-    assert mock_sam3_pretrained["rope"] == [(28, 42), (14, 14)]
     assert mock_sam3_pretrained["loads"] == [("facebook/sam3", False)]
 
 
-def test_small_image_raises() -> None:
-    model = SAM3Encoder(bands=_rgb_bands())
-    with pytest.raises(ValueError, match="smaller than patch_size"):
-        model.forward_patch_features(torch.zeros(2, 3, 4, 4))
+def test_forward_size_mismatch_raises() -> None:
+    model = SAM3Encoder(bands=_rgb_bands(), image_size=224, normalization="identity")
+    with pytest.raises(ValueError, match="built for 224x224"):
+        model(torch.zeros(2, 3, 256, 256))

@@ -1,7 +1,5 @@
 name: sam3_encoder
 target: torchgeo_bench.models.SAM3Encoder
-kwargs:
-  checkpoint_path: checkpoints/sam3
 segmentation:
   layers:
     - neck.fpn_layers.3

@@ -77,7 +77,6 @@ Extra             Pulls in
 ``docs``          sphinx, pydata-sphinx-theme, myst-parser, sphinx-copybutton, sphinx-design
 ``id``            ``torchid`` for intrinsic-dimension metrics (Python ≥ 3.13 only)
 ``olmoearth``     ``olmoearth-pretrain-minimal`` for the OlmoEarth backbone
-``sam3``          ``transformers`` for the SAM 3 encoder
 ``terratorch``    ``terratorch`` for TerraTorch backbones
 ``all``           every extra above **except** ``cuda`` (FAISS conflict)
 ================  ==============================================================

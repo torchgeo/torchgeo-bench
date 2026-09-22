@@ -327,13 +327,18 @@ The ``version`` parameter selects the weight family:
 SAM 3 vision encoder
 ^^^^^^^^^^^^^^^^^^^^
 
-:class:`~torchgeo_bench.models.SAM3Encoder`.  Requires the optional
-``sam3`` extra and a local checkpoint at :file:`checkpoints/sam3/`:
+:class:`~torchgeo_bench.models.SAM3Encoder`.  Weights come from the gated Hub
+repo `facebook/sam3 <https://huggingface.co/facebook/sam3>`_: accept the terms on
+the model page, run ``hf auth login`` once, and the checkpoint downloads into the
+HuggingFace cache on first use.
 
 .. code-block:: console
 
-   $ pip install 'torchgeo-bench[sam3]'
    $ torchgeo-bench run --model sam3_encoder --dataset m-eurosat --bands red,green,blue
+
+The ViT layers bake their RoPE grid in at construction, so the encoder is built
+for one fixed input size (``input.image_size``, 224 by default) and rejects
+any other size at forward time.  ``--image-size none`` is therefore not supported.
 
 Adding a new model
 ------------------
