@@ -1,20 +1,8 @@
-"""Checkpoint-compatible TerraFM encoder for frozen-backbone benchmarking.
+"""Checkpoint-compatible TerraFM encoder (arXiv:2506.06281).
 
-Licensing and provenance:
-    This is an independent reimplementation of the TerraFM architecture
-    released by MBZUAI (Apache-2.0 on the Hugging Face model repository),
-    adapted from ``terrafm.py`` on the ``master`` branch of
-    https://github.com/mbzuai-oryx/TerraFM, which itself adapts DINO
-    (https://github.com/facebookresearch/dino).  Weights are distributed at
-    https://huggingface.co/MBZUAI/TerraFM and are not downloaded at runtime:
-    pass an explicit local ``checkpoint_path``.
-
-    TerraFM: A Scalable Foundation Model for Unified Multisensor Earth
-    Observation, arXiv:2506.06281.
-
-Parameter names below deliberately mirror the released checkpoint
-(``conv2d_s2_l2a``, ``patch_embed.projection.proj1``, ...) so that the
-published weights load under ``strict=True``.
+Architecture reference: https://github.com/mbzuai-oryx/TerraFM.
+Load local weights from https://huggingface.co/MBZUAI/TerraFM.
+Parameter names follow the released checkpoint for strict loading.
 """
 
 import hashlib
@@ -38,7 +26,6 @@ logger = logging.getLogger(__name__)
 # Sentinel-2 L2A band order is undocumented upstream.  TerraFM pretrains on
 # Major-TOM Core-S2L2A, whose 12 bands are the standard S2 sequence with the
 # cirrus band B10 dropped; this matches the order CROMA uses in this repo.
-# See the module docstring's open-question note in the PR description.
 TERRAFM_S2_12: tuple[str, ...] = (
     "coastal",
     "blue",
@@ -197,13 +184,6 @@ class TerraFMBench(BenchModel):
         "base": (768, 12, 12),
         "large": (1024, 24, 16),
     }
-    _TAP_INDICES: ClassVar[dict[str, tuple[int, ...]]] = {
-        "base": (2, 5, 8, 11),
-        "large": (5, 11, 17, 23),
-    }
-    #: Read by ``SegmentationProbe._process_feature`` to strip the CLS token
-    #: from a hooked ``blocks.N`` output; without it a 197-token sequence is
-    #: liable to be reinterpreted as channel-first.
     num_prefix_tokens: int = 1
 
     def __init__(  # noqa: PLR0913 - public YAML options
@@ -306,7 +286,7 @@ class TerraFMBench(BenchModel):
         if not path.is_file():
             raise FileNotFoundError(f"TerraFM checkpoint does not exist: {path}")
         self._verify_md5(path, checkpoint_md5)
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         state = checkpoint.get("model", checkpoint) if isinstance(checkpoint, dict) else checkpoint
         if not isinstance(state, dict):
             raise TypeError(
