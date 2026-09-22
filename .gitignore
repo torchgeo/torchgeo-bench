@@ -117,7 +117,6 @@ data/
 !results/intrinsic_dim/*.csv
 !results/legacy/
 !results/legacy/*.csv
-!results/coordbench_results.csv
 !conf/**/*.json
 !**/band_stats.json
 !**/normalizer.json
@@ -152,3 +151,6 @@ site/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# tracked benchmark results
+!coordbench-results.csv

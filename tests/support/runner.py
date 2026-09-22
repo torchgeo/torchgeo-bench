@@ -94,4 +94,5 @@ def _chainable_model_mock() -> mock.Mock:
     model = mock.Mock()
     model.to.return_value = model
     model.eval.return_value = model
+    model.effective_normalization = "bandspec_zscore"
     return model

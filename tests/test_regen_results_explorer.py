@@ -159,9 +159,11 @@ def test_regeneration_preserves_references_history_and_current_rows(
     assert _constant(text, "CARBON_INTENSITY") == _constant(HTML, "CARBON_INTENSITY")
     assert json.loads((explorer.SNAPSHOT_DIR / f"{label}.json").read_text()) == expected
     assert old_path.read_bytes() == old_bytes
-    assert (
-        "Across 4 measurements on 1 classification datasets and 1 frozen-backbone variants" in text
-    )
+    assert "This snapshot contains 4 measurements" in text
+    assert "1 frozen-backbone variants on 1 classification datasets" in text
+    assert "Torchgeo-Bench results explorer" in text
+    assert "leads" not in text
+    assert "highest single score" not in text
     assert "1 segmentation measurements cover 1 backbones on 1 datasets" in text
     assert "results/compute_cost.csv" in text
     assert "default 200 resamples" in text
@@ -202,32 +204,3 @@ def test_missing_headline_does_not_overwrite_the_page(
     with pytest.raises(SystemExit, match="headline-text"):
         explorer.main()
     assert explorer.HTML_PATH.read_text() == broken
-
-
-def test_mean_rank_leader_requires_complete_dataset_coverage() -> None:
-    rows = [
-        {"dataset": dataset, "name": name, "method": "linear", "metric_value": score}
-        for dataset, name, score in [
-            ("first", "full", 0.8),
-            ("second", "full", 0.7),
-            ("first", "partial", 0.99),
-            ("first", "weaker", 0.7),
-            ("second", "weaker", 0.6),
-        ]
-    ]
-    assert explorer._mean_rank_leader(rows, "linear") == "full"
-    assert explorer._mean_rank_leader(rows, "knn5") is None
-
-
-def test_leader_uses_dataset_ranks_not_average_metric_values() -> None:
-    rows = [
-        {"dataset": dataset, "name": name, "method": "linear", "metric_value": score}
-        for dataset, first, second in [("a", 0.6, 0.5), ("b", 0.6, 0.5), ("c", 0.0, 1.0)]
-        for name, score in [("wins-most-datasets", first), ("higher-average-score", second)]
-    ]
-    assert explorer._mean_rank_leader(rows, "linear") == "wins-most-datasets"
-
-
-def test_backbone_display_does_not_strip_other_prefixes() -> None:
-    assert explorer._backbone_name("tgeo_dofa") == "dofa"
-    assert explorer._backbone_name("tt_terramind") == "tt_terramind"

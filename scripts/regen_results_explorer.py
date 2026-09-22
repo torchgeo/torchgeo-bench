@@ -19,6 +19,8 @@ import re
 from datetime import date
 from pathlib import Path
 
+from torchgeo_bench.results import load_results
+
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -156,12 +158,9 @@ def _iter_compute_cost_rows():
 
 def _iter_result_rows():
     """Yield rows from every per-model results CSV, plus melted compute costs."""
-    paths = sorted(RESULTS_DIR.glob("*.csv"))
-    paths += sorted(PROFILE_RESULTS_DIR.glob("*.csv"))
-    paths += sorted(INTRINSIC_DIM_RESULTS_DIR.glob("*.csv"))
-    for path in paths:
-        with path.open() as fh:
-            yield from csv.DictReader(fh)
+    for directory in (RESULTS_DIR, PROFILE_RESULTS_DIR, INTRINSIC_DIM_RESULTS_DIR):
+        frame = load_results(directory)
+        yield from frame.astype(object).where(frame.notna(), None).to_dict("records")
     yield from _iter_compute_cost_rows()
 
 
@@ -170,7 +169,7 @@ def _load_csv_rows(label: str) -> list[dict]:
     for r in _iter_result_rows():
         if r["method"] not in ALLOWED_METHODS:
             continue
-        if not r.get("metric_value"):
+        if r.get("metric_value") is None or r["metric_value"] == "":
             continue
         row = {}
         for k in COLUMNS:
@@ -182,7 +181,7 @@ def _load_csv_rows(label: str) -> list[dict]:
             elif k in NUMERIC:
                 row[k] = float(v)
             elif k in BOOL:
-                row[k] = v.lower() in ("true", "1")
+                row[k] = str(v).lower() in ("true", "1")
             else:
                 row[k] = v
         row["snapshot"] = label
@@ -194,38 +193,6 @@ def _snapshot_label_sort_key(label: str) -> tuple:
     """Sort dated labels chronologically and other labels alphabetically."""
     m = re.match(r"(\d{4}-\d{2}-\d{2})", label)
     return (m.group(1) if m else "", label)
-
-
-def _mean_rank_leader(rows: list[dict], method: str) -> str | None:
-    """Model with the best mean rank for ``method``, over models covering every dataset.
-
-    Ranking (rather than mean metric) keeps datasets on different metric scales
-    comparable; restricting to full coverage stops a model that ran on one easy
-    dataset from outranking one evaluated everywhere.
-    """
-    best: dict[str, dict[str, float]] = {}
-    for r in rows:
-        if r["method"] != method or r["metric_value"] is None or not r["name"]:
-            continue
-        scores = best.setdefault(r["dataset"], {})
-        scores[r["name"]] = max(r["metric_value"], scores.get(r["name"], r["metric_value"]))
-    if not best:
-        return None
-    ranks: dict[str, list[int]] = {}
-    for scores in best.values():
-        for rank, (name, _) in enumerate(sorted(scores.items(), key=lambda kv: -kv[1]), 1):
-            ranks.setdefault(name, []).append(rank)
-    full = {n: sum(v) / len(v) for n, v in ranks.items() if len(v) == len(best)}
-    return min(full, key=lambda n: full[n]) if full else None
-
-
-def _backbone_name(name: str) -> str:
-    """Strip the ``tgeo_`` loader prefix for display.
-
-    The prefix records where a backbone is loaded from, not what it is; the
-    explorer's JS strips it the same way at its own render sites.
-    """
-    return name.removeprefix("tgeo_") if name else name
 
 
 def _sub_once(pattern: str, repl: str, text: str) -> str:
@@ -313,24 +280,9 @@ def main() -> None:
     n_seg_models = len({r["name"] for r in seg_rows if r["name"]})
     best = max(accuracy_rows or latest_rows, key=lambda r: r["metric_value"] or 0)
 
-    text = _replace_snapshot_data(HTML_PATH.read_text(), flat_rows, snapshot_meta, latest_label)
-
-    knn_leader = _mean_rank_leader(accuracy_rows, "knn5")
-    linear_leader = _mean_rank_leader(accuracy_rows, "linear")
-    if knn_leader and linear_leader:
-        knn_leader = _backbone_name(knn_leader)
-        linear_leader = _backbone_name(linear_leader)
-        if knn_leader == linear_leader:
-            lede = f"{knn_leader} leads both KNN-5 and linear probing"
-        else:
-            lede = f"{knn_leader} leads KNN-5, {linear_leader} leads linear probing"
-        detail = (
-            f"<em>{knn_leader}</em> has the best mean rank under KNN-5 and "
-            f"<em>{linear_leader}</em> under linear probing"
-        )
-    else:
-        lede = f"{n_models} frozen backbones on {n_datasets} datasets"
-        detail = "no model is evaluated on every dataset, so no overall rank is reported"
+    text = _replace_snapshot_data(
+        HTML_PATH.read_text(encoding="utf-8"), flat_rows, snapshot_meta, latest_label
+    )
 
     seg_sentence = (
         f" A further {len(seg_rows):,} segmentation measurements cover "
@@ -342,24 +294,17 @@ def main() -> None:
 
     text = _sub_once(
         r'<h1 class="headline" id="headline-text">.*?</h1>',
-        (
-            f'<h1 class="headline" id="headline-text">'
-            f"{lede} across {n_datasets} classification datasets"
-            f"</h1>"
-        ),
+        '<h1 class="headline" id="headline-text">Torchgeo-Bench results explorer</h1>',
         text,
     )
     text = _sub_once(
         r'<p class="standfirst" id="standfirst-text">.*?</p>',
         (
             f'<p class="standfirst" id="standfirst-text">'
-            f"Across {len(latest_rows):,} measurements on {n_datasets} "
-            f"classification datasets and {n_models} frozen-backbone variants, "
-            f"{detail}. The highest single score is "
-            f"{best['metric_value']:.3f} ({best['metric_name']}) for "
-            f"<em>{_backbone_name(best['name'])}</em> on "
-            f"<em>{best['dataset']}</em>."
+            f"This snapshot contains {len(latest_rows):,} measurements, including "
+            f"{n_models} frozen-backbone variants on {n_datasets} classification datasets."
             f"{seg_sentence}"
+            f" Use the controls to filter; the figures and table follow the selection."
             f"</p>"
         ),
         text,
@@ -390,7 +335,7 @@ def main() -> None:
         text,
     )
 
-    HTML_PATH.write_text(text)
+    HTML_PATH.write_text(text, encoding="utf-8")
     logger.info(
         "Wrote %s: %d snapshots, latest=%s (%d rows, %d models, %d datasets) — best %.4f (%s on %s)",
         HTML_PATH.relative_to(ROOT),
