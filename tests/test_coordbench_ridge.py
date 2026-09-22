@@ -6,7 +6,12 @@ import torch
 from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score
 
-from torchgeo_bench.coordbench.probe import RidgeData, _ridge_eval, linear_probe_score
+from torchgeo_bench.coordbench.probe import (
+    RidgeData,
+    _ridge_eval,
+    _ridge_predict,
+    linear_probe_score,
+)
 
 
 @pytest.mark.parametrize("standardize", [False, True])
@@ -83,3 +88,40 @@ def test_ridge_preserves_shared_tensors(*, dtype: torch.dtype) -> None:
     _ridge_eval(data, torch.arange(15), torch.arange(15, 20), 1.0, standardize=True)
     torch.testing.assert_close(features, before_features, rtol=0, atol=0)
     torch.testing.assert_close(targets, before_targets, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("shape", [(80, 6), (20, 40)])
+@pytest.mark.parametrize("outputs", [1, 3])
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available"),
+        ),
+    ],
+)
+def test_ridge_predictions_match_sklearn_defaults(
+    shape: tuple[int, int], outputs: int, device: str
+) -> None:
+    rng = np.random.default_rng(17)
+    n_train, n_features = shape
+    features = rng.normal(size=(n_train + 12, n_features)) + 7
+    features[:, -1] = 3
+    features[:, -2] = features[:, 0]
+    targets = features @ rng.normal(size=(n_features, outputs)) + 250
+    targets += rng.normal(size=targets.shape)
+    reference = Ridge().fit(features[:n_train], targets[:n_train])
+    expected = reference.predict(features[n_train:]).reshape(-1, outputs)
+    data = RidgeData(
+        torch.as_tensor(features, device=device), torch.as_tensor(targets, device=device), None
+    )
+    actual = _ridge_predict(
+        data,
+        torch.arange(n_train, device=device),
+        torch.arange(n_train, len(features), device=device),
+        alpha=1.0,
+        standardize=False,
+    )
+    np.testing.assert_allclose(actual.cpu().numpy(), expected, rtol=1e-10, atol=1e-10)

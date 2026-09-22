@@ -80,15 +80,15 @@ class RidgeData:
     class_indices: torch.Tensor | None
 
 
-def _ridge_eval(
+def _ridge_predict(
     data: RidgeData,
     train_idx: torch.Tensor,
     test_idx: torch.Tensor,
     alpha: float,
     *,
     standardize: bool,
-) -> float:
-    """Fit closed-form ridge on ``train_idx``, score on ``test_idx`` (R^2 or accuracy)."""
+) -> torch.Tensor:
+    """Fit ridge on the training fold and predict with an unpenalized intercept."""
     x_tr, x_te = data.features[train_idx], data.features[test_idx]
     if standardize:
         mean, std = x_tr.mean(0, keepdim=True), x_tr.std(0, keepdim=True).clamp_min(1e-6)
@@ -108,7 +108,19 @@ def _ridge_eval(
     del x_tr, y_tr
     weight = torch.linalg.solve(gram, rhs)
     del gram, rhs
-    pred = (x_te @ weight).add_(y_mean)
+    return (x_te @ weight).add_(y_mean)
+
+
+def _ridge_eval(
+    data: RidgeData,
+    train_idx: torch.Tensor,
+    test_idx: torch.Tensor,
+    alpha: float,
+    *,
+    standardize: bool,
+) -> float:
+    """Score held-out ridge predictions with R^2 or classification accuracy."""
+    pred = _ridge_predict(data, train_idx, test_idx, alpha, standardize=standardize)
     if data.class_indices is None:
         y_te = data.targets[test_idx]
         ss_res = ((y_te - pred) ** 2).sum()
