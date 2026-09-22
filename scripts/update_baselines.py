@@ -29,7 +29,6 @@ _DEFAULT_OUTPUT = _REPO_ROOT / "tests" / "fixtures" / "accuracy_baselines.csv"
 
 TARGET_METHODS = {"knn5", "linear"}
 
-# Keep the small regression matrix explicit rather than expanding it as results accumulate.
 BASELINE_CASES: dict[str, dict[str, tuple[str, ...]]] = {
     "rcf": {
         "all": ("m-eurosat", "m-pv4ger", "so2sat"),
@@ -62,14 +61,12 @@ def baseline_metadata(model_config: str, dataset: str, bands: str) -> dict[str, 
             "datasets": [dataset],
             "input": {
                 "bands": bands,
-                # OlmoEarth owns normalization regardless of the requested strategy.
                 "normalization": "model" if model_config == "olmoearth_nano" else "dataset",
             },
         }
     )
     config, preset = resolve_run_config(config, dataset)
     metadata = dict(dataset_metadata(config, dataset, get_bench_dataset_class(dataset), preset, ""))
-    # Bootstrap changes confidence intervals, and the resume hash also includes device/workers.
     del metadata["bootstrap"], metadata["config_hash"]
     return {"model_config": model_config, **metadata}
 
@@ -103,21 +100,17 @@ def filter_and_deduplicate(
                         f"Missing comparable knn5/linear results for "
                         f"{model_config} / {dataset} / {bands}"
                     )
-                rows.extend(_baseline_rows(selected, metadata))
+                rows.extend(
+                    {
+                        **metadata,
+                        "method": row.method,
+                        "metric_name": row.metric_name,
+                        "expected_value": row.metric_value,
+                        "source_config_hash": row.config_hash,
+                    }
+                    for row in selected.itertuples()
+                )
     return pd.DataFrame(rows)
-
-
-def _baseline_rows(selected: pd.DataFrame, metadata: dict[str, object]) -> list[dict[str, object]]:
-    return [
-        {
-            **metadata,
-            "method": row.method,
-            "metric_name": row.metric_name,
-            "expected_value": row.metric_value,
-            "source_config_hash": row.config_hash,
-        }
-        for row in selected.itertuples()
-    ]
 
 
 def _diff_summary(old: pd.DataFrame | None, new: pd.DataFrame) -> None:
@@ -150,7 +143,6 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     paths = sorted(args.input.glob("*.csv")) if args.input.is_dir() else [args.input]
-    # Filter effective settings before deduplicating: results can contain linear-probe sweeps.
     df = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
 
     old: pd.DataFrame | None = None
