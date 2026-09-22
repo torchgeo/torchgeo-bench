@@ -385,7 +385,6 @@ def test_runtime_method_selection(
         knn_k=7,
         knn_device="cpu",
         ridge_alphas=[0.1, 2.0],
-        penalize_intercept=True,
     )
     run_coordbench(config)
     rows = pd.read_csv(config.output.file)
@@ -393,7 +392,6 @@ def test_runtime_method_selection(
     assert set(rows.method) == {"knn7" if method == "knn" else "linear" for method in methods}
     assert all(options["device"] == "cpu" for _, options in calls)
     assert all(options["alphas"] == (0.1, 2.0) for kind, options in calls if kind == "linear")
-    assert all(options["penalize_intercept"] for kind, options in calls if kind == "linear")
     assert set(rows.model_target) == {"torchgeo_bench.coordbench.models.SinCosLocationEncoder"}
     assert set(rows.model_name) == {"sincos"}
     assert list(rows.columns) == [

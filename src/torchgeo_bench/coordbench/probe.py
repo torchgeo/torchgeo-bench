@@ -78,7 +78,6 @@ class RidgeData:
     features: torch.Tensor
     targets: torch.Tensor
     class_indices: torch.Tensor | None
-    penalize_intercept: bool = False
 
 
 def _ridge_eval(
@@ -99,14 +98,9 @@ def _ridge_eval(
     # float32 rounding and the Gram matrix goes singular.
     x_tr, x_te = x_tr.double(), x_te.double()
     y_tr = data.targets[train_idx].double()
-    if data.penalize_intercept:
-        x_tr = torch.cat([x_tr, torch.ones_like(x_tr[:, :1])], dim=1)
-        x_te = torch.cat([x_te, torch.ones_like(x_te[:, :1])], dim=1)
-        y_mean = torch.zeros_like(y_tr[:1])
-    else:
-        x_mean, y_mean = x_tr.mean(0, keepdim=True), y_tr.mean(0, keepdim=True)
-        x_tr.sub_(x_mean)
-        x_te.sub_(x_mean)
+    x_mean, y_mean = x_tr.mean(0, keepdim=True), y_tr.mean(0, keepdim=True)
+    x_tr.sub_(x_mean)
+    x_te.sub_(x_mean)
     y_tr.sub_(y_mean)
     gram = x_tr.T @ x_tr
     gram.diagonal().add_(alpha)
@@ -167,11 +161,10 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
     fold_assign: np.ndarray | None = None,
     *,
     standardize: bool = True,
-    penalize_intercept: bool = False,
 ) -> tuple[float, list[float]]:
     """Closed-form ridge linear probe (regression R^2 / one-hot-ridge accuracy).
 
-    By default, center features and targets on each training fold and restore the target mean
+    Center features and targets on each training fold and restore the target mean
     after prediction, leaving the intercept unpenalized as in sklearn Ridge.
 
     Args:
@@ -185,7 +178,6 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
         test_mask: Official held-out boolean mask; takes precedence over CV.
         fold_assign: Per-point fold ids for spatial-block CV; else random k-fold.
         standardize: z-score features per train fold.
-        penalize_intercept: Apply the ridge penalty to the bias, matching the legacy probe.
 
     Returns:
         ``(score, fold_scores)`` — the reported metric and the per-fold scores it
@@ -206,7 +198,7 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
         class_idx = torch.as_tensor(inverse, device=dev)
         targets = torch.nn.functional.one_hot(class_idx).float()
 
-    data = RidgeData(feats, targets, class_idx, penalize_intercept)
+    data = RidgeData(feats, targets, class_idx)
     all_idx = torch.arange(feats.shape[0], device=dev)
     if test_mask is not None:
         is_test = torch.as_tensor(np.asarray(test_mask)[valid], device=dev, dtype=torch.bool)

@@ -213,7 +213,6 @@ def _evaluate_benchmark(
                         seed=seed,
                         device=cfg.runtime.device,
                         alphas=tuple(coord.ridge_alphas),
-                        penalize_intercept=coord.penalize_intercept,
                         test_mask=test_mask,
                         fold_assign=fold_assign,
                     )
