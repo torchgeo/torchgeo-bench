@@ -21,9 +21,9 @@ For example:
    $ torchgeo-bench run --config docs/examples/image-run.yaml --methods linear --dry-run
    $ torchgeo-bench run --config-help
 
-``--dry-run`` validates selections and prints reusable YAML without loading
-weights or dataset samples. ``run --config-help`` and ``flops --config-help``
-print JSON schemas; each command's ``--help`` lists its flags.
+``--dry-run`` validates selections and prints reusable YAML without loading weights or dataset samples. For image runs, it checks explicit band names against each dataset's metadata and rejects model-native normalization when the preset declares it unsupported, as RCF does. These checks use resolved model and dataset defaults without writing those defaults into the output YAML. Custom model targets are not imported; constructor-specific requirements, including RGB-only inputs and weight-specific normalization, may still fail at runtime.
+
+``run --config-help`` and ``flops --config-help`` print JSON schemas; each command's ``--help`` lists its flags.
 
 Precedence and validation
 -------------------------

@@ -9,9 +9,9 @@ import json
 import yaml
 
 from .. import commands
-from ..config.presets import load_model_preset
+from ..config.presets import NORMALIZATIONS, resolve_run_config
 from ..config.run import RunConfig, validate_run_config
-from ..datasets import list_datasets
+from ..datasets import get_bench_dataset_class, list_datasets
 from ._config import (
     FlagOverride,
     comma_separated_bands,
@@ -48,17 +48,20 @@ _FLAG_OVERRIDES = (
 def load_config(args: argparse.Namespace) -> RunConfig:
     """Load, validate, and return the selected image configuration."""
     config = load_from_flags(args, _FLAG_OVERRIDES, validate_run_config)
-    preset = load_model_preset(config.model)
     datasets = list_datasets()
     unknown_datasets = [name for name in config.datasets if name != "all" and name not in datasets]
     if unknown_datasets:
         raise ValueError(
             f"unknown model or dataset: model={config.model.name}, datasets={unknown_datasets}"
         )
-    if isinstance(config.input.bands, str) and config.input.bands not in {"rgb", "all"}:
-        raise ValueError("input.bands must be rgb, all, or a YAML list of band names")
-    if preset.track != "image":
-        raise ValueError(f"{config.model.name!r} is a coordinate encoder; use 'coord'")
+    for dataset in datasets if config.datasets == ["all"] else config.datasets:
+        effective, preset = resolve_run_config(config, dataset)
+        preset.validate_normalization(NORMALIZATIONS[effective.input.normalization])
+        if isinstance(effective.input.bands, str):
+            if effective.input.bands not in {"rgb", "all"}:
+                raise ValueError("input.bands must be rgb, all, or a YAML list of band names")
+        else:
+            get_bench_dataset_class(dataset).resolve_band_specs(effective.input.bands)
     return config
 
 

@@ -117,3 +117,61 @@ assert "omegaconf" not in sys.modules
     )
     assert result.stdout == ""
     assert result.stderr == "WARNING: sample message\n"
+
+
+@pytest.mark.parametrize(
+    ("model", "flags", "status"),
+    [
+        ("rcf", ["--bands", "red,green,blue"], 0),
+        ("rcf", ["--bands", "B99"], 2),
+        ("rcf", ["--normalization", "model"], 2),
+        ("olmoearth_nano", ["--normalization", "model"], 0),
+        ("terratorch/clay_v1_5", ["--bands", "red,green,blue"], 0),
+    ],
+)
+def test_run_metadata_validation_loads_no_models_or_samples(
+    model: str, flags: list[str], status: int
+) -> None:
+    code = """
+import sys
+blocked = {'olmoearth_pretrain_minimal', 'terratorch', 'rshf'}
+class BlockRuntime:
+    def find_spec(self, fullname, path=None, target=None):
+        if (fullname.split('.')[0] in blocked
+            or fullname.startswith('torchgeo_bench.models')
+            or fullname == 'torchgeo_bench.commands._run_runtime'):
+            raise AssertionError(f'Unexpected runtime import: {fullname}')
+sys.meta_path.insert(0, BlockRuntime())
+from torchgeo_bench.cli import main
+from torchgeo_bench.datasets.base import BenchDataset
+def no_dataset(*args, **kwargs):
+    raise AssertionError('Metadata validation must not construct datasets')
+BenchDataset.__init__ = no_dataset
+status = 0
+try:
+    main(sys.argv[2:])
+except SystemExit as error:  # allow-except: inspect expected CLI validation exits
+    status = error.code
+assert status == int(sys.argv[1])
+assert not blocked & sys.modules.keys()
+"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            code,
+            str(status),
+            "run",
+            "--model",
+            model,
+            "--dataset",
+            "m-eurosat",
+            *flags,
+            "--dry-run",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

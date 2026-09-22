@@ -19,6 +19,7 @@ pytestmark = pytest.mark.integration
 def test_public_classification_and_resume(tmp_path: Path, *, temperature_scaling: bool) -> None:
     write_classification_files(tmp_path, "m-eurosat", (2, 7), all_bands=True)
     datasets = ["m-eurosat"]
+    bands = ["red", "green", "blue"] if temperature_scaling else "all"
     if not temperature_scaling:
         labels = tuple([int(index == label) for index in range(43)] for label in (0, 1))
         write_classification_files(tmp_path, "m-bigearthnet", labels, all_bands=True)
@@ -30,7 +31,7 @@ def test_public_classification_and_resume(tmp_path: Path, *, temperature_scaling
             {
                 "model": {"name": "rcf"},
                 "datasets": datasets,
-                "input": {"bands": "all", "image_size": 16, "interpolation": "nearest"},
+                "input": {"bands": bands, "image_size": 16, "interpolation": "nearest"},
                 "classification": {
                     "bootstrap_samples": 5,
                     "linear": {
@@ -54,7 +55,7 @@ def test_public_classification_and_resume(tmp_path: Path, *, temperature_scaling
     assert set(rows["dataset"]) == set(datasets)
     assert rows["seed"].eq(7).all()
     assert rows["normalization"].eq("bandspec_zscore").all()
-    assert rows["bands"].eq("all").all()
+    assert rows["bands"].eq(",".join(bands) if isinstance(bands, list) else bands).all()
     assert rows["feature_dim"].eq(512).all()
     assert rows["n_train"].eq(24).all()
     assert rows["n_val"].eq(8).all()
