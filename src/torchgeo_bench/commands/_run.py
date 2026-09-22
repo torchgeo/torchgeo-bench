@@ -42,6 +42,8 @@ _FLAG_OVERRIDES = (
     FlagOverride("resume", ("output", "resume")),
     FlagOverride("output", ("output", "file")),
     FlagOverride("results_dir", ("output", "directory")),
+    FlagOverride("profile_dir", ("output", "profile_directory")),
+    FlagOverride("intrinsic_dim_dir", ("output", "intrinsic_dim_directory")),
 )
 
 

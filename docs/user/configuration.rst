@@ -247,12 +247,18 @@ Results and resume
      profile_directory: results/profiles
      intrinsic_dim_directory: results/intrinsic_dim
 
-Normal image metrics append to ``output.directory/<model name>.csv``.
-Optional profile and intrinsic-dimension rows use their own directories.
-An explicit ``output.file`` combines all selected image-run measurements in
-that CSV. ``--output`` sets the file, and ``--results-dir`` sets the normal
-metrics directory. Neither changes standalone profile JSON or other commands'
-outputs.
+Classification and segmentation metrics append to ``output.directory/<model name>.csv``. ``--results-dir`` sets only this directory. Use ``--profile-dir`` and ``--intrinsic-dim-dir`` to set ``output.profile_directory`` and ``output.intrinsic_dim_directory`` for the optional side files. Each flag overrides its corresponding YAML setting; omitted directories keep their YAML values or the defaults above.
+
+To keep an image run's CSVs out of the tracked reference results while retaining separate files:
+
+.. code-block:: bash
+
+   torchgeo-bench run --config docs/examples/image-run.yaml \
+     --results-dir outputs/my-run/models \
+     --profile-dir outputs/my-run/profiles \
+     --intrinsic-dim-dir outputs/my-run/intrinsic_dim
+
+An explicit ``--output`` / ``output.file`` takes precedence over all three directories and combines all selected image-run measurements in that CSV. These settings do not change standalone profile JSON or other commands' outputs.
 
 ``--resume`` / ``--no-resume`` control skipping completed measurements.
 Resume compares method/config keys and metric completeness; additive profile
