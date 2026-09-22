@@ -17,13 +17,11 @@ import numpy as np
 import torch
 from sklearn.preprocessing import StandardScaler
 
+from torchgeo_bench.coordbench.config import RIDGE_ALPHAS
 from torchgeo_bench.devices import resolve_device
 from torchgeo_bench.knn import KNNClassifier
 
 logger = logging.getLogger(__name__)
-
-# Half-decade L2 grid (1e-4..1e6), selected by cross-validation.
-RIDGE_ALPHAS = tuple(float(10.0**e) for e in np.arange(-4.0, 6.5, 0.5))
 
 
 def spatial_fold_ids(
@@ -82,6 +80,37 @@ class RidgeData:
     class_indices: torch.Tensor | None
 
 
+def _ridge_predict(
+    data: RidgeData,
+    train_idx: torch.Tensor,
+    test_idx: torch.Tensor,
+    alpha: float,
+    *,
+    standardize: bool,
+) -> torch.Tensor:
+    """Fit ridge on the training fold and predict with an unpenalized intercept."""
+    x_tr, x_te = data.features[train_idx], data.features[test_idx]
+    if standardize:
+        mean, std = x_tr.mean(0, keepdim=True), x_tr.std(0, keepdim=True).clamp_min(1e-6)
+        x_tr.sub_(mean).div_(std)
+        x_te.sub_(mean).div_(std)
+    # float64 normal equations: for high-dim features a small alpha is otherwise lost to
+    # float32 rounding and the Gram matrix goes singular.
+    x_tr, x_te = x_tr.double(), x_te.double()
+    y_tr = data.targets[train_idx].double()
+    x_mean, y_mean = x_tr.mean(0, keepdim=True), y_tr.mean(0, keepdim=True)
+    x_tr.sub_(x_mean)
+    x_te.sub_(x_mean)
+    y_tr.sub_(y_mean)
+    gram = x_tr.T @ x_tr
+    gram.diagonal().add_(alpha)
+    rhs = x_tr.T @ y_tr
+    del x_tr, y_tr
+    weight = torch.linalg.solve(gram, rhs)
+    del gram, rhs
+    return (x_te @ weight).add_(y_mean)
+
+
 def _ridge_eval(
     data: RidgeData,
     train_idx: torch.Tensor,
@@ -90,20 +119,8 @@ def _ridge_eval(
     *,
     standardize: bool,
 ) -> float:
-    """Fit closed-form ridge on ``train_idx``, score on ``test_idx`` (R^2 or accuracy)."""
-    x_tr, x_te = data.features[train_idx], data.features[test_idx]
-    if standardize:
-        mean, std = x_tr.mean(0, keepdim=True), x_tr.std(0, keepdim=True).clamp_min(1e-6)
-        x_tr, x_te = (x_tr - mean) / std, (x_te - mean) / std
-    # float64 normal equations: for high-dim features a small alpha is otherwise lost to
-    # float32 rounding and the Gram matrix goes singular.
-    x_tr = torch.cat([x_tr, torch.ones(x_tr.shape[0], 1, device=x_tr.device)], dim=1).double()
-    x_te = torch.cat([x_te, torch.ones(x_te.shape[0], 1, device=x_te.device)], dim=1).double()
-    eye = torch.eye(x_tr.shape[1], device=x_tr.device, dtype=torch.float64)
-    weight = torch.linalg.solve(
-        x_tr.T @ x_tr + alpha * eye, x_tr.T @ data.targets[train_idx].double()
-    )
-    pred = x_te @ weight
+    """Score held-out ridge predictions with R^2 or classification accuracy."""
+    pred = _ridge_predict(data, train_idx, test_idx, alpha, standardize=standardize)
     if data.class_indices is None:
         y_te = data.targets[test_idx]
         ss_res = ((y_te - pred) ** 2).sum()
@@ -159,6 +176,9 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
 ) -> tuple[float, list[float]]:
     """Closed-form ridge linear probe (regression R^2 / one-hot-ridge accuracy).
 
+    Center features and targets on each training fold and restore the target mean
+    after prediction, leaving the intercept unpenalized as in sklearn Ridge.
+
     Args:
         features: Feature matrix ``(N, D)``.
         labels: Per-point labels ``(N,)``.
@@ -197,7 +217,9 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
         train_pool, test_idx = all_idx[~is_test], all_idx[is_test]
         tp = train_pool.cpu().numpy()
         inner = [torch.as_tensor(tp[i::folds], device=dev) for i in range(folds)]
-        best_alpha, _ = _cv_alpha_scores(data, inner, alphas, standardize=standardize)
+        best_alpha = alphas[0]
+        if len(alphas) > 1:
+            best_alpha, _ = _cv_alpha_scores(data, inner, alphas, standardize=standardize)
         score = _ridge_eval(data, train_pool, test_idx, best_alpha, standardize=standardize)
         return score, [score]
 
