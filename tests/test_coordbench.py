@@ -380,13 +380,19 @@ def test_runtime_method_selection(
     monkeypatch.setattr("torchgeo_bench.coordbench.run.knn_probe_score", knn)
     monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", linear)
     config = _coord_cfg(
-        tmp_path, methods=methods, knn_k=7, knn_device="cpu", penalize_intercept=True
+        tmp_path,
+        methods=methods,
+        knn_k=7,
+        knn_device="cpu",
+        ridge_alphas=[0.1, 2.0],
+        penalize_intercept=True,
     )
     run_coordbench(config)
     rows = pd.read_csv(config.output.file)
     assert {kind for kind, _ in calls} == set(methods)
     assert set(rows.method) == {"knn7" if method == "knn" else "linear" for method in methods}
     assert all(options["device"] == "cpu" for _, options in calls)
+    assert all(options["alphas"] == (0.1, 2.0) for kind, options in calls if kind == "linear")
     assert all(options["penalize_intercept"] for kind, options in calls if kind == "linear")
     assert set(rows.model_target) == {"torchgeo_bench.coordbench.models.SinCosLocationEncoder"}
     assert set(rows.model_name) == {"sincos"}

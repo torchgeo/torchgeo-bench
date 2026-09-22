@@ -70,6 +70,8 @@ Set ``--penalize-intercept`` or ``evaluation.penalize_intercept: true`` to repro
 
 Older versions penalized the intercept. To recompute those results, select a fresh ``--output`` CSV; resume keys do not distinguish the two conventions, and runs append to existing files.
 
+By default, the probe selects the best mean CV score over 21 half-decade penalties from ``1e-4`` to ``1e6``. Set ``evaluation.ridge_alphas: [0.01, 0.1, 1.0, 10.0]`` in YAML or ``--ridge-alphas 0.01 0.1 1 10`` to choose a grid. Supply one positive value, such as ``--ridge-alphas 1``, to disable alpha tuning. With an official holdout, tuning uses only the training pool; otherwise, the reported folds are also used to select alpha. Use a fresh output CSV when changing the grid because resume keys do not include it.
+
 ``--dataset`` accepts one or more family or benchmark names, for example
 ``--dataset pdfm satclip``. The corresponding YAML field is a list:
 ``datasets: [pdfm, satclip]``. Use ``--dataset all`` or ``datasets: [all]``
