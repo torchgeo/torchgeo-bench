@@ -32,11 +32,32 @@ _FLAG_OVERRIDES = (
 )
 
 
+class _SingleDatasetAction(argparse.Action):
+    """Store one profile dataset, rejecting repeated flags."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        if hasattr(namespace, self.dest):
+            parser.error(f"{option_string} may only be specified once")
+        setattr(namespace, self.dest, values)
+
+
 def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
     """Register profile flags without overriding YAML with parser defaults."""
     parser.add_argument("--config", default=argparse.SUPPRESS, help="Standalone profile YAML")
     parser.add_argument("-m", "--model", default=argparse.SUPPRESS, help="Image model preset")
-    parser.add_argument("-d", "--dataset", default=argparse.SUPPRESS, help="One dataset name")
+    parser.add_argument(
+        "-d",
+        "--dataset",
+        action=_SingleDatasetAction,
+        default=argparse.SUPPRESS,
+        help="One dataset name (not repeatable)",
+    )
     parser.add_argument(
         "--device", default=argparse.SUPPRESS, help="auto, cpu, cuda, or cuda:<index>"
     )

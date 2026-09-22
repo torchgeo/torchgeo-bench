@@ -88,6 +88,63 @@ def test_package_module_dry_run_matches_console_script(tmp_path: Path, *, use_co
 
 
 @pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+@pytest.mark.parametrize(
+    "dataset_args",
+    [
+        ["-d", "m-eurosat", "-d", "so2sat"],
+        ["--dataset", "m-eurosat", "--dataset", "so2sat"],
+        ["-d", "m-eurosat", "--device", "cpu", "--dataset", "so2sat"],
+        ["--dataset", "m-eurosat", "-d", "so2sat"],
+        ["--dataset=m-eurosat", "--dataset=so2sat"],
+        ["-d", "m-eurosat", "--dataset=m-eurosat"],
+    ],
+)
+def test_profile_rejects_repeated_dataset_flags(
+    module: str | None, dataset_args: list[str], tmp_path: Path
+) -> None:
+    completed = run_entrypoint(
+        module, ["profile", "--model", "rcf", *dataset_args, "--dry-run"], tmp_path
+    )
+    assert completed.returncode == 2, completed.stdout + completed.stderr
+    assert completed.stdout == ""
+    assert "usage: torchgeo-bench profile" in completed.stderr
+    assert "error:" in completed.stderr
+    assert "may only be specified once" in completed.stderr
+    assert "Traceback" not in completed.stderr
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+@pytest.mark.parametrize("use_config", [False, True])
+def test_profile_accepts_one_dataset_flag(
+    module: str | None, tmp_path: Path, *, use_config: bool
+) -> None:
+    if use_config:
+        path = tmp_path / "profile.yaml"
+        path.write_text("model: {name: rcf}\ndataset: m-eurosat\n", encoding="utf-8")
+        arguments = ["profile", "--config", str(path)]
+    else:
+        arguments = ["profile", "--model", "rcf"]
+    completed = run_entrypoint(module, [*arguments, "--dataset=so2sat", "--dry-run"], tmp_path)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+    config = yaml.safe_load(completed.stdout)
+    assert config["model"]["name"] == "rcf"
+    assert config["dataset"] == "so2sat"
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+def test_run_accepts_repeated_dataset_flags(module: str | None, tmp_path: Path) -> None:
+    completed = run_entrypoint(
+        module,
+        ["run", "-m", "rcf", "-d", "m-eurosat", "--dataset=so2sat", "--dry-run"],
+        tmp_path,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+    assert yaml.safe_load(completed.stdout)["datasets"] == ["m-eurosat", "so2sat"]
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
 @pytest.mark.parametrize("dry_run", [False, True])
 @pytest.mark.parametrize(
     ("flags", "diagnostic"),
