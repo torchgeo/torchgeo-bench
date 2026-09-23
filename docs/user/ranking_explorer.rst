@@ -71,6 +71,7 @@ those with extra caution.
 The hand-edited source is
 :file:`scripts/ranking_explorer.template.html`. The generator
 reads its empty JSON anchors and writes the self-contained documentation asset:
+GitHub Actions automatically regenerates this artifact when ranking inputs change.
 
 .. code-block:: console
 

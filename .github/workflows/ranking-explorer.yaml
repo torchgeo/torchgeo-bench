@@ -1,0 +1,89 @@
+name: Ranking explorer
+
+# The ranking explorer page is generated from benchmark results and committed.
+# This workflow keeps the page synchronized by opening an update PR from main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ranking-explorer.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "results/models/**"
+      - "results/compute_cost.csv"
+      - "scripts/regen_leaderboard.py"
+      - "scripts/ranking_explorer.template.html"
+      - "tests/test_regen_leaderboard_smoke.py"
+      - "src/torchgeo_bench/results.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/ranking-explorer.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "results/models/**"
+      - "results/compute_cost.csv"
+      - "scripts/regen_leaderboard.py"
+      - "scripts/ranking_explorer.template.html"
+      - "tests/test_regen_leaderboard_smoke.py"
+      - "src/torchgeo_bench/results.py"
+  workflow_dispatch:
+
+# Serialize runs so refresh updates on a shared branch do not race.
+concurrency:
+  group: ranking-explorer-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  regenerate:
+    name: Regenerate ranking explorer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Regenerate
+        run: uv run --frozen python scripts/regen_leaderboard.py
+
+      - name: Show what changed
+        run: git --no-pager diff --stat
+
+      - name: Upload preview
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ranking-explorer
+          path: docs/_static/ranking_explorer.html
+          retention-days: 14
+
+      - name: Open refresh PR
+        if: github.event_name != 'pull_request'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/ranking-explorer
+          base: main
+          add-paths: |
+            docs/_static/ranking_explorer.html
+          commit-message: "chore(docs): refresh ranking explorer"
+          title: "chore(docs): refresh ranking explorer"
+          body: |
+            Regenerated `docs/_static/ranking_explorer.html` from benchmark results
+            and `results/compute_cost.csv` via `scripts/regen_leaderboard.py`.
+
+            Triggered by ${{ github.sha }}.
+          labels: automation
+          delete-branch: true
