@@ -125,6 +125,12 @@ def test_harmonize_filters_cls_ablation_and_dropped_dataset_rows() -> None:
     assert "m-pv4ger" not in set(out["dataset"])
 
 
+def test_rgb_only_datasets_are_never_multispectral() -> None:
+    raw = pd.DataFrame([_row("native_full", "resisc45", "linear", "all", 0.5, "bandspec_zscore")])
+    out = rl.harmonize(raw)
+    assert set(out["bandclass"]) == {"RGB"}
+
+
 def test_terramind_alias_applies_during_harmonization() -> None:
     raw = pd.DataFrame(
         [

@@ -40,6 +40,10 @@ LANDSAT_SUB_SUFFIX = "_landsat_as_s2"
 # Datasets excluded from the leaderboard only (all_results.csv is untouched).
 DROPPED_DATASETS = frozenset({"m-pv4ger", "m-brick-kiln"})
 
+# Datasets that only ship RGB bands.  A ``bands=all`` run on these is still an
+# RGB measurement and must never enter the Multispectral views.
+RGB_ONLY_DATASETS = frozenset({"aid", "resisc45", "ucmerced"})
+
 # The plain (S2L2A) TerraMind configs were additionally swept with
 # ``dataset.bands=rgb``, which forces their S2L2A-modality pathway onto
 # RGB-only input -- a real, off-modality measurement, not a duplicate of the
@@ -209,7 +213,8 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
     df["source_model"] = base
     df["base_model"] = base.map(canonical_slug)
 
-    df["bandclass"] = (df["bands"].astype(str) == "rgb").map({True: "RGB", False: "Multispectral"})
+    is_rgb = (df["bands"].astype(str) == "rgb") | df["dataset"].isin(RGB_ONLY_DATASETS)
+    df["bandclass"] = is_rgb.map({True: "RGB", False: "Multispectral"})
     df["probe"] = df["method"].astype(str)
     is_segmentation = df["probe"].str.startswith(SEGMENTATION_METHOD_PREFIX)
     df["task"] = is_segmentation.map({True: "segmentation", False: "classification"})
