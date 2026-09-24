@@ -4,6 +4,7 @@ kwargs:
   factory: resnet152
   weights_class: ResNet152_Weights
   weights_member: SENTINEL2_SI_RGB_SATLAS
+  normalization_input_unit: uint8_div255
   auto_resize: false
   target_size: 224
 segmentation:

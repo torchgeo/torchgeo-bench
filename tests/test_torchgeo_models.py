@@ -767,3 +767,36 @@ def test_expected_input_unit_is_derived_per_instance(monkeypatch: pytest.MonkeyP
     declared = _DeclaredUnitSwin(bands=_rgb_bands(), normalization="identity")
     assert declared.expected_input_unit is InputUnit.S2_DN
     assert _DeclaredUnitSwin.expected_input_unit is InputUnit.S2_DN
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "torchgeo/resnet50_s2rgb_satlas_si",
+        "torchgeo/resnet50_s2rgb_satlas_mi",
+        "torchgeo/resnet152_s2rgb_satlas_si",
+        "torchgeo/resnet152_s2rgb_satlas_mi",
+    ],
+)
+def test_satlas_resnet_presets_scale_s2_dn_to_unit_range(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Satlas S2 RGB checkpoints divide 0-255 TCI values by 255, so raw DN must become uint8."""
+    import torchgeo_bench.models.torchgeo_models as tg_models
+    from torchgeo_bench.config.presets import load_model_preset
+    from torchgeo_bench.config.schema import ModelConfig
+
+    class _TinyResNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 4, 1)
+            self.fc = nn.Identity()
+
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+    )
+    kwargs = load_model_preset(ModelConfig(name=name), seed=0).kwargs
+    model = TorchGeoResNetBench(bands=_rgb_bands(), normalization="model_native", **kwargs)
+
+    normalized = model.normalize_inputs(torch.full((1, 3, 2, 2), 5000.0))
+    torch.testing.assert_close(normalized, torch.full_like(normalized, 0.5))
