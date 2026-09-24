@@ -769,34 +769,52 @@ def test_expected_input_unit_is_derived_per_instance(monkeypatch: pytest.MonkeyP
     assert _DeclaredUnitSwin.expected_input_unit is InputUnit.S2_DN
 
 
+class _TinySatlasResNet(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 4, 1)
+        self.fc = nn.Identity()
+
+
+class _TinySatlasSwin(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.features = nn.Sequential(nn.Sequential(nn.Conv2d(3, 4, 1)))
+        self.head = nn.Identity()
+
+
 @pytest.mark.parametrize(
-    "name",
+    ("name", "wrapper", "backbone"),
     [
-        "torchgeo/resnet50_s2rgb_satlas_si",
-        "torchgeo/resnet50_s2rgb_satlas_mi",
-        "torchgeo/resnet152_s2rgb_satlas_si",
-        "torchgeo/resnet152_s2rgb_satlas_mi",
+        ("torchgeo/resnet50_s2rgb_satlas_si", TorchGeoResNetBench, _TinySatlasResNet),
+        ("torchgeo/resnet50_s2rgb_satlas_mi", TorchGeoResNetBench, _TinySatlasResNet),
+        ("torchgeo/resnet152_s2rgb_satlas_si", TorchGeoResNetBench, _TinySatlasResNet),
+        ("torchgeo/resnet152_s2rgb_satlas_mi", TorchGeoResNetBench, _TinySatlasResNet),
+        ("torchgeo/swinv2t_s2rgb_satlas_si", TorchGeoSwinBench, _TinySatlasSwin),
+        ("torchgeo/swinv2t_s2rgb_satlas_mi", TorchGeoSwinBench, _TinySatlasSwin),
+        ("torchgeo/swinv2b_s2rgb_satlas_si", TorchGeoSwinBench, _TinySatlasSwin),
+        ("torchgeo/swinv2b_s2rgb_satlas_mi", TorchGeoSwinBench, _TinySatlasSwin),
     ],
 )
-def test_satlas_resnet_presets_scale_s2_dn_to_unit_range(
-    monkeypatch: pytest.MonkeyPatch, name: str
+def test_satlas_s2_presets_scale_dn_like_tci(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    wrapper: type[nn.Module],
+    backbone: type[nn.Module],
 ) -> None:
-    """Satlas S2 RGB checkpoints divide 0-255 TCI values by 255, so raw DN must become uint8."""
+    """Satlas S2 RGB checkpoints divide L1C TCI by 255; TCI saturates at DN 3558."""
     import torchgeo_bench.models.torchgeo_models as tg_models
     from torchgeo_bench.config.presets import load_model_preset
     from torchgeo_bench.config.schema import ModelConfig
 
-    class _TinyResNet(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.conv1 = nn.Conv2d(3, 4, 1)
-            self.fc = nn.Identity()
-
     monkeypatch.setattr(
-        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinyResNet()
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: backbone()
     )
-    kwargs = load_model_preset(ModelConfig(name=name), seed=0).kwargs
-    model = TorchGeoResNetBench(bands=_rgb_bands(), normalization="model_native", **kwargs)
+    preset = load_model_preset(ModelConfig(name=name), seed=0)
+    assert preset.target == f"torchgeo_bench.models.{wrapper.__name__}"
+    model = wrapper(bands=_rgb_bands(), normalization="model_native", **preset.kwargs)
 
-    normalized = model.normalize_inputs(torch.full((1, 3, 2, 2), 5000.0))
-    torch.testing.assert_close(normalized, torch.full_like(normalized, 0.5))
+    images = torch.tensor([1779.0, 3558.0, 10000.0]).view(1, 3, 1, 1)
+    torch.testing.assert_close(
+        model.normalize_inputs(images), torch.tensor([0.5, 1.0, 1.0]).view(1, 3, 1, 1)
+    )
