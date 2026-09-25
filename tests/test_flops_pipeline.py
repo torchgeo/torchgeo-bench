@@ -197,8 +197,6 @@ def _seg_cfg(layers: list[str], head_type: str) -> SegmentationConfig:
 
 @pytest.mark.parametrize("head_type", ["linear", "conv_block", "fpn", "dpt", "patch_linear"])
 def test_seg_head_gflops_is_positive_and_deterministic(head_type):
-    if head_type == "dpt":
-        pytest.importorskip("transformers")
     model = _TapModel().eval()
     probe = _build_seg_probe(model, 4, _seg_cfg(_TAP_LAYERS, head_type))
     probe.eval()

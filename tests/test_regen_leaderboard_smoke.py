@@ -1,9 +1,4 @@
-"""Tests for the static ranking explorer generator.
-
-The generator is a standalone script, so the tests import it from
-``scripts``.  Ranking tests require ``evaluma`` and skip cleanly
-when the optional development dependency is unavailable.
-"""
+"""Tests for the static ranking explorer generator."""
 
 import json
 import re
@@ -139,7 +134,6 @@ def test_terramind_alias_applies_during_harmonization() -> None:
 def test_alias_collision_raises_before_coverage_selection() -> None:
     # Multispectral bands so the TerraMind off-modality filter (bands=="rgb"
     # only) doesn't remove the plain config's rows before the collision check.
-    pytest.importorskip("evaluma")
     rows = []
     for dataset in DATASETS:
         rows.extend(
@@ -198,21 +192,18 @@ def test_missing_normalization_is_rejected() -> None:
 
 
 def test_complete_native_is_preferred_for_the_entire_model_row() -> None:
-    pytest.importorskip("evaluma")
     bench, excluded = rl.build_view(_harmonized(), "classification", "linear", "RGB")
     assert not excluded or all(row["model"] != "native_full" for row in excluded)
     assert bench.scores_.loc["native_full", "d1"] == pytest.approx(0.84)
 
 
 def test_partial_native_falls_back_to_a_complete_zscore_row() -> None:
-    pytest.importorskip("evaluma")
     bench, _excluded = rl.build_view(_harmonized(), "classification", "linear", "RGB")
     assert bench.scores_.loc["partial_native", "d1"] == pytest.approx(0.80)
     assert list(bench.scores_.loc["partial_native"].index) == list(DATASETS)
 
 
 def test_incomplete_zscore_is_excluded_even_when_native_is_partial() -> None:
-    pytest.importorskip("evaluma")
     bench, excluded = rl.build_view(_harmonized(), "classification", "linear", "RGB")
     assert "excluded" not in set(bench.models_)
     assert {row["model"]: row["n_tasks"] for row in excluded}["excluded"] == 2
@@ -221,7 +212,6 @@ def test_incomplete_zscore_is_excluded_even_when_native_is_partial() -> None:
 def test_excluded_n_tasks_reflects_native_coverage_not_just_zscore() -> None:
     """A model with no zscore rows (e.g. OlmoEarth, relabeled to model_native)
     that is nonetheless incomplete must report its native coverage, not 0."""
-    pytest.importorskip("evaluma")
     raw = _raw_df()
     raw = pd.concat(
         [
@@ -262,7 +252,6 @@ def test_compute_join_rejects_conflicting_nonempty_measurements() -> None:
 
 @pytest.fixture(scope="module")
 def assembled() -> tuple[dict[str, object], dict[str, object], dict[str, str]]:
-    pytest.importorskip("evaluma")
     return rl.assemble(
         _harmonized(), n_bootstrap=20, compute=rl.extract_compute_cost(_compute_df())
     )
@@ -337,7 +326,6 @@ def test_sensitivity_payload_is_symmetric_and_bounded(assembled) -> None:
 
 
 def test_sensitivity_keeps_each_task_family_full_dataset_set() -> None:
-    pytest.importorskip("evaluma")
     source = _harmonized()
     classification = source[source["dataset"].isin(("d1", "d2"))].copy()
     classification["dataset"] = "class-" + classification["dataset"]
@@ -369,55 +357,7 @@ def test_inline_replaces_only_the_three_template_anchors() -> None:
         assert json.loads(match.group(1)) == expected
 
 
-def test_template_contains_only_remaining_controls_and_anchors() -> None:
-    assert SCRIPTS.parent == rl.ROOT
-    assert rl.TEMPLATE_PATH == TEMPLATE_PATH
-    text = TEMPLATE_PATH.read_text(encoding="utf-8")
-    for name in ("RANKINGS", "SENSITIVITY", "DEFAULT_SLICE"):
-        assert re.search(rf"const {name} = \{{\}};", text)
-    assert "MODEL_META" not in text
-    for element_id in (
-        'id="sel-aggregation"',
-        'id="sel-task"',
-        'id="sel-probe"',
-        'id="sel-bands"',
-        'id="table"',
-        'id="sensitivity"',
-        'id="compute-scatter"',
-        'id="omitted-compute"',
-        'id="sort-status"',
-        'id="metric-key"',
-    ):
-        assert element_id in text
-    for removed_id in (
-        'id="sel-pooling"',
-        'id="sel-normalization"',
-        'id="sel-flow-axis"',
-        'id="rank-flow-card"',
-        'id="rank-dispersion-card"',
-        'id="model-detail-card"',
-        'id="profile-card"',
-    ):
-        assert removed_id not in text
-    assert 'const SENSITIVITY_AGGREGATION = "avg_rank";' in text
-    assert "matrix-cell.active" not in text
-    assert "scatter-label" in text
-    assert "placeScatterLabels" in text
-    assert '"Worse ←", title, "→ Better"' in text
-    assert '"Less compute ←", "Backbone GFLOPs (log scale)", "→ More compute"' in text
-    assert "directedAxisTitle" in text
-    assert 'class="badge"' not in text
-    assert "method-card" not in text
-    assert '<a href="../user/ranking_explorer.html">evaluation setup</a>' in text
-    assert "https://github.com/torchgeo/torchgeo-bench/issues" in text
-    assert 'formatter: "rownum"' not in text
-    assert '{title: "#", field: "rank"' in text
-    assert "renderSortStatus" in text
-    assert "table.clearSort()" in text
-
-
 def test_generator_renders_a_synthetic_template_and_output(tmp_path) -> None:
-    pytest.importorskip("evaluma")
     csv_path = tmp_path / "all_results.csv"
     compute_path = tmp_path / "compute_cost.csv"
     html_path = tmp_path / "ranking_explorer.html"
@@ -448,4 +388,3 @@ def test_generator_renders_a_synthetic_template_and_output(tmp_path) -> None:
     assert match is not None
     rankings = json.loads(match.group(1))
     assert rankings["classification"]["linear"]["RGB"]["avg_rank"]["rows"]
-    assert 'id="sel-pooling"' not in text

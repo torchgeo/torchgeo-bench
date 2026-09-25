@@ -128,7 +128,7 @@ pytest -m slow                            # Only downloaded-data/weight tests
 pytest -m accuracy_check                  # Only model accuracy baselines
 ```
 
-The default selection excludes `slow` and `accuracy_check`, not `integration`. Offline integration tests run real algorithms on small, disjoint on-disk splits and exercise the canonical CLI entry points without downloading data or weights. All tests live under `tests/`; shared helpers go in `tests/support/`, never another test module. Optional Cleanlab tests live in `tests/projects/cleanlab/`.
+The default selection excludes `slow` and `accuracy_check`, not `integration`. Offline integration tests run real algorithms on small, disjoint on-disk splits and exercise the canonical CLI entry points without downloading data or weights. All tests live under `tests/`; shared helpers go in `tests/support/`, never another test module.
 
 Pytest-cov measures line and branch coverage, including Python subprocesses. `pytest` displays missing coverage and writes `coverage.xml`; `pytest --cov-report=html` also produces `htmlcov/`. Use `--no-cov` for targeted iteration. Tests all use the regular Ruff profile.
 

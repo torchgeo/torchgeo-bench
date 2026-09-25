@@ -593,6 +593,8 @@ def test_runtime_seeds_encoder_construction(
 
     monkeypatch.setattr("torchgeo_bench.coordbench.run.build_model", build)
     config = _coord_cfg(tmp_path)
-    run_coordbench(config)
-    run_coordbench(config)
-    assert torch.equal(random_values[0], random_values[1])
+    for seed in (7, 7, 11):
+        config.runtime.seed = seed
+        run_coordbench(config)
+        expected = torch.rand(4, generator=torch.Generator().manual_seed(seed))
+        assert torch.equal(random_values[-1], expected)

@@ -583,7 +583,6 @@ class MockBackbone4Layer(nn.Module):
 
 
 def test_probe_dpt_head_forward():
-    pytest.importorskip("transformers")
     from torchgeo_bench.models.segmentation_heads import DPTHead
 
     backbone = MockBackbone4Layer()
@@ -615,7 +614,6 @@ def test_probe_dpt_wrong_num_layers():
 
 def test_dpt_fusion_layer_shim_matches_reference():
     """These checks protect decoder behavior when transformers changes its private fusion API."""
-    pytest.importorskip("transformers")
     from transformers.models.dpt.modeling_dpt import DPTPreActResidualLayer
 
     from torchgeo_bench.models.segmentation_heads import _dpt_fusion_layer
@@ -640,7 +638,6 @@ def test_dpt_fusion_layer_shim_matches_reference():
 
 def test_dpt_head_upsamples_purely_through_fusion_cascade():
     """Four fusion stages must reach 224x224 from 14x14 without relying on the final resize."""
-    pytest.importorskip("transformers")
     from torchgeo_bench.models.segmentation_heads import DPTHead
 
     head = DPTHead([32, 32, 32, 32], num_classes=NUM_CLASSES, hidden_dim=16)
