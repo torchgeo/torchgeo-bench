@@ -82,6 +82,8 @@ wavelength = int(round(wavelength_um))
 # BEST: no comment on lines that are self explanatory
 ```
 
+**Describe the current code, not its history.** Docs, docstrings, and comments state what the code does now. Don't narrate what it used to do, what changed, or which issue changed it: avoid "previously", "no longer", "used to", "now also", and issue numbers as timestamps such as "pre-#123". That context belongs in the commit subject and PR description. When behavior changes, rewrite the existing text to describe the new behavior instead of appending a note about the old one.
+
 ## Simplification Principles
 
 Prioritize readability, clear ownership, and long-term maintainability. Evaluate simplification by how easily a contributor can understand and change the behavior.
@@ -347,6 +349,8 @@ Implement `_forward_patch_features`, not the public `forward_patch_features`: th
 - **Complexity caps:** max-complexity 10, max-args 5, max-branches 12, max-returns 6, max-statements 50.
 
 ## Testing Patterns
+
+Every test should catch a regression the existing suite would miss. Before adding one, name that regression and check whether an existing test or parametrization already covers it; if so, add a case there instead of a new test. Prefer one representative case over a large parameter grid when the extra cases exercise the same code path. Don't add tests that pin superseded behavior, such as old hash values, retired formats, or proof that legacy rows are rejected. When a change makes an existing assertion obsolete, update or delete it rather than rewriting it to check the old behavior a different way.
 
 ```python
 class TestGeoBenchDatasetBasics:
