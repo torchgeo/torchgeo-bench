@@ -1,8 +1,4 @@
-"""Resume keys and plans for unfinished benchmark work.
-
-Keys require exact config hashes. Hashes that included runtime device/workers no longer match;
-those runs recompute without rewriting existing rows or guessing historical configurations.
-"""
+"""Resume keys and plans for unfinished benchmark work."""
 
 import hashlib
 import json
@@ -40,8 +36,8 @@ KEY_COLS = (
 def resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
     """Fingerprint result-affecting settings for one resolved image run.
 
-    Device and worker count only control execution. Seed and batch size remain part of the
-    identity; changing batch size can affect floating-point results.
+    Excludes device and worker count, which only control execution. Includes batch size because
+    it can change floating-point results.
     """
     payload = {
         "schema_version": config.schema_version,

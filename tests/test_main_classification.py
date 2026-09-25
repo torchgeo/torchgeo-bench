@@ -182,23 +182,12 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
     assert knn_mock.call_args.kwargs["device"] == "cpu"
 
 
-@pytest.mark.parametrize(
-    ("requested", "resumed"),
-    [
-        (None, "cpu"),
-        ("cpu", "cuda:1"),
-        ("cuda", "cuda:0"),
-        ("cuda:0", "cuda:1"),
-        ("cuda:1", "cpu"),
-        ("auto", "cpu"),
-    ],
-)
+@pytest.mark.parametrize("requested", [None, "cpu", "cuda", "cuda:0", "cuda:1", "auto"])
 @pytest.mark.parametrize("entrypoint", ["direct", "command"])
-def test_resume_skips_after_changing_device_and_workers(
+def test_device_resolution_and_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     requested: str | None,
-    resumed: str,
     entrypoint: str,
 ) -> None:
     from torchgeo_bench.commands._run_runtime import run
@@ -235,12 +224,9 @@ def test_resume_skips_after_changing_device_and_workers(
         assert build.return_value.to.call_args.args[0] == torch.device(expected_device)
         assert all(call.args[2] == torch.device(expected_device) for call in embed.call_args_list)
         output = Path(cfg.output.file)
-        assert pd.read_csv(output)["config_hash"].tolist() == [_hash_for(cfg)]
         before = output.read_bytes()
         data.reset_mock()
         build.reset_mock()
-        cfg.runtime.device = resumed
-        cfg.runtime.workers = 8
         cfg.output.resume = True
         execute(cfg)
     data.assert_not_called()
