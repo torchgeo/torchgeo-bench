@@ -75,7 +75,7 @@ Tests
    $ uv run pytest -k "m-eurosat" -v                # by keyword
    $ uv run pytest --no-cov                         # disable coverage for speed
 
-All test cases live under :file:`tests/`, including the optional Cleanlab project tests in :file:`tests/projects/cleanlab/`. Shared inputs and subprocess helpers belong in :file:`tests/support/`, not in another test module. Use the same Ruff profile for every test.
+All test cases live under :file:`tests/`. Shared inputs and subprocess helpers belong in :file:`tests/support/`, not in another test module. Use the same Ruff profile for every test.
 
 The default suite needs no downloaded datasets or pretrained weights and can run on CPU; GPU-specific tests skip when CUDA is unavailable. The :file:`tests/integration/` suite creates small on-disk datasets with separate training, validation, and test samples. It exercises CLI parsing, data loading, feature extraction, fitting, output files, and resume behavior together. External download transport is replaced with local fixture data, and a temporary random-weight preset lets the public CLI exercise segmentation offline; numerical algorithms and result writers run normally. Integration tests must assert meaningful outputs, not just a zero exit status.
 
