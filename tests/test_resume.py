@@ -35,8 +35,9 @@ def _hash(config: RunConfig, dataset: str = "m-eurosat") -> str:
         {"intrinsic_dim": {"enabled": True}},
         {"datasets": ["m-forestnet"]},
         {"output": {"resume": True}},
+        {"runtime": {"device": "cpu", "workers": 0}},
     ],
-    ids=["profile-pass", "intrinsic-dim-pass", "dataset-selection", "resume-toggle"],
+    ids=["profile-pass", "intrinsic-dim-pass", "dataset-selection", "resume-toggle", "execution"],
 )
 def test_config_hash_ignores_run_selection_and_additive_passes(overrides: dict) -> None:
     assert _hash(_cfg()) == _hash(_cfg(**overrides))
@@ -55,9 +56,7 @@ def test_config_hash_ignores_output_paths_and_method_selection() -> None:
     "overrides",
     [
         {"runtime": {"seed": 1}},
-        {"runtime": {"device": "cpu"}},
         {"runtime": {"batch_size": 8}},
-        {"runtime": {"workers": 0}},
         {"input": {"bands": "all"}},
         {"input": {"normalization": "minmax"}},
         {"classification": {"knn_k": 7}},

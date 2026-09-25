@@ -63,7 +63,7 @@ def build_jobs(level: int, datasets: list[str]) -> list[Job]:
     ]
 
 
-def feature_manifest(level: int, datasets: list[str], devices: list[int]) -> dict:
+def feature_manifest(level: int, datasets: list[str]) -> dict:
     """Record each dataset's actual feature columns and sensor inputs."""
     result = {}
     for name in datasets:
@@ -91,17 +91,7 @@ def feature_manifest(level: int, datasets: list[str], devices: list[int]) -> dic
             "num_classes": bench.num_classes,
             "multilabel": bench.multilabel,
             "split_sizes": bench.split_sizes,
-            "config_hashes": {
-                resume_config_hash(
-                    cfg.model_copy(
-                        update={
-                            "runtime": cfg.runtime.model_copy(update={"device": f"cuda:{device}"})
-                        }
-                    ),
-                    preset,
-                ): f"cuda:{device}"
-                for device in devices
-            },
+            "config_hash": resume_config_hash(cfg, preset),
         }
     return result
 
@@ -124,7 +114,7 @@ def validate_case(rows: list[dict], name: str, spec: dict) -> list[str]:
             for row in rows
             if row["dataset"] == name
             and row["method"] == method
-            and row["config_hash"] in spec["config_hashes"]
+            and row["config_hash"] == spec["config_hash"]
         ]
         if len(selected) != 1:
             failures.append(f"{name}/{method}: expected one row, found {len(selected)}")
@@ -168,7 +158,7 @@ def save_json(path: Path, value: dict) -> None:
 def run_level(args: argparse.Namespace, level: int) -> bool:
     """Run one complexity level and verify that both methods actually completed."""
     name = model_name(level)
-    manifest = feature_manifest(level, args.datasets, args.devices)
+    manifest = feature_manifest(level, args.datasets)
     save_json(args.run_dir / f"{name}.features.json", manifest)
     output = args.output_dir / f"{name}.csv"
     code = run_jobs(
@@ -196,12 +186,12 @@ def run_level(args: argparse.Namespace, level: int) -> bool:
 
 
 def _current_rows(args: argparse.Namespace, level: int) -> list[dict]:
-    manifest = feature_manifest(level, args.datasets, args.devices)
+    manifest = feature_manifest(level, args.datasets)
     return [
         row
         for row in completed_rows(args.output_dir / f"{model_name(level)}.csv")
         if row["dataset"] in manifest
-        and row["config_hash"] in manifest[row["dataset"]]["config_hashes"]
+        and row["config_hash"] == manifest[row["dataset"]]["config_hash"]
     ]
 
 

@@ -151,12 +151,9 @@ all three files -- ``results/models/<name>.csv``,
    (dataset, method, model, name, normalization, image_size, interpolation,
     partition, bands, num_classes, res, pool, config_hash)
 
-Note that ``method`` is per-method (``knn5`` / ``linear`` /
-``intrinsic_dim`` / ``seg-<head_type>``), so re-running with
-``--methods linear`` never requires a KNN row. Resume accepts historical
-configuration hashes only when their effective preprocessing and evaluation
-settings match. Changed evaluation settings can require a new run; additive
-profile and intrinsic-dimension passes do not invalidate probe hashes.
+Resume checks each method separately, so ``--methods linear`` never requires a KNN row. Profile and intrinsic-dimension passes do not change ``config_hash``; each requested metric must be present before a pass is skipped.
+
+Resume requires an exact ``config_hash`` match. The hash covers the resolved model, preprocessing, and evaluation settings plus ``runtime.seed`` and ``runtime.batch_size``, since batch size can change floating-point results. It excludes ``runtime.device`` and ``runtime.workers``, so completed results and profile measurements are reused on another device or worker count; use ``--no-resume`` or a separate output file to remeasure performance.
 
 Rows written before version 0.5.0 do not have ``num_classes`` and are treated
 as incomplete by resume mode. The checked-in SpaceNet2/7 rows produced under
