@@ -15,14 +15,14 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
         include:
           - os: ubuntu-latest
-            extras: --extra dev --extra id --extra olmoearth --extra sam3
-            cache-tag: dev-id-olmoearth-sam3
+            extras: --extra dev --extra id --extra olmoearth
+            cache-tag: dev-id-olmoearth
           - os: macos-latest
-            extras: --extra dev --extra sam3
-            cache-tag: dev-sam3
+            extras: --extra dev
+            cache-tag: dev
           - os: windows-latest
-            extras: --extra dev --extra sam3
-            cache-tag: dev-sam3
+            extras: --extra dev
+            cache-tag: dev
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
