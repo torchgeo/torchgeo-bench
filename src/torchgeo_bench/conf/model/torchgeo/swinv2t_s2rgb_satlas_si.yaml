@@ -4,6 +4,7 @@ kwargs:
   factory: swin_v2_t
   weights_class: Swin_V2_T_Weights
   weights_member: SENTINEL2_SI_RGB_SATLAS
+  normalization_input_unit: s2_tci_div255
   auto_resize: true
   target_size: 256
 segmentation:

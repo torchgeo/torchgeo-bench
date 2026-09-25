@@ -132,6 +132,7 @@ _UNIT_EXPECTED_SOURCE: dict[str, InputUnit] = {
     "uint8_div255": InputUnit.UINT8,
     "reflectance_0_1": InputUnit.REFLECTANCE_0_1,
     "s2_dn_div10000": InputUnit.S2_DN,
+    "s2_tci_div255": InputUnit.S2_TCI,
 }
 
 
