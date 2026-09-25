@@ -1,6 +1,7 @@
 # torchgeo-bench
 
 [![CI](https://github.com/torchgeo/torchgeo-bench/actions/workflows/ci.yaml/badge.svg)](https://github.com/torchgeo/torchgeo-bench/actions/workflows/ci.yaml)
+[![codecov](https://codecov.io/gh/torchgeo/torchgeo-bench/branch/main/graph/badge.svg)](https://codecov.io/gh/torchgeo/torchgeo-bench)
 [![PyPI version](https://img.shields.io/pypi/v/torchgeo-bench.svg)](https://pypi.org/project/torchgeo-bench/)
 [![Python 3.12+](https://img.shields.io/pypi/pyversions/torchgeo-bench.svg)](https://pypi.org/project/torchgeo-bench/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
