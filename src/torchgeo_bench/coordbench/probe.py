@@ -11,6 +11,7 @@ random k-fold.
 
 import logging
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import numpy as np
@@ -80,15 +81,15 @@ class RidgeData:
     class_indices: torch.Tensor | None
 
 
-def _ridge_predict(
+def ridge_predictions(
     data: RidgeData,
     train_idx: torch.Tensor,
     test_idx: torch.Tensor,
-    alpha: float,
+    alphas: tuple[float, ...],
     *,
     standardize: bool,
-) -> torch.Tensor:
-    """Fit ridge on the training fold and predict with an unpenalized intercept."""
+) -> Iterator[torch.Tensor]:
+    """Predict each alpha from shared fold statistics with an unpenalized intercept."""
     x_tr, x_te = data.features[train_idx], data.features[test_idx]
     if standardize:
         mean, std = x_tr.mean(0, keepdim=True), x_tr.std(0, keepdim=True).clamp_min(1e-6)
@@ -103,30 +104,31 @@ def _ridge_predict(
     x_te.sub_(x_mean)
     y_tr.sub_(y_mean)
     gram = x_tr.T @ x_tr
-    gram.diagonal().add_(alpha)
     rhs = x_tr.T @ y_tr
     del x_tr, y_tr
-    weight = torch.linalg.solve(gram, rhs)
-    del gram, rhs
-    return (x_te @ weight).add_(y_mean)
+    diagonal = gram.diagonal().clone()
+    for alpha in alphas:
+        gram.diagonal().copy_(diagonal + alpha)
+        weight = torch.linalg.solve(gram, rhs)
+        yield (x_te @ weight).add_(y_mean)
 
 
-def _ridge_eval(
+def ridge_scores(
     data: RidgeData,
     train_idx: torch.Tensor,
     test_idx: torch.Tensor,
-    alpha: float,
+    alphas: tuple[float, ...],
     *,
     standardize: bool,
-) -> float:
-    """Score held-out ridge predictions with R^2 or classification accuracy."""
-    pred = _ridge_predict(data, train_idx, test_idx, alpha, standardize=standardize)
+) -> list[float]:
+    """Score each alpha on a held-out fold with R^2 or classification accuracy."""
+    predictions = ridge_predictions(data, train_idx, test_idx, alphas, standardize=standardize)
     if data.class_indices is None:
         y_te = data.targets[test_idx]
-        ss_res = ((y_te - pred) ** 2).sum()
         ss_tot = ((y_te - y_te.mean()) ** 2).sum().clamp_min(1e-12)
-        return float(1.0 - ss_res / ss_tot)
-    return float((pred.argmax(1) == data.class_indices[test_idx]).float().mean())
+        return [float(1.0 - ((y_te - pred) ** 2).sum() / ss_tot) for pred in predictions]
+    class_indices = data.class_indices[test_idx]
+    return [float((pred.argmax(1) == class_indices).float().mean()) for pred in predictions]
 
 
 def _cv_alpha_scores(
@@ -138,18 +140,14 @@ def _cv_alpha_scores(
 ) -> tuple[float, list[float]]:
     """Pick the alpha with the best mean CV score; return it plus its per-fold scores."""
     nf = len(fold_ids)
+    scores_by_alpha: list[list[float]] = [[] for _ in alphas]
+    for f, test_idx in enumerate(fold_ids):
+        train_idx = torch.cat([fold_ids[j] for j in range(nf) if j != f])
+        fold_scores = ridge_scores(data, train_idx, test_idx, alphas, standardize=standardize)
+        for scores, score in zip(scores_by_alpha, fold_scores, strict=True):
+            scores.append(score)
     best_alpha, best_mean, best_scores = alphas[0], -1e30, []
-    for a in alphas:
-        scores = [
-            _ridge_eval(
-                data,
-                torch.cat([fold_ids[j] for j in range(nf) if j != f]),
-                fold_ids[f],
-                a,
-                standardize=standardize,
-            )
-            for f in range(nf)
-        ]
+    for a, scores in zip(alphas, scores_by_alpha, strict=True):
         mean_score = float(np.mean(scores))
         if mean_score > best_mean:
             best_mean, best_alpha, best_scores = mean_score, a, scores
@@ -220,7 +218,7 @@ def linear_probe_score(  # noqa: PLR0913 - public probe options.
         best_alpha = alphas[0]
         if len(alphas) > 1:
             best_alpha, _ = _cv_alpha_scores(data, inner, alphas, standardize=standardize)
-        score = _ridge_eval(data, train_pool, test_idx, best_alpha, standardize=standardize)
+        score = ridge_scores(data, train_pool, test_idx, (best_alpha,), standardize=standardize)[0]
         return score, [score]
 
     fa = None if fold_assign is None else np.asarray(fold_assign)[valid]
