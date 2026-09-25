@@ -280,10 +280,10 @@ def test_unknown_config_field_fails_before_execution(tmp_path: Path) -> None:
 def test_runtime_failure_propagates_from_cli(
     monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
 ) -> None:
-    def fail(_: object) -> None:
+    def fail(_: object, *, strict: bool) -> None:
         raise error_type("benchmark failed")
 
-    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.run", fail)
+    monkeypatch.setattr("torchgeo_bench.commands._run_runtime.main", fail)
     with pytest.raises(error_type, match="benchmark failed"):
         main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--device", "cpu"])
 

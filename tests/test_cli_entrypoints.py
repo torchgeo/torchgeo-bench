@@ -85,3 +85,33 @@ def test_package_module_dry_run_matches_console_script(tmp_path: Path, *, use_co
     assert config["datasets"] == ["m-eurosat"]
     assert config["runtime"] == {"device": "cpu", "seed": 3}
     assert config["output"]["resume"] is False
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize(
+    ("flags", "diagnostic"),
+    [
+        (["--bands", "B99"], "MEurosat: unknown band 'B99'; available:"),
+        (["--normalization", "model"], "'rcf' does not support --normalization model"),
+    ],
+)
+def test_run_rejects_semantic_input_errors_before_execution(
+    module: str | None,
+    flags: list[str],
+    diagnostic: str,
+    tmp_path: Path,
+    *,
+    dry_run: bool,
+) -> None:
+    arguments = ["run", "--model", "rcf", "--dataset", "m-eurosat", *flags]
+    if dry_run:
+        arguments.append("--dry-run")
+    completed = run_entrypoint(module, arguments, tmp_path)
+    assert completed.returncode == 2, completed.stderr
+    assert completed.stdout == ""
+    assert completed.stderr.startswith("error: ")
+    assert diagnostic in completed.stderr
+    assert "Traceback" not in completed.stderr
+    assert not (tmp_path / "data").exists()
+    assert not (tmp_path / "results").exists()

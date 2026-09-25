@@ -8,7 +8,9 @@ import importlib
 from copy import deepcopy
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, StrictBool
+
+from torchgeo_bench.errors import UnsupportedNormalizationError
 
 from .run import RunConfig
 from .schema import (
@@ -56,7 +58,15 @@ class ModelPreset(PresetDefaults):
     target: str
     track: Literal["image", "coord"] = "image"
     seed_from_run: bool = False
+    supports_model_normalization: StrictBool | None = None
     dataset_overrides: dict[str, PresetDefaults] = Field(default_factory=dict)
+
+    def validate_normalization(self, normalization: str) -> None:
+        """Reject explicitly unsupported strategies; undeclared capabilities stay runtime checks."""
+        if normalization == NORMALIZATIONS["model"] and self.supports_model_normalization is False:
+            raise UnsupportedNormalizationError(
+                f"{self.name!r} does not support --normalization model; use --normalization dataset"
+            )
 
     def for_dataset(self, dataset: str) -> "ModelPreset":
         """Apply a dataset override without mutating the shared preset."""
@@ -99,6 +109,7 @@ def resolve_run_config(config: RunConfig, dataset: str) -> tuple[RunConfig, Mode
 def build_model(preset: ModelPreset, **runtime_options: Any) -> Any:
     """Construct one model; nested target-like kwargs remain ordinary mappings."""
     options = {**preset.kwargs, **runtime_options}
+    preset.validate_normalization(options.get("normalization", NORMALIZATIONS["dataset"]))
     module, _, symbol = preset.target.rpartition(".")
     constructor = getattr(importlib.import_module(module), symbol)
     if getattr(constructor, "wants_resolved_image_size", False):
