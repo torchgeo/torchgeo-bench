@@ -23,9 +23,7 @@ The installed ``torchgeo-bench`` command, ``python -m torchgeo_bench``, and
     the download destination, not the benchmark's fixed ``./data/`` paths.
 
 ``profile``
-    Measure a fixed real dataset batch and emit JSON to stdout. Accepts
-    ``--config``, input/runtime flags, warmup/measurement counts,
-    precision, and optional FLOP counting.
+    Measure a fixed real dataset batch and emit JSON to stdout by default. Accepts ``--config``, input/runtime flags, warmup/measurement counts, precision, and optional FLOP counting. ``--output-dir`` writes ``profile.json`` beneath the given directory; ``--output`` selects an exact filename.
 
 ``flops``
     Measure backbone/probe compute using synthetic inputs and append to
@@ -36,6 +34,8 @@ The installed ``torchgeo-bench`` command, ``python -m torchgeo_bench``, and
     Evaluate location encoders under random/spatial or official splits.
     Accepts coordinate YAML or explicit model, dataset, method, split,
     runtime, and output flags.
+
+All measurement commands share ``--output-dir`` for an output root and ``--output`` for an explicit file that takes precedence. CSV commands default to the ``results`` root; profiling defaults to stdout. Image runs keep ``models/``, ``profiles/``, and ``intrinsic_dim/`` subdirectories under the root unless an explicit file combines them.
 
 All measurement commands support ``--dry-run``. See
 :doc:`/user/configuration` for exact YAML fields and :doc:`/user/coordbench`

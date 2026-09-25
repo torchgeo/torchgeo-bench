@@ -11,7 +11,7 @@ from torchgeo_bench.config.schema import (
     KnnDevice,
     Methods,
     ModelConfig,
-    OutputPath,
+    OutputPaths,
     SchemaVersion,
     StrictModel,
     default_methods,
@@ -29,10 +29,9 @@ class CoordRuntimeConfig(StrictModel):
     seed: StrictInt = Field(default=0, ge=0, le=2**64 - 1)
 
 
-class CoordOutputConfig(StrictModel):
+class CoordOutputConfig(OutputPaths):
     """Coordinate result CSV and resume settings."""
 
-    file: OutputPath = "results/coordbench_results.csv"
     resume: StrictBool = False
 
 

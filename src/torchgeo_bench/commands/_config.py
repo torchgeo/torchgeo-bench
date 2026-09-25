@@ -37,6 +37,22 @@ class FlagOverride:
     replace_roots: tuple[str, ...] = field(default_factory=tuple)
 
 
+OUTPUT_FLAG_OVERRIDES = (
+    FlagOverride("output", ("output", "file")),
+    FlagOverride("output_dir", ("output", "directory")),
+)
+
+
+def add_output_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register common directory and explicit-file output flags."""
+    parser.add_argument(
+        "-o", "--output", default=argparse.SUPPRESS, help="Output file (overrides --output-dir)"
+    )
+    parser.add_argument(
+        "--output-dir", default=argparse.SUPPRESS, help="Root directory for all command outputs"
+    )
+
+
 def comma_separated_bands(value: Any) -> Any:
     """Convert explicit comma-separated bands while leaving named selections alone."""
     if isinstance(value, str) and value not in {"rgb", "all"}:

@@ -255,4 +255,4 @@ Results
 
 Results are appended to ``results/models/<model name>.csv`` by default, or to ``output.file`` when supplied. Use a separate file for exploratory runs so they do not change the reference results. ``--resume`` skips completed work only when the effective configuration matches; changing a result-affecting setting causes it to run again.
 
-The standalone ``profile`` command emits a JSON record to stdout rather than adding benchmark rows. See :doc:`configuration` for optional measurement settings and :doc:`results-format` for the CSV columns.
+The standalone ``profile`` command emits a JSON record to stdout by default; ``--output-dir`` or ``--output`` writes that record to a file instead. See :doc:`configuration` for output paths and optional measurement settings, and :doc:`results-format` for the CSV columns.

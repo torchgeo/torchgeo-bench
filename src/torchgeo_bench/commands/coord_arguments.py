@@ -2,6 +2,8 @@
 
 import argparse
 
+from ._config import add_output_arguments
+
 
 def add_coord_arguments(parser: argparse.ArgumentParser) -> None:
     """Register explicit coordinate flags without importing runtime dependencies."""
@@ -31,7 +33,7 @@ def add_coord_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--knn-device", default=argparse.SUPPRESS)
     parser.add_argument("--device", default=argparse.SUPPRESS)
     parser.add_argument("--seed", type=int, default=argparse.SUPPRESS)
-    parser.add_argument("--output", default=argparse.SUPPRESS, help="Result CSV path")
+    add_output_arguments(parser)
     parser.add_argument(
         "--resume", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS
     )

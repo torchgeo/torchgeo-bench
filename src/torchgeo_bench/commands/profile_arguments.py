@@ -4,7 +4,14 @@ import argparse
 
 from ..config.presets import NORMALIZATIONS
 from ..config.profile import ProfileConfig
-from ._config import FlagOverride, comma_separated_bands, load_from_flags, parse_image_size
+from ._config import (
+    OUTPUT_FLAG_OVERRIDES,
+    FlagOverride,
+    add_output_arguments,
+    comma_separated_bands,
+    load_from_flags,
+    parse_image_size,
+)
 
 _FLAG_OVERRIDES = (
     FlagOverride("model", ("model", "name"), replace_roots=("model",)),
@@ -21,6 +28,7 @@ _FLAG_OVERRIDES = (
     FlagOverride("image_size", ("input", "image_size")),
     FlagOverride("interpolation", ("input", "interpolation")),
     FlagOverride("normalization", ("input", "normalization")),
+    *OUTPUT_FLAG_OVERRIDES,
 )
 
 
@@ -55,6 +63,7 @@ def add_profile_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--count-flops", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS
     )
+    add_output_arguments(parser)
     parser.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS)
 
 

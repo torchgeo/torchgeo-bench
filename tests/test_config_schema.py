@@ -27,7 +27,7 @@ def test_defaults_and_modern_shape() -> None:
     assert config.runtime.device == "cuda:0"
     assert config.input.normalization == "dataset"
     assert config.classification.linear.c_count == 40
-    assert config.output.directory == "results/models"
+    assert config.output.directory == "results"
 
 
 def test_all_datasets_must_be_an_exclusive_selection() -> None:

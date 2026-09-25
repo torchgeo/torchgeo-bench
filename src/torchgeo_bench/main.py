@@ -23,6 +23,7 @@ from torchgeo_bench.config.presets import (
     resolve_run_config,
 )
 from torchgeo_bench.config.run import RunConfig
+from torchgeo_bench.config.schema import resolve_output_path
 from torchgeo_bench.datasets import (
     BenchDataset,
     get_bench_dataset_class,
@@ -653,18 +654,18 @@ def evaluate_segmentation(
     return metrics, sum(probe.channels_list), lr, actual_batch_size
 
 
-def _resolve_output_path(cfg: RunConfig, directory: str | None = None) -> str:
-    """Return explicit ``output``, else the model's CSV in the requested directory.
+def _resolve_output_path(cfg: RunConfig, subdirectory: str = "models") -> str:
+    """Return an explicit file or the model's CSV beneath the shared output root.
 
     An explicit ``output.file`` routes metrics, profile, and intrinsic-dimension
     rows to one file; otherwise each kind has its own per-model directory.
     """
-    if cfg.output.file:
-        return cfg.output.file
     from torchgeo_bench.config.presets import load_model_preset
 
     preset = load_model_preset(cfg.model, seed=cfg.runtime.seed)
-    return str(model_results_path(directory or cfg.output.directory, preset.name))
+    return resolve_output_path(
+        cfg.output.directory, cfg.output.file, model_results_path(subdirectory, preset.name)
+    )
 
 
 def run_segmentation(
@@ -975,8 +976,8 @@ def main(cfg: RunConfig, *, strict: bool = False) -> None:
     dataset_names = _expand_dataset_list(cfg.datasets)
 
     output_path = _resolve_output_path(cfg)
-    profile_output_path = _resolve_output_path(cfg, cfg.output.profile_directory)
-    intrinsic_dim_output_path = _resolve_output_path(cfg, cfg.output.intrinsic_dim_directory)
+    profile_output_path = _resolve_output_path(cfg, "profiles")
+    intrinsic_dim_output_path = _resolve_output_path(cfg, "intrinsic_dim")
     output_paths = {output_path, profile_output_path, intrinsic_dim_output_path}
     for path in output_paths:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

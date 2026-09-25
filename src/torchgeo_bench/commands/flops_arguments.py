@@ -2,6 +2,8 @@
 
 import argparse
 
+from ._config import add_output_arguments
+
 
 def add_flops_arguments(parser: argparse.ArgumentParser) -> None:
     """Register the public FLOPs interface without importing models or datasets."""
@@ -52,7 +54,7 @@ def add_flops_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timing-batch-size", type=int, default=argparse.SUPPRESS)
     parser.add_argument("--n-warmup", type=int, default=argparse.SUPPRESS)
     parser.add_argument("--n-measure", type=int, default=argparse.SUPPRESS)
-    parser.add_argument("--output", "-o", default=argparse.SUPPRESS, help="Append-only results CSV")
+    add_output_arguments(parser)
     parser.add_argument(
         "--resume", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS
     )
