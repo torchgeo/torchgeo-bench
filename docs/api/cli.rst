@@ -23,7 +23,7 @@ The installed ``torchgeo-bench`` command, ``python -m torchgeo_bench``, and
     the download destination, not the benchmark's fixed ``./data/`` paths.
 
 ``profile``
-    Measure a fixed real dataset batch and emit JSON to stdout by default. Accepts ``--config``, input/runtime flags, warmup/measurement counts, precision, and optional FLOP counting. ``--output-dir`` writes ``profile.json`` beneath the given directory; ``--output`` selects an exact filename.
+    Measure a fixed real dataset batch and emit JSON to stdout by default. Accepts ``--config``, input/runtime flags, warmup/measurement counts, precision, and optional FLOP counting. Specify ``--dataset`` at most once; one CLI value can override the dataset in YAML. ``--output-dir`` writes ``profile.json`` beneath the given directory; ``--output`` selects an exact filename.
 
 ``flops``
     Measure backbone/probe compute using synthetic inputs and append to
