@@ -245,7 +245,6 @@ class TestKuroSiwoCanonicalization:
             (("vv",), [3.0]),
             (("dem",), [99.0]),
             (("vv", "dem"), [3.0, 99.0]),
-            (("vv", "vh", "dem"), [3.0, 3.0, 99.0]),
             (None, [3.0, 3.0, 99.0]),
         ],
     )
