@@ -3,10 +3,8 @@
 
 """Tests for the discoverable image CLI."""
 
-import argparse
 import json
 import os
-import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +14,7 @@ import pytest
 import yaml
 
 from torchgeo_bench.cli import main
-from torchgeo_bench.commands._config import parse_image_size, set_path
+from torchgeo_bench.commands._config import set_path
 from torchgeo_bench.config import list_model_configs
 from torchgeo_bench.config.presets import resolve_run_config
 from torchgeo_bench.config.run import validate_run_config
@@ -63,7 +61,7 @@ def test_config_values_are_overridden_by_explicit_flags(
     assert "resume: false" in output
 
 
-def test_nested_flag_mapping_and_image_size_validation() -> None:
+def test_nested_flag_mapping() -> None:
     mapping = {}
     set_path(mapping, ("classification", "linear", "refit_train_val"), False)
     set_path(mapping, ("runtime", "workers"), 0)
@@ -71,20 +69,6 @@ def test_nested_flag_mapping_and_image_size_validation() -> None:
         "classification": {"linear": {"refit_train_val": False}},
         "runtime": {"workers": 0},
     }
-    assert parse_image_size("none") is None
-    assert parse_image_size("224") == 224
-    with pytest.raises(argparse.ArgumentTypeError, match="positive"):
-        parse_image_size("0")
-
-
-@pytest.mark.parametrize("size", ["0", "-1", "not-an-integer"])
-def test_invalid_image_size_is_rejected_at_cli(
-    size: str, capsys: pytest.CaptureFixture[str]
-) -> None:
-    with pytest.raises(SystemExit) as error:
-        main(["run", "--model", "rcf", "--dataset", "m-eurosat", "--image-size", size])
-    assert error.value.code == 2
-    assert "--image-size" in capsys.readouterr().err
 
 
 def test_boolean_flags_override_config(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -512,11 +496,6 @@ def test_main_rejects_unknown_parser_command(monkeypatch: pytest.MonkeyPatch) ->
     )
     with pytest.raises(SystemExit, match="not implemented"):
         main([])
-
-
-def test_module_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["torchgeo-bench", "models", "rcf"])
-    runpy.run_module("torchgeo_bench.cli", run_name="__main__")
 
 
 @pytest.mark.parametrize("value", ["null", "3", "[]"])

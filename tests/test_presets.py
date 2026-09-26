@@ -103,6 +103,43 @@ def test_custom_model_keeps_constructor_options_separate() -> None:
     assert preset.target == "custom_model.Model"
 
 
+def test_model_dataset_overrides_are_isolated_and_fall_back() -> None:
+    model_cfg = ModelPreset.model_validate(
+        {
+            "target": "example.Model",
+            "name": "example",
+            "input": {"image_size": 224},
+            "kwargs": {"res": 1.0, "pool": "cls"},
+            "dataset_overrides": {
+                "m-eurosat": {"input": {"image_size": 64}, "kwargs": {"res": 3.5}},
+                "forestnet": {"input": {"image_size": 128}, "kwargs": {"pool": "mean"}},
+            },
+        }
+    )
+
+    eurosat = model_cfg.for_dataset("m-eurosat")
+    fallback = model_cfg.for_dataset("unlisted")
+    forestnet = model_cfg.for_dataset("forestnet")
+
+    assert (eurosat.input.image_size, eurosat.kwargs["res"], eurosat.kwargs["pool"]) == (
+        64,
+        3.5,
+        "cls",
+    )
+    assert (fallback.input.image_size, fallback.kwargs["res"], fallback.kwargs["pool"]) == (
+        224,
+        1.0,
+        "cls",
+    )
+    assert (forestnet.input.image_size, forestnet.kwargs["res"], forestnet.kwargs["pool"]) == (
+        128,
+        1.0,
+        "mean",
+    )
+    assert not eurosat.dataset_overrides
+    assert model_cfg.input.image_size == 224
+
+
 def test_configuration_import_and_resolution_do_not_import_omegaconf() -> None:
     code = """
 import sys

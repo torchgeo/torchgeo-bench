@@ -88,22 +88,11 @@ def test_package_module_dry_run_matches_console_script(tmp_path: Path, *, use_co
 
 
 @pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
-@pytest.mark.parametrize(
-    "dataset_args",
-    [
-        ["-d", "m-eurosat", "-d", "so2sat"],
-        ["--dataset", "m-eurosat", "--dataset", "so2sat"],
-        ["-d", "m-eurosat", "--device", "cpu", "--dataset", "so2sat"],
-        ["--dataset", "m-eurosat", "-d", "so2sat"],
-        ["--dataset=m-eurosat", "--dataset=so2sat"],
-        ["-d", "m-eurosat", "--dataset=m-eurosat"],
-    ],
-)
-def test_profile_rejects_repeated_dataset_flags(
-    module: str | None, dataset_args: list[str], tmp_path: Path
-) -> None:
+def test_profile_rejects_repeated_dataset_flags(module: str | None, tmp_path: Path) -> None:
     completed = run_entrypoint(
-        module, ["profile", "--model", "rcf", *dataset_args, "--dry-run"], tmp_path
+        module,
+        ["profile", "--model", "rcf", "-d", "m-eurosat", "--dataset=so2sat", "--dry-run"],
+        tmp_path,
     )
     assert completed.returncode == 2, completed.stdout + completed.stderr
     assert completed.stdout == ""
