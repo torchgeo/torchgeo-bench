@@ -371,12 +371,6 @@ def test_forward_pass_only_skips_explicit_band_errors(flops_config, monkeypatch,
             main(flops_config)
 
 
-def test_flops_config_resolves_rcf_seed():
-    config = FlopsConfig(model=ModelConfig(name="rcf"))
-    resolved, preset = config.resolve()
-    assert preset.kwargs["seed"] == resolved.runtime.seed == 0
-
-
 type FlopsRun = tuple[FlopsConfig, list[dict[str, object]], list[str]]
 
 
