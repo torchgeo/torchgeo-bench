@@ -267,8 +267,8 @@ class SegmentationSolver:
                 restore the head weights from the best validation check.
 
         Returns:
-            Val mIoU of the returned weights if val_cache is given, else None: the final epoch
-            without early stopping, or the best check with it.
+            Validation mIoU of the weights left in the head when val_cache is given (the final
+            epoch, or the best check with early stopping), otherwise None.
         """
         gpu_train = self._device_cache(train_cache)
         gpu_val = None if val_cache is None else self._device_cache(val_cache)
