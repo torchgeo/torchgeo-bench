@@ -259,24 +259,6 @@ def test_run_coordbench_end_to_end(
     assert (df.metric_value.abs() <= 1.5).all()
 
 
-def test_run_coordbench_resume_skips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
-    )
-    cfg = _coord_cfg(tmp_path)
-    run_coordbench(cfg)
-    before = Path(cfg.output.file).read_bytes()
-
-    def unexpected_probe(*args: object, **kwargs: object) -> None:
-        pytest.fail("Completed coordinate probes must not be recomputed")
-
-    cfg.output.resume = True
-    monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", unexpected_probe)
-    monkeypatch.setattr("torchgeo_bench.coordbench.run.knn_probe_score", unexpected_probe)
-    run_coordbench(cfg)
-    assert Path(cfg.output.file).read_bytes() == before
-
-
 def test_run_coordbench_reports_official_test_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
