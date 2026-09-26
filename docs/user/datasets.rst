@@ -2,7 +2,7 @@ Datasets
 ========
 
 ``torchgeo-bench`` supports two generations of GeoBench datasets — V1 and
-V2 — plus wrappers around torchgeo's standalone EuroSAT, NWPU-RESISC45, and UC Merced datasets, and AID (rehosted from Hugging Face). All datasets share the
+V2 — plus wrappers around torchgeo's standalone EuroSAT, NWPU-RESISC45, and UC Merced datasets, AID (rehosted from Hugging Face), and Infra-Bench CLS. All datasets share the
 :class:`~torchgeo_bench.datasets.BenchDataset` interface and are
 registered by name so they can be selected without importing every loader.
 
@@ -36,6 +36,10 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
    * - ``aid``
      - ``data/aid/``
      - Hugging Face ``isaaccorley/aid``, pinned commit + checksum-verified
+   * - ``infrabench-cls``
+     - ``data/infrabench_cls/``
+     - Hugging Face ``jmguthrie/infrabench-cls`` (pinned commit) and the paper's split from
+       GitHub ``justing0909/infra-bench-cls``, both checksum-verified
 
    * - ``ucmerced``
      - ``data/ucmerced/``
@@ -56,6 +60,7 @@ The :doc:`/api/cli` accepts one or more dataset names. Collection aliases remain
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT
    $ torchgeo-bench download resisc45                                 # torchgeo RESISC45
    $ torchgeo-bench download aid                                      # isaaccorley/aid rehost
+   $ torchgeo-bench download infrabench-cls                           # Infra-Bench CLS cells + split
 
    $ torchgeo-bench download ucmerced                                 # torchgeo UC Merced
    $ torchgeo-bench download geobench_v2 --output-dir /scratch/data   # custom root
@@ -218,6 +223,7 @@ CLI name             Class
 ``eurosat-spatial``  :class:`~torchgeo_bench.datasets.EuroSATSpatial`  (longitude-based split)
 ``resisc45``         :class:`~torchgeo_bench.datasets.RESISC45`  (45-class aerial scenes, RGB)
 ``aid``              :class:`~torchgeo_bench.datasets.AID`  (30-class aerial scenes, RGB)
+``infrabench-cls``   :class:`~torchgeo_bench.datasets.InfraBenchCLS`  (13-class infrastructure, S2 + S1)
 
 ``ucmerced``         :class:`~torchgeo_bench.datasets.UCMerced`  (21-class aerial land use, RGB)
 ==================== ============================================================================
@@ -231,6 +237,8 @@ no geolocation, so it appears on the coverage map as an explicit gap rather
 than being silently omitted.
 
 ``aid`` contains 10,000 RGB scenes at 600x600 across 30 classes (Xia et al., 2017). With no official split, ``scripts/generate_aid_splits.py`` generates a deterministic, stratified 60/20/20 split. Downloads use the pinned, checksum-verified ``isaaccorley/aid`` rehost. Upstream specifies no license or image geolocation. Band subsets and ordering are applied before user transforms.
+
+``infrabench-cls`` contains 18,756 tiles of critical-infrastructure assets identified in OpenStreetMap, across seven continental regions and four sectors (energy, water, transport, telecom), in 13 classes. Each 600 m tile stacks seven Sentinel-2 L2A bands with Sentinel-1 VV and VH on a 10 m grid. Labels derive from OSM tags and are weak. The split is the paper's spatially blocked split (13,087 / 2,856 / 2,813), assigned by asset id: six border assets present in two regional cells appear twice, always in validation or test. Sentinel-2 is stored as reflectance scaled to 0--255 rather than L2A digital numbers, Sentinel-1 is in dB clipped to -30--10, and tiles of 60--65 px (a few truncated at scene edges) are resized to 60x60. The data are ODbL 1.0 because they derive from OpenStreetMap.
 
 ``ucmerced`` contains 2,100 RGB aerial images across 21 land use classes, resized to 256x256 by torchgeo. Its published split files contain 1,260 training, 420 validation, and 420 test images. Normalization statistics use the training split only. The source resolution is 1 ft (0.3048 m); the shared ``aerial`` sensor tag uses an approximate 1 m GSD for resolution-aware models. Images have no georeferencing, which is recorded in the coverage map.
 
