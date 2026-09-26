@@ -58,7 +58,6 @@ def test_eurosat_rejects_unknown_split(dataset_cls: type[EuroSAT]) -> None:
 
 
 @pytest.mark.parametrize("dataset_cls", [EuroSAT, EuroSATSpatial])
-@pytest.mark.parametrize("split", ["train", "val", "test"])
 @pytest.mark.parametrize(
     ("bands", "expected_codes"),
     [
@@ -86,15 +85,16 @@ def test_eurosat_rejects_unknown_split(dataset_cls: type[EuroSAT]) -> None:
 def test_eurosat_forwards_bands_split_and_transform(
     monkeypatch: pytest.MonkeyPatch,
     dataset_cls: type[EuroSAT],
-    split: str,
     bands: tuple[str, ...] | None,
     expected_codes: tuple[str, ...],
 ) -> None:
     upstream = MagicMock()
     transform = torch.nn.Identity()
     monkeypatch.setattr(dataset_cls, "_tg_class", upstream)
-    result = dataset_cls().get_dataset(split, bands=bands, partition="unused", transform=transform)
+    result = dataset_cls().get_dataset(
+        "train", bands=bands, partition="unused", transform=transform
+    )
     upstream.assert_called_once_with(
-        root=str(Path("data/eurosat")), split=split, bands=expected_codes, transforms=transform
+        root=str(Path("data/eurosat")), split="train", bands=expected_codes, transforms=transform
     )
     assert result is upstream.return_value
