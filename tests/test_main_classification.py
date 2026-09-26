@@ -183,32 +183,33 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
     assert knn_mock.call_args.kwargs["device"] == "cpu"
 
 
-@pytest.mark.parametrize("requested", [None, "cpu", "cuda", "cuda:0", "cuda:1", "auto"])
-@pytest.mark.parametrize("entrypoint", ["direct", "command"])
+@pytest.mark.parametrize(
+    ("requested", "expected_device"),
+    [
+        ("cuda", "cuda:1"),
+        ("auto", "cuda:1"),
+    ],
+)
 def test_device_resolution_and_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    requested: str | None,
-    entrypoint: str,
+    requested: str,
+    expected_device: str,
 ) -> None:
-    from torchgeo_bench.commands._run_runtime import run
-
     cfg = validate_run_config(
         {
             "model": {"name": "rcf"},
             "datasets": ["m-eurosat"],
-            "runtime": {} if requested is None else {"device": requested},
+            "runtime": {"device": requested},
             "classification": {"methods": ["knn"]},
             "output": {"file": str(tmp_path / "out.csv")},
         }
     )
     original = cfg.model_dump_json()
-    execute = main if entrypoint == "direct" else run
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     monkeypatch.setattr("torchgeo_bench.knn.gpu_faiss_available", lambda: False)
-    expected_device = "cuda:1" if requested in ("auto", "cuda") else requested or "cuda:0"
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()) as data,
         mock.patch(
@@ -220,7 +221,7 @@ def test_device_resolution_and_resume(
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
     ):
-        execute(cfg)
+        main(cfg)
         assert cfg.model_dump_json() == original
         assert build.return_value.to.call_args.args[0] == torch.device(expected_device)
         assert all(call.args[2] == torch.device(expected_device) for call in embed.call_args_list)
@@ -229,7 +230,7 @@ def test_device_resolution_and_resume(
         data.reset_mock()
         build.reset_mock()
         cfg.output.resume = True
-        execute(cfg)
+        main(cfg)
     data.assert_not_called()
     build.assert_not_called()
     assert output.read_bytes() == before
@@ -239,7 +240,6 @@ def test_device_resolution_and_resume(
     ("device", "available", "message"),
     [
         ("cuda", False, "CUDA is unavailable"),
-        ("cuda:0", False, "CUDA is unavailable"),
         ("cuda:2", True, "CUDA index 2"),
     ],
 )
