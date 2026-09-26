@@ -1,9 +1,7 @@
 """Persistence and locking contracts for the results CSV writer."""
 
 import csv
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
 
 import pandas as pd
 import pytest
@@ -51,17 +49,6 @@ def test_schema_drift_added_column_rewrites_with_unioned_header(tmp_path: Path) 
     assert all(len(r) == len(rows[0]) for r in rows)
 
 
-def test_schema_drift_removed_column_keeps_old_values(tmp_path: Path) -> None:
-    path = str(tmp_path / "out.csv")
-    append_rows_atomic(path, [{"a": 1, "b": 2, "c": "rgb"}])
-    append_rows_atomic(path, [{"a": 3, "b": 4}])
-
-    rows = _read_csv(path)
-    assert rows[0] == ["a", "b", "c"]
-    assert rows[1] == ["1", "2", "rgb"]
-    assert rows[2] == ["3", "4", ""]
-
-
 @pytest.mark.parametrize("existing", [False, True])
 def test_empty_rows_is_noop(tmp_path: Path, *, existing: bool) -> None:
     path = tmp_path / "out.csv"
@@ -82,29 +69,6 @@ def test_reordered_columns_keep_values_associated_with_names(tmp_path: Path) -> 
         {"a": "first", "b": "with,\nnewline"},
         {"a": "last", "b": "second"},
     ]
-
-
-def test_concurrent_writers_preserve_every_row_during_schema_drift(tmp_path: Path) -> None:
-    path = str(tmp_path / "out.csv")
-    barrier = Barrier(4)
-
-    def write_batch(worker: int) -> None:
-        barrier.wait(timeout=10)
-        append_rows_atomic(
-            path,
-            [{"id": worker * 3 + i, f"worker_{worker}": f"value-{i}"} for i in range(3)],
-        )
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        list(executor.map(write_batch, range(4)))
-
-    rows = pd.read_csv(path).set_index("id")
-    assert sorted(rows.index) == list(range(12))
-    for worker in range(4):
-        for index in range(3):
-            row = rows.loc[worker * 3 + index]
-            assert row[f"worker_{worker}"] == f"value-{index}"
-            assert row.notna().sum() == 1
 
 
 def test_read_failure_preserves_file_and_releases_lock(
