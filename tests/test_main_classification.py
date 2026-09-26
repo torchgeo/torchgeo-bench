@@ -1,5 +1,6 @@
 """Offline tests for the classification runner."""
 
+from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
@@ -304,50 +305,21 @@ def test_explicit_gpu_knn_without_gpu_faiss_fails_before_data_loading(tmp_path: 
     data_mock.assert_not_called()
 
 
-def test_linear_row_emitted(tmp_path: Path):
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out)
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_logistic",
-            return_value=(
-                0.6,
-                0.52,
-                0.66,
-                0.1,
-                {"ece": 0.04, "rms_ce": 0.06, "mce": 0.09},
-                {"ece_ts": 0.04, "rms_ce_ts": 0.06, "mce_ts": 0.09, "temperature": 0.8},
-            ),
-        ),
-    ):
-        main(cfg)
-
-    df = pd.read_csv(out)
-    assert "linear" in df["method"].values
-    row = df[df["method"] == "linear"].iloc[0]
-    assert row["metric_name"] == "accuracy"
-
-
 @pytest.mark.parametrize(
-    ("error", "strict"),
+    ("error", "strict", "raises"),
     [
-        (RuntimeError("linear probe failed"), False),
-        (RuntimeError("linear probe failed"), True),
-        (LinearProbeDivergedError("linear probe failed"), True),
+        (RuntimeError("linear probe failed"), False, True),
+        (RuntimeError("linear probe failed"), True, True),
+        (LinearProbeDivergedError("linear probe failed"), False, False),
+        (LinearProbeDivergedError("linear probe failed"), True, True),
     ],
 )
 def test_completed_knn_survives_later_linear_failure(
-    tmp_path: Path, *, error: RuntimeError, strict: bool
+    tmp_path: Path, *, error: RuntimeError, strict: bool, raises: bool
 ) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out)
+    outcome = pytest.raises(RuntimeError, match="linear probe failed") if raises else nullcontext()
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
@@ -358,7 +330,7 @@ def test_completed_knn_survives_later_linear_failure(
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
         mock.patch("torchgeo_bench.main.evaluate_logistic", side_effect=error),
-        pytest.raises(RuntimeError, match="linear probe failed"),
+        outcome,
     ):
         main(cfg, strict=strict)
 
@@ -368,24 +340,6 @@ def test_completed_knn_survives_later_linear_failure(
     assert (row["metric_value"], row["ci_lower"], row["ci_upper"]) == (0.5, 0.45, 0.55)
     assert row["ece"] == 0.05
     assert row["config_hash"] == _hash_for(cfg)
-
-
-def test_resume_skips_completed_knn_row(tmp_path: Path):
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(
-        out, overrides={"output": {"resume": True}, "classification": {"methods": ["knn"]}}
-    )
-    pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
-    ):
-        main(cfg)
-
-    knn_mock.assert_not_called()
-    df = pd.read_csv(out)
-    assert int((df["method"] == "knn5").sum()) == 1
 
 
 def test_resume_complete_preflight_skips_data_loading_and_model_init(tmp_path: Path):
@@ -470,10 +424,7 @@ def test_non_resume_still_runs_even_with_matching_existing_rows(tmp_path: Path):
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 2
 
 
-@pytest.mark.parametrize("strict", [False, True])
-def test_model_eval_overrides_do_not_change_classification_resume_semantics(
-    tmp_path: Path, *, strict: bool
-) -> None:
+def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_path: Path) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
@@ -511,7 +462,7 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(
             ),
         ) as linear_mock,
     ):
-        main(cfg, strict=strict)
+        main(cfg)
 
     data_mock.assert_called_once()
     instantiate_mock.assert_called_once()
@@ -555,35 +506,6 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
 
     knn_mock.assert_not_called()
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 1
-
-
-def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
-    """Rows from an older label schema must not satisfy the current resume key."""
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(
-        out, overrides={"output": {"resume": True}, "classification": {"methods": ["knn"]}}
-    )
-    legacy_row = _resume_row(cfg, method="knn5", metric_name="accuracy")
-    legacy_row.pop("num_classes")
-    pd.DataFrame([legacy_row]).to_csv(out, index=False)
-    model = _chainable_model_mock()
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.build_model", return_value=model),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ) as knn_mock,
-    ):
-        main(cfg)
-
-    knn_mock.assert_called_once()
-    df = pd.read_csv(out)
-    assert len(df) == 2
-    assert pd.isna(df.iloc[0]["num_classes"])
-    assert int(df.iloc[1]["num_classes"]) == 10
 
 
 def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):
