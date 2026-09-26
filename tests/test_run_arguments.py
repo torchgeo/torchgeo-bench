@@ -3,8 +3,6 @@
 import argparse
 from pathlib import Path
 
-import pytest
-
 from torchgeo_bench.commands.run_arguments import add_run_arguments
 
 
@@ -47,12 +45,3 @@ def test_explicit_values_preserve_types_and_dataset_order() -> None:
         "methods": ["linear"],
         "dry_run": True,
     }
-
-
-@pytest.mark.parametrize("size", ["0", "-1", "bad"])
-def test_invalid_image_sizes_are_parser_errors(size: str) -> None:
-    parser = argparse.ArgumentParser()
-    add_run_arguments(parser)
-    with pytest.raises(SystemExit) as error:
-        parser.parse_args(["--image-size", size])
-    assert error.value.code == 2

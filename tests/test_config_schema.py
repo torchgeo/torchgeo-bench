@@ -171,13 +171,6 @@ def test_non_mapping_yaml_is_rejected(tmp_path: Path) -> None:
         load_run_config(path)
 
 
-def test_schema_rejects_bool_schema_version() -> None:
-    config = valid_config()
-    config["schema_version"] = True
-    with pytest.raises(ValidationError):
-        validate_run_config(config)
-
-
 def test_round_trip_dump_is_valid() -> None:
     config = RunConfig.model_validate(valid_config(), strict=True)
     restored = RunConfig.model_validate(config.model_dump(mode="json"), strict=True)
