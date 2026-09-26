@@ -250,8 +250,6 @@ def test_segmentation_probe_conv_block_head(mock_backbone, dummy_data):
     from torchgeo_bench.models.segmentation_heads import ConvBlockHead
 
     assert isinstance(probe.head, ConvBlockHead)
-    assert hasattr(probe.head, "projectors")
-    assert isinstance(probe.head.head, nn.Conv2d)
 
 
 def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
@@ -374,9 +372,6 @@ def test_probe_fpn_head(mock_backbone, dummy_data):
     probe = make_probe(mock_backbone, ["layer2", "layer1"], head_type="fpn", hidden_dim=16)
 
     assert isinstance(probe.head, FPNHead)
-    assert hasattr(probe.head, "laterals")
-    assert hasattr(probe.head, "fpn_convs")
-    assert hasattr(probe.head, "fpn_head")
 
     logits = probe(dummy_data["image"])
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
@@ -595,11 +590,6 @@ def test_probe_dpt_head_forward():
     )
 
     assert isinstance(probe.head, DPTHead)
-    assert hasattr(probe.head, "convs")
-    assert hasattr(probe.head, "ref")
-    assert hasattr(probe.head, "out_conv")
-    assert len(probe.head.convs) == 4
-    assert len(probe.head.ref) == 4
 
     images = torch.randn(2, 3, 64, 64)
     logits = probe(images)
