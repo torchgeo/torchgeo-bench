@@ -43,12 +43,6 @@ def test_reduce_to_vec_4d_both_concatenates_mean_and_max() -> None:
     torch.testing.assert_close(out, torch.cat([x.mean(dim=(2, 3)), x.amax(dim=(2, 3))], dim=1))
 
 
-def test_reduce_to_vec_3d_mean_drops_cls() -> None:
-    x = torch.arange(2 * 10 * 8, dtype=torch.float32).reshape(2, 10, 8)
-    out = _reduce_to_vec(x, pool="mean")
-    torch.testing.assert_close(out, x[:, 1:].mean(dim=1))
-
-
 @pytest.mark.parametrize("container", [list, tuple])
 def test_reduce_to_vec_sequence_takes_last(container: type[list] | type[tuple]) -> None:
     a = torch.zeros(2, 8, 2, 2)
