@@ -73,3 +73,8 @@ torchgeo wrappers
 .. autoclass:: AID
 
 .. autoclass:: UCMerced
+
+Other datasets
+--------------
+
+.. autoclass:: InfraBenchCLS

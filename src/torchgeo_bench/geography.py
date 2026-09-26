@@ -16,10 +16,11 @@ Three statuses:
 * ``no_geo`` — no coordinates are available; see :attr:`GeoRecord.reason` and :data:`NO_GEO`.
 * ``not_downloaded`` — registered, but no data files were found locally.
 
-Two coordinate sources are handled:
+Three coordinate sources are handled:
 
 * **V2**: read coordinates and place labels from ``.tortilla`` metadata, not imagery.
 * **V1**: reproject JSON affine/CRS origins from shards or HDF5 to EPSG:4326.
+* **Manifest**: read tile-centre lon/lat from per-cell ``manifest.json`` records.
 
 Unchanged raw data produces byte-identical JSON.
 """
@@ -83,7 +84,7 @@ class GeoRecord:
     Attributes:
         name: Dataset identifier, as registered (e.g. ``"m-eurosat"``).
         status: ``"extracted"``, ``"no_geo"``, or ``"not_downloaded"``.
-        version: Source family — ``"v1"``, ``"v2"``, or ``"torchgeo"``.
+        version: Source family — ``"v1"``, ``"v2"``, ``"manifest"``, or ``"torchgeo"``.
             ``None`` when nothing was read.
         n: Number of geolocated samples found.
         reason: Why coordinates are unavailable; always set for ``"no_geo"``.
@@ -276,6 +277,24 @@ def _extract_v1(name: str, files: list[str], workers: int) -> dict | None:
     }
 
 
+def read_manifest_coordinates(paths: list[str]) -> dict:
+    """Read tile-centre lon/lat from each cell's ``manifest.json`` records."""
+    lons: list[float] = []
+    lats: list[float] = []
+    for path in sorted(paths):
+        for record in json.loads(Path(path).read_text())["records"]:
+            lons.append(float(record["lon"]))
+            lats.append(float(record["lat"]))
+    lon, lat = np.array(lons), np.array(lats)
+    ok = np.isfinite(lon) & np.isfinite(lat)
+    return {
+        "lon": lon[ok],
+        "lat": lat[ok],
+        "place": np.full(int(ok.sum()), None, dtype=object),
+        "version": "manifest",
+    }
+
+
 def _natural_earth_countries() -> str:
     """Locate the Natural Earth admin-0 shapefile, downloading if needed."""
     import cartopy.io.shapereader as shpreader
@@ -396,6 +415,7 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
     tortillas = sorted(glob.glob(str(directory / "*.tortilla")))
     shards = sorted(glob.glob(str(directory / "shard_*.tar")))
     hdf5s = sorted(glob.glob(str(directory / "*.hdf5")))
+    manifests = sorted(glob.glob(str(directory / "*" / "manifest.json")))
 
     if tortillas:
         data = _extract_v2(tortillas)
@@ -409,9 +429,12 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
             return GeoRecord(
                 name=name, status="no_geo", reason="no sample carries a usable transform/crs"
             )
+    elif manifests:
+        data = read_manifest_coordinates(manifests)
     else:
         raise FileNotFoundError(
-            f"No .tortilla, V1 shard, or .hdf5 files under {directory}. Run `{command}`."
+            f"No .tortilla, V1 shard, .hdf5, or manifest.json files under {directory}. "
+            f"Run `{command}`."
         )
 
     if len(data["lon"]) == 0:
