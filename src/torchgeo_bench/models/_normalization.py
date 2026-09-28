@@ -26,12 +26,9 @@ from enum import StrEnum
 import torch
 
 from torchgeo_bench.datasets.base import BandSpec
+from torchgeo_bench.errors import UnsupportedNormalizationError
 
 from ._input_units import InputUnit, detect_input_unit, to_reflectance, to_s2_dn
-
-
-class UnsupportedNormalizationError(ValueError):
-    """A model does not define the requested normalization pipeline."""
 
 
 class NormalizationStrategy(StrEnum):

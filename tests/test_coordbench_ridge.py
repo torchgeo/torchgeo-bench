@@ -8,9 +8,10 @@ from sklearn.metrics import r2_score
 
 from torchgeo_bench.coordbench.probe import (
     RidgeData,
-    _ridge_eval,
-    _ridge_predict,
+    _cv_alpha_scores,
     linear_probe_score,
+    ridge_predictions,
+    ridge_scores,
 )
 
 
@@ -28,7 +29,7 @@ def test_ridge_matches_sklearn(*, standardize: bool, task_type: str, official: b
     targets = labels[:, None]
     if task_type == "classification":
         targets = np.eye(3, dtype=np.float32)[labels]
-    alphas = (0.01, 10.0, 10000.0)
+    alphas = (10.0, 0.01, 10000.0, 0.01)
     test_mask = np.arange(90) >= 60 if official else None
     pool = np.arange(60 if official else 90)
     folds = [pool[i::3] for i in range(3)]
@@ -85,14 +86,13 @@ def test_ridge_preserves_shared_tensors(*, dtype: torch.dtype) -> None:
     targets = features[:, :1].clone() + 10
     before_features, before_targets = features.clone(), targets.clone()
     data = RidgeData(features, targets, None)
-    _ridge_eval(data, torch.arange(15), torch.arange(15, 20), 1.0, standardize=True)
+    ridge_scores(data, torch.arange(15), torch.arange(15, 20), (1.0, 10.0), standardize=True)
     torch.testing.assert_close(features, before_features, rtol=0, atol=0)
     torch.testing.assert_close(targets, before_targets, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("shape", [(80, 6), (20, 40)])
 @pytest.mark.parametrize("outputs", [1, 3])
-@pytest.mark.parametrize("alpha", [0.01, 1.0, 100.0])
 @pytest.mark.parametrize(
     "device",
     [
@@ -103,9 +103,7 @@ def test_ridge_preserves_shared_tensors(*, dtype: torch.dtype) -> None:
         ),
     ],
 )
-def test_ridge_predictions_match_sklearn(
-    shape: tuple[int, int], outputs: int, alpha: float, device: str
-) -> None:
+def test_ridge_predictions_match_sklearn(shape: tuple[int, int], outputs: int, device: str) -> None:
     rng = np.random.default_rng(17)
     n_train, n_features = shape
     features = rng.normal(size=(n_train + 12, n_features)) + 7
@@ -113,16 +111,46 @@ def test_ridge_predictions_match_sklearn(
     features[:, -2] = features[:, 0]
     targets = features @ rng.normal(size=(n_features, outputs)) + 250
     targets += rng.normal(size=targets.shape)
-    reference = Ridge(alpha=alpha).fit(features[:n_train], targets[:n_train])
-    expected = reference.predict(features[n_train:]).reshape(-1, outputs)
     data = RidgeData(
         torch.as_tensor(features, device=device), torch.as_tensor(targets, device=device), None
     )
-    actual = _ridge_predict(
+    alphas = (100.0, 0.01, 1.0, 100.0)
+    predictions = ridge_predictions(
         data,
         torch.arange(n_train, device=device),
         torch.arange(n_train, len(features), device=device),
-        alpha=alpha,
+        alphas=alphas,
         standardize=False,
     )
-    np.testing.assert_allclose(actual.cpu().numpy(), expected, rtol=1e-10, atol=1e-10)
+    for alpha, actual in zip(alphas, predictions, strict=True):
+        reference = Ridge(alpha=alpha).fit(features[:n_train], targets[:n_train])
+        expected = reference.predict(features[n_train:]).reshape(-1, outputs)
+        np.testing.assert_allclose(actual.cpu().numpy(), expected, rtol=1e-10, atol=1e-10)
+
+
+def test_cv_builds_normal_equations_once_per_fold(monkeypatch: pytest.MonkeyPatch) -> None:
+    products = []
+    matmul = torch.Tensor.__matmul__
+
+    def record(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+        products.append((tuple(left.shape), tuple(right.shape)))
+        return matmul(left, right)
+
+    monkeypatch.setattr(torch.Tensor, "__matmul__", record)
+    generator = torch.Generator().manual_seed(17)
+    features = torch.randn(60, 6, generator=generator)
+    targets = torch.randn(60, 1, generator=generator)
+    data = RidgeData(features, targets, None)
+    folds = [torch.arange(i, 60, 3) for i in range(3)]
+    _cv_alpha_scores(data, folds, (0.01, 100.0, 1.0), standardize=True)
+    assert products.count(((6, 40), (40, 6))) == 3
+    assert products.count(((6, 40), (40, 1))) == 3
+
+
+def test_cv_keeps_first_alpha_when_scores_tie() -> None:
+    data = RidgeData(torch.zeros(12, 2), torch.full((12, 1), 7.0), None)
+    folds = [torch.arange(i, 12, 3) for i in range(3)]
+    with pytest.warns(UserWarning, match="grid edge"):
+        alpha, scores = _cv_alpha_scores(data, folds, (10.0, 0.1, 1.0), standardize=False)
+    assert alpha == 10.0
+    assert scores == [1.0, 1.0, 1.0]

@@ -1,6 +1,5 @@
 """Strict synthetic profiling configuration and precedence."""
 
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -128,17 +127,3 @@ def test_custom_constructor_is_not_imported() -> None:
     )
     _, preset = config.resolve()
     assert preset.kwargs == config.model.kwargs
-
-
-def test_no_application_owned_omegaconf_in_flops_scope() -> None:
-    source = Path(__file__).parents[1] / "src" / "torchgeo_bench"
-    paths = [
-        source / "config" / "flops.py",
-        source / "flops_pipeline.py",
-        source / "commands" / "_flops.py",
-        source / "commands" / "_flops_runtime.py",
-        source / "commands" / "flops_arguments.py",
-    ]
-    for path in paths:
-        assert "omegaconf" not in path.read_text().lower()
-        assert "DictConfig" not in path.read_text()

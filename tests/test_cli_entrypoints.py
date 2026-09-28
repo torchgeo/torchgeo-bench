@@ -85,3 +85,79 @@ def test_package_module_dry_run_matches_console_script(tmp_path: Path, *, use_co
     assert config["datasets"] == ["m-eurosat"]
     assert config["runtime"] == {"device": "cpu", "seed": 3}
     assert config["output"]["resume"] is False
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+def test_profile_rejects_repeated_dataset_flags(module: str | None, tmp_path: Path) -> None:
+    completed = run_entrypoint(
+        module,
+        ["profile", "--model", "rcf", "-d", "m-eurosat", "--dataset=so2sat", "--dry-run"],
+        tmp_path,
+    )
+    assert completed.returncode == 2, completed.stdout + completed.stderr
+    assert completed.stdout == ""
+    assert "usage: torchgeo-bench profile" in completed.stderr
+    assert "error:" in completed.stderr
+    assert "may only be specified once" in completed.stderr
+    assert "Traceback" not in completed.stderr
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+@pytest.mark.parametrize("use_config", [False, True])
+def test_profile_accepts_one_dataset_flag(
+    module: str | None, tmp_path: Path, *, use_config: bool
+) -> None:
+    if use_config:
+        path = tmp_path / "profile.yaml"
+        path.write_text("model: {name: rcf}\ndataset: m-eurosat\n", encoding="utf-8")
+        arguments = ["profile", "--config", str(path)]
+    else:
+        arguments = ["profile", "--model", "rcf"]
+    completed = run_entrypoint(module, [*arguments, "--dataset=so2sat", "--dry-run"], tmp_path)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+    config = yaml.safe_load(completed.stdout)
+    assert config["model"]["name"] == "rcf"
+    assert config["dataset"] == "so2sat"
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+def test_run_accepts_repeated_dataset_flags(module: str | None, tmp_path: Path) -> None:
+    completed = run_entrypoint(
+        module,
+        ["run", "-m", "rcf", "-d", "m-eurosat", "--dataset=so2sat", "--dry-run"],
+        tmp_path,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+    assert yaml.safe_load(completed.stdout)["datasets"] == ["m-eurosat", "so2sat"]
+
+
+@pytest.mark.parametrize("module", [None, "torchgeo_bench", "torchgeo_bench.cli"])
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize(
+    ("flags", "diagnostic"),
+    [
+        (["--bands", "B99"], "MEurosat: unknown band 'B99'; available:"),
+        (["--normalization", "model"], "'rcf' does not support --normalization model"),
+    ],
+)
+def test_run_rejects_semantic_input_errors_before_execution(
+    module: str | None,
+    flags: list[str],
+    diagnostic: str,
+    tmp_path: Path,
+    *,
+    dry_run: bool,
+) -> None:
+    arguments = ["run", "--model", "rcf", "--dataset", "m-eurosat", *flags]
+    if dry_run:
+        arguments.append("--dry-run")
+    completed = run_entrypoint(module, arguments, tmp_path)
+    assert completed.returncode == 2, completed.stderr
+    assert completed.stdout == ""
+    assert completed.stderr.startswith("error: ")
+    assert diagnostic in completed.stderr
+    assert "Traceback" not in completed.stderr
+    assert not (tmp_path / "data").exists()
+    assert not (tmp_path / "results").exists()

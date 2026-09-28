@@ -47,13 +47,3 @@ Galleries are saved under `results/cleanlab/galleries/`. EuroSAT-family hashes a
 NPZ artifacts contain numeric `indices`, `labels`, `probs`, and `classes`, plus Unicode `meta` strings. Any additional textual fields, such as `sample_ids`, must also be string arrays, not object arrays. Consumers always load with `allow_pickle=False` and reject object-backed required arrays. Unused legacy metadata is not read, so numeric artifacts with old object metadata remain usable without unpickling it; model names come from filenames.
 
 Train probabilities are in-sample, so their flag rates underestimate train noise. Test probabilities are out-of-sample; flags still require manual review and are not confirmed label errors. Multi-label aggregate flag rates can be inflated by class imbalance and the union of per-class flags. See the [historical GeoBench audit report](cleanlab_audit_geobench.md) for the original findings and limitations.
-
-## Tests
-
-With the core development dependencies installed:
-
-```bash
-python -m pytest tests/projects/cleanlab
-```
-
-Artifact-safety and configuration tests do not require Cleanlab. Tests that exercise its actual issue-finding algorithms skip when it is not installed.

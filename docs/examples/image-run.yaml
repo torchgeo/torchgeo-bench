@@ -44,11 +44,9 @@ runtime:
   seed: 0
   verbose: false
 output:
-  directory: results/models
+  directory: results
   file: null
   resume: false
-  profile_directory: results/profiles
-  intrinsic_dim_directory: results/intrinsic_dim
 profile:
   enabled: false
   n_warmup: 3

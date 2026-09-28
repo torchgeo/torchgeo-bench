@@ -8,6 +8,7 @@ from unittest import mock
 
 import pandas as pd
 import pytest
+import yaml
 
 from tests.support.runner import (
     _chainable_model_mock,
@@ -15,6 +16,7 @@ from tests.support.runner import (
     _synthetic_embeddings,
     _synthetic_loaders,
 )
+from torchgeo_bench.cli import main as cli_main
 from torchgeo_bench.config.presets import merge_settings
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.main import main
@@ -29,9 +31,7 @@ def _compose_default_routing_cfg(tmp_path: Path, overrides: dict | None = None) 
             {
                 "output": {
                     "file": None,
-                    "directory": str(tmp_path / "models"),
-                    "profile_directory": str(tmp_path / "profiles"),
-                    "intrinsic_dim_directory": str(tmp_path / "intrinsic_dim"),
+                    "directory": str(tmp_path),
                 }
             },
             overrides or {},
@@ -39,13 +39,30 @@ def _compose_default_routing_cfg(tmp_path: Path, overrides: dict | None = None) 
     )
 
 
+@pytest.mark.parametrize(
+    ("directory_flags", "directories"),
+    [
+        ([], ("results/models", "results/profiles", "results/intrinsic_dim")),
+        (
+            ["--output-dir", "custom"],
+            ("custom/models", "custom/profiles", "custom/intrinsic_dim"),
+        ),
+    ],
+)
 @pytest.mark.parametrize("explicit_output", [False, True])
 def test_routing_splits_by_kind_unless_output_is_explicit(
-    tmp_path: Path, *, explicit_output: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    directory_flags: list[str],
+    directories: tuple[str, str, str],
+    *,
+    explicit_output: bool,
 ) -> None:
-    cfg = _compose_default_routing_cfg(
-        tmp_path,
+    monkeypatch.chdir(tmp_path)
+    cfg = _compose_cfg(
+        tmp_path / "unused.csv",
         overrides={
+            "output": {"file": None},
             "classification": {"methods": ["knn"]},
             "intrinsic_dim": {
                 "enabled": True,
@@ -56,16 +73,16 @@ def test_routing_splits_by_kind_unless_output_is_explicit(
             "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
         },
     )
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.model_dump_yaml()), encoding="utf-8")
+    flags = ["run", "--config", str(config_path), *directory_flags]
     if explicit_output:
-        cfg.output.file = str(tmp_path / "all.csv")
+        flags.extend(["--output", str(tmp_path / "all.csv")])
     profile_metrics = {
         "params_m": 0.01,
         "throughput_samples_per_sec": 100.0,
         "latency_ms_per_batch_p50": 5.0,
     }
-
-    def _mock_compute(*args, **kwargs):
-        return {str(kwargs["estimators"][0]): 5.0}
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
@@ -74,18 +91,19 @@ def test_routing_splits_by_kind_unless_output_is_explicit(
             "torchgeo_bench.main.evaluate_knn",
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
-        mock.patch("torchgeo_bench.main.compute_intrinsic_dim", side_effect=_mock_compute),
+        mock.patch("torchgeo_bench.main.compute_intrinsic_dim", return_value={"twonn": 5.0}),
         mock.patch("torchgeo_bench.main.measure_profile", return_value=profile_metrics),
     ):
-        main(cfg)
+        cli_main(flags)
 
-    metrics_path = model_results_path(tmp_path / "models", "rcf")
-    profile_path = model_results_path(tmp_path / "profiles", "rcf")
-    id_path = model_results_path(tmp_path / "intrinsic_dim", "rcf")
+    metrics_path, profile_path, id_path = (
+        model_results_path(tmp_path / directory, "rcf") for directory in directories
+    )
     if explicit_output:
         assert not any(path.exists() for path in (metrics_path, profile_path, id_path))
-        metrics_path = profile_path = id_path = Path(cfg.output.file)
+        metrics_path = profile_path = id_path = tmp_path / "all.csv"
     all_methods = {"knn5", "profile", "intrinsic_dim"}
+    assert set(tmp_path.rglob("*.csv")) == {metrics_path, profile_path, id_path}
 
     assert metrics_path.exists()
     metrics_df = pd.read_csv(metrics_path)

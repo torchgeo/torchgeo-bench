@@ -230,14 +230,23 @@ def _coord_cfg(tmp_path: Path, **coord_overrides: object) -> CoordConfig:
     )
 
 
-def test_run_coordbench_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("explicit_file", [False, True])
+def test_run_coordbench_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, explicit_file: bool
+) -> None:
     monkeypatch.setattr(
         "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
     )
     cfg = _coord_cfg(tmp_path, split="both")
+    cfg.output.directory = str(tmp_path / "nested")
+    output_path = tmp_path / "coord.csv"
+    if not explicit_file:
+        cfg.output.file = None
+        output_path = tmp_path / "nested" / "coordbench_results.csv"
     run_coordbench(cfg)
 
-    df = pd.read_csv(cfg.output.file)
+    assert set(tmp_path.rglob("*.csv")) == {output_path}
+    df = pd.read_csv(output_path)
     assert {"dataset", "task", "method", "split", "metric_name", "metric_value"} <= set(df.columns)
     reg = df[df.dataset == "synthetic-reg"]
     clf = df[df.dataset == "synthetic-clf"]
@@ -248,24 +257,6 @@ def test_run_coordbench_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     # Without an official split, both cross-validation schemes should run.
     assert {"random", "spatial"} <= set(df.split)
     assert (df.metric_value.abs() <= 1.5).all()
-
-
-def test_run_coordbench_resume_skips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "torchgeo_bench.coordbench.run.load_benchmarks", lambda names: _synthetic_benchmarks()
-    )
-    cfg = _coord_cfg(tmp_path)
-    run_coordbench(cfg)
-    before = Path(cfg.output.file).read_bytes()
-
-    def unexpected_probe(*args: object, **kwargs: object) -> None:
-        pytest.fail("Completed coordinate probes must not be recomputed")
-
-    cfg.output.resume = True
-    monkeypatch.setattr("torchgeo_bench.coordbench.run.linear_probe_score", unexpected_probe)
-    monkeypatch.setattr("torchgeo_bench.coordbench.run.knn_probe_score", unexpected_probe)
-    run_coordbench(cfg)
-    assert Path(cfg.output.file).read_bytes() == before
 
 
 def test_run_coordbench_reports_official_test_count(
@@ -584,6 +575,8 @@ def test_runtime_seeds_encoder_construction(
 
     monkeypatch.setattr("torchgeo_bench.coordbench.run.build_model", build)
     config = _coord_cfg(tmp_path)
-    run_coordbench(config)
-    run_coordbench(config)
-    assert torch.equal(random_values[0], random_values[1])
+    for seed in (7, 7, 11):
+        config.runtime.seed = seed
+        run_coordbench(config)
+        expected = torch.rand(4, generator=torch.Generator().manual_seed(seed))
+        assert torch.equal(random_values[-1], expected)

@@ -9,7 +9,7 @@ from .schema import (
     ClassificationConfig,
     InputConfig,
     ModelConfig,
-    OutputPath,
+    OutputPaths,
     RuntimeConfig,
     SchemaVersion,
     SegmentationConfig,
@@ -18,14 +18,10 @@ from .schema import (
 )
 
 
-class OutputConfig(StrictModel):
+class OutputConfig(OutputPaths):
     """Result storage settings."""
 
-    directory: OutputPath = "results/models"
-    file: OutputPath | None = None
     resume: StrictBool = False
-    profile_directory: OutputPath = "results/profiles"
-    intrinsic_dim_directory: OutputPath = "results/intrinsic_dim"
 
 
 class CPUThroughputConfig(StrictModel):

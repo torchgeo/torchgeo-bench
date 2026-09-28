@@ -28,7 +28,8 @@ def test_coord_defaults() -> None:
     assert config.evaluation.methods == ["knn", "linear"]
     assert config.evaluation.knn_device == "cpu"
     assert config.runtime.device == "cpu"
-    assert config.output.file == "results/coordbench_results.csv"
+    assert config.output.directory == "results"
+    assert config.output.file is None
     assert not config.output.resume
     preset = resolve_coord_preset(config)
     assert preset.name == "sincos"
@@ -76,10 +77,10 @@ def test_coord_defaults() -> None:
         {"runtime": {"seed": 2**64}},
         {"runtime": {"seed": 0.5}},
         {"runtime": {"batch_size": 2}},
-        {"output": {"file": None}},
+        {"output": {"directory": None}},
         {"output": {"file": " "}},
         {"output": {"resume": "false"}},
-        {"output": {"directory": "results"}},
+        {"output": {"directory": " "}},
     ],
 )
 def test_coord_rejects_invalid_values(values: dict[str, Any]) -> None:
@@ -142,7 +143,11 @@ def test_all_typed_flags() -> None:
         "knn_device": "cpu",
     }
     assert config.runtime.model_dump() == {"device": "cpu", "seed": 42}
-    assert config.output.model_dump() == {"file": "runs/coord.csv", "resume": True}
+    assert config.output.model_dump() == {
+        "directory": "results",
+        "file": "runs/coord.csv",
+        "resume": True,
+    }
 
 
 def test_yaml_flag_precedence(tmp_path: Path) -> None:

@@ -73,35 +73,37 @@ class BenchDataset(ABC):
         wrappers it is the dataset's own root (e.g. ``data/eurosat``).
         """
 
-    def select_band_specs(self, bands: "Iterable[str] | None") -> list[BandSpec]:
+    @classmethod
+    def select_band_specs(cls, bands: "Iterable[str] | None") -> list[BandSpec]:
         """Return the :class:`BandSpec` entries matching *bands*.
 
         Preserves the order given by *bands*. Raises ``ValueError`` if any
         requested band is not declared on the dataset.
         """
         if bands is None:
-            return list(self.bands)
-        by_name = {b.name: b for b in self.bands}
+            return list(cls.bands)
+        by_name = {b.name: b for b in cls.bands}
         result: list[BandSpec] = []
         for name in bands:
             if name not in by_name:
                 raise ValueError(
-                    f"{type(self).__name__}: unknown band {name!r}; available: {sorted(by_name)}"
+                    f"{cls.__name__}: unknown band {name!r}; available: {sorted(by_name)}"
                 )
             result.append(by_name[name])
         return result
 
-    def resolve_band_specs(self, selection: "str | Iterable[str]") -> list[BandSpec]:
+    @classmethod
+    def resolve_band_specs(cls, selection: "str | Iterable[str]") -> list[BandSpec]:
         """Resolve ``rgb``, ``all``, or explicit names using this dataset's metadata.
 
         Band order and objects are preserved without loading dataset samples.
         """
         if not isinstance(selection, str):
-            return self.select_band_specs(selection)
+            return cls.select_band_specs(selection)
         if selection == "rgb":
-            return self.select_band_specs(self.rgb_bands)
+            return cls.select_band_specs(cls.rgb_bands)
         if selection == "all":
-            return self.select_band_specs(None)
+            return cls.select_band_specs(None)
         raise ValueError(
             f"Unknown band selection {selection!r}; use rgb, all, or explicit band names"
         )

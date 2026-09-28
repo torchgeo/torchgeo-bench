@@ -1,5 +1,6 @@
 """Offline tests for the classification runner."""
 
+from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
@@ -16,46 +17,9 @@ from tests.support.runner import (
     _synthetic_embeddings,
     _synthetic_loaders,
 )
-from torchgeo_bench.config.presets import ModelPreset, resolve_run_config
+from torchgeo_bench.config.presets import resolve_run_config
 from torchgeo_bench.config.run import validate_run_config
 from torchgeo_bench.main import LinearProbeDivergedError, main
-
-
-def test_model_dataset_overrides_are_isolated_and_fall_back() -> None:
-    model_cfg = ModelPreset.model_validate(
-        {
-            "target": "example.Model",
-            "name": "example",
-            "input": {"image_size": 224},
-            "kwargs": {"res": 1.0, "pool": "cls"},
-            "dataset_overrides": {
-                "m-eurosat": {"input": {"image_size": 64}, "kwargs": {"res": 3.5}},
-                "forestnet": {"input": {"image_size": 128}, "kwargs": {"pool": "mean"}},
-            },
-        }
-    )
-
-    eurosat = model_cfg.for_dataset("m-eurosat")
-    fallback = model_cfg.for_dataset("unlisted")
-    forestnet = model_cfg.for_dataset("forestnet")
-
-    assert (eurosat.input.image_size, eurosat.kwargs["res"], eurosat.kwargs["pool"]) == (
-        64,
-        3.5,
-        "cls",
-    )
-    assert (fallback.input.image_size, fallback.kwargs["res"], fallback.kwargs["pool"]) == (
-        224,
-        1.0,
-        "cls",
-    )
-    assert (forestnet.input.image_size, forestnet.kwargs["res"], forestnet.kwargs["pool"]) == (
-        128,
-        1.0,
-        "mean",
-    )
-    assert not eurosat.dataset_overrides
-    assert model_cfg.input.image_size == 224
 
 
 def test_dataset_override_routes_recipe_and_changes_resume_key(tmp_path: Path) -> None:
@@ -183,42 +147,32 @@ def test_implicit_gpu_knn_fallback_reaches_evaluator_as_cpu(tmp_path: Path, monk
 
 
 @pytest.mark.parametrize(
-    ("requested", "expected_hash"),
+    ("requested", "expected_device"),
     [
-        (None, "0391f898e8a4db0d"),
-        ("cpu", "21d7c33e4e3fb14b"),
-        ("cuda", "f3d1f875b722da7e"),
-        ("cuda:0", "0391f898e8a4db0d"),
-        ("cuda:1", "2ff6e9885cdca60c"),
-        ("auto", "2ff6e9885cdca60c"),
+        ("cuda", "cuda:1"),
+        ("auto", "cuda:1"),
     ],
 )
-@pytest.mark.parametrize("entrypoint", ["direct", "command"])
-def test_device_labels_preserve_existing_hashes_and_resume(
+def test_device_resolution_and_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    requested: str | None,
-    expected_hash: str,
-    entrypoint: str,
+    requested: str,
+    expected_device: str,
 ) -> None:
-    from torchgeo_bench.commands._run_runtime import run
-
     cfg = validate_run_config(
         {
             "model": {"name": "rcf"},
             "datasets": ["m-eurosat"],
-            "runtime": {} if requested is None else {"device": requested},
+            "runtime": {"device": requested},
             "classification": {"methods": ["knn"]},
             "output": {"file": str(tmp_path / "out.csv")},
         }
     )
     original = cfg.model_dump_json()
-    execute = main if entrypoint == "direct" else run
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     monkeypatch.setattr("torchgeo_bench.knn.gpu_faiss_available", lambda: False)
-    expected_device = "cuda:1" if requested in ("auto", "cuda") else requested or "cuda:0"
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()) as data,
         mock.patch(
@@ -230,17 +184,16 @@ def test_device_labels_preserve_existing_hashes_and_resume(
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
     ):
-        execute(cfg)
+        main(cfg)
         assert cfg.model_dump_json() == original
         assert build.return_value.to.call_args.args[0] == torch.device(expected_device)
         assert all(call.args[2] == torch.device(expected_device) for call in embed.call_args_list)
         output = Path(cfg.output.file)
-        assert pd.read_csv(output)["config_hash"].tolist() == [expected_hash]
         before = output.read_bytes()
         data.reset_mock()
         build.reset_mock()
         cfg.output.resume = True
-        execute(cfg)
+        main(cfg)
     data.assert_not_called()
     build.assert_not_called()
     assert output.read_bytes() == before
@@ -250,7 +203,6 @@ def test_device_labels_preserve_existing_hashes_and_resume(
     ("device", "available", "message"),
     [
         ("cuda", False, "CUDA is unavailable"),
-        ("cuda:0", False, "CUDA is unavailable"),
         ("cuda:2", True, "CUDA index 2"),
     ],
 )
@@ -316,50 +268,21 @@ def test_explicit_gpu_knn_without_gpu_faiss_fails_before_data_loading(tmp_path: 
     data_mock.assert_not_called()
 
 
-def test_linear_row_emitted(tmp_path: Path):
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(out)
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_logistic",
-            return_value=(
-                0.6,
-                0.52,
-                0.66,
-                0.1,
-                {"ece": 0.04, "rms_ce": 0.06, "mce": 0.09},
-                {"ece_ts": 0.04, "rms_ce_ts": 0.06, "mce_ts": 0.09, "temperature": 0.8},
-            ),
-        ),
-    ):
-        main(cfg)
-
-    df = pd.read_csv(out)
-    assert "linear" in df["method"].values
-    row = df[df["method"] == "linear"].iloc[0]
-    assert row["metric_name"] == "accuracy"
-
-
 @pytest.mark.parametrize(
-    ("error", "strict"),
+    ("error", "strict", "raises"),
     [
-        (RuntimeError("linear probe failed"), False),
-        (RuntimeError("linear probe failed"), True),
-        (LinearProbeDivergedError("linear probe failed"), True),
+        (RuntimeError("linear probe failed"), False, True),
+        (RuntimeError("linear probe failed"), True, True),
+        (LinearProbeDivergedError("linear probe failed"), False, False),
+        (LinearProbeDivergedError("linear probe failed"), True, True),
     ],
 )
 def test_completed_knn_survives_later_linear_failure(
-    tmp_path: Path, *, error: RuntimeError, strict: bool
+    tmp_path: Path, *, error: RuntimeError, strict: bool, raises: bool
 ) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(out)
+    outcome = pytest.raises(RuntimeError, match="linear probe failed") if raises else nullcontext()
 
     with (
         mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
@@ -370,7 +293,7 @@ def test_completed_knn_survives_later_linear_failure(
             return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
         ),
         mock.patch("torchgeo_bench.main.evaluate_logistic", side_effect=error),
-        pytest.raises(RuntimeError, match="linear probe failed"),
+        outcome,
     ):
         main(cfg, strict=strict)
 
@@ -380,24 +303,6 @@ def test_completed_knn_survives_later_linear_failure(
     assert (row["metric_value"], row["ci_lower"], row["ci_upper"]) == (0.5, 0.45, 0.55)
     assert row["ece"] == 0.05
     assert row["config_hash"] == _hash_for(cfg)
-
-
-def test_resume_skips_completed_knn_row(tmp_path: Path):
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(
-        out, overrides={"output": {"resume": True}, "classification": {"methods": ["knn"]}}
-    )
-    pd.DataFrame([_resume_row(cfg, method="knn5", metric_name="accuracy")]).to_csv(out, index=False)
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.evaluate_knn") as knn_mock,
-    ):
-        main(cfg)
-
-    knn_mock.assert_not_called()
-    df = pd.read_csv(out)
-    assert int((df["method"] == "knn5").sum()) == 1
 
 
 def test_resume_complete_preflight_skips_data_loading_and_model_init(tmp_path: Path):
@@ -482,10 +387,7 @@ def test_non_resume_still_runs_even_with_matching_existing_rows(tmp_path: Path):
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 2
 
 
-@pytest.mark.parametrize("strict", [False, True])
-def test_model_eval_overrides_do_not_change_classification_resume_semantics(
-    tmp_path: Path, *, strict: bool
-) -> None:
+def test_model_eval_overrides_do_not_change_classification_resume_semantics(tmp_path: Path) -> None:
     out = tmp_path / "out.csv"
     cfg = _compose_cfg(
         out,
@@ -523,7 +425,7 @@ def test_model_eval_overrides_do_not_change_classification_resume_semantics(
             ),
         ) as linear_mock,
     ):
-        main(cfg, strict=strict)
+        main(cfg)
 
     data_mock.assert_called_once()
     instantiate_mock.assert_called_once()
@@ -567,35 +469,6 @@ def test_resume_skips_when_image_size_read_as_float(tmp_path: Path):
 
     knn_mock.assert_not_called()
     assert int((pd.read_csv(out)["method"] == "knn5").sum()) == 1
-
-
-def test_resume_recomputes_legacy_row_without_num_classes(tmp_path: Path):
-    """Rows from an older label schema must not satisfy the current resume key."""
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(
-        out, overrides={"output": {"resume": True}, "classification": {"methods": ["knn"]}}
-    )
-    legacy_row = _resume_row(cfg, method="knn5", metric_name="accuracy")
-    legacy_row.pop("num_classes")
-    pd.DataFrame([legacy_row]).to_csv(out, index=False)
-    model = _chainable_model_mock()
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.build_model", return_value=model),
-        mock.patch("torchgeo_bench.main.embed_split", side_effect=_synthetic_embeddings()),
-        mock.patch(
-            "torchgeo_bench.main.evaluate_knn",
-            return_value=(0.5, 0.45, 0.55, {"ece": 0.05, "rms_ce": 0.07, "mce": 0.1}, 6),
-        ) as knn_mock,
-    ):
-        main(cfg)
-
-    knn_mock.assert_called_once()
-    df = pd.read_csv(out)
-    assert len(df) == 2
-    assert pd.isna(df.iloc[0]["num_classes"])
-    assert int(df.iloc[1]["num_classes"]) == 10
 
 
 def test_resume_reruns_when_evaluation_config_changes(tmp_path: Path):

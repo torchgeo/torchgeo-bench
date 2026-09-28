@@ -108,14 +108,9 @@ def _relabel_olmoearth_normalization(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _dedup_results(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop duplicate measurement rows left by the resume-hash gap.
+    """Keep one row per measurement group in :data:`DEDUP_KEY_COLS`.
 
-    ``config_hash`` was added after many rows were already written, and it also
-    covers settings that cannot change a metric (``num_workers``,
-    ``batch_size``, ``device``), so a rerun under a different one of those
-    misses the resume key and appends instead of skipping. Within each "same
-    measurement" group (:data:`DEDUP_KEY_COLS`), a hashed row wins over a
-    legacy unhashed one; among hashed rows the last appended wins.
+    A hashed row wins over an unhashed one; among hashed rows the last appended wins.
     """
     missing = [c for c in DEDUP_KEY_COLS if c not in df.columns]
     if missing or "config_hash" not in df.columns:

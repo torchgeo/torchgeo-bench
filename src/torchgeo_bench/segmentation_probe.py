@@ -196,7 +196,7 @@ class SegmentationProbe(nn.Module):
         elif head_type == "dpt":
             self.head = DPTHead(self.channels_list, num_classes, hidden_dim=hdim)
         elif head_type == "patch_linear":
-            self.head = PatchLinearHead(self.channels_list, num_classes)
+            self.head = PatchLinearHead(self.channels_list, num_classes).to(self._backbone_device())
             dry_run_features = [
                 torch.zeros(
                     (1, channels, height, width),

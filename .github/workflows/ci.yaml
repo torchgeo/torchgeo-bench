@@ -15,14 +15,14 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
         include:
           - os: ubuntu-latest
-            extras: --extra dev --extra id --extra olmoearth --extra sam3
-            cache-tag: dev-id-olmoearth-sam3
+            extras: --extra dev --extra id --extra olmoearth
+            cache-tag: dev-id-olmoearth
           - os: macos-latest
-            extras: --extra dev --extra sam3
-            cache-tag: dev-sam3
+            extras: --extra dev
+            cache-tag: dev
           - os: windows-latest
-            extras: --extra dev --extra sam3
-            cache-tag: dev-sam3
+            extras: --extra dev
+            cache-tag: dev
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -58,7 +58,7 @@ jobs:
           if-no-files-found: error
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}

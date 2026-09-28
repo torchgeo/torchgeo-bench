@@ -123,6 +123,24 @@ type SchemaVersion = Annotated[Literal[1], BeforeValidator(_check_schema_version
 type OutputPath = Annotated[StrictStr, AfterValidator(_check_output_path)]
 
 
+class OutputPaths(StrictModel):
+    """Output root and optional explicit file for CSV benchmark commands."""
+
+    directory: OutputPath = "results"
+    file: OutputPath | None = None
+
+
+def resolve_output_path(
+    directory: str | None, file: str | None, relative_path: str | pathlib.Path
+) -> str:
+    """Return the explicit file or a command's default path under the output root."""
+    if file is not None:
+        return file
+    if directory is None:
+        raise ValueError("An output directory or file is required")
+    return str(pathlib.Path(directory) / relative_path)
+
+
 def default_methods() -> list[Method]:
     """Return the default probe selection, shared by image and coordinate runs."""
     return ["knn", "linear"]

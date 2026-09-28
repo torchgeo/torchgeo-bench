@@ -8,6 +8,7 @@ import hashlib
 import json
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
@@ -140,6 +141,36 @@ def test_profile_emits_fixed_real_batch_metadata(
     assert all(images is batch for images in calls[:5])
     if count_flops:
         assert calls[-1].shape == (1, 3, 8, 8)
+
+
+@pytest.mark.parametrize("destination", ["directory", "file", "both"])
+def test_profile_writes_json_to_requested_destination(
+    profile_args: argparse.Namespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    destination: str,
+) -> None:
+    root = tmp_path / "nested" / "profiles"
+    explicit = tmp_path / "selected" / "measurement.json"
+    if destination != "file":
+        profile_args.output_dir = str(root)
+    if destination != "directory":
+        profile_args.output = str(explicit)
+    monkeypatch.setattr(_profile_runtime, "get_datasets", lambda **_: (None, _Loader(), None, None))
+    monkeypatch.setattr(_profile_runtime, "build_model", lambda *_, **__: nn.Conv2d(3, 3, 1))
+
+    profile(profile_args)
+
+    path = root / "profile.json" if destination == "directory" else explicit
+    assert capsys.readouterr().out == ""
+    assert set(tmp_path.rglob("*.json")) == {path}
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["model"] == "rcf"
+    assert record["dataset"] == "m-eurosat"
+    assert record["profile"]["throughput_samples_per_sec"] > 0
+    if destination == "both":
+        assert not root.exists()
 
 
 @pytest.mark.parametrize(

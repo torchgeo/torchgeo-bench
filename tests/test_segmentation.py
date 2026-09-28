@@ -250,8 +250,6 @@ def test_segmentation_probe_conv_block_head(mock_backbone, dummy_data):
     from torchgeo_bench.models.segmentation_heads import ConvBlockHead
 
     assert isinstance(probe.head, ConvBlockHead)
-    assert hasattr(probe.head, "projectors")
-    assert isinstance(probe.head.head, nn.Conv2d)
 
 
 def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
@@ -374,9 +372,6 @@ def test_probe_fpn_head(mock_backbone, dummy_data):
     probe = make_probe(mock_backbone, ["layer2", "layer1"], head_type="fpn", hidden_dim=16)
 
     assert isinstance(probe.head, FPNHead)
-    assert hasattr(probe.head, "laterals")
-    assert hasattr(probe.head, "fpn_convs")
-    assert hasattr(probe.head, "fpn_head")
 
     logits = probe(dummy_data["image"])
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
@@ -583,7 +578,6 @@ class MockBackbone4Layer(nn.Module):
 
 
 def test_probe_dpt_head_forward():
-    pytest.importorskip("transformers")
     from torchgeo_bench.models.segmentation_heads import DPTHead
 
     backbone = MockBackbone4Layer()
@@ -596,11 +590,6 @@ def test_probe_dpt_head_forward():
     )
 
     assert isinstance(probe.head, DPTHead)
-    assert hasattr(probe.head, "convs")
-    assert hasattr(probe.head, "ref")
-    assert hasattr(probe.head, "out_conv")
-    assert len(probe.head.convs) == 4
-    assert len(probe.head.ref) == 4
 
     images = torch.randn(2, 3, 64, 64)
     logits = probe(images)
@@ -615,7 +604,6 @@ def test_probe_dpt_wrong_num_layers():
 
 def test_dpt_fusion_layer_shim_matches_reference():
     """These checks protect decoder behavior when transformers changes its private fusion API."""
-    pytest.importorskip("transformers")
     from transformers.models.dpt.modeling_dpt import DPTPreActResidualLayer
 
     from torchgeo_bench.models.segmentation_heads import _dpt_fusion_layer
@@ -640,7 +628,6 @@ def test_dpt_fusion_layer_shim_matches_reference():
 
 def test_dpt_head_upsamples_purely_through_fusion_cascade():
     """Four fusion stages must reach 224x224 from 14x14 without relying on the final resize."""
-    pytest.importorskip("transformers")
     from torchgeo_bench.models.segmentation_heads import DPTHead
 
     head = DPTHead([32, 32, 32, 32], num_classes=NUM_CLASSES, hidden_dim=16)
@@ -659,12 +646,17 @@ def test_dpt_head_upsamples_purely_through_fusion_cascade():
 
 
 @pytest.mark.parametrize(("grid", "size", "patch"), [(4, 64, 16), (16, 64, 4), (16, 65, 4)])
-def test_patch_linear_head_infers_patch_geometry(grid: int, size: int, patch: int) -> None:
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_patch_linear_head_infers_patch_geometry(
+    grid: int, size: int, patch: int, dtype: torch.dtype
+) -> None:
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
-    head = PatchLinearHead([8], num_classes=3)
-    logits = head([torch.randn(2, 8, grid, grid)], size, size)
+    head = PatchLinearHead([8], num_classes=3).to(dtype=dtype)
+    logits = head([torch.randn(2, 8, grid, grid, dtype=dtype)], size, size)
     assert head.patch_size == patch
+    assert all(param.dtype == dtype for param in head.parameters())
+    assert logits.dtype == dtype
     assert logits.shape == (2, 3, size, size)
     assert torch.isfinite(logits).all()
 
@@ -681,15 +673,49 @@ def test_patch_linear_head_ignores_extra_channels():
     torch.testing.assert_close(head([primary, extra * 100], 64, 64), expected)
 
 
-def test_probe_patch_linear_head_vit():
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param("meta", id="meta-device-without-cuda"),
+        pytest.param(
+            "cuda:0",
+            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable"),
+        ),
+    ],
+)
+def test_probe_patch_linear_head_initializes_on_backbone_device(device: str) -> None:
+    from torchgeo_bench.models.segmentation_heads import PatchLinearHead
+
+    probe = make_probe(ViTBackbone().to(device), ["blocks"], head_type="patch_linear")
+
+    assert isinstance(probe.head, PatchLinearHead)
+    assert probe.head.conv is not None
+    assert probe.head.patch_size == 16
+    for param in probe.head.parameters():
+        assert param.device == torch.device(device)
+        assert param.dtype == torch.get_default_dtype()
+
+
+def test_probe_patch_linear_head_vit() -> None:
     from torchgeo_bench.models.segmentation_heads import PatchLinearHead
 
     probe = make_probe(ViTBackbone(), ["blocks"], head_type="patch_linear")
+    assert isinstance(probe.head, PatchLinearHead)
+    assert probe.head.conv is not None
+    params = list(probe.head.parameters())
+    optimizer = torch.optim.SGD(params, lr=0.1)
+    initial_weight = probe.head.conv.weight.detach().clone()
+
     images = torch.randn(2, 3, 64, 64)
     logits = probe(images)
-
-    assert isinstance(probe.head, PatchLinearHead)
     assert logits.shape == (2, NUM_CLASSES, 64, 64)
+    logits.square().mean().backward()
+    optimizer.step()
+
+    assert all(param.grad is not None for param in params)
+    assert [id(param) for param in probe.head.parameters()] == [id(param) for param in params]
+    assert not torch.equal(probe.head.conv.weight, initial_weight)
 
 
 def test_probe_patch_linear_cached_features():

@@ -55,7 +55,7 @@ dependencies = [
   "scikit-learn>=1.3",
   "timm>=0.9",
   "torch>=2",
-  "torchgeo>=0.10",
+  "torchgeo>=0.10,<0.11",
   "torchmetrics>=1.4",
   "torchvision>=0.15",
   "tqdm>=4.66",
@@ -101,7 +101,7 @@ optional-dependencies.olmoearth = [
   "olmoearth-pretrain-minimal>=0.0.6", # OlmoEarth v1.2 weights require this version.
 ]
 optional-dependencies.terratorch = [
-  "terratorch>=1",
+  "terratorch @ git+https://github.com/torchgeo/terratorch.git@main",
 ]
 urls.Documentation = "https://torchgeo.org/torchgeo-bench/"
 urls.Homepage = "https://github.com/torchgeo/torchgeo-bench"

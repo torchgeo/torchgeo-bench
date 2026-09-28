@@ -82,6 +82,8 @@ wavelength = int(round(wavelength_um))
 # BEST: no comment on lines that are self explanatory
 ```
 
+**Describe the current code, not its history.** Docs, docstrings, and comments state what the code does now. Don't narrate what it used to do, what changed, or which issue changed it: avoid "previously", "no longer", "used to", "now also", and issue numbers as timestamps such as "pre-#123". That context belongs in the commit subject and PR description. When behavior changes, rewrite the existing text to describe the new behavior instead of appending a note about the old one.
+
 ## Simplification Principles
 
 Prioritize readability, clear ownership, and long-term maintainability. Evaluate simplification by how easily a contributor can understand and change the behavior.
@@ -128,7 +130,7 @@ pytest -m slow                            # Only downloaded-data/weight tests
 pytest -m accuracy_check                  # Only model accuracy baselines
 ```
 
-The default selection excludes `slow` and `accuracy_check`, not `integration`. Offline integration tests run real algorithms on small, disjoint on-disk splits and exercise the canonical CLI entry points without downloading data or weights. All tests live under `tests/`; shared helpers go in `tests/support/`, never another test module. Optional Cleanlab tests live in `tests/projects/cleanlab/`.
+The default selection excludes `slow` and `accuracy_check`, not `integration`. Offline integration tests run real algorithms on small, disjoint on-disk splits and exercise the canonical CLI entry points without downloading data or weights. All tests live under `tests/`; shared helpers go in `tests/support/`, never another test module.
 
 Pytest-cov measures line and branch coverage, including Python subprocesses. `pytest` displays missing coverage and writes `coverage.xml`; `pytest --cov-report=html` also produces `htmlcov/`. Use `--no-cov` for targeted iteration. Tests all use the regular Ruff profile.
 
@@ -204,7 +206,7 @@ torchgeo-bench coord --model sincos --dataset california_housing --methods linea
 - Each model writes to its own `results/models/<model name>.csv` (not one shared file), so re-running one model only touches that file. Rows are appended, never rewritten in place.
 - `--resume` skips a (dataset, method, bands, normalization, ...) combo only if an existing row's `config_hash` matches the current run's config. Changing a hashed config field invalidates the match. Additive `profile` and `intrinsic_dim` settings do not invalidate equivalent classification results; their own metric completeness is checked separately.
 - One-time, hardware-dependent measurements (`torchgeo-bench flops`, intrinsic-dimension probes) live in their own side files — `results/compute_cost.csv`, `results/profiles/<model name>.csv`, and `results/intrinsic_dim/<model name>.csv` — so a routine metrics rerun doesn't touch them.
-- `--output` / `output.file` combines selected image-run measurements in one CSV; otherwise `output.directory`, `output.profile_directory`, and `output.intrinsic_dim_directory` keep their respective defaults. Standalone `profile` writes JSON stdout, and `coord` has its own CSV schema/resume key.
+- `--output-dir` / `output.directory` sets one root for all command outputs. Image runs use `models/`, `profiles/`, and `intrinsic_dim/` beneath it; `flops` and `coord` use `compute_cost.csv` and `coordbench_results.csv`. `--output` / `output.file` overrides the root and combines image-run measurements in one CSV. Standalone `profile` defaults to JSON stdout, or writes `profile.json` under an explicit root. CoordBench retains its own CSV schema/resume key.
 - Don't hand-edit `config_hash`/`KEY_COLS` logic without checking `resume.py`'s docstring first; it's easy to silently invalidate every existing row across `results/models/`.
 
 ## Datasets
@@ -347,6 +349,8 @@ Implement `_forward_patch_features`, not the public `forward_patch_features`: th
 - **Complexity caps:** max-complexity 10, max-args 5, max-branches 12, max-returns 6, max-statements 50.
 
 ## Testing Patterns
+
+Every test should catch a regression the existing suite would miss. Before adding one, name that regression and check whether an existing test or parametrization already covers it; if so, add a case there instead of a new test. Prefer one representative case over a large parameter grid when the extra cases exercise the same code path. Don't add tests that pin superseded behavior, such as old hash values, retired formats, or proof that legacy rows are rejected. When a change makes an existing assertion obsolete, update or delete it rather than rewriting it to check the old behavior a different way.
 
 ```python
 class TestGeoBenchDatasetBasics:

@@ -13,6 +13,21 @@ GEOBENCH_V2_ROOT = Path("data/geobenchv2")
 EUROSAT_ROOT = Path("data/eurosat")
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    group = parser.getgroup("accuracy baselines")
+    group.addoption(
+        "--accuracy-device",
+        default="cpu",
+        help="Device for accuracy_check benchmarks (default: cpu).",
+    )
+    group.addoption(
+        "--accuracy-timeout",
+        type=int,
+        default=600,
+        help="Timeout in seconds per accuracy_check benchmark (default: 600).",
+    )
+
+
 @pytest.fixture
 def geobench_root() -> str:
     if not (GEOBENCH_ROOT / "m-eurosat").exists():

@@ -29,5 +29,6 @@ timing:
   n_measure: 20
 
 output:
-  file: results/compute_cost.csv
+  directory: results
+  file: null
   resume: true

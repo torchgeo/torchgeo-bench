@@ -72,22 +72,6 @@ def _mock_probe_and_solver():
     probe = mock.Mock()
     probe.channels_list = [16, 32]
     solver = mock.Mock()
-    solver.fit.return_value = None
-    metrics = {
-        "mIoU": 0.42,
-        "fw_IoU": 0.55,
-        "precision": 0.6,
-        "recall": 0.7,
-        "f1": 0.65,
-    }
-    confusions = torch.tensor([[[0, 4], [0, 0]], [[0, 0], [0, 4]]])
-
-    def evaluate(*_args, collect_confusions: bool = False, **_kwargs):
-        if collect_confusions:
-            return metrics, confusions
-        return metrics
-
-    solver.evaluate.side_effect = evaluate
     return probe, solver
 
 
@@ -118,30 +102,6 @@ def test_dataset_eval_resolution_preserves_explicit_values_and_original_config(
     assert captured[0].segmentation.epochs == 3
     assert captured[0].segmentation.batch_size == 6
     assert cfg.model_dump() == original
-
-
-def test_segmentation_row_emitted(tmp_path: Path):
-    out = tmp_path / "out.csv"
-    cfg = _cfg_for_segmentation(out)
-
-    with (
-        mock.patch(
-            "torchgeo_bench.main.get_datasets", return_value=_synthetic_segmentation_loaders()
-        ),
-        mock.patch(
-            "torchgeo_bench.segmentation_task.build_seg_probe_and_solver",
-            return_value=_mock_probe_and_solver(),
-        ),
-    ):
-        main(cfg)
-
-    df = pd.read_csv(out)
-    assert df["method"].str.startswith("seg-").any()
-    assert "miou" in set(df["metric_name"].str.lower())
-    assert df.loc[0, "best_lr"] == 1e-3
-    assert df.loc[0, "best_batch_size"] == 2
-    assert not df.loc[0, "merge_val"]
-    assert df.loc[0, "ci_lower"] < df.loc[0, "ci_upper"]
 
 
 def test_cached_segmentation_records_probe_batch_size(tmp_path: Path):

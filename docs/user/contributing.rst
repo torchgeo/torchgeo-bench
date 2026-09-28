@@ -75,13 +75,17 @@ Tests
    $ uv run pytest -k "m-eurosat" -v                # by keyword
    $ uv run pytest --no-cov                         # disable coverage for speed
 
-All test cases live under :file:`tests/`, including the optional Cleanlab project tests in :file:`tests/projects/cleanlab/`. Shared inputs and subprocess helpers belong in :file:`tests/support/`, not in another test module. Use the same Ruff profile for every test.
+All test cases live under :file:`tests/`. Shared inputs and subprocess helpers belong in :file:`tests/support/`, not in another test module. Use the same Ruff profile for every test.
 
 The default suite needs no downloaded datasets or pretrained weights and can run on CPU; GPU-specific tests skip when CUDA is unavailable. The :file:`tests/integration/` suite creates small on-disk datasets with separate training, validation, and test samples. It exercises CLI parsing, data loading, feature extraction, fitting, output files, and resume behavior together. External download transport is replaced with local fixture data, and a temporary random-weight preset lets the public CLI exercise segmentation offline; numerical algorithms and result writers run normally. Integration tests must assert meaningful outputs, not just a zero exit status.
 
 ``pytest-cov`` measures both lines and branches across :mod:`torchgeo_bench`, including Python subprocesses. Every normal run displays missing coverage and writes :file:`coverage.xml`; CI saves that report as an artifact and uploads it to Codecov. Generate a navigable local report with ``uv run pytest --cov-report=html`` and open :file:`htmlcov/index.html`. Optional model packages remain in the coverage denominator even when they are not installed, so compare results using the same dependency extras.
 
 Only the explicitly selected ``slow`` and ``accuracy_check`` suites need real data or cached weights. Missing datasets skip individually; present but malformed data must fail. They use the canonical subdirectories documented in :doc:`datasets`.
+
+Accuracy checks default to CPU with a 600-second timeout per model/dataset combination. Override these explicitly for larger models, for example ``uv run pytest -m accuracy_check --accuracy-device cuda:0 --accuracy-timeout 3600``. The absolute accuracy tolerance remains 0.02 for both KNN and linear probes.
+
+Refresh :file:`tests/fixtures/accuracy_baselines.csv` with ``uv run python scripts/update_baselines.py``. The script reads stored results without running models or downloading weights. Its explicit case list preserves the small regression matrix; selection matches the resolved model target, normalization, bands, partition, seed, image settings, class count, resolution, pooling, and linear-probe settings before choosing the latest hashed result. Missing comparable results are an error. The fixture records the source hash for provenance, but does not require a rerun to share it: resume hashes also include bootstrap and batch-size settings. The default offline suite checks that the fixture still matches the stored results and current presets. Terratorch execution compatibility is tracked separately in `issue #397 <https://github.com/torchgeo/torchgeo-bench/issues/397>`__; refreshing its stored baselines does not verify that optional backend.
 
 Code style
 ----------

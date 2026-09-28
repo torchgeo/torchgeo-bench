@@ -8,7 +8,7 @@ intrinsic-dimension estimators plus dependency-free centered feature-spectrum
 diagnostics.  Used by
 :func:`torchgeo_bench.main.evaluate_intrinsic_dim` to attach
 ``method="intrinsic_dim"`` rows to
-``output.intrinsic_dim_directory/<model name>.csv``. An explicit
+``output.directory/intrinsic_dim/<model name>.csv``. An explicit
 ``output.file`` combines them with the image-run metrics instead.
 
 Enable the pass with ``intrinsic_dim.enabled: true`` in image YAML.

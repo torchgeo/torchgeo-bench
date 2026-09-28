@@ -10,6 +10,7 @@ import sys
 from contextlib import redirect_stdout
 from dataclasses import asdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,7 @@ from torch.utils.data import Dataset
 
 from ..config.presets import NORMALIZATIONS, ModelPreset, build_model
 from ..config.profile import ProfileConfig, resolve_profile_config
+from ..config.schema import resolve_output_path
 from ..datasets import BandSpec, get_bench_dataset_class, get_datasets
 from ..devices import resolve_device
 from ..model_profile import ProfileResult, profile_inference
@@ -154,4 +156,12 @@ def run(config: ProfileConfig) -> None:
             n_measure=config.measurements,
             count_flops=config.count_flops,
         )
-    print(json.dumps(_record(config, preset, selected_bands, sample, result), allow_nan=False))
+    payload = json.dumps(_record(config, preset, selected_bands, sample, result), allow_nan=False)
+    if config.output.directory is None and config.output.file is None:
+        print(payload)
+    else:
+        path = Path(
+            resolve_output_path(config.output.directory, config.output.file, "profile.json")
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload + "\n", encoding="utf-8")

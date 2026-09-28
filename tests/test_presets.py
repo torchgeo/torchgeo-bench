@@ -6,12 +6,14 @@ import sys
 import pytest
 
 from torchgeo_bench.config import list_model_configs, model_config_path
+from torchgeo_bench.config.flops import FlopsConfig
 from torchgeo_bench.config.presets import (
     ModelPreset,
     build_model,
     load_model_preset,
     resolve_run_config,
 )
+from torchgeo_bench.config.profile import ProfileConfig, resolve_profile_config
 from torchgeo_bench.config.run import RunConfig
 from torchgeo_bench.config.schema import ModelConfig, load_yaml
 from torchgeo_bench.models.torchgeo_models import TorchGeoScaleMAEBench
@@ -51,6 +53,27 @@ def test_rcf_seed_is_explicit_and_overridable() -> None:
     )
 
 
+@pytest.mark.parametrize("name", ["torchgeo/deo_rgb", "torchgeo/deo_s2"])
+@pytest.mark.parametrize("normalization", [None, "dataset"])
+def test_deo_normalization_defaults_and_explicit_override(
+    name: str, normalization: str | None
+) -> None:
+    settings = {"model": {"name": name}}
+    if normalization is not None:
+        settings["input"] = {"normalization": normalization}
+    run = RunConfig.model_validate({**settings, "datasets": ["m-eurosat"]})
+    profile = ProfileConfig.model_validate({**settings, "dataset": "m-eurosat"})
+    flops = FlopsConfig.model_validate(settings)
+
+    for effective, preset in (
+        resolve_run_config(run, "m-eurosat"),
+        resolve_profile_config(profile),
+        flops.resolve(),
+    ):
+        assert effective.input.normalization == (normalization or "model")
+        assert "normalization" not in preset.kwargs
+
+
 def test_preset_layers_do_not_override_an_explicit_empty_selection() -> None:
     omitted = RunConfig(model=ModelConfig(name="timm/resnet50"), datasets=["caffe"])
     explicit = RunConfig.model_validate(
@@ -78,6 +101,43 @@ def test_custom_model_keeps_constructor_options_separate() -> None:
     preset = load_model_preset(selection)
     assert preset.kwargs == {"options": {"_target_": "ordinary.mapping"}}
     assert preset.target == "custom_model.Model"
+
+
+def test_model_dataset_overrides_are_isolated_and_fall_back() -> None:
+    model_cfg = ModelPreset.model_validate(
+        {
+            "target": "example.Model",
+            "name": "example",
+            "input": {"image_size": 224},
+            "kwargs": {"res": 1.0, "pool": "cls"},
+            "dataset_overrides": {
+                "m-eurosat": {"input": {"image_size": 64}, "kwargs": {"res": 3.5}},
+                "forestnet": {"input": {"image_size": 128}, "kwargs": {"pool": "mean"}},
+            },
+        }
+    )
+
+    eurosat = model_cfg.for_dataset("m-eurosat")
+    fallback = model_cfg.for_dataset("unlisted")
+    forestnet = model_cfg.for_dataset("forestnet")
+
+    assert (eurosat.input.image_size, eurosat.kwargs["res"], eurosat.kwargs["pool"]) == (
+        64,
+        3.5,
+        "cls",
+    )
+    assert (fallback.input.image_size, fallback.kwargs["res"], fallback.kwargs["pool"]) == (
+        224,
+        1.0,
+        "cls",
+    )
+    assert (forestnet.input.image_size, forestnet.kwargs["res"], forestnet.kwargs["pool"]) == (
+        128,
+        1.0,
+        "mean",
+    )
+    assert not eurosat.dataset_overrides
+    assert model_cfg.input.image_size == 224
 
 
 def test_configuration_import_and_resolution_do_not_import_omegaconf() -> None:

@@ -22,7 +22,7 @@ from torch import nn
 from torchgeo_bench.bands import BandCompatibilityError
 from torchgeo_bench.config.flops import FlopsConfig, FlopsSegmentationConfig
 from torchgeo_bench.config.presets import NORMALIZATIONS, ModelPreset, build_model
-from torchgeo_bench.config.schema import SegmentationConfig
+from torchgeo_bench.config.schema import SegmentationConfig, resolve_output_path
 from torchgeo_bench.datasets import get_bench_dataset_class
 from torchgeo_bench.datasets.base import BandSpec
 from torchgeo_bench.devices import resolve_device
@@ -390,7 +390,7 @@ def main(config: FlopsConfig) -> None:
     """Measure per-sample compute cost for one model config."""
     cfg, preset = config.resolve()
     device = resolve_device(cfg.runtime.device)
-    output_path = cfg.output.file
+    output_path = resolve_output_path(cfg.output.directory, cfg.output.file, "compute_cost.csv")
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     torch.manual_seed(cfg.runtime.seed)

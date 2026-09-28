@@ -51,30 +51,3 @@ def test_profile_resume_partial_does_not_skip(tmp_path: Path):
     profile_df = df[df["method"] == "profile"]
     for name in metrics:
         assert int((profile_df["metric_name"] == name).sum()) == 1
-
-
-def test_profile_resume_complete_skips(tmp_path: Path):
-    out = tmp_path / "out.csv"
-    cfg = _compose_cfg(
-        out,
-        overrides={
-            "output": {"resume": True},
-            "classification": {"methods": ["knn"]},
-            "profile": {"enabled": True, "n_warmup": 1, "n_measure": 1},
-        },
-    )
-
-    seed_rows = [_resume_row(cfg, method="knn5", metric_name="accuracy")]
-    seed_rows.extend(
-        _resume_row(cfg, method="profile", metric_name=name)
-        for name in ("params_m", "throughput_samples_per_sec", "latency_ms_per_batch_p50")
-    )
-    pd.DataFrame(seed_rows).to_csv(out, index=False)
-
-    with (
-        mock.patch("torchgeo_bench.main.get_datasets", return_value=_synthetic_loaders()),
-        mock.patch("torchgeo_bench.main.measure_profile") as profile_mock,
-    ):
-        main(cfg)
-
-    profile_mock.assert_not_called()

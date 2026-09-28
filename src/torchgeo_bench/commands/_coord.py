@@ -7,7 +7,7 @@ import yaml
 
 from torchgeo_bench.coordbench.config import CoordConfig, resolve_coord_preset
 
-from ._config import FlagOverride, load_config_or_exit, load_from_flags
+from ._config import OUTPUT_FLAG_OVERRIDES, FlagOverride, load_config_or_exit, load_from_flags
 
 _FLAG_OVERRIDES = (
     FlagOverride("model", ("model", "name"), replace_roots=("model",)),
@@ -22,7 +22,7 @@ _FLAG_OVERRIDES = (
     FlagOverride("device", ("runtime", "device")),
     FlagOverride("seed", ("runtime", "seed")),
     FlagOverride("resume", ("output", "resume")),
-    FlagOverride("output", ("output", "file")),
+    *OUTPUT_FLAG_OVERRIDES,
 )
 
 

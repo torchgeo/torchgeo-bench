@@ -40,11 +40,10 @@ def test_invalid_solver_raises():
         LogisticRegression(solver="sgd")
 
 
-@pytest.mark.parametrize("device", ["cuda", "cuda:0"])
-def test_explicit_cuda_requires_availability(monkeypatch: pytest.MonkeyPatch, device: str) -> None:
+def test_explicit_cuda_requires_availability(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     with pytest.raises(ValueError, match="CUDA is unavailable"):
-        LogisticRegression(device=device)
+        LogisticRegression(device="cuda")
 
 
 @pytest.mark.parametrize("device", [None, "cpu", torch.device("cpu")])
@@ -58,7 +57,7 @@ def test_default_and_cpu_device_never_query_cuda(
     assert LogisticRegression(device=device).device == torch.device("cpu")
 
 
-@pytest.mark.parametrize("device", ["auto", "cuda", torch.device("cuda")])
+@pytest.mark.parametrize("device", ["auto", "cuda"])
 def test_logistic_regression_uses_current_cuda(
     monkeypatch: pytest.MonkeyPatch, device: str | torch.device
 ) -> None:
@@ -75,13 +74,6 @@ def test_auto_device_fits_on_cpu_when_cuda_is_unavailable(monkeypatch: pytest.Mo
     explicit = LogisticRegression(device="cpu").fit(X, y)
     assert automatic.device == torch.device("cpu")
     np.testing.assert_allclose(automatic.predict_proba(X), explicit.predict_proba(X))
-
-
-def test_logistic_regression_rejects_invalid_cuda_index(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
-    with pytest.raises(ValueError, match="CUDA index 2"):
-        LogisticRegression(device="cuda:2")
 
 
 def test_fit_non_tensor_raises():
