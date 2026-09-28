@@ -1,5 +1,5 @@
 name: tgeo_swinv2t_s2ms_satlas_si
-target: torchgeo_bench.models.TorchGeoSatlasMSBench
+target: torchgeo_bench.models.TorchGeoSwinBench
 kwargs:
   factory: swin_v2_t
   weights_class: Swin_V2_T_Weights

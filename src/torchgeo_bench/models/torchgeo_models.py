@@ -349,8 +349,21 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
         return self.backbone(images)
 
 
+_SATLAS_TCI_BANDS = ["red", "green", "blue"]
+
+
 class TorchGeoSwinBench(_TorchGeoBackboneBench):
-    """Wrapper for torchgeo Swin-V2 models (NAIP / Sentinel-2 SatLAS variants)."""
+    """Wrapper for torchgeo Swin-V2 models (NAIP / Sentinel-2 SatLAS variants).
+
+    RGB checkpoints adapt the input convolution to the dataset's band count. The Sentinel-2
+    multispectral checkpoints instead select their nine bands by name, in the weights'
+    metadata order ``B04, B03, B02, B05, B06, B07, B08, B11, B12``, and reject datasets
+    missing any of them.
+
+    Under ``model_native``, multispectral R/G/B follow the Sentinel-2 L1C TCI scale and the
+    other bands stay raw DN. The weights divide them by 255 and 8160, and the result is
+    clipped to ``[0, 1]`` (github.com/allenai/satlas/blob/main/Normalization.md).
+    """
 
     weights_input_unit = "uint8_div255"
 
@@ -375,97 +388,34 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
             **_kwargs,
         )
         self.backbone.head = nn.Identity()
-        # Mark non-RGB results as "adapted": their input-convolution weights differ.
-        _adapt_first_conv(self.backbone, "features.0.0", len(bands))
+        self._source_indices: list[int] | None = None
+        if self.weights.meta["in_chans"] == 3:
+            # Mark non-RGB results as "adapted": their input-convolution weights differ.
+            _adapt_first_conv(self.backbone, "features.0.0", len(bands))
+        else:
+            self._select_multispectral_bands(weights_member)
 
-    @torch.no_grad()
-    def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
-        if self.auto_resize and self.target_size:
-            images = _auto_resize(images, self.target_size)
-        return self.backbone(images)
-
-
-_SATLAS_TCI_BANDS = ["red", "green", "blue"]
-_SATLAS_MS_HEADS: dict[str, str] = {
-    "resnet50": "fc",
-    "resnet152": "fc",
-    "swin_v2_t": "head",
-    "swin_v2_b": "head",
-}
-
-
-class TorchGeoSatlasMSBench(_TorchGeoBackboneBench):
-    """Wrapper for Satlas Sentinel-2 multispectral ResNet and Swin-V2 checkpoints.
-
-    The checkpoints take nine bands in the order listed by the weights metadata:
-    ``B04, B03, B02, B05, B06, B07, B08, B11, B12``. Dataset bands are selected into
-    that order by name, so the input convolution is never adapted and datasets missing
-    any of the nine are rejected.
-
-    Under ``model_native``, R/G/B follow the Sentinel-2 L1C TCI scale and the other
-    bands stay raw DN. The weights divide them by 255 and 8160, and the result is
-    clipped to ``[0, 1]`` (github.com/allenai/satlas/blob/main/Normalization.md).
-    """
-
-    expected_input_unit = InputUnit.S2_DN
-
-    def __init__(  # noqa: PLR0913 - public YAML options
-        self,
-        bands: list[BandSpec],
-        *,
-        factory: str = "swin_v2_b",
-        weights_class: str = "Swin_V2_B_Weights",
-        weights_member: str = "SENTINEL2_SI_MS_SATLAS",
-        auto_resize: bool = True,
-        target_size: int | None = 256,
-        normalization: NormalizationStrategy | str = NormalizationStrategy.BANDSPEC_ZSCORE,
-        **_kwargs: Any,
-    ) -> None:
-        if factory not in _SATLAS_MS_HEADS:
+    def _select_multispectral_bands(self, weights_member: str) -> None:
+        model_bands = [canonical_band_name(name) for name in self.weights.meta["bands"]]
+        if model_bands[:3] != _SATLAS_TCI_BANDS:
             raise ValueError(
-                f"TorchGeoSatlasMSBench factory must be one of {tuple(_SATLAS_MS_HEADS)}, "
-                f"got {factory!r}."
+                f"{weights_member} is unsupported: TorchGeoSwinBench multispectral inputs "
+                f"must start with red, green, blue; got {model_bands}."
             )
-        strategy = NormalizationStrategy(normalization)
-        native = strategy is NormalizationStrategy.MODEL_NATIVE
-        # Native scaling is applied below; the generic builder rejects mixed-sensor datasets.
-        super().__init__(
-            bands=bands,
-            factory=factory,
-            weights_class=weights_class,
-            weights_member=weights_member,
-            auto_resize=auto_resize,
-            target_size=target_size,
-            normalization=NormalizationStrategy.IDENTITY if native else strategy,
-            **_kwargs,
-        )
-        self.normalization = strategy
-        self.model_bands = [canonical_band_name(name) for name in self.weights.meta["bands"]]
-        if self.model_bands[:3] != _SATLAS_TCI_BANDS:
-            raise ValueError(
-                f"{weights_member} must list red, green, blue first; got {self.model_bands}."
-            )
-        source_indices = resolve_src_indices(bands, preferred_sensors=("s2",))
-        missing = [band for band in self.model_bands if band not in source_indices]
+        source_indices = resolve_src_indices(self.bands, preferred_sensors=("s2",))
+        missing = [band for band in model_bands if band not in source_indices]
         if missing:
             raise BandCompatibilityError(
                 f"{weights_member} requires Sentinel-2 bands {missing}; "
                 f"available={sorted(source_indices)}."
             )
-        self._source_indices = [source_indices[band] for band in self.model_bands]
-        if native:
-            if self._weights_normalize is None:
-                raise ValueError(f"{weights_member} does not supply a Normalize transform.")
-            self._source_unit = detect_input_unit([bands[i] for i in self._source_indices])
-        setattr(self.backbone, _SATLAS_MS_HEADS[factory], nn.Identity())
+        self._source_indices = [source_indices[band] for band in model_bands]
+        self._source_unit = detect_input_unit([self.bands[i] for i in self._source_indices])
 
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Normalize, then select the checkpoint's nine bands in Satlas order."""
-        if images.shape[1] != len(self.bands):
-            raise ValueError(
-                f"TorchGeoSatlasMSBench received {images.shape[1]} channels "
-                f"for {len(self.bands)} bands."
-            )
+        """Normalize, then select multispectral checkpoints' bands in Satlas order."""
+        if self._source_indices is None:
+            return super().normalize_inputs(images)
         if self.normalization is not NormalizationStrategy.MODEL_NATIVE:
             return super().normalize_inputs(images)[:, self._source_indices]
         selected = to_s2_dn(images[:, self._source_indices], self._source_unit)
