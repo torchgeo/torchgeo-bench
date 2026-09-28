@@ -887,7 +887,7 @@ def test_satlas_ms_rejects_datasets_missing_required_bands(
         )
 
 
-def test_swin_rejects_multispectral_weights_without_leading_rgb(
+def test_swin_rejects_non_satlas_s2_multispectral_weights(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import torchgeo_bench.models.torchgeo_models as tg_models
@@ -895,9 +895,24 @@ def test_swin_rejects_multispectral_weights_without_leading_rgb(
     monkeypatch.setattr(
         tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySatlasSwin()
     )
-    with pytest.raises(ValueError, match="must start with red, green, blue"):
+    with pytest.raises(ValueError, match="only accepts RGB or Satlas Sentinel-2 multispectral"):
         TorchGeoSwinBench(
             bands=MEurosat().bands,
             weights_class="Swin_V2_B_Weights",
             weights_member="LANDSAT_SI_SATLAS",
         )
+
+
+def test_swin_rejects_other_checkpoints_with_satlas_s2_bands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import torchgeo_bench.models.torchgeo_models as tg_models
+
+    satlas = _resolve_torchgeo_weights("Swin_V2_B_Weights", "SENTINEL2_SI_MS_SATLAS")
+    other = SimpleNamespace(transforms=satlas.transforms, meta={**satlas.meta, "dataset": "Other"})
+    monkeypatch.setattr(
+        tg_models, "_resolve_torchgeo_factory", lambda _name: lambda weights: _TinySatlasSwin()
+    )
+    monkeypatch.setattr(tg_models, "_resolve_torchgeo_weights", lambda *_: other)
+    with pytest.raises(ValueError, match="only accepts RGB or Satlas Sentinel-2 multispectral"):
+        TorchGeoSwinBench(bands=MEurosat().bands, weights_member="SENTINEL2_SI_MS_SATLAS")

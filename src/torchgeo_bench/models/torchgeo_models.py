@@ -349,16 +349,17 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
         return self.backbone(images)
 
 
-_SATLAS_TCI_BANDS = ["red", "green", "blue"]
+# R/G/B lead because Satlas feeds them from the TCI image (Normalization.md in allenai/satlas).
+_SATLAS_S2_MS_BANDS = ("B04", "B03", "B02", "B05", "B06", "B07", "B08", "B11", "B12")
 
 
 class TorchGeoSwinBench(_TorchGeoBackboneBench):
     """Wrapper for torchgeo Swin-V2 models (NAIP / Sentinel-2 SatLAS variants).
 
-    RGB checkpoints adapt the input convolution to the dataset's band count. The Sentinel-2
-    multispectral checkpoints instead select their nine bands by name, in the weights'
-    metadata order ``B04, B03, B02, B05, B06, B07, B08, B11, B12``, and reject datasets
-    missing any of them.
+    RGB checkpoints adapt the input convolution to the dataset's band count. The Satlas
+    Sentinel-2 multispectral checkpoints instead select their nine bands by name, in the order
+    ``B04, B03, B02, B05, B06, B07, B08, B11, B12``, and reject datasets missing any of them.
+    Other multi-band checkpoints are rejected.
 
     Under ``model_native``, multispectral R/G/B follow the Sentinel-2 L1C TCI scale and the
     other bands stay raw DN. The weights divide them by 255 and 8160, and the result is
@@ -393,15 +394,18 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
             # Mark non-RGB results as "adapted": their input-convolution weights differ.
             _adapt_first_conv(self.backbone, "features.0.0", len(bands))
         else:
-            self._select_multispectral_bands(weights_member)
+            self._select_satlas_s2_ms_bands(weights_member)
 
-    def _select_multispectral_bands(self, weights_member: str) -> None:
-        model_bands = [canonical_band_name(name) for name in self.weights.meta["bands"]]
-        if model_bands[:3] != _SATLAS_TCI_BANDS:
+    def _select_satlas_s2_ms_bands(self, weights_member: str) -> None:
+        meta = self.weights.meta
+        if meta.get("dataset") != "SatlasPretrain" or tuple(meta.get("bands", ())) != (
+            _SATLAS_S2_MS_BANDS
+        ):
             raise ValueError(
-                f"{weights_member} is unsupported: TorchGeoSwinBench multispectral inputs "
-                f"must start with red, green, blue; got {model_bands}."
+                f"{weights_member} is unsupported: TorchGeoSwinBench only accepts RGB or "
+                "Satlas Sentinel-2 multispectral checkpoints."
             )
+        model_bands = [canonical_band_name(name) for name in _SATLAS_S2_MS_BANDS]
         source_indices = resolve_src_indices(self.bands, preferred_sensors=("s2",))
         missing = [band for band in model_bands if band not in source_indices]
         if missing:
@@ -413,7 +417,7 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
         self._source_unit = detect_input_unit([self.bands[i] for i in self._source_indices])
 
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Normalize, then select multispectral checkpoints' bands in Satlas order."""
+        """Normalize, then select Satlas multispectral checkpoints' bands in Satlas order."""
         if self._source_indices is None:
             return super().normalize_inputs(images)
         if self.normalization is not NormalizationStrategy.MODEL_NATIVE:
