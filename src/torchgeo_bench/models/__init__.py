@@ -23,6 +23,7 @@ from .torchgeo_models import (
     TorchGeoEarthLocBench,
     TorchGeoPanopticonBench,
     TorchGeoResNetBench,
+    TorchGeoSatlasMSBench,
     TorchGeoScaleMAEBench,
     TorchGeoSwinBench,
 )
@@ -55,6 +56,7 @@ __all__: list[str] = [
     "TorchGeoEarthLocBench",
     "TorchGeoPanopticonBench",
     "TorchGeoResNetBench",
+    "TorchGeoSatlasMSBench",
     "TorchGeoScaleMAEBench",
     "TorchGeoSwinBench",
     "UniverSatBenchModel",
