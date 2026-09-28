@@ -369,7 +369,7 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
     Defaults match the SeCo / MoCo Sentinel-2 RGB pretrained weights, whose
     ``Normalize`` transform expects raw Sentinel-2 DN values divided into
     a single global scale. Satlas multispectral checkpoints select their bands by name
-    (see :meth:`_TorchGeoBackboneBench._prepare_input_conv`).
+    (see ``_TorchGeoBackboneBench._prepare_input_conv``).
     """
 
     weights_input_unit = "s2_dn_div10000"
@@ -413,7 +413,7 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
     """Wrapper for torchgeo Swin-V2 models (NAIP / Sentinel-2 SatLAS variants).
 
     Satlas multispectral checkpoints select their bands by name (see
-    :meth:`_TorchGeoBackboneBench._prepare_input_conv`).
+    ``_TorchGeoBackboneBench._prepare_input_conv``).
     """
 
     weights_input_unit = "uint8_div255"
