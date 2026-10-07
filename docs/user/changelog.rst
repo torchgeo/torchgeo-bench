@@ -20,6 +20,7 @@ Added
   deterministic, stratified 60/20/20 split per class (6,000 / 2,000 / 2,000).
   Downloadable with ``torchgeo-bench download aid``.  One of the three
   most-used benchmarks in the GFM literature.
+* Infra-Bench CLS (``infrabench-cls``): 18,756 Sentinel-2 + Sentinel-1 tiles of OpenStreetMap critical infrastructure, 13 classes across seven regions and four sectors, on the paper's spatially blocked 13,087 / 2,856 / 2,813 split. Download with ``torchgeo-bench download infrabench-cls``. The coverage map reads its tile centres from per-cell ``manifest.json`` records.
 
 0.5.0 (2026-08-10)
 ------------------
