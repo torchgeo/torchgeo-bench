@@ -17,6 +17,7 @@ import torchgeo.models as tgm
 from torchvision.transforms import Normalize as NormalizeV1
 from torchvision.transforms.v2 import Normalize as NormalizeV2
 
+from torchgeo_bench.bands import BandCompatibilityError
 from torchgeo_bench.datasets.base import BandSpec
 
 from ._band_mapping import (
@@ -25,7 +26,14 @@ from ._band_mapping import (
     map_to_model_bands,
     resolve_src_indices,
 )
-from ._input_units import InputUnit, convert_unit, detect_input_unit, to_reflectance, to_s2_dn
+from ._input_units import (
+    InputUnit,
+    convert_unit,
+    detect_input_unit,
+    to_reflectance,
+    to_s2_dn,
+    to_s2_tci,
+)
 from ._normalization import NormalizationStrategy
 from ._pooling import pool_tokens
 from .interface import BenchModel
@@ -132,7 +140,12 @@ _UNIT_EXPECTED_SOURCE: dict[str, InputUnit] = {
     "uint8_div255": InputUnit.UINT8,
     "reflectance_0_1": InputUnit.REFLECTANCE_0_1,
     "s2_dn_div10000": InputUnit.S2_DN,
+    "s2_tci_div255": InputUnit.S2_TCI,
 }
+
+
+# R/G/B lead because Satlas feeds them from the TCI image (Normalization.md in allenai/satlas).
+_SATLAS_S2_MS_BANDS = ("B04", "B03", "B02", "B05", "B06", "B07", "B08", "B11", "B12")
 
 
 class _TorchGeoBackboneBench(BenchModel):
@@ -207,6 +220,59 @@ class _TorchGeoBackboneBench(BenchModel):
             if native and self._weights_target_unit is not None
             else None
         )
+        self._satlas_s2_ms_indices: list[int] | None = None
+
+    def _prepare_input_conv(self, conv_path: str, weights_member: str) -> None:
+        """Select Satlas S2 multispectral bands, or adapt ``conv_path`` to the band count.
+
+        Satlas Sentinel-2 multispectral checkpoints take their nine bands by name in
+        :data:`_SATLAS_S2_MS_BANDS` order, and datasets missing any of them are rejected.
+        Other multi-band Satlas checkpoints (Landsat, Sentinel-1) are rejected. Every other
+        checkpoint keeps its first convolution adapted to the dataset's band count.
+        """
+        meta = self.weights.meta
+        if meta.get("dataset") != "SatlasPretrain":
+            _adapt_first_conv(self.backbone, conv_path, len(self.bands))
+        elif tuple(meta["bands"]) == _SATLAS_S2_MS_BANDS:
+            self._select_satlas_s2_ms_bands(weights_member)
+        elif meta["in_chans"] == 3:
+            # Mark non-RGB results as "adapted": their input-convolution weights differ.
+            _adapt_first_conv(self.backbone, conv_path, len(self.bands))
+        else:
+            raise ValueError(
+                f"{weights_member} is unsupported: only RGB and Sentinel-2 multispectral "
+                "Satlas checkpoints are supported."
+            )
+
+    def _select_satlas_s2_ms_bands(self, weights_member: str) -> None:
+        model_bands = [canonical_band_name(name) for name in _SATLAS_S2_MS_BANDS]
+        source_indices = resolve_src_indices(self.bands, preferred_sensors=("s2",))
+        missing = [band for band in model_bands if band not in source_indices]
+        if missing:
+            raise BandCompatibilityError(
+                f"{weights_member} requires Sentinel-2 bands {missing}; "
+                f"available={sorted(source_indices)}."
+            )
+        self._satlas_s2_ms_indices = [source_indices[band] for band in model_bands]
+        self._satlas_s2_ms_unit = detect_input_unit(
+            [self.bands[i] for i in self._satlas_s2_ms_indices]
+        )
+
+    def _normalize_satlas_s2_ms(self, images: torch.Tensor) -> torch.Tensor:
+        """Normalize, then select the Satlas S2 multispectral bands.
+
+        Under ``model_native`` (``--normalization model``), this uses Satlas's own
+        preprocessing: R/G/B follow the Sentinel-2 L1C TCI scale and the other bands stay raw
+        DN; the weights divide them by 255 and 8160, and the result is clipped to ``[0, 1]``
+        (github.com/allenai/satlas/blob/main/Normalization.md).
+        """
+        indices = cast(list[int], self._satlas_s2_ms_indices)
+        if self.normalization is not NormalizationStrategy.MODEL_NATIVE:
+            return super().normalize_inputs(images)[:, indices]
+        selected = to_s2_dn(images[:, indices], self._satlas_s2_ms_unit)
+        tci = to_s2_tci(selected[:, :3], InputUnit.S2_DN)
+        inputs = torch.cat((tci, selected[:, 3:]), dim=1)
+        return cast(nn.Sequential, self._weights_normalize)(inputs).clamp(0.0, 1.0)
 
     def _tiled_normalize(self, in_chans: int) -> nn.Sequential | None:
         """Build the pretrained normalization chain for ``in_chans`` channels.
@@ -267,6 +333,8 @@ class _TorchGeoBackboneBench(BenchModel):
         Convert inputs to the scale expected by the weights' Normalize first.
         Otherwise, so2sat reflectance in [0, 2.8] collapses under ``std=[10000]``.
         """
+        if self._satlas_s2_ms_indices is not None:
+            return self._normalize_satlas_s2_ms(images)
         native = self.normalization is NormalizationStrategy.MODEL_NATIVE
         weights_norm = self._weights_normalize if native else None
         if self._weights_target_unit is not None and native:
@@ -300,7 +368,8 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
 
     Defaults match the SeCo / MoCo Sentinel-2 RGB pretrained weights, whose
     ``Normalize`` transform expects raw Sentinel-2 DN values divided into
-    a single global scale.
+    a single global scale. Satlas multispectral checkpoints select their bands by name
+    (see ``_TorchGeoBackboneBench._prepare_input_conv``).
     """
 
     weights_input_unit = "s2_dn_div10000"
@@ -331,7 +400,7 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
             **_kwargs,
         )
         self.backbone.fc = nn.Identity()
-        _adapt_first_conv(self.backbone, "conv1", len(bands))
+        self._prepare_input_conv("conv1", weights_member)
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
@@ -341,7 +410,11 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
 
 
 class TorchGeoSwinBench(_TorchGeoBackboneBench):
-    """Wrapper for torchgeo Swin-V2 models (NAIP / Sentinel-2 SatLAS variants)."""
+    """Wrapper for torchgeo Swin-V2 models (NAIP / Sentinel-2 SatLAS variants).
+
+    Satlas multispectral checkpoints select their bands by name (see
+    ``_TorchGeoBackboneBench._prepare_input_conv``).
+    """
 
     weights_input_unit = "uint8_div255"
 
@@ -366,8 +439,7 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
             **_kwargs,
         )
         self.backbone.head = nn.Identity()
-        # Mark non-RGB results as "adapted": their input-convolution weights differ.
-        _adapt_first_conv(self.backbone, "features.0.0", len(bands))
+        self._prepare_input_conv("features.0.0", weights_member)
 
     @torch.no_grad()
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:

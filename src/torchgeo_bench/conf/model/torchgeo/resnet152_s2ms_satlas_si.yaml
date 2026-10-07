@@ -1,12 +1,13 @@
-name: tgeo_resnet50_s2rgb_satlas_mi
+name: tgeo_resnet152_s2ms_satlas_si
 target: torchgeo_bench.models.TorchGeoResNetBench
 kwargs:
-  factory: resnet50
-  weights_class: ResNet50_Weights
-  weights_member: SENTINEL2_MI_RGB_SATLAS
-  normalization_input_unit: s2_tci_div255
+  factory: resnet152
+  weights_class: ResNet152_Weights
+  weights_member: SENTINEL2_SI_MS_SATLAS
   auto_resize: false
   target_size: 224
+input:
+  bands: all
 segmentation:
   layers:
     - layer4
