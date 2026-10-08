@@ -8,6 +8,8 @@ Targets:
 - ``resisc45`` — torchgeo's NWPU-RESISC45 downloader, into ``<output>/resisc45``.
 - ``aid`` — pinned ``isaaccorley/aid`` rehost, into ``<output>/aid``.
 - ``ucmerced`` — torchgeo's UC Merced downloader, into ``<output>/ucmerced``.
+- ``hotosm_buildings`` — pinned ``hotosm/vhr-building-segmentation`` parquet, converted
+  into compact per-split files under ``<output>/hotosm_buildings``.
 
 V1 uses the pinned ``calebrob6/geobenchv1-webdataset`` mirror.
 
@@ -16,6 +18,7 @@ Use ``--datasets`` to select a GeoBench subset.
 
 import hashlib
 import logging
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -24,6 +27,11 @@ from torchgeo.datasets import RESISC45, EuroSAT, EuroSATSpatial, UCMerced
 
 from torchgeo_bench.datasets._v1_webdataset import download_sharded_root
 from torchgeo_bench.datasets.geobench_v2 import list_v2_datasets
+from torchgeo_bench.datasets.hotosm_buildings import (
+    UPSTREAM_SPLITS,
+    HOTBuildings,
+    _convert_hotosm_split,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +46,9 @@ AID_SPLIT_SHA256: dict[str, str] = {
     "test": "84b08edcfd4d34bc62340ff0aebc0e07426865323bfd6c38868dc2bc8c70111b",
 }
 
+HOTOSM_REPO = "hotosm/vhr-building-segmentation"
+HOTOSM_REVISION = "8d3e64e5c69aa37209953cce3a48df1092bc7c94"
+
 DEFAULT_V2_DATASETS: tuple[str, ...] = tuple(list_v2_datasets())
 
 V1_DATASETS: tuple[str, ...] = (
@@ -49,7 +60,7 @@ V1_DATASETS: tuple[str, ...] = (
     "m-bigearthnet",
 )
 TORCHGEO_DATASETS: tuple[str, ...] = ("eurosat", "resisc45", "ucmerced")
-DIRECT_DATASETS: tuple[str, ...] = ("aid",)
+DIRECT_DATASETS: tuple[str, ...] = ("aid", "hotosm_buildings")
 DOWNLOADABLE_DATASETS: tuple[str, ...] = (
     V1_DATASETS + DEFAULT_V2_DATASETS + TORCHGEO_DATASETS + DIRECT_DATASETS
 )
@@ -176,6 +187,35 @@ def download_aid(output_dir: Path) -> None:
     logger.info("AID download complete.")
 
 
+def download_hotosm_buildings(output_dir: Path) -> None:
+    """Download the pinned HOT parquet and convert it into ``output_dir/hotosm_buildings``.
+
+    The upstream shards (5.9 GB) are deleted after conversion (about 1.3 GB).
+    """
+    target = Path(output_dir) / "hotosm_buildings"
+    upstream = target / "upstream"
+    logger.info("Downloading %s@%s -> %s", HOTOSM_REPO, HOTOSM_REVISION, upstream)
+    snapshot_download(
+        repo_id=HOTOSM_REPO,
+        repo_type="dataset",
+        revision=HOTOSM_REVISION,
+        allow_patterns=["data/*.parquet"],
+        local_dir=upstream,
+    )
+    for split, prefix in UPSTREAM_SPLITS.items():
+        rows = _convert_hotosm_split(
+            (upstream / "data").glob(f"{prefix}-*.parquet"), target / f"{split}.parquet"
+        )
+        if rows != HOTBuildings.split_sizes[split]:
+            raise ValueError(
+                f"HOT buildings {split}: expected {HOTBuildings.split_sizes[split]} rows, "
+                f"got {rows}. Remove {target} and retry the download."
+            )
+        logger.info("Converted HOT buildings %s split (%d rows).", split, rows)
+    shutil.rmtree(upstream)
+    logger.info("HOT buildings download complete.")
+
+
 def download_ucmerced(output_dir: Path) -> None:
     """Download verified UC Merced imagery and splits into ``output_dir/ucmerced``."""
     target = Path(output_dir) / "ucmerced"
@@ -211,3 +251,5 @@ def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None
         download_aid(output_dir)
     if "ucmerced" in selected:
         download_ucmerced(output_dir)
+    if "hotosm_buildings" in selected:
+        download_hotosm_buildings(output_dir)
