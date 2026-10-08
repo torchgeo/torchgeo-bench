@@ -69,6 +69,11 @@ def test_low_magnitude_band_does_not_split_raw_sensor_units() -> None:
         (InputUnit.REFLECTANCE_0_1, InputUnit.UINT8, 0.5, 127.5),
         (InputUnit.UINT8, InputUnit.S2_DN, 255.0, 10000.0),
         (InputUnit.UINT8, InputUnit.REFLECTANCE_0_1, 255.0, 1.0),
+        (InputUnit.S2_DN, InputUnit.S2_TCI, 1779.0, 127.5),
+        (InputUnit.S2_DN, InputUnit.S2_TCI, 10000.0, 255.0),
+        (InputUnit.S2_DN, InputUnit.S2_TCI, -50.0, 0.0),
+        (InputUnit.REFLECTANCE_0_1, InputUnit.S2_TCI, 0.1779, 127.5),
+        (InputUnit.UINT8, InputUnit.S2_TCI, 200.0, 200.0),
     ],
 )
 def test_convert_unit_pairs(src: InputUnit, dst: InputUnit, value: float, expected: float) -> None:

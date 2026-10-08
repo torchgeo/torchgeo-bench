@@ -17,6 +17,12 @@ class InputUnit(StrEnum):
     S2_DN = "s2_dn"  # raw Sentinel-2 sensor counts, 0..~10000+
     REFLECTANCE_0_1 = "reflectance_0_1"  # already-normalised, ~0..1 (2.8 max in m-so2sat)
     UINT8 = "uint8"  # 0..255 NAIP / Landsat L1
+    S2_TCI = "s2_tci"  # 0..255 Sentinel-2 L1C true-colour image; never detected from data
+
+
+# ESA's L1C TCI saturates at 255 for DN 3558 (reflectance 0.3558):
+# https://sentinel.esa.int/web/sentinel/user-guides/sentinel-2-msi/definitions
+_S2_TCI_SATURATION_DN = 3558.0
 
 
 def detect_input_unit(bands: list[BandSpec]) -> InputUnit:
@@ -91,6 +97,18 @@ def to_uint8(images: torch.Tensor, src: InputUnit) -> torch.Tensor:
     return images * (255.0 / 10000.0)
 
 
+def to_s2_tci(images: torch.Tensor, src: InputUnit) -> torch.Tensor:
+    """Bring values into Sentinel-2 L1C TCI scale, clipped to ``[0, 255]``.
+
+    Used for Satlas Sentinel-2 RGB backbones, which were trained on TCI divided by 255.
+    uint8 inputs are already display-scaled RGB, so they pass through unchanged.
+    """
+    if src == InputUnit.UINT8:
+        return images
+    dn = to_s2_dn(images, src)
+    return (dn * (255.0 / _S2_TCI_SATURATION_DN)).clamp(0.0, 255.0)
+
+
 def convert_unit(images: torch.Tensor, src: InputUnit, dst: InputUnit) -> torch.Tensor:
     """Convert image values between input scales; leave them unchanged if src == dst."""
     if src == dst:
@@ -101,4 +119,6 @@ def convert_unit(images: torch.Tensor, src: InputUnit, dst: InputUnit) -> torch.
         return to_reflectance(images, src)
     if dst == InputUnit.UINT8:
         return to_uint8(images, src)
+    if dst == InputUnit.S2_TCI:
+        return to_s2_tci(images, src)
     raise ValueError(f"convert_unit: unknown target unit {dst}")
