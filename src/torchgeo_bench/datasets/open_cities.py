@@ -19,6 +19,7 @@ import pandas as pd
 import rasterio
 import shapely
 import torch
+from rasterio.crs import CRS
 from rasterio.features import rasterize
 from rasterio.windows import Window
 from torch.utils.data import Dataset
@@ -68,7 +69,7 @@ def load_checksums() -> dict[str, str]:
     return {path: digest for digest, path in (line.split() for line in text.splitlines())}
 
 
-def load_labels(path: Path, crs: rasterio.crs.CRS) -> np.ndarray:
+def load_labels(path: Path, crs: CRS) -> np.ndarray:
     """Read a label GeoJSON, reproject it to ``crs``, and repair invalid polygons.
 
     Repairs can yield line or point fragments; only the polygonal parts are kept.
@@ -153,7 +154,7 @@ class _OpenCitiesSplit(Dataset):
         chip_size: int = CHIP_SIZE,
     ) -> None:
         self.root = root
-        self.scenes = (index.city + "/" + index.scene).to_numpy()
+        self.scenes = index.city.str.cat(index.scene, sep="/").to_numpy()
         self.offsets = index[["col_off", "row_off"]].to_numpy()
         self.transform = transform
         self.chip_size = chip_size
