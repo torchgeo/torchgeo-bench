@@ -122,7 +122,6 @@ data/
 !**/normalizer.json
 !docs/_static/_results_snapshots/*.json
 !docs/_static/_dataset_geography/*.json
-!src/torchgeo_bench/datasets/open_cities_index.csv
 
 # Logs
 *.log
