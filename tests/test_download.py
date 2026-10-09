@@ -271,7 +271,7 @@ def test_download_datasets_validates_every_name_before_dispatch(
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("name", ["eurosat", "resisc45", "ucmerced"])
+@pytest.mark.parametrize("name", ["eurosat", "resisc45", "ucmerced", "open_cities"])
 def test_download_datasets_deduplicates_names(tmp_path: Path, name: str) -> None:
     with mock.patch(f"torchgeo_bench.download.download_{name}") as download:
         download_datasets([name, name], tmp_path)

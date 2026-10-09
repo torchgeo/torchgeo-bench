@@ -2,7 +2,7 @@ Datasets
 ========
 
 ``torchgeo-bench`` supports two generations of GeoBench datasets — V1 and
-V2 — plus wrappers around torchgeo's standalone EuroSAT, NWPU-RESISC45, and UC Merced datasets, and AID (rehosted from Hugging Face). All datasets share the
+V2 — plus wrappers around torchgeo's standalone EuroSAT, NWPU-RESISC45, and UC Merced datasets, AID (rehosted from Hugging Face), and the Open Cities AI Challenge building segmentation set. All datasets share the
 :class:`~torchgeo_bench.datasets.BenchDataset` interface and are
 registered by name so they can be selected without importing every loader.
 
@@ -36,6 +36,9 @@ variables like ``GEOBENCH_ROOT``; if you keep data elsewhere, symlink
    * - ``aid``
      - ``data/aid/``
      - Hugging Face ``isaaccorley/aid``, pinned commit + checksum-verified
+   * - ``open_cities``
+     - ``data/open_cities/<city>/``
+     - source.coop ``open-cities/ai-challenge`` tier 1, checksum-verified; masks built locally
 
    * - ``ucmerced``
      - ``data/ucmerced/``
@@ -56,6 +59,7 @@ The :doc:`/api/cli` accepts one or more dataset names. Collection aliases remain
    $ torchgeo-bench download eurosat                                  # torchgeo EuroSAT
    $ torchgeo-bench download resisc45                                 # torchgeo RESISC45
    $ torchgeo-bench download aid                                      # isaaccorley/aid rehost
+   $ torchgeo-bench download open_cities                              # source.coop, ~34 GB
 
    $ torchgeo-bench download ucmerced                                 # torchgeo UC Merced
    $ torchgeo-bench download geobench_v2 --output-dir /scratch/data   # custom root
@@ -237,6 +241,23 @@ than being silently omitted.
 .. code-block:: console
 
    $ torchgeo-bench run --model imagestats --dataset ucmerced --device cpu
+
+Open Cities AI Challenge — segmentation
+---------------------------------------
+
+==================== ====== ===== ============================================ ==============================================================
+CLI name             #cls   bands notes                                        Class
+==================== ====== ===== ============================================ ==============================================================
+``open_cities``      2      3     drone RGB, native 0.02-0.20 m GSD            :class:`~torchgeo_bench.datasets.OpenCities`
+==================== ====== ===== ============================================ ==============================================================
+
+``open_cities`` is building footprint segmentation on drone imagery of seven African cities (Accra, Dar es Salaam, Kampala, Monrovia, Niamey, Pointe-Noire, and Zanzibar), from the tier-1 scenes of the Open Cities AI Challenge (GFDRR Labs, 2020). The upstream release ships 31 large georeferenced scenes with OpenStreetMap footprints and a test set without labels, so the benchmark defines its own chips and splits. Samples are 512x512 chips cut on each scene's native pixel grid. Since the native ground sampling distance ranges from 0.02 m to 0.20 m, a chip covers between 10 m and 100 m on the ground, and any resizing is left to the model's transforms.
+
+The chips and their train/val/test assignment are fixed in the packaged ``open_cities_index.csv``, which ``scripts/generate_open_cities_index.py`` generated once. Within each city, 500 m geographic blocks are assigned to the splits so that chip count and building pixels both come close to 70/10/20, which gives 76,818 train, 11,236 validation, and 22,408 test chips. A chip is kept when at least half of it is valid imagery, and chips that duplicate an overlapping scene are dropped. Zanzibar is mostly rural bush, so its blocks with less than 1% building cover are dropped as well. ``scripts/plot_open_cities_splits.py`` draws the split map of each city and writes the block polygons as GeoJSON for inspection in a GIS.
+
+``torchgeo-bench download open_cities`` fetches the 31 scenes and their label GeoJSONs (about 34 GB) from source.coop and verifies them against packaged SHA-256 checksums. The imagery is kept byte-identical. The download then rasterises one mask GeoTIFF per scene on the same pixel grid, with 0 for background, 1 for building, and 255 where the image is transparent or black, which the loss and metrics ignore. Normalization statistics exclude these nodata pixels.
+
+A label audit against Google and Microsoft building footprints found the tier-1 labels well aligned with the imagery, while the Dar es Salaam scenes miss about 5% of buildings. In addition, Monrovia scenes ``207cc7`` and ``401175`` are stored in UTM zone 36N instead of 29N, so their ground pixels are not square. Labels are ODbL 1.0; the imagery is CC BY 4.0 or ODbL depending on the scene.
 
 Selecting datasets
 ------------------
