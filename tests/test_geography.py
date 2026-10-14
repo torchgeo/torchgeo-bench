@@ -1,12 +1,17 @@
 """Check committed geography records without loading raw imagery."""
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
+import rasterio
+from rasterio.transform import Affine
 
+from tests.support.data import write_openearthmap_sar_files
+from torchgeo_bench import geography
 from torchgeo_bench.datasets import list_datasets
 from torchgeo_bench.geography import (
     GEO_ALIAS,
@@ -23,6 +28,39 @@ from torchgeo_bench.geography import (
 )
 
 VALID_STATUSES = {"extracted", "no_geo", "not_downloaded"}
+
+
+@pytest.mark.usefixtures("small_openearthmap_sar")
+def test_openearthmap_sar_geography_skips_missing_tags_and_reprojects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from torchgeo_bench.datasets import openearthmap_sar as sar
+
+    monkeypatch.setattr(sar, "SPLITS", {"train": ("TrainArea", 1), "val": ("ValArea", 1)})
+    directory = write_openearthmap_sar_files(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    image = directory / "train/sar_images/TrainArea_001.tif"
+    with rasterio.open(
+        image, "w", driver="GTiff", width=16, height=16, count=1, dtype="uint8"
+    ) as raster:
+        raster.write(np.zeros((1, 16, 16), dtype=np.uint8))
+    located = directory / "val/sar_images/ValArea_001.tif"
+    with rasterio.open(located, "r+") as raster:
+        raster.crs = "EPSG:32618"
+        raster.transform = Affine(0.5, 0, 500000, 0, -0.5, 4400000)
+    monkeypatch.setattr(
+        geography, "_attribute_continents", lambda lon, lat: Counter({"North America": len(lon)})
+    )
+    record = extract_geography("openearthmap-sar")
+    assert record.n == 1
+    assert record.version == "openearthmap-sar"
+    lon, lat = record.points[0]
+    assert -76 < lon < -74
+    assert 39 < lat < 41
+    with rasterio.open(image, "r+") as raster:
+        raster.transform = Affine(1, 0, 10, 0, -1, 20)
+    with pytest.raises(ValueError, match="Incomplete or invalid GeoTIFF"):
+        extract_geography("openearthmap-sar")
 
 
 @pytest.fixture(scope="module")

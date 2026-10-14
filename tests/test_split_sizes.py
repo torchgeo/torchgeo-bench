@@ -36,6 +36,7 @@ EXPECTED_SIZES: dict[str, dict[str, int]] = {
     "ucmerced": {"train": 1260, "val": 420, "test": 420},
     "eurosat-spatial": {"train": 16200, "val": 5400, "test": 5400},
     "aid": {"train": 6000, "val": 2000, "test": 2000},
+    "openearthmap-sar": {"train": 4333, "val": 210, "test": 490},
 }
 
 
