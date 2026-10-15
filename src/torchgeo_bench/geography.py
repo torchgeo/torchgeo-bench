@@ -16,10 +16,11 @@ Three statuses:
 * ``no_geo`` — no coordinates are available; see :attr:`GeoRecord.reason` and :data:`NO_GEO`.
 * ``not_downloaded`` — registered, but no data files were found locally.
 
-Two coordinate sources are handled:
+Three coordinate sources are handled:
 
 * **V2**: read coordinates and place labels from ``.tortilla`` metadata, not imagery.
 * **V1**: reproject JSON affine/CRS origins from shards or HDF5 to EPSG:4326.
+* **HF parquet**: read ``lon``/``lat``/``country`` columns from converted split files.
 
 Unchanged raw data produces byte-identical JSON.
 """
@@ -83,7 +84,7 @@ class GeoRecord:
     Attributes:
         name: Dataset identifier, as registered (e.g. ``"m-eurosat"``).
         status: ``"extracted"``, ``"no_geo"``, or ``"not_downloaded"``.
-        version: Source family — ``"v1"``, ``"v2"``, or ``"torchgeo"``.
+        version: Source family — ``"v1"``, ``"v2"``, ``"torchgeo"``, or ``"hf_parquet"``.
             ``None`` when nothing was read.
         n: Number of geolocated samples found.
         reason: Why coordinates are unavailable; always set for ``"no_geo"``.
@@ -147,6 +148,22 @@ def _extract_v2(paths: list[str]) -> dict | None:
 
     ok = np.isfinite(lon) & np.isfinite(lat)
     return {"lon": lon[ok], "lat": lat[ok], "place": place[ok], "version": "v2"}
+
+
+def _extract_parquet(paths: list[Path]) -> dict:
+    """Read lon/lat and country columns from converted per-split parquet files."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    table = pa.concat_tables(
+        pq.read_table(path, columns=["lon", "lat", "country"]) for path in paths
+    )
+    return {
+        "lon": table["lon"].to_numpy(),
+        "lat": table["lat"].to_numpy(),
+        "place": np.asarray(table["country"].to_pylist(), dtype=object),
+        "version": "hf_parquet",
+    }
 
 
 def _metadata_origin(meta: dict) -> tuple[float | None, float | None, str]:
@@ -396,6 +413,7 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
     tortillas = sorted(glob.glob(str(directory / "*.tortilla")))
     shards = sorted(glob.glob(str(directory / "shard_*.tar")))
     hdf5s = sorted(glob.glob(str(directory / "*.hdf5")))
+    parquets = [directory / f"{split}.parquet" for split in ("train", "val", "test")]
 
     if tortillas:
         data = _extract_v2(tortillas)
@@ -409,9 +427,11 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
             return GeoRecord(
                 name=name, status="no_geo", reason="no sample carries a usable transform/crs"
             )
+    elif all(path.is_file() for path in parquets):
+        data = _extract_parquet(parquets)
     else:
         raise FileNotFoundError(
-            f"No .tortilla, V1 shard, or .hdf5 files under {directory}. Run `{command}`."
+            f"No .tortilla, V1 shard, .hdf5, or split .parquet files under {directory}. Run `{command}`."
         )
 
     if len(data["lon"]) == 0:
