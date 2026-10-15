@@ -8,6 +8,7 @@ Targets:
 - ``resisc45`` — torchgeo's NWPU-RESISC45 downloader, into ``<output>/resisc45``.
 - ``aid`` — pinned ``isaaccorley/aid`` rehost, into ``<output>/aid``.
 - ``ucmerced`` — torchgeo's UC Merced downloader, into ``<output>/ucmerced``.
+- ``openearthmap-sar``: verified DFC2025 SAR images and labels.
 
 V1 uses the pinned ``calebrob6/geobenchv1-webdataset`` mirror.
 
@@ -16,8 +17,11 @@ Use ``--datasets`` to select a GeoBench subset.
 
 import hashlib
 import logging
+import shutil
 import zipfile
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from urllib.request import urlopen
 
 from huggingface_hub import snapshot_download
 from torchgeo.datasets import RESISC45, EuroSAT, EuroSATSpatial, UCMerced
@@ -49,7 +53,7 @@ V1_DATASETS: tuple[str, ...] = (
     "m-bigearthnet",
 )
 TORCHGEO_DATASETS: tuple[str, ...] = ("eurosat", "resisc45", "ucmerced")
-DIRECT_DATASETS: tuple[str, ...] = ("aid",)
+DIRECT_DATASETS: tuple[str, ...] = ("aid", "openearthmap-sar")
 DOWNLOADABLE_DATASETS: tuple[str, ...] = (
     V1_DATASETS + DEFAULT_V2_DATASETS + TORCHGEO_DATASETS + DIRECT_DATASETS
 )
@@ -186,6 +190,117 @@ def download_ucmerced(output_dir: Path) -> None:
     logger.info("UCMerced download complete.")
 
 
+@dataclass(frozen=True)
+class SARArchive:
+    """Immutable Zenodo artifact and the benchmark directories it supplies."""
+
+    url: str
+    size: int
+    md5: str
+    prefixes: tuple[str, ...]
+
+    @property
+    def filename(self) -> str:
+        """Return the record's ZIP basename."""
+        return self.url.rsplit("/", 1)[1]
+
+
+SAR_ARCHIVES = (
+    SARArchive(
+        "https://zenodo.org/records/14622048/files/dfc25_track1_trainval.zip",
+        8864311171,
+        "100772c6daf81fd09bb869ccd6f9f5d7",
+        ("train/sar_images", "train/labels", "val/sar_images"),
+    ),
+    SARArchive(
+        "https://zenodo.org/records/14948851/files/dfc25_track1_test.zip",
+        403551447,
+        "bc52f9c4c3b5e3db775cde84371fbc14",
+        ("test/sar_images",),
+    ),
+    SARArchive(
+        "https://zenodo.org/records/14950559/files/dfc25_track1_val_labels.zip",
+        8615257,
+        "7bbb7f90bc6d448fc7fa779d62e5cc73",
+        ("val/labels",),
+    ),
+    SARArchive(
+        "https://zenodo.org/records/14950559/files/dfc25_track1_test_labels.zip",
+        17842327,
+        "29558d6198855e9e8ff8db31d3b6fa8b",
+        ("test/labels",),
+    ),
+)
+
+
+def _verify_sar_archive(path: Path, artifact: SARArchive) -> None:
+    with path.open("rb") as stream:
+        actual = hashlib.file_digest(stream, "md5").hexdigest()
+    if actual != artifact.md5 or path.stat().st_size != artifact.size:
+        raise ValueError(
+            f"OpenEarthMap-SAR checksum/size mismatch: {path}; expected "
+            f"md5:{artifact.md5}, {artifact.size} bytes; got md5:{actual}, "
+            f"{path.stat().st_size} bytes. Remove this file and retry."
+        )
+
+
+def _extract_sar_archive(path: Path, target: Path, prefixes: tuple[str, ...]) -> None:
+    from torchgeo_bench.datasets.openearthmap_sar import split_filenames
+
+    expected = {
+        f"{prefix}/{name}" for prefix in prefixes for name in split_filenames(prefix.split("/")[0])
+    }
+    with zipfile.ZipFile(path) as archive:
+        selected: dict[str, zipfile.ZipInfo] = {}
+        for member in archive.infolist():
+            name = member.filename
+            parts = PurePosixPath(name).parts
+            if "\\" in name or ":" in name or name.startswith("/") or ".." in parts:
+                raise ValueError(f"Unsafe ZIP member in {path}: {name}")
+            if name in expected:
+                if name in selected:
+                    raise ValueError(f"Duplicate ZIP member in {path}: {name}")
+                selected[name] = member
+            elif any(name.startswith(f"{prefix}/") for prefix in prefixes) and PurePosixPath(
+                name
+            ).suffix.lower() in {".tif", ".tiff"}:
+                raise ValueError(f"Unexpected TIFF in {path}: {name}")
+        if selected.keys() != expected:
+            raise ValueError(f"Missing ZIP members in {path}: {min(expected - selected.keys())}")
+        logger.info("Extracting %d SAR/label TIFFs from %s", len(selected), path)
+        for name, member in selected.items():
+            destination = target / name
+            if not destination.resolve().is_relative_to(target.resolve()):
+                raise ValueError(f"ZIP destination escapes {target}: {destination}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, destination.open("wb") as output:
+                shutil.copyfileobj(source, output)
+
+
+def download_openearthmap_sar(output_dir: Path) -> None:
+    """Install all four checksum-verified releases, repairing from retained ZIPs."""
+    from torchgeo_bench.datasets.openearthmap_sar import SPLITS, split_paths
+
+    target = Path(output_dir) / "openearthmap-sar"
+    target.mkdir(parents=True, exist_ok=True)
+    for artifact in SAR_ARCHIVES:
+        path = target / artifact.filename
+        if not path.exists():
+            partial = path.with_suffix(".zip.part")
+            logger.info("Downloading %s -> %s (%d bytes)", artifact.url, path, artifact.size)
+            with urlopen(artifact.url, timeout=120) as response, partial.open("wb") as output:
+                shutil.copyfileobj(response, output, length=1024 * 1024)
+            _verify_sar_archive(partial, artifact)
+            partial.replace(path)
+        else:
+            logger.info("Verifying cached archive %s", path)
+            _verify_sar_archive(path, artifact)
+        _extract_sar_archive(path, target, artifact.prefixes)
+    for split in SPLITS:
+        split_paths(target, split)
+    logger.info("OpenEarthMap-SAR download complete.")
+
+
 def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None:
     """Download individually named benchmark datasets.
 
@@ -211,3 +326,5 @@ def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None
         download_aid(output_dir)
     if "ucmerced" in selected:
         download_ucmerced(output_dir)
+    if "openearthmap-sar" in selected:
+        download_openearthmap_sar(output_dir)

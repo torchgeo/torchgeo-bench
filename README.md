@@ -65,6 +65,8 @@ V1 uses the pickle-free [JSON-metadata mirror](https://huggingface.co/datasets/c
 
 V2 (classification + segmentation) and torchgeo's EuroSAT, RESISC45, and UC Merced downloaders work the same way (`torchgeo-bench download geobench_v2`, `torchgeo-bench download eurosat`, `torchgeo-bench download resisc45`, `torchgeo-bench download ucmerced`). See the [documentation](https://torchgeo.org/torchgeo-bench/user/datasets.html) for all options.
 
+For standalone SAR segmentation, `torchgeo-bench download openearthmap-sar` installs the official DFC2025 Track I SAR images and labels (4,333 train / 210 validation / 490 test pairs, eight classes). Training RGB is excluded. See the [SAR example](docs/examples/openearthmap-sar-run.yaml) and [dataset protocol](https://torchgeo.org/torchgeo-bench/user/datasets.html#standalone-segmentation-openearthmap-sar).
+
 ## Run a basic experiment
 
 ```bash
