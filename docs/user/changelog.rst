@@ -7,6 +7,7 @@ Unreleased
 Added
 ^^^^^
 
+* Opt-in Boundary IoU for segmentation (``segmentation.boundary_iou``), which scores contour accuracy instead of area overlap. Off by default. The band width is written to the results file with the score, and existing results keep their resume fingerprint.
 * UC Merced Land Use (``ucmerced``) via torchgeo: 2,100 RGB images, 21 classes, with published 1,260 / 420 / 420 splits and training-split normalization statistics. Download with ``torchgeo-bench download ucmerced``.
 * NWPU-RESISC45 (``resisc45``) via torchgeo: 31,500 RGB scenes, 45 classes, on
   torchgeo's published 18,900 / 6,300 / 6,300 split.  Downloadable with

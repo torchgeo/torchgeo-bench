@@ -260,6 +260,8 @@ class SegmentationConfig(StrictModel):
     ignore_index: StrictInt = 255
     cache_features: StrictBool = True
     cache_dtype: Literal["float16", "float32"] = "float16"
+    boundary_iou: StrictBool = False
+    boundary_iou_dilation_ratio: StrictFloat = Field(default=0.02, gt=0, le=1)
 
 
 class RuntimeConfig(StrictModel):

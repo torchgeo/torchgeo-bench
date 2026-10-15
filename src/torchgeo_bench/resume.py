@@ -37,8 +37,13 @@ def resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
     """Fingerprint result-affecting settings for one resolved image run.
 
     Excludes device and worker count, which only control execution. Includes batch size because
-    it can change floating-point results.
+    it can change floating-point results. A disabled Boundary IoU is omitted so results
+    recorded before that option existed still resume.
     """
+    segmentation = config.segmentation.model_dump(mode="json")
+    if not config.segmentation.boundary_iou:
+        segmentation.pop("boundary_iou")
+        segmentation.pop("boundary_iou_dilation_ratio")
     payload = {
         "schema_version": config.schema_version,
         "model": {
@@ -48,7 +53,7 @@ def resume_config_hash(config: RunConfig, model_cfg: ModelPreset) -> str:
         },
         "input": config.input.model_dump(mode="json"),
         "classification": config.classification.model_dump(mode="json", exclude={"methods"}),
-        "segmentation": config.segmentation.model_dump(mode="json"),
+        "segmentation": segmentation,
         "runtime": config.runtime.model_dump(mode="json", include={"seed", "batch_size"}),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)

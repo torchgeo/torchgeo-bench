@@ -1,6 +1,7 @@
 """Benchmark script for torchgeo-bench."""
 
 import logging
+import math
 import os
 from collections.abc import Iterator, Sequence, Sized
 from dataclasses import dataclass, replace
@@ -668,6 +669,13 @@ def _resolve_output_path(cfg: RunConfig, subdirectory: str = "models") -> str:
     )
 
 
+def _optional_int(value: float | None) -> int | None:
+    """Return a whole-pixel width, or None when the metric never ran."""
+    if value is None or math.isnan(value):
+        return None
+    return int(value)
+
+
 def run_segmentation(
     cfg: RunConfig,
     model: BenchModel,
@@ -704,6 +712,8 @@ def run_segmentation(
         precision=metrics.get("precision"),
         recall=metrics.get("recall"),
         f1=metrics.get("f1"),
+        boundary_iou=metrics.get("boundary_IoU"),
+        boundary_iou_width=_optional_int(metrics.get("boundary_IoU_width")),
     ).to_row()
     yield [row]
 

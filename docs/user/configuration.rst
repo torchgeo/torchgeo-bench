@@ -191,6 +191,8 @@ Segmentation
      ignore_index: 255
      cache_features: true
      cache_dtype: float16
+     boundary_iou: false
+     boundary_iou_dilation_ratio: 0.02
 
 These YAML settings apply to segmentation datasets, independently of
 ``classification.methods``. Supported heads are ``linear``, ``conv_block``,
@@ -206,6 +208,8 @@ feature layers. See
 dtype is ``float16`` or ``float32``. The loss is cross entropy with the
 configured ``ignore_index``; there is no constructor-style criterion block.
 Segmentation confidence intervals use ``classification.bootstrap_samples``.
+
+``boundary_iou`` adds Boundary IoU, which scores a band along each contour instead of whole regions, so a prediction with the right area and the wrong edges no longer scores well. ``boundary_iou_dilation_ratio`` sets the band width as a fraction of the image diagonal. The resolved width in pixels is written to the results file next to the score, because scores measured at different widths are not comparable.
 
 Optional image measurements
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

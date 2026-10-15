@@ -7,6 +7,7 @@ from collections.abc import Iterator
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torchmetrics import Metric
 from torchmetrics.classification import (
     MulticlassF1Score,
     MulticlassJaccardIndex,
@@ -15,6 +16,7 @@ from torchmetrics.classification import (
 )
 from tqdm.auto import tqdm
 
+from .boundary_iou import DEFAULT_DILATION_RATIO, MulticlassBoundaryIoU
 from .config.schema import SegmentationConfig
 from .segmentation_probe import (
     CachedFeaturesDataset,
@@ -40,6 +42,9 @@ class SegmentationSolver:
         criterion: nn.Module | None = None,
         lr_scheduler: str = "cosine",
         ignore_index: int = 255,
+        *,
+        boundary_iou: bool = False,
+        boundary_iou_dilation_ratio: float = DEFAULT_DILATION_RATIO,
     ) -> None:
         """Configure the optimizer, loss, and segmentation metrics.
 
@@ -52,6 +57,8 @@ class SegmentationSolver:
             criterion: Loss module. Defaults to CrossEntropyLoss with ignore_index.
             lr_scheduler: LR schedule: "cosine" (CosineAnnealingLR) or "none" (constant LR).
             ignore_index: Label value to ignore in loss and metrics (default: 255).
+            boundary_iou: Also score contour accuracy with Boundary IoU.
+            boundary_iou_dilation_ratio: Boundary band width, as a fraction of the image diagonal.
         """
         self.model = model.to(device)
         self.num_classes = num_classes
@@ -97,13 +104,24 @@ class SegmentationSolver:
             ignore_index=self.ignore_index,
             average="macro",
         )
-        self._all_metrics = [
+        self.metric_boundary_iou = (
+            MulticlassBoundaryIoU(
+                num_classes=self.num_classes,
+                ignore_index=self.ignore_index,
+                dilation_ratio=boundary_iou_dilation_ratio,
+            )
+            if boundary_iou
+            else None
+        )
+        self._all_metrics: list[Metric] = [
             self.metric,
             self.metric_fw_iou,
             self.metric_precision,
             self.metric_recall,
             self.metric_f1,
         ]
+        if self.metric_boundary_iou is not None:
+            self._all_metrics.append(self.metric_boundary_iou)
 
         self.use_amp = device.startswith("cuda") and torch.cuda.is_available()
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -322,14 +340,19 @@ class SegmentationSolver:
         return counts.reshape(len(masks), self.num_classes, self.num_classes)
 
     def _compute_metrics(self) -> "SegMetrics":
-        """Compute and return all metrics as a dict."""
-        return {
+        """Compute and return all metrics as a dict, with Boundary IoU only when enabled."""
+        metrics = {
             "mIoU": self.metric.compute().item(),
             "fw_IoU": self.metric_fw_iou.compute().item(),
             "precision": self.metric_precision.compute().item(),
             "recall": self.metric_recall.compute().item(),
             "f1": self.metric_f1.compute().item(),
         }
+        if self.metric_boundary_iou is not None:
+            metrics["boundary_IoU"] = self.metric_boundary_iou.compute_mean()
+            width = self.metric_boundary_iou.boundary_width
+            metrics["boundary_IoU_width"] = float("nan") if width is None else float(width)
+        return metrics
 
     def _evaluation_batches(
         self, data: DataLoader | GPUTensorCache, batch_size: int
@@ -416,5 +439,7 @@ def build_seg_probe_and_solver(
         criterion=criterion,
         lr_scheduler=config.scheduler,
         ignore_index=config.ignore_index,
+        boundary_iou=config.boundary_iou,
+        boundary_iou_dilation_ratio=config.boundary_iou_dilation_ratio,
     )
     return probe, solver

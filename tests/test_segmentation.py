@@ -272,6 +272,33 @@ def test_solver_fit_and_evaluate(mock_backbone, dummy_data):
     assert 0.0 <= metrics["mIoU"] <= 1.0
 
 
+def test_solver_reports_boundary_iou_with_its_width_when_enabled(mock_backbone, dummy_data):
+    """Switching the metric on adds the score and the tolerance it was measured at."""
+    data = dummy_data
+    loader = DataLoader(TensorDataset(data["image"], data["mask"]), batch_size=2)
+    probe = SegmentationProbe(
+        backbone=mock_backbone, layer_names=["layer1", "layer2"], num_classes=NUM_CLASSES
+    )
+    solver = SegmentationSolver(
+        model=probe, num_classes=NUM_CLASSES, device="cpu", boundary_iou=True
+    )
+
+    metrics = solver.evaluate(loader)
+
+    assert isinstance(metrics, dict)
+    assert metrics.keys() == {
+        "mIoU",
+        "fw_IoU",
+        "precision",
+        "recall",
+        "f1",
+        "boundary_IoU",
+        "boundary_IoU_width",
+    }
+    assert 0.0 <= metrics["boundary_IoU"] <= 1.0
+    assert metrics["boundary_IoU_width"] >= 1.0
+
+
 @pytest.mark.parametrize("collect_confusions", [False, True])
 @pytest.mark.parametrize(
     ("as_dict", "mask_4d", "ignore_index"), [(False, False, 255), (True, True, -1)]

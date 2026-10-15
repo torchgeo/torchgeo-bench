@@ -36,8 +36,16 @@ def _hash(config: RunConfig, dataset: str = "m-eurosat") -> str:
         {"datasets": ["m-forestnet"]},
         {"output": {"resume": True}},
         {"runtime": {"device": "cpu", "workers": 0}},
+        {"segmentation": {"boundary_iou_dilation_ratio": 0.05}},
     ],
-    ids=["profile-pass", "intrinsic-dim-pass", "dataset-selection", "resume-toggle", "execution"],
+    ids=[
+        "profile-pass",
+        "intrinsic-dim-pass",
+        "dataset-selection",
+        "resume-toggle",
+        "execution",
+        "boundary-iou-off",
+    ],
 )
 def test_config_hash_ignores_run_selection_and_additive_passes(overrides: dict) -> None:
     assert _hash(_cfg()) == _hash(_cfg(**overrides))
@@ -67,6 +75,7 @@ def test_config_hash_ignores_output_paths_and_method_selection() -> None:
         {"classification": {"bootstrap_samples": 100}},
         {"segmentation": {"head": "linear"}},
         {"segmentation": {"learning_rate": 0.01}},
+        {"segmentation": {"boundary_iou": True}},
         {"model": {"name": "rcf", "kwargs": {"mode": "empirical"}}},
     ],
 )
