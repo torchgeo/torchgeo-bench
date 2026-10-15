@@ -16,10 +16,11 @@ Three statuses:
 * ``no_geo`` — no coordinates are available; see :attr:`GeoRecord.reason` and :data:`NO_GEO`.
 * ``not_downloaded`` — registered, but no data files were found locally.
 
-Two coordinate sources are handled:
+Three coordinate sources are handled:
 
 * **V2**: read coordinates and place labels from ``.tortilla`` metadata, not imagery.
 * **V1**: reproject JSON affine/CRS origins from shards or HDF5 to EPSG:4326.
+* **Packaged index**: Open Cities chip centres from the committed index; no download needed.
 
 Unchanged raw data produces byte-identical JSON.
 """
@@ -83,7 +84,7 @@ class GeoRecord:
     Attributes:
         name: Dataset identifier, as registered (e.g. ``"m-eurosat"``).
         status: ``"extracted"``, ``"no_geo"``, or ``"not_downloaded"``.
-        version: Source family — ``"v1"``, ``"v2"``, or ``"torchgeo"``.
+        version: Source family — ``"v1"``, ``"v2"``, ``"torchgeo"``, or ``"index"``.
             ``None`` when nothing was read.
         n: Number of geolocated samples found.
         reason: Why coordinates are unavailable; always set for ``"no_geo"``.
@@ -147,6 +148,19 @@ def _extract_v2(paths: list[str]) -> dict | None:
 
     ok = np.isfinite(lon) & np.isfinite(lat)
     return {"lon": lon[ok], "lat": lat[ok], "place": place[ok], "version": "v2"}
+
+
+def _extract_open_cities() -> dict:
+    """Read chip-centre lon/lat and city names from the packaged Open Cities index."""
+    from .datasets.open_cities import CITY_NAME, load_index
+
+    index = load_index()
+    return {
+        "lon": index.lon.to_numpy(),
+        "lat": index.lat.to_numpy(),
+        "place": index.city.map(CITY_NAME).to_numpy(dtype=object),
+        "version": "index",
+    }
 
 
 def _metadata_origin(meta: dict) -> tuple[float | None, float | None, str]:
@@ -362,30 +376,8 @@ def _build_record(name: str, data: dict, continents: Counter) -> GeoRecord:
     )
 
 
-def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
-    """Extract the geographic footprint of one registered dataset.
-
-    Args:
-        name: Registered dataset identifier.
-        workers: Processes used for the V1 metadata scan. Defaults to
-            ``min(32, os.cpu_count())``.
-
-    Returns:
-        A :class:`GeoRecord` with extracted coordinates or a reason they are unavailable.
-
-    Raises:
-        FileNotFoundError: If dataset imagery is missing.
-    """
-    workers = workers or min(32, os.cpu_count() or 8)
-
-    if name in NO_GEO:
-        return GeoRecord(name=name, status="no_geo", reason=NO_GEO[name])
-
-    if name in GEO_ALIAS:
-        target = GEO_ALIAS[name]
-        record = extract_geography(target, workers=workers)
-        return replace(record, name=name, alias_of=target)
-
+def _extract_files(name: str, workers: int) -> dict | GeoRecord:
+    """Read coordinates from downloaded V1/V2 files, or return a ``no_geo`` record."""
     command = (
         "torchgeo-bench download geobench_v1" if name.startswith("m-") else download_command(name)
     )
@@ -413,6 +405,39 @@ def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
         raise FileNotFoundError(
             f"No .tortilla, V1 shard, or .hdf5 files under {directory}. Run `{command}`."
         )
+    return data
+
+
+def extract_geography(name: str, *, workers: int | None = None) -> GeoRecord:
+    """Extract the geographic footprint of one registered dataset.
+
+    Args:
+        name: Registered dataset identifier.
+        workers: Processes used for the V1 metadata scan. Defaults to
+            ``min(32, os.cpu_count())``.
+
+    Returns:
+        A :class:`GeoRecord` with extracted coordinates or a reason they are unavailable.
+
+    Raises:
+        FileNotFoundError: If dataset imagery is missing.
+    """
+    workers = workers or min(32, os.cpu_count() or 8)
+
+    if name in NO_GEO:
+        return GeoRecord(name=name, status="no_geo", reason=NO_GEO[name])
+
+    if name in GEO_ALIAS:
+        target = GEO_ALIAS[name]
+        record = extract_geography(target, workers=workers)
+        return replace(record, name=name, alias_of=target)
+
+    if name == "open_cities":
+        data = _extract_open_cities()
+    else:
+        data = _extract_files(name, workers)
+        if isinstance(data, GeoRecord):
+            return data
 
     if len(data["lon"]) == 0:
         return GeoRecord(name=name, status="no_geo", reason="all coordinates were non-finite")
