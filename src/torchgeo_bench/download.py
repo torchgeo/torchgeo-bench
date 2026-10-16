@@ -7,6 +7,8 @@ Targets:
 - ``eurosat`` — torchgeo's EuroSAT downloader, into ``<output>/eurosat``.
 - ``resisc45`` — torchgeo's NWPU-RESISC45 downloader, into ``<output>/resisc45``.
 - ``aid`` — pinned ``isaaccorley/aid`` rehost, into ``<output>/aid``.
+- ``infrabench-cls`` — pinned ``jmguthrie/infrabench-cls`` cells and the paper's split,
+  into ``<output>/infrabench_cls``.
 - ``ucmerced`` — torchgeo's UC Merced downloader, into ``<output>/ucmerced``.
 
 V1 uses the pinned ``calebrob6/geobenchv1-webdataset`` mirror.
@@ -16,10 +18,11 @@ Use ``--datasets`` to select a GeoBench subset.
 
 import hashlib
 import logging
+import urllib.request
 import zipfile
 from pathlib import Path
 
-from huggingface_hub import snapshot_download
+from huggingface_hub import hf_hub_download, snapshot_download
 from torchgeo.datasets import RESISC45, EuroSAT, EuroSATSpatial, UCMerced
 
 from torchgeo_bench.datasets._v1_webdataset import download_sharded_root
@@ -38,6 +41,16 @@ AID_SPLIT_SHA256: dict[str, str] = {
     "test": "84b08edcfd4d34bc62340ff0aebc0e07426865323bfd6c38868dc2bc8c70111b",
 }
 
+INFRABENCH_REPO = "jmguthrie/infrabench-cls"
+INFRABENCH_REVISION = "2b10e1eb8aadc9c46eb2f3c19582995d5ca541b7"
+INFRABENCH_ZIP = "infra-bench-cls-dataset-v2.zip"
+INFRABENCH_ZIP_SHA256 = "b1cf661b3e796e3254fb1a306087780871b050c6a4cc80878b2b3ca1ab17f99e"
+INFRABENCH_SPLIT_URL = (
+    "https://raw.githubusercontent.com/justing0909/infra-bench-cls/"
+    "1eef7fd2c31479f6c60fdf94a03b35a4ba012e96/data/spatial_split/asset_id_to_split_v1.parquet"
+)
+INFRABENCH_SPLIT_SHA256 = "46b554a419d4f13cda221b18e26168e54bdb4266eca7e1846ec78dbbecf625fd"
+
 DEFAULT_V2_DATASETS: tuple[str, ...] = tuple(list_v2_datasets())
 
 V1_DATASETS: tuple[str, ...] = (
@@ -49,7 +62,7 @@ V1_DATASETS: tuple[str, ...] = (
     "m-bigearthnet",
 )
 TORCHGEO_DATASETS: tuple[str, ...] = ("eurosat", "resisc45", "ucmerced")
-DIRECT_DATASETS: tuple[str, ...] = ("aid",)
+DIRECT_DATASETS: tuple[str, ...] = ("aid", "infrabench-cls")
 DOWNLOADABLE_DATASETS: tuple[str, ...] = (
     V1_DATASETS + DEFAULT_V2_DATASETS + TORCHGEO_DATASETS + DIRECT_DATASETS
 )
@@ -155,7 +168,7 @@ def _verify_sha256(path: Path, expected: str) -> None:
         actual = hashlib.file_digest(stream, "sha256").hexdigest()
     if actual != expected:
         raise ValueError(
-            f"AID checksum mismatch: {path} (expected {expected}, got {actual}). "
+            f"Checksum mismatch: {path} (expected {expected}, got {actual}). "
             "Remove this file and retry the download."
         )
 
@@ -174,6 +187,35 @@ def download_aid(output_dir: Path) -> None:
     with zipfile.ZipFile(target / "AID.zip") as archive:
         archive.extractall(target)
     logger.info("AID download complete.")
+
+
+def download_infrabench_cls(output_dir: Path) -> None:
+    """Download Infra-Bench CLS into ``output_dir/infrabench_cls``.
+
+    Extract the 28 benchmark cells and skip the uncapped substation archives.
+    """
+    target = Path(output_dir) / "infrabench_cls"
+    target.mkdir(parents=True, exist_ok=True)
+    logger.info("Downloading %s@%s -> %s", INFRABENCH_REPO, INFRABENCH_REVISION, target)
+    bundle = Path(
+        hf_hub_download(
+            repo_id=INFRABENCH_REPO,
+            filename=INFRABENCH_ZIP,
+            repo_type="dataset",
+            revision=INFRABENCH_REVISION,
+            local_dir=target,
+        )
+    )
+    _verify_sha256(bundle, INFRABENCH_ZIP_SHA256)
+    split_file = target / "asset_id_to_split_v1.parquet"
+    urllib.request.urlretrieve(INFRABENCH_SPLIT_URL, split_file)
+    _verify_sha256(split_file, INFRABENCH_SPLIT_SHA256)
+    with zipfile.ZipFile(bundle) as archive:
+        cells = [n for n in archive.namelist() if n.endswith("_v1_1k.zip")]
+        for name in cells:
+            with archive.open(name) as stream, zipfile.ZipFile(stream) as cell:
+                cell.extractall(target)
+    logger.info("Infra-Bench CLS download complete (%d cells).", len(cells))
 
 
 def download_ucmerced(output_dir: Path) -> None:
@@ -209,5 +251,7 @@ def download_datasets(names: list[str], output_dir: Path = Path("data")) -> None
         download_resisc45(output_dir)
     if "aid" in selected:
         download_aid(output_dir)
+    if "infrabench-cls" in selected:
+        download_infrabench_cls(output_dir)
     if "ucmerced" in selected:
         download_ucmerced(output_dir)
